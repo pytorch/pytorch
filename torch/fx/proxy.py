@@ -10,6 +10,8 @@ from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -21,6 +23,10 @@ class TracerBase:
     trace_asserts : bool = False
     # Feature flag for proxying accesses to buffer values
     proxy_buffer_attributes : bool = False
+
+    # Name of the function to be traced. It will only be used when
+    # ``root`` is an instance of ``nn.Module``
+    traced_func_name: str = "forward"
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,

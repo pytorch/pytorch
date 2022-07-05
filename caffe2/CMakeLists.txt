@@ -89,8 +89,10 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+  list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
@@ -230,6 +232,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
+  message(STATUS "MPS sources: ")
+  foreach(tmp ${Caffe2_MPS_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
   message(STATUS "HIP test sources: ")
   foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
@@ -237,6 +244,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
   message(STATUS "ATen CPU test sources: ")
   foreach(tmp ${ATen_CPU_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "ATen MPS test sources: ")
+  foreach(tmp ${ATen_MPS_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -352,7 +364,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if(BUILD_LAZY_TS_BACKEND)
       list(APPEND GENERATED_CXX_TORCH
-        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
         "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
@@ -369,6 +380,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNonNativeIr.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
@@ -389,6 +401,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -433,7 +446,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -451,6 +464,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_enum_tag.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -548,12 +562,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
     # Force -Werror on several files
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkldnn/Pooling.cpp PROPERTIES COMPILE_FLAGS "-Werror")
+    # Disable non-virtual-dtor error here because 3rd party (LLVM) violates that warning and fails the build
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-error=non-virtual-dtor")
   endif()
   # Disable certain warnings for GCC-9.X
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
     # See https://github.com/pytorch/pytorch/issues/38856
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -659,10 +675,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   endif()
 
-  if(USE_MLCOMPUTE)
-    include(../mlc/mlc_build.cmake)
-  endif()
-
   if(BUILD_ONEDNN_GRAPH)
     list(APPEND Caffe2_CPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
@@ -765,7 +777,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
-# NOTE [ Linking AVX-n and non-AVX-n files ]
+if(USE_MPS)
+  list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+endif()
+
+# NOTE [ Linking AVX and non-AVX files ]
 #
 # Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
@@ -971,8 +987,17 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
-        ${CUDA_cusolver_LIBRARY}
     )
+    if($ENV{ATEN_STATIC_CUDA})
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+      )
+    else()
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_cusolver_LIBRARY}
+      )
+    endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
@@ -1108,7 +1133,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
@@ -1770,7 +1795,7 @@ if(BUILD_TEST)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
         # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
-          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
           target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
           if(USE_FBGEMM)
@@ -1816,6 +1841,25 @@ if(BUILD_TEST)
       endif()
     endif()
   endforeach()
+
+  if(USE_MPS)
+    foreach(test_src ${Caffe2_MPS_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} torch_library gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if(INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+        # Install PDB files for MSVC builds
+        if(MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
+      endif()
+    endforeach()
+  endif()
 
   if(USE_CUDA)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
@@ -1977,6 +2021,9 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
+  if(CAFFE2_USE_MKLDNN)
+      target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
+  endif()
   if(WIN32)
     target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)

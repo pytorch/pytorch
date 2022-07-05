@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <torch/torch.h>
+
 #include <unordered_map>
 
 namespace torch {
@@ -371,9 +373,9 @@ inline void testValidate(
 
       TORCH_INTERNAL_ASSERT(
           at_tensor.dim() ==
-              TensorDomain::noReductions(
-                  fusion_input_tv->getMaybeRFactorDomain())
-                  .size(),
+              static_cast<int64_t>(TensorDomain::noReductions(
+                                       fusion_input_tv->getMaybeRFactorDomain())
+                                       .size()),
           "Dimensionality mismatch in inputs.");
     }
   }
@@ -400,9 +402,10 @@ inline void testValidate(
     TORCH_INTERNAL_ASSERT(
         aten_output_tensor.dim() == fusion_output_tensor.dim() &&
             fusion_outputs[j].dim() ==
-                TensorDomain::noReductions(
-                    fusion_output_tv->getMaybeRFactorDomain())
-                    .size(),
+                static_cast<int64_t>(
+                    TensorDomain::noReductions(
+                        fusion_output_tv->getMaybeRFactorDomain())
+                        .size()),
         "Dimensionality mismatch in outputs.");
 
     auto tolerance_values = getTolerance(
@@ -450,6 +453,17 @@ inline void testValidate(
     j++;
   }
 }
+
+inline void clearL2Cache() {
+  torch::NoGradGuard no_grad;
+  auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  auto options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(at::kCUDA, 0);
+
+  auto l2_elems = l2_cache_size / 4;
+  torch::Tensor t0 = torch::empty(l2_elems, options);
+  torch::Tensor t1 = torch::clone(t0);
+};
 
 } // namespace cuda
 } // namespace fuser

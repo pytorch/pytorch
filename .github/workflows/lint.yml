@@ -7,11 +7,12 @@ on:
       - master
       - main
       - release/*
+      - landchecks/*
   workflow_dispatch:
 
 jobs:
   lintrunner:
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.16x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -25,7 +26,7 @@ jobs:
           submodules: false
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.8.*
+        run: pip install lintrunner==0.9.*
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -40,16 +41,9 @@ jobs:
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        if: github.event_name == 'push'
-        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
-
-      - name: Run lintrunner on PR files
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set +e
-          if ! lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}" ; then
+          if ! lintrunner --force-color --all-files --tee-json=lint.json; then
               echo ""
               echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
               echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
@@ -60,18 +54,15 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         # Don't show this as an error; the above step will have already failed.
         continue-on-error: true
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # The easiest way to get annotations is to just run lintrunner again
-          # in JSON mode and use jq to massage the output into GitHub Actions
-          # workflow commands.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --output=json | \
-            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
+          # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+          jq --raw-output \
+            '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+            lint.json
 
   quick-checks:
     name: quick-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -97,6 +88,10 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -110,11 +105,11 @@ jobs:
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
-          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+          python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
   workflow-checks:
     name: workflow-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -158,7 +153,7 @@ jobs:
 
   toc:
     name: toc
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
@@ -200,7 +195,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -222,8 +217,9 @@ jobs:
           python3 -mpip install boto3==1.16.34
           pip3 install typing-extensions==3.10 --user
           pip3 install -r requirements-flake8.txt --user
+          python3 -mpip install rockset==0.8.10 --user
           python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.812 --user
+          python3 -mpip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
@@ -233,12 +229,19 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     strategy:
       matrix:
-        with_torch: [with_torch, without_torch]
+        test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.5
+          architecture: x64
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
@@ -251,7 +254,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Install torch
-        if: matrix.with_torch == 'with_torch'
+        if: matrix.test_type == 'with_torch'
         run: |
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'

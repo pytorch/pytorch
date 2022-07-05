@@ -152,19 +152,19 @@ __device__ constexpr int alignBufferSize(int buffer, int size) {
 }
 
 __device__ double clamp(double x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax(x, minv), maxv);
 }
 
 __device__ float clamp(float x, double minv, double maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return fmin(fmax((double)x, minv), maxv);
 }
 
 __device__ int clamp(int x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max((int64_t)x, minv), maxv);
 }
 
 __device__ int64_t clamp(int64_t x, int64_t minv, int64_t maxv) {
-  return x < minv ? minv : (x > maxv ? maxv : x);
+  return min(max(x, minv), maxv);
 }
 
 __device__ double frac(double x) {
@@ -416,4 +416,115 @@ struct alignas(align) TypelessData {
 template <typename T>
 TypelessData<sizeof(T), alignof(T)> erase_type(T x) {
   return x;
+}
+
+template <typename T>
+bool isfinite(T x) {
+  return ::isfinite(x);
+}
+
+template <typename T>
+bool isfinite(std::complex<T> x) {
+  return ::isfinite(std::real(x)) && ::isfinite(std::imag(x));
+}
+
+template <typename T>
+bool isinf(T x) {
+  return ::isinf(x);
+}
+
+template <typename T>
+bool isinf(std::complex<T> x) {
+  return ::isinf(std::real(x)) || ::isinf(std::imag(x));
+}
+
+////////////////////////////////////////////////////////////
+// TODO: the following overloads are only needed for CUDA //
+// 10.2 Please remove when CUDA 10.2 support is dropped   //
+////////////////////////////////////////////////////////////
+
+bool isinf(int64_t x) {
+  return false;
+}
+
+bool isinf(int x) {
+  return false;
+}
+
+bool isinf(short x) {
+  return false;
+}
+
+bool isinf(char x) {
+  return false;
+}
+
+bool isinf(unsigned char x) {
+  return false;
+}
+
+bool isinf(bool x) {
+  return false;
+}
+
+bool isfinite(int64_t x) {
+  return true;
+}
+
+bool isfinite(int x) {
+  return true;
+}
+
+bool isfinite(short x) {
+  return true;
+}
+
+bool isfinite(char x) {
+  return true;
+}
+
+bool isfinite(unsigned char x) {
+  return true;
+}
+
+bool isfinite(bool x) {
+  return true;
+}
+
+////////////////////////////////////////////////////////////
+//                        End TODO                        //
+////////////////////////////////////////////////////////////
+
+template <typename T>
+bool isnan(T x) {
+  return x != x;
+}
+
+template <typename T>
+bool isneginf(T x) {
+  return x < 0 && isinf(x);
+}
+
+template <typename T>
+bool isposinf(T x) {
+  return x > 0 && isinf(x);
+}
+
+template <typename T>
+bool isreal(T x) {
+  return true;
+}
+
+template <typename T>
+bool isreal(std::complex<T> x) {
+  return std::imag(x) == 0;
+}
+
+// Return the current value of the cycle counter
+__device__ inline int64_t readCycleCounter() {
+  // Ensures preceding memory operations are completed. Doing this
+  // would make sense for measuring elapsed times enclosed with this
+  // function.
+  __threadfence();
+  return clock64();
 }

@@ -4,7 +4,6 @@ import torch
 import numpy as np
 
 import math
-from itertools import product, chain
 from numbers import Number
 import random
 import unittest
@@ -73,54 +72,6 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_uf
 # See NumPy's universal function documentation
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
-
-
-def generate_numeric_tensors_hard(device, dtype, *, domain=(None, None), filter_=None):
-    is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-    if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
-        return ()
-
-    if dtype.is_floating_point:
-        if dtype is torch.float16:
-            # float16 has smaller range.
-            vals = _large_float16_vals
-        else:
-            vals = _large_float_vals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_large_float_vals, _large_float_vals),
-                product(_float_vals, _large_float_vals),
-                product(_large_float_vals, _float_vals),
-            )
-        )
-    else:
-        vals = _large_int_vals
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
-
-
-def generate_numeric_tensors_extremal(
-    device, dtype, *, domain=(None, None), filter_=None
-):
-    if not (dtype.is_floating_point or dtype.is_complex):
-        return ()
-
-    vals = []
-    if dtype.is_floating_point:
-        vals = _float_extremals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_float_extremals, _float_extremals),
-                product(_float_vals, _float_extremals),
-                product(_float_extremals, _float_vals),
-            )
-        )
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 # TODO: port test_unary_out_op_mem_overlap
@@ -525,6 +476,31 @@ class TestUnaryUfuncs(TestCase):
             result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
+
+    @onlyCPU
+    def test_nan_to_num_bfloat16(self, device):
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, exact_dtype=False)
+
+        def func():
+            return torch.nan_to_num
+
+        shapes = [[1, 3, 6, 6], [1, 3, 6, 128], [1, 3, 256, 256]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device)
+            extremals = [float('nan'), float('inf'), -float('inf')]
+            for id1, id2, extremal in zip(torch.randint(0, 2, (3,)), torch.randint(0, 5, (3,)), extremals):
+                x[0, id1, id2, :] = extremal
+            test_dtype(func(), x, torch.bfloat16)
 
     @dtypes(torch.cdouble)
     def test_complex_edge_values(self, device, dtype):

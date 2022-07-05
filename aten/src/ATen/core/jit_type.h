@@ -787,7 +787,7 @@ struct TORCH_API TensorType : public SharedType {
   static const TypeKind Kind = TypeKind::TensorType;
 
   static std::vector<int64_t> contiguousStridesOf(
-      at::IntArrayRef sizes,
+      at::IntArrayRef in_sizes,
       at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
     auto contiguous_fn = [](const at::IntArrayRef& sizes,
                             const std::vector<int64_t>& dim_order) {
@@ -804,18 +804,18 @@ struct TORCH_API TensorType : public SharedType {
       return strides;
     };
 
-    std::vector<int64_t> dim_order(sizes.size());
+    std::vector<int64_t> dim_order(in_sizes.size());
     if (memory_format == MemoryFormat::ChannelsLast) {
       dim_order = {1, 3, 2, 0};
     } else if (memory_format == MemoryFormat::ChannelsLast3d) {
       dim_order = {1, 4, 3, 2, 0};
     } else {
-      auto ndims = sizes.size();
+      auto ndims = in_sizes.size();
       for (size_t i = 0; i < ndims; i++) {
         dim_order[i] = ndims - i - 1; // Reverse
       }
     }
-    return contiguous_fn(sizes, dim_order);
+    return contiguous_fn(in_sizes, dim_order);
   }
 
  private:
@@ -2087,24 +2087,12 @@ protected:
 EnumerationType() : Type(Kind) {}
 };
 
-struct LayoutType;
-using LayoutTypePtr = SingletonTypePtr<LayoutType>;
-// This type represents a Generator
-struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
-std::string str() const override {
-return "Layout";
-}
-static const TypeKind Kind = TypeKind::LayoutType;
-// global singleton
-static LayoutTypePtr get();
-
-private:
-LayoutType() : EnumerationType() {}
-};
+// WARNING: These enumeration types below DO NOT actually get parsed out
+// from the logical schema strings, instead they are mapped as ints.  To
+// observe these types, use real_type() instead of type() on Argument
 
 struct ScalarTypeType;
 using ScalarTypeTypePtr = SingletonTypePtr<ScalarTypeType>;
-// This type represents a Generator
 struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
 std::string str() const override {
 return "ScalarType";
@@ -2115,6 +2103,34 @@ static ScalarTypeTypePtr get();
 
 private:
 ScalarTypeType() : EnumerationType() {}
+};
+
+struct MemoryFormatType;
+using MemoryFormatTypePtr = SingletonTypePtr<MemoryFormatType>;
+struct TORCH_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
+std::string str() const override {
+return "MemoryFormatType";
+}
+static const TypeKind Kind = TypeKind::MemoryFormatType;
+// global singleton
+static MemoryFormatTypePtr get();
+
+private:
+MemoryFormatType() : EnumerationType() {}
+};
+
+struct LayoutType;
+using LayoutTypePtr = SingletonTypePtr<LayoutType>;
+struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+std::string str() const override {
+return "LayoutType";
+}
+static const TypeKind Kind = TypeKind::LayoutType;
+// global singleton
+static LayoutTypePtr get();
+
+private:
+LayoutType() : EnumerationType() {}
 };
 
 // the common supertype of all lists,
@@ -2209,7 +2225,11 @@ struct InferredType {
   /* implicit */ InferredType(std::string reason)
       : type_(nullptr), reason_(std::move(reason)) {}
   TypePtr type() const {
-    TORCH_INTERNAL_ASSERT(type_);
+    TORCH_INTERNAL_ASSERT(
+        type_,
+        "Tried to get the type from an InferredType but the type is null. ",
+        "Reason: ",
+        reason_);
     return type_;
   }
   bool success() const {
