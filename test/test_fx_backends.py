@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: fx"]
 
+import sys
 import logging
 from typing import List, Tuple
 
@@ -8,8 +9,16 @@ from torch.fx._symbolic_trace import symbolic_trace
 
 from torch.fx.passes.backends.nvfuser import NvFuserBackend
 
-from torch.testing._internal.common_utils import run_tests, instantiate_parametrized_tests
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIfRocm,
+    dtypes,
+)
+
+if not TEST_CUDA:
+    print('CUDA not available, skipping tests', file=sys.stderr)
+    TestCase = object  # noqa: F811
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -103,7 +112,7 @@ class HF_T5_Partial(torch.nn.Module):
                 mul, _unsafe_view_6, relu, view]
 
 
-class TestFxNvFuserBackend(JitTestCase):
+class TestFxNvFuserBackend(TestCase):
 
     def _generate_random_inputs(self, device, inputs_meta: List[Tuple[torch.Size, torch.dtype]]):
         inputs = []
@@ -119,9 +128,10 @@ class TestFxNvFuserBackend(JitTestCase):
 
         return inputs
 
-    def test_nvfuser_backend(self):
-        device = 'cuda'
 
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_nvfuser_backend(self, device, dtype):
         m = HF_T5_Partial()
         m.to(device)
 
@@ -137,7 +147,8 @@ class TestFxNvFuserBackend(JitTestCase):
 
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
-instantiate_parametrized_tests(TestFxNvFuserBackend)
+
+instantiate_device_type_tests(TestFxNvFuserBackend, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

@@ -60,7 +60,7 @@ class NvFuserBackend:
         return execute(prim_module, *args, executor="nvfuser")
 
     def compile(self, graph_module: GraphModule) -> GraphModule:
-        # entry function for nvFuser bsackend
+        # entry function for nvFuser backend
         logging.debug("Compiling graph_module: ", graph_module.code)
 
         # FX graph based partitioning based on nvfuser supported ops
@@ -73,7 +73,7 @@ class NvFuserBackend:
 
             self.partitioner_cache[graph_module] = fused_graph_module
 
-        # Replace fused submodules's __call__() function with lower_to_prims_and_execute()
+        # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
         num_partitions = 0
         for node in fused_graph_module.graph.nodes:
             # TODO: use a better way to identify fused submodule
