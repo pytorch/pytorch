@@ -3951,6 +3951,15 @@ torch.cuda.synchronize()
         loss.backward()
         optimizer.step()
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUDA_VISIBLE_DEVICES")
+    @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
+    def test_lazy_init(self):
+        """ Validate that no CUDA calls are made during `import torch` call"""
+        from subprocess import check_output
+        test_script="import os; import torch;os.environ['CUDA_VISIBLE_DEVICES']='32';print(torch.cuda.device_count())"
+        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        self.assertEqual(rc, "0")
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
