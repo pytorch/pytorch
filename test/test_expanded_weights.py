@@ -12,7 +12,7 @@ from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests, parametrize
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
@@ -207,28 +207,19 @@ class TestExpandedWeightFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
             torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
 
-    def test_small_model(self, device):
-        def convnet(num_classes):
-            return nn.Sequential(
-                nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AvgPool2d(kernel_size=2, stride=2),
-                nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AvgPool2d(kernel_size=2, stride=2),
-                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AvgPool2d(kernel_size=2, stride=2),
-                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool2d((1, 1)),
-                nn.Flatten(start_dim=1, end_dim=-1),
-                nn.Linear(128, num_classes, bias=True),
-            )
-
+    def _test_embedding_model(self, model, num_embedding, device):
         batch_size = 32
-        model = convnet(10).to(device)
-        input = torch.randn([batch_size, 3, 28, 28], device=device)
+        input = torch.randint(0, num_embedding, (batch_size, 5, 5), device=device)
+        return self._test_model(partial(model, num_embedding=num_embedding), batch_size, input, device)
+
+    def _test_conv_model(self, model, input_size, num_dim, device):
+        batch_size = 32
+        input_ending = [input_size] * num_dim
+        input = torch.randn([batch_size, 3] + input_ending, device=device)
+        return self._test_model(partial(model, num_dim=num_dim), batch_size, input, device)
+
+    def _test_model(self, model, batch_size, input, device):
+        model = model(10).to(device)
         targets = torch.randint(0, 10, (batch_size,), device=device)
         criterion = CrossEntropyLoss(reduction='sum')  # use a loss that doesn't average across the batch to test in a for loop
         result = call_for_per_sample_grads(model, batch_size, input)
@@ -247,6 +238,75 @@ class TestExpandedWeightFunctional(TestCase):
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
             self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
+
+
+    def test_cnn_model(self, device):
+        def convnet(num_classes, num_dim):
+            return nn.Sequential(
+                nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(128, num_classes, bias=True),
+            )
+
+        return self._test_conv_model(convnet, 28, 2, device)
+
+    @parametrize('num_dim', [1, 2, 3])
+    def test_instance_norm_model(self, num_dim, device):
+        def instance_norm_model(num_classes, num_dim):
+            conv_layer = nn.Conv1d if num_dim == 1 else nn.Conv2d if num_dim == 2 else nn.Conv3d
+            norm_layer = nn.InstanceNorm1d if num_dim == 1 else nn.InstanceNorm2d if num_dim == 2 else nn.InstanceNorm3d
+            return nn.Sequential(
+                conv_layer(3, 32, kernel_size=3, stride=1, padding=1),
+                norm_layer(32, affine=True),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
+            )
+        return self._test_conv_model(instance_norm_model, 7, num_dim, device)
+
+    @parametrize('num_dim', [1, 2, 3])
+    def test_group_norm_model(self, num_dim, device):
+        def group_norm_model(num_classes, num_dim):
+            conv_layer = nn.Conv1d if num_dim == 1 else nn.Conv2d if num_dim == 2 else nn.Conv3d
+            return nn.Sequential(
+                conv_layer(3, 32, kernel_size=3, stride=1, padding=1),
+                nn.GroupNorm(8, 32, affine=True),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
+            )
+        return self._test_conv_model(group_norm_model, 7, num_dim, device)
+
+    @parametrize('num_dim', [1, 2, 3])
+    def test_layer_norm_model(self, num_dim, device):
+        def layer_norm_model(num_classes, num_dim):
+            conv_layer = nn.Conv1d if num_dim == 1 else nn.Conv2d if num_dim == 2 else nn.Conv3d
+            normalized_shape = [7] * num_dim
+            return nn.Sequential(
+                conv_layer(3, 32, kernel_size=3, stride=1, padding=1),
+                nn.LayerNorm(normalized_shape, elementwise_affine=True),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
+            )
+        return self._test_conv_model(layer_norm_model, 7, num_dim, device)
+
+    def test_embedding_model(self, device):
+        def embedding_model(num_classes, num_embedding):
+            return nn.Sequential(
+                nn.Embedding(num_embedding, 15),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(375, num_classes, bias=True)
+            )
+        return self._test_embedding_model(embedding_model, 16, device)
 
     def test_group_norm_error(self, device):
         # group norm has to call native_group_norm. This checks that it hits the same errors
