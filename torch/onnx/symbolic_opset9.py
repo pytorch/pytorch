@@ -220,6 +220,7 @@ __all__ = [
     "nonzero",
     "norm",
     "numel",
+    "numpy_T",
     "one_hot",
     "ones_like",
     "ones",
@@ -765,6 +766,12 @@ def _standard_gamma(g, self, generator):
 
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
+
+
+def numpy_T(g, input):
+    ndim = symbolic_helper._get_tensor_rank(input)
+    perm = list(reversed(range(0, ndim)))
+    return g.op("Transpose", input, perm_i=perm)
 
 
 def expand(g, self, size, implicit):
