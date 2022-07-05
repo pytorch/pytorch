@@ -277,6 +277,7 @@
   output_differentiability: [False]
 
 - name: acosh(Tensor self) -> Tensor
+# Save one rsqrt in the real case by using that for x real and positive sqrt(x*y) = sqrt(x)*sqrt(y) (not true in the compelx case)
   self: "self.is_complex() ? grad * ((self + 1).rsqrt() * (self - 1).rsqrt()).conj() : grad * (self * self - 1).rsqrt()"
   result: auto_element_wise
 
