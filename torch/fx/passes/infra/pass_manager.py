@@ -169,7 +169,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[nn.Module], nn.Module]] = []
+    passes: List[Callable[[nn.Module], PassResult]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -244,7 +244,7 @@ class PassManager:
     def check(self, module: nn.Module) -> None:
         pass
 
-    def __call__(self, module: nn.Module) -> nn.Module:
+    def __call__(self, module: nn.Module) -> PassResult:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
