@@ -8,6 +8,11 @@ from .. import _reduction as _Reduction
 from torch import Tensor
 from typing import Callable, Optional
 
+__all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
+           'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
+           'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
+           'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
+           'TripletMarginWithDistanceLoss', 'CTCLoss']
 
 class _Loss(Module):
     reduction: str
@@ -1125,7 +1130,9 @@ class CrossEntropyLoss(_WeightedLoss):
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
-        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+        - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
+
 
         where:
 
@@ -1450,9 +1457,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Input: :math:`(N, D)` or :math:`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-          input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math:`(N, D)`; a scalar otherwise.
 
     Examples::
 

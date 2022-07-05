@@ -119,7 +119,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       IValue val = token;
       auto instruction = val.toTupleRef().elements()[0].toStringRef();
       auto debug_handle = val.toTupleRef().elements()[1].toInt();
-      double const_val = 1.0;
 #ifndef NO_PROFILING
       auto start_time_us = torch::profiler::impl::getTime() / 1000;
 #endif
@@ -132,8 +131,6 @@ class BackendWithCompiler : public PyTorchBackendInterface {
               instruction);
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           auto sub = instruction.substr(15);
-          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-          const_val = stod(sub);
         } else if (instruction == "aten::add" || instruction == "aten::sub") {
           TORCH_CHECK(x.sizes() == h.sizes());
           if (x.dim() > 1 || (x.dim() == 1 && x.size(0) > 1)) {
@@ -148,6 +145,15 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto x_ptr = float_data_ptr(x);
           auto h_ptr = float_data_ptr(h);
           auto y_ptr = float_data_ptr(y);
+#ifndef NO_PROFILING
+          RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER(
+              x_ptr,
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float) + y.numel() * sizeof(float) +
+                  h.numel() * sizeof(float),
+              c10::Device(c10::kCPU));
+#endif
           if (instruction == "aten::add") {
             y_ptr[0] = x_ptr[0] + h_ptr[0];
           } else {

@@ -18,18 +18,14 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    TYPE_CHECKING,
-    Union,
 )
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ._utils import _replace_by_prefix
+from torch.distributed.utils import _replace_by_prefix
 
-if TYPE_CHECKING:
-    from collections import OrderedDict  # noqa: F401
 
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
@@ -38,8 +34,8 @@ FPW_MODULE = "_fpw_module"
 
 
 def _post_state_dict_hook(
-    module: nn.Module, state_dict: "OrderedDict[str, Tensor]", prefix: str, *args: Any
-) -> "OrderedDict[str, Tensor]":
+    module: nn.Module, state_dict: Dict[str, Any], prefix: str, *args: Any
+) -> Dict[str, Any]:
     """
     _post_state_dict_hook() is called after the state_dict() is executed
     and before returning the state_dict to the users.
@@ -52,7 +48,7 @@ def _post_state_dict_hook(
 
 
 def _pre_load_state_dict_hook(
-    state_dict: Union[Dict[str, Tensor], "OrderedDict[str, Tensor]"],
+    state_dict: Dict[str, Any],
     prefix: str,
     *args: Any,
 ) -> None:
@@ -238,6 +234,10 @@ class FlatParameter(nn.Parameter):
         return num_unflat_params
 
     @property
+    def param_info(self) -> List[ParamInfo]:
+        return self._param_infos
+
+    @property
     def _param_names(self):
         return [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
 
@@ -284,6 +284,12 @@ class FlattenParamsWrapper(nn.Module):
     def __init__(self, module: nn.Module, param_list: List[nn.Parameter]):
         super().__init__()
         self._fpw_module = module
+        # People may test whether this module contains parameters by using
+        # `getattr(module, "flat_param") is None`. This is not always accurate
+        # as the above condition is also true if this module is unflattened.
+        # `no_params` explicitly shows this module has no parameters and
+        # is always correct regardless flattened or unflattened.
+        self.no_params = True
         self.flat_param = None
 
         # Register hook to be called after state_dict() to remove the
@@ -299,6 +305,7 @@ class FlattenParamsWrapper(nn.Module):
 
         # A list of parameters to be flatten
         unique_param_list = set(param_list)
+        self.no_params = False
 
         # convert from list of Parameters to set of (Module, parameter_name) tuples, which
         # will survive in case the Parameter instances are reset.
@@ -317,8 +324,8 @@ class FlattenParamsWrapper(nn.Module):
         # This attribute is used to remember the flat_param inside the unflatten_params()
         # context. With this attribute, FSDP can access the flat parameter metadata
         # even if flat_param is temporarily deleted.
-        # ``_orig_flat_param` is a list to avoid being tracked by ``state_dict()``.
-        self._orig_flat_param: List[Optional[FlatParameter]] = [None]
+        # ``orig_flat_param` is a list to avoid being tracked by ``state_dict()``.
+        self.orig_flat_param: List[Optional[FlatParameter]] = [None]
         self._flatten_params()
 
         # Sanity check for the string constants.
@@ -432,15 +439,15 @@ class FlattenParamsWrapper(nn.Module):
         if getattr(self, "flat_param", None) is None:
             yield
         else:
-            self._orig_flat_param[0] = self.flat_param
+            self.orig_flat_param[0] = self.flat_param
             self._unflatten_params()
             # Put yield in a try...finally in case the caller catches the exception and handles
             # it. In that case, we need to properly handle the undoing of state here.
             try:
                 yield
             finally:
-                self._flatten_params(self._orig_flat_param[0])
-                self._orig_flat_param[0] = None
+                self._flatten_params(self.orig_flat_param[0])
+                self.orig_flat_param[0] = None
 
     def _get_param_views(
         self, external_data: Optional[Tensor] = None

@@ -1,10 +1,6 @@
 from collections import OrderedDict
-from typing import Dict, Any, Tuple, List, Optional
-from torch.fx.graph import (
-    Node,
-)
+from typing import Dict, Any
 from torch.ao.quantization.quantization_types import Pattern
-from ..qconfig import QConfigAny
 from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
@@ -12,9 +8,6 @@ import copy
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any
-
-MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
-                    QConfigAny]
 
 # pattern for conv bn fusion
 DEFAULT_FUSION_PATTERNS = OrderedDict()
@@ -31,7 +24,7 @@ DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
 
 # Mapping from pattern to activation_post_process(observer/fake_quant) constructor for output activation
 # e.g. pattern: torch.sigmoid,
-#      output_activation_post_process: default_affine_fixed_qparams_fake_quant
+#      output_activation_post_process: default_fixed_qparams_range_0to1_fake_quant
 DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP = dict()
 DEFAULT_OUTPUT_OBSERVER_MAP = dict()
 

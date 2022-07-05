@@ -146,7 +146,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
-  _(SymInt)   \
+  _(SymInt)                  \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -203,13 +203,13 @@ struct Capsule {
 /// \endrst
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
-      : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+      : IValue(rhs.payload, rhs.tag) {
+    if (isIntrusivePtr() && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
       c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
     }
   }
 
-  IValue(IValue&& rhs) noexcept : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
+  IValue(IValue&& rhs) noexcept : tag(rhs.tag) {
     moveFrom(std::move(rhs));
   }
 
@@ -350,12 +350,12 @@ public:
       return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
-    if (!this->is_intrusive_ptr) {
+    if (!isIntrusivePtr()) {
       // Primitive types don't alias anything
       return false;
     }
 
-    AT_ASSERT(rhs.is_intrusive_ptr);
+    AT_ASSERT(rhs.isIntrusivePtr());
 
     // Other types can be compared by their ptr value
     return this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
@@ -367,7 +367,7 @@ public:
       return payload.as_tensor.use_count();
     }
 
-    if (!is_intrusive_ptr) {
+    if (!isIntrusivePtrLegacyBehavior()) {
       return 1;
     }
 
@@ -400,7 +400,6 @@ public:
     } else {
       std::swap(payload.u, rhs.payload.u);
     }
-    std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
   }
 
@@ -408,7 +407,7 @@ public:
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
@@ -427,12 +426,7 @@ public:
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
-  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
-    // Note: the undefined tensor is not refcounted, so while it
-    // is tagged as a tensor, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined tensor.
+  IValue(at::Storage s) : tag(Tag::Storage) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
   }
   bool isStorage() const {
@@ -450,7 +444,7 @@ public:
 
   /// @private [doxygen private]
   IValue(intrusive_ptr<caffe2::Blob> blob)
-      : tag(Tag::Blob), is_intrusive_ptr(true) {
+      : tag(Tag::Blob) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
@@ -517,7 +511,7 @@ public:
   C10_NODISCARD ivalue::Tuple& toTupleRef() const;
 
   // Double
-  IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
+  IValue(double d) : tag(Tag::Double) {
     payload.u.as_double = d;
   }
   bool isDouble() const {
@@ -559,11 +553,11 @@ public:
   c10::intrusive_ptr<at::Quantizer> toQuantizer() const&;
 
   // Int
-  IValue(int64_t i) : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(int64_t i) : tag(Tag::Int) {
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
+  IValue(c10::SymInt i) : tag(Tag::SymInt) {
     payload.u.as_int = i.data();
   }
 
@@ -590,7 +584,7 @@ public:
   }
 
   // Bool
-  IValue(bool b) : tag(Tag::Bool), is_intrusive_ptr(false) {
+  IValue(bool b) : tag(Tag::Bool) {
 #if defined(__clang__) && defined(__x86_64__)
     // Initializing entire payload stops valgrind's from reporting
     // "jump or move depends on uninitialised value" in IValue copy constructor
@@ -750,7 +744,7 @@ public:
   c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const&;
 
   // None
-  IValue() : tag(Tag::None), is_intrusive_ptr(false) {}
+  IValue() : tag(Tag::None) {}
   bool isNone() const {
     return Tag::None == tag;
   }
@@ -768,15 +762,17 @@ public:
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
-      *this = s.toDouble();
+      tag = Tag::Double;
+      payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
     } else if (s.isBoolean()) {
-      *this = s.toBool();
-    } else if (s.isIntegral(false)) {
-      *this = s.toLong();
+      tag = Tag::Bool;
+      payload.u.as_bool = s.toBool();
     } else {
-      TORCH_CHECK(false, "Unknown type in Scalar");
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
+      tag  = Tag::Int;
+      payload.u.as_int = s.toLong();
     }
   }
 
@@ -797,7 +793,7 @@ public:
   }
 
   // Device
-  IValue(c10::Device d) : tag(Tag::Device), is_intrusive_ptr(false) {
+  IValue(c10::Device d) : tag(Tag::Device) {
     payload.u.as_device.type = d.type();
     payload.u.as_device.index = d.index();
   }
@@ -811,7 +807,7 @@ public:
 
   //Stream
   IValue(c10::Stream stream)
-    : tag(Tag::Stream), is_intrusive_ptr(false) {
+    : tag(Tag::Stream) {
     payload.u.as_int = stream.pack();
   }
   c10::Stream toStream() &&;
@@ -840,7 +836,7 @@ public:
   }
 
   // QScheme
-  IValue(at::QScheme qscheme) : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(at::QScheme qscheme) : tag(Tag::Int) {
     payload.u.as_int = static_cast<int64_t>(qscheme);
   }
 
@@ -856,12 +852,7 @@ public:
   }
 
   // Generator
-  IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(g.defined()) {
-    // Note: the undefined generator is not refcounted, so while it
-    // is tagged as a generator, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined generator.
+  IValue(at::Generator g) : tag(Tag::Generator) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
@@ -933,7 +924,10 @@ public:
       const IValue& v);
 
   bool isPtrType() const {
-    return (isTensor() && payload.as_tensor.defined()) || is_intrusive_ptr;
+    if (isTensor()) {
+      return payload.as_tensor.defined();
+    }
+    return isIntrusivePtrLegacyBehavior();
   }
 
   /// @private [doxygen private]
@@ -1041,7 +1035,7 @@ public:
     // the "wrong" one of as_tensor and as_intrusive_ptr and 2) enable
     // the compiler to generate the same code for each case. It is
     // surprisingly difficult to get this right.
-    if (isTensor() || is_intrusive_ptr) {
+    if (isTensor() || isIntrusivePtr()) {
       c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.u.as_intrusive_ptr;
       c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
       // No need to make this destructor call!
@@ -1065,14 +1059,78 @@ public:
       payload.u = rhs.payload.u;
     }
     tag = rhs.tag;
-    is_intrusive_ptr = rhs.is_intrusive_ptr;
     rhs.clearToNone();
   }
 
   void clearToNone() noexcept {
     payload.u.as_int = 0;
     tag = Tag::None;
-    is_intrusive_ptr = false;
+  }
+
+  bool isIntrusivePtr() const {
+    switch (tag) {
+      case Tag::None:
+        return false;
+      case Tag::Tensor:
+        return false;
+      case Tag::Storage:
+        return true;
+      case Tag::Generator:
+        return true;
+      case Tag::Double:
+        return false;
+      case Tag::ComplexDouble:
+        return true;
+      case Tag::Int:
+        return false;
+      case Tag::SymInt:
+        return false;
+      case Tag::Bool:
+        return false;
+      case Tag::Tuple:
+        return true;
+      case Tag::String:
+        return true;
+      case Tag::Blob:
+        return true;
+      case Tag::GenericList:
+        return true;
+      case Tag::GenericDict:
+        return true;
+      case Tag::Future:
+        return true;
+      case Tag::Device:
+        return false;
+      case Tag::Stream:
+        return false;
+      case Tag::Object:
+        return true;
+      case Tag::PyObject:
+        return true;
+      case Tag::Uninitialized:
+        return false;
+      case Tag::Capsule:
+        return true;
+      case Tag::RRef:
+        return true;
+      case Tag::Quantizer:
+        return true;
+      case Tag::Enum:
+        return true;
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false, "unexpected tag ", static_cast<int>(tag));
+    return false;
+  }
+
+  // Storage and Generator were treated specially when
+  // is_intrusive_ptr was stored as explicit state. This getter
+  // preserves the old behavior for use with WeakIValue for now.
+  bool isIntrusivePtrLegacyBehavior() const {
+    if (tag == Tag::Storage || tag == Tag::Generator) {
+      return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton();
+    } else {
+      return isIntrusivePtr();
+    }
   }
 
   union Payload {
@@ -1100,7 +1158,7 @@ public:
     ~Payload() {}
   };
 
-  IValue(const Payload& p, Tag t, bool i) : tag(t), is_intrusive_ptr(i) {
+  IValue(const Payload& p, Tag t) : tag(t) {
     if (isTensor()) {
       new (&payload.as_tensor) at::Tensor(p.as_tensor);
     } else {
@@ -1115,7 +1173,6 @@ public:
 
   Payload payload;
   Tag tag;
-  bool is_intrusive_ptr;
   friend struct WeakIValue;
 };
 
@@ -1132,7 +1189,7 @@ struct TORCH_API WeakIValue final {
   }
   WeakIValue(const IValue& rhs)
       : tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    is_intrusive_ptr(rhs.isIntrusivePtrLegacyBehavior()) {
     if (rhs.isTensor()) {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
       is_intrusive_ptr = true;
@@ -1176,7 +1233,7 @@ struct TORCH_API WeakIValue final {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;
       newPayload.u = payload;
-      return IValue(newPayload, tag, false);
+      return IValue(newPayload, tag);
     }
     if (IValue::Tag::Tensor == tag) {
       auto temp = c10::weak_intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl>::reclaim(
@@ -1199,7 +1256,7 @@ struct TORCH_API WeakIValue final {
       if (!pl.u.as_intrusive_ptr) {
         return IValue();
       } else {
-        return IValue(pl, tag, true);
+        return IValue(pl, tag);
       }
     }
   }

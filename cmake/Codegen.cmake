@@ -74,6 +74,11 @@ if(INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
+  set(GEN_MPS_FLAG)
+  if(USE_MPS)
+    set(GEN_MPS_FLAG --mps)
+  endif()
+
   set(CUSTOM_BUILD_FLAGS)
   if(INTERN_BUILD_MOBILE)
     if(USE_VULKAN)
@@ -154,6 +159,7 @@ if(INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
+      ${GEN_MPS_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -343,11 +349,11 @@ function(append_filelist name outputvar)
   set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
-      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
+      ${PROJECT_SOURCE_DIR}/build_variables.bzl
       ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+            "exec(open('${PROJECT_SOURCE_DIR}/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)

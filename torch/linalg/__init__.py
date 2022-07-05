@@ -266,7 +266,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 4, 4)  # Batch of matrices
     >>> Ainv = torch.linalg.inv(A)
-    >>> torch.dist(A @ Ainv, torch.eye(4)))
+    >>> torch.dist(A @ Ainv, torch.eye(4))
     tensor(1.9073e-06)
 
     >>> A = torch.randn(4, 4, dtype=torch.complex128)  # Complex matrix
@@ -336,6 +336,11 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+""" + fr"""
+.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
+          {common_notes["sync_note"]}
+""" + r"""
+
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
@@ -372,7 +377,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: This function is computed using :func:`torch.lu`.
+.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
           {common_notes["sync_note"]}
 """ + r"""
 
@@ -1228,8 +1233,6 @@ linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Te
 
 Computes a vector or matrix norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
-
 Supports input of float, double, cfloat and cdouble dtypes.
 
 Whether this function computes a vector or matrix norm is determined as follows:
@@ -1359,18 +1362,18 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(x, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+If :attr:`x` is complex valued, it computes the norm of :attr:`x`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal :attr:`A` as a batch of
+This function does not necessarily treat multidimensonal :attr:`x` as a batch of
 vectors, instead:
 
-- If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
+- If :attr:`dim`\ `= None`, :attr:`x` will be flattened before the norm is computed.
 - If :attr:`dim` is an `int` or a `tuple`, the norm will be computed over these dimensions
   and the other dimensions will be treated as batch dimensions.
 
@@ -1390,12 +1393,16 @@ other `int` or `float`   `sum(abs(x)^{ord})^{(1 / ord)}`
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
+:attr:`dtype` may be used to perform the computation in a more precise dtype.
+It is semantically equivalent to calling ``linalg.vector_norm(x.to(dtype))``
+but it is faster in some cases.
+
 .. seealso::
 
         :func:`torch.linalg.matrix_norm` computes a matrix norm.
 
 Args:
-    A (Tensor): tensor, flattened by default, but this behavior can be
+    x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
@@ -1406,12 +1413,14 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
+    dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
+        If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
+        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
+        :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`x` is complex.
 
 Examples::
 
@@ -1584,7 +1593,7 @@ Examples::
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
-linalg.svd(A, full_matrices=True, *, out=None) -> (Tensor, Tensor, Tensor)
+linalg.svd(A, full_matrices=True, *, driver=None, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition (SVD) of a matrix.
 
@@ -1621,6 +1630,18 @@ which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 The singular values are returned in descending order.
 
 The parameter :attr:`full_matrices` chooses between the full (default) and reduced SVD.
+
+The :attr:`driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
+The choice of a driver is a trade-off between accuracy and speed.
+
+- If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+
+  - For a general matrix: `'gesvdj'` (Jacobi method)
+  - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+
+- If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
+
+By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
 Differences with `numpy.linalg.svd`:
 
@@ -1682,6 +1703,9 @@ Args:
                                     `U` and `Vh`. Default: `True`.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
 Returns:
@@ -1713,12 +1737,14 @@ Examples::
     >>> torch.dist(A, U @ torch.diag_embed(S) @ Vh)
     tensor(3.0957e-06)
 
+.. _condition number:
+    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
 
 svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
-linalg.svdvals(A, *, out=None) -> Tensor
+linalg.svdvals(A, *, driver=None, out=None) -> Tensor
 
 Computes the singular values of a matrix.
 
@@ -1742,6 +1768,10 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        Check :func:`torch.linalg.svd` for details.
+        Default: `None`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
@@ -2025,7 +2055,7 @@ Example::
 
 
 solve = _add_docstr(_linalg.linalg_solve, r"""
-linalg.solve(A, B, *, out=None) -> Tensor
+linalg.solve(A, B, *, left=True, out=None) -> Tensor
 
 Computes the solution of a square system of linear equations with a unique solution.
 
@@ -2034,6 +2064,12 @@ this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the
 :math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 This system of linear equations has one solution if and only if :math:`A` is `invertible`_.
 This function assumes that :math:`A` is invertible.
@@ -2074,6 +2110,7 @@ Args:
                 according to the rules described above
 
 Keyword args:
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
@@ -2222,7 +2259,7 @@ the output has the same batch dimensions.
              As such, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 
-.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             Gradient computations are only supported if the input matrix is full-rank.
              If this condition is not met, no error will be thrown, but the gradient may not be finite.
              This is because the LU decomposition with pivoting is not differentiable at these points.
 
@@ -2231,8 +2268,11 @@ the output has the same batch dimensions.
         :func:`torch.linalg.lu_solve` solves a system of linear equations given the output of this
         function provided the input matrix was square and invertible.
 
+        :func:`torch.lu_unpack` unpacks the tensors returned by :func:`~lu_factor` into the three
+        matrices `P, L, U` that form the decomposition.
+
         :func:`torch.linalg.lu` computes the LU decomposition with partial pivoting of a possibly
-        non-square matrix.
+        non-square matrix. It is a composition of :func:`~lu_factor` and :func:`torch.lu_unpack`.
 
         :func:`torch.linalg.solve` solves a system of linear equations. It is a composition
         of :func:`~lu_factor` and :func:`~lu_solve`.
@@ -2296,6 +2336,166 @@ Returns:
 
 .. _LAPACK's getrf:
     https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+""")
+
+lu_solve = _add_docstr(_linalg.linalg_lu_solve, r"""
+linalg.lu_solve(LU, pivots, B, *, left=True, adjoint=False, out=None) -> Tensor
+
+Computes the solution of a square system of linear equations with a unique solution given an LU decomposition.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system** associated to
+:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
+
+.. math:: AX = B
+
+where :math:`A` is given factorized as returned by :func:`~lu_factor`.
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
+
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+
+.. math::
+
+    A^{\text{H}}X = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
+
+where :math:`A^{\text{H}}` is the conjugate transpose when :math:`A` is complex, and the
+transpose when :math:`A` is real-valued. The :attr:`left`\ `= False` case is analogous.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if the inputs are batches of matrices then
+the output has the same batch dimensions.
+
+Args:
+    LU (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+                 where `*` is zero or more batch dimensions as returned by :func:`~lu_factor`.
+    pivots (Tensor): tensor of shape `(*, n)` (or `(*, k)` if :attr:`left`\ `= True`)
+                     where `*` is zero or more batch dimensions as returned by :func:`~lu_factor`.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
+    adjoint (bool, optional): whether to solve the system :math:`AX=B` or :math:`A^{\text{H}}X = B`. Default: `False`.
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> B = torch.randn(3, 2)
+    >>> X = torch.linalg.lu_solve(LU, pivots, B)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> B = torch.randn(3, 3, 2)   # Broadcasting rules apply: A is broadcasted
+    >>> X = torch.linalg.lu_solve(LU, pivots, B)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> B = torch.randn(3, 5, 3)
+    >>> X = torch.linalg.lu_solve(LU, pivots, B, left=False)
+    >>> torch.allclose(X @ A, B)
+    True
+
+    >>> B = torch.randn(3, 3, 4)   # Now solve for A^T
+    >>> X = torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+    >>> torch.allclose(A.mT @ X, B)
+    True
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
+lu = _add_docstr(_linalg.linalg_lu, r"""
+lu(A, *, pivot=True, out=None) -> (Tensor, Tensor, Tensor)
+
+Computes the LU decomposition with partial pivoting of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **LU decomposition with partial pivoting** of a matrix
+:math:`A \in \mathbb{K}^{m \times n}` is defined as
+
+.. math::
+
+    A = PLU\mathrlap{\qquad P \in \mathbb{K}^{m \times m}, L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
+
+where `k = min(m,n)`, :math:`P` is a `permutation matrix`_, :math:`L` is lower triangular with ones on the diagonal
+and :math:`U` is upper triangular.
+
+If :attr:`pivot`\ `= False` and :attr:`A` is on GPU, then the **LU decomposition without pivoting** is computed
+
+.. math::
+
+    A = LU\mathrlap{\qquad L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
+
+When :attr:`pivot`\ `= False`, the returned matrix :attr:`P` will be empty.
+The LU decomposition without pivoting `may not exist`_ if any of the principal minors of :attr:`A` is singular.
+In this case, the output matrix may contain `inf` or `NaN`.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. seealso::
+
+        :func:`torch.linalg.solve` solves a system of linear equations using the LU decomposition
+        with partial pivoting.
+
+.. warning:: The LU decomposition is almost never unique, as often there are different permutation
+             matrices that can yield different LU decompositions.
+             As such, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             If this condition is not met, no error will be thrown, but the gradient
+             may not be finite.
+             This is because the LU decomposition with pivoting is not differentiable at these points.
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    pivot (bool, optional): Controls whether to compute the LU decomposition with partial pivoting or
+        no pivoting. Default: `True`.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(P, L, U)`.
+
+Examples::
+
+    >>> A = torch.randn(3, 2)
+    >>> P, L, U = torch.linalg.lu(A)
+    >>> P
+    tensor([[0., 1., 0.],
+            [0., 0., 1.],
+            [1., 0., 0.]])
+    >>> L
+    tensor([[1.0000, 0.0000],
+            [0.5007, 1.0000],
+            [0.0633, 0.9755]])
+    >>> U
+    tensor([[0.3771, 0.0489],
+            [0.0000, 0.9644]])
+    >>> torch.dist(A, P @ L @ U)
+    tensor(5.9605e-08)
+
+    >>> A = torch.randn(2, 5, 7, device="cuda")
+    >>> P, L, U = torch.linalg.lu(A, pivot=False)
+    >>> P
+    tensor([], device='cuda:0')
+    >>> torch.dist(A, L @ U)
+    tensor(1.0376e-06, device='cuda:0')
+
+.. _permutation matrix:
+    https://en.wikipedia.org/wiki/Permutation_matrix
+.. _may not exist:
+    https://en.wikipedia.org/wiki/LU_decomposition#Definitions
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
@@ -2439,7 +2639,8 @@ the **full QR decomposition** of a matrix
 
     A = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times m}, R \in \mathbb{K}^{m \times n}}
 
-where :math:`Q` is orthogonal in the real case and unitary in the complex case, and :math:`R` is upper triangular.
+where :math:`Q` is orthogonal in the real case and unitary in the complex case,
+and :math:`R` is upper triangular with real diagonal (even in the complex case).
 
 When `m > n` (tall matrix), as `R` is upper triangular, its last `m - n` rows are zero.
 In this case, we can drop the last `m - n` columns of `Q` to form the
@@ -2459,30 +2660,27 @@ The parameter :attr:`mode` chooses between the full and reduced QR decomposition
 If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
 - :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively.
+  It is always differentiable.
 - :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively.
+  It is differentiable for `m <= n`.
 - :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`.
+  It is never differentiable.
 
 Differences with `numpy.linalg.qr`:
 
 - :attr:`mode`\ `= 'raw'` is not implemented.
 - Unlike `numpy.linalg.qr`, this function always returns a tuple of two tensors.
   When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
-  This behavior may change in a future PyTorch release.
 
-.. note:: The elements in the diagonal of `R` are not necessarily positive.
+.. warning:: The elements in the diagonal of `R` are not necessarily positive.
+             As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
+             Therefore, different platforms, like NumPy, or inputs on different devices,
+             may produce different valid decompositions.
 
-.. note:: :attr:`mode`\ `= 'r'` does not support backpropagation. Use :attr:`mode`\ `= 'reduced'` instead.
-
-.. warning:: The QR decomposition is only unique up to the sign of the diagonal of `R` when the
-             first `k = min(m, n)` columns of :attr:`A` are linearly independent.
-             If this is not the case, different platforms, like NumPy,
-             or inputs on different devices, may produce different valid decompositions.
-
-.. warning:: Gradient computations are only supported if the first `k = min(m, n)` columns
+.. warning:: The QR decomposition is only well-defined if the first `k = min(m, n)` columns
              of every matrix in :attr:`A` are linearly independent.
-             If this condition is not met, no error will be thrown, but the gradient produced
-             will be incorrect.
-             This is because the QR decomposition is not differentiable at these points.
+             If this condition is not met, no error will be thrown, but the QR produced
+             may be incorrect and its autodiff may fail or produce incorrect results.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -2526,4 +2724,55 @@ Examples::
     tensor(1.6099e-06)
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
+""")
+
+vander = _add_docstr(_linalg.linalg_vander, r"""
+vander(x, N=None) -> Tensor
+
+Generates a Vandermonde matrix.
+
+Returns the Vandermonde matrix :math:`V`
+
+.. math::
+
+    V = \begin{pmatrix}
+            1 & x_1 & x_1^2 & \dots & x_1^{N-1}\\
+            1 & x_2 & x_2^2 & \dots & x_2^{N-1}\\
+            1 & x_3 & x_3^2 & \dots & x_3^{N-1}\\
+            \vdots & \vdots & \vdots & \ddots &\vdots \\
+            1 & x_n & x_n^2 & \dots & x_n^{N-1}
+        \end{pmatrix}.
+
+for `N > 1`.
+If :attr:`N`\ `= None`, then `N = x.size(-1)` so that the output is a square matrix.
+
+Supports inputs of float, double, cfloat, cdouble, and integral dtypes.
+Also supports batches of vectors, and if :attr:`x` is a batch of vectors then
+the output has the same batch dimensions.
+
+Differences with `numpy.vander`:
+
+- Unlike `numpy.vander`, this function returns the powers of :attr:`x` in ascending order.
+  To get them in the reverse order call ``linalg.vander(x, N).flip(-1)``.
+
+Args:
+    x (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions
+                consisting of vectors.
+
+Keyword args:
+    N (int, optional): Number of columns in the output. Default: `x.size(-1)`
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 5])
+    >>> linalg.vander(x)
+    tensor([[  1,   1,   1,   1],
+            [  1,   2,   4,   8],
+            [  1,   3,   9,  27],
+            [  1,   5,  25, 125]])
+    >>> linalg.vander(x, N=3)
+    tensor([[ 1,  1,  1],
+            [ 1,  2,  4],
+            [ 1,  3,  9],
+            [ 1,  5, 25]])
 """)

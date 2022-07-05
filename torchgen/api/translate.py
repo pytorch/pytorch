@@ -12,6 +12,8 @@ from torchgen.api.types import (
     memoryFormatT,
     tensorOptionsT,
     scalarTypeT,
+    SymIntT,
+    symIntArrayRefT,
     boolT,
     deviceT,
     layoutT,
@@ -56,7 +58,10 @@ from torchgen.api.types import (
 
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
+out_tensor_ctype = NamedCType("out", ConstRefCType(BaseCType(tensorT)))
+
 longVec_ctype = VectorCType(BaseCType(longT))
+longSymVec_ctype = VectorCType(BaseCType(SymIntT))
 optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
@@ -271,24 +276,54 @@ Check this module for more information.
             return f"TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})"
 
         elif goal == NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))):
-            options = direct_solve(options_ctype)
-            return f"optTypeMetaToScalarType({options}.dtype_opt())"
+            try:
+                options = direct_solve(options_ctype)
+                return f"optTypeMetaToScalarType({options}.dtype_opt())"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.scalar_type()"
 
         elif goal == NamedCType("layout", OptionalCType(BaseCType(layoutT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.layout_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.layout_opt()"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.layout()"
 
         elif goal == NamedCType("device", OptionalCType(BaseCType(deviceT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.device_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.device_opt()"
+            except UnsatError:
+                out_tensor = direct_solve(out_tensor_ctype)
+                return f"{out_tensor}.device()"
 
         elif goal == NamedCType("pin_memory", OptionalCType(BaseCType(boolT))):
-            options = direct_solve(options_ctype)
-            return f"{options}.pinned_memory_opt()"
+            try:
+                options = direct_solve(options_ctype)
+                return f"{options}.pinned_memory_opt()"
+            except UnsatError:
+                # If we're calling a factory op from its out= variant,
+                # We don't actually care about the value of pin_memory.
+                out_tensor = direct_solve(out_tensor_ctype)
+                return "c10::nullopt"
 
         # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
         elif goal.type == BaseCType(intArrayRefT):
-            return direct_solve(NamedCType(goal.name, longVec_ctype))
+            try:
+                return direct_solve(NamedCType(goal.name, longVec_ctype))
+            except UnsatError:
+                # We can also go SymIntArrayRef -> IntArrayRef
+                symIntArrayRef_type = direct_solve(
+                    NamedCType(goal.name, BaseCType(symIntArrayRefT))
+                )
+                return f"c10::asIntArrayRefSlow({symIntArrayRef_type})"
+        elif goal.type == BaseCType(symIntArrayRefT):
+            return direct_solve(NamedCType(goal.name, longSymVec_ctype))
+        elif goal.type == BaseCType(longT):
+            symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
+            return f"{symInt_type}.expectInt()"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
@@ -308,6 +343,10 @@ Check this module for more information.
             if goal.type == VectorCType(BaseCType(longT)):
                 intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
                 argname = direct_solve(intArrayRef_ctype)
+                return f"{argname}.vec()"
+            if goal.type == VectorCType(BaseCType(SymIntT)):
+                symIntArrayRef_ctype = NamedCType(goal.name, BaseCType(symIntArrayRefT))
+                argname = direct_solve(symIntArrayRef_ctype)
                 return f"{argname}.vec()"
             elif goal.type == OptionalCType(VectorCType(BaseCType(longT))):
                 optionalIntArrayRef_ctype = NamedCType(
@@ -331,6 +370,15 @@ Check this module for more information.
             # But there currently aren't any ops that require lambda capture codegen
             # With arguments like std::vector<IntArrayRef>.
             # If that changes, we'll have to add the translation here.
+
+        # We allow const casting on tensors, since const-correctness is a bit broken for at::Tensor.
+        # We could probably generalize this to non-tensor types too.
+        if goal.type == MutRefCType(BaseCType(tensorT)):
+            const_ref_tensor_ctype = NamedCType(
+                goal.name, ConstRefCType(BaseCType(tensorT))
+            )
+            argname = direct_solve(const_ref_tensor_ctype)
+            return f"const_cast<Tensor&>({argname})"
 
         unsat(goal)
 

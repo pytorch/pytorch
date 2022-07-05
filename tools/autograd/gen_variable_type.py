@@ -144,6 +144,8 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
+    # This function returns nested_tensor shape as a tensor that is non-differentiable
+    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -157,6 +159,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "view_as",
     "roll",
     "clone",
+    "block_diag",
     "diag_embed",
     "repeat",
     "expand",
@@ -200,6 +203,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "select",
     "where",
     "as_strided",
+    "as_strided_scatter",
     "slice",
     "constant_pad_nd",
     "unbind",
@@ -237,6 +241,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
+    "std_mean",
+    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
@@ -244,7 +250,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
-    "linalg_eigh",
+    "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
     "_linalg_svd",
@@ -258,7 +264,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "index_add_",
     "linalg_inv",
     "linalg_inv_ex",
-    "l1_loss_backward",
     "baddbmm",
     "addbmm",
     "addmm",
@@ -322,7 +327,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_det_lu_based_helper",
+    "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -332,6 +337,13 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "im2col",
     "im2col_backward",
     "cholesky_inverse",
+    "to_sparse",
+    "sparse_sampled_addmm",
+    "linalg_lu",
+    "pixel_shuffle",
+    "pixel_unshuffle",
+    "linalg_lu_solve",
+    "_linalg_solve",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -347,7 +359,7 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
-RESET_GRAD_ACCUMULATOR = {"set", "resize"}
+RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 
 # NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
 #
@@ -369,19 +381,24 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 """
 )
 
+
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
-if (${tensor_name}_storage_saved.has_value())
+if (${tensor_name}_storage_saved.has_value() &&
+    !at::impl::dispatch_mode_enabled() &&
+    !at::impl::tensor_has_dispatch(${tensor_name}))
   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
 
 # See [Note: ITensorListRef]
 # Materialize the tensor list once before using.
-MATERIALIZE_TENSORLIST = CodeTemplate("""\
+MATERIALIZE_TENSORLIST = CodeTemplate(
+    """\
 auto ${tensorlist_name}_materialized = ${tensorlist_name}.materialize();
-""")
+"""
+)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
@@ -394,8 +411,8 @@ for (const Tensor& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
@@ -403,9 +420,11 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 # See [Note: IOptTensorListRef]
 # Materialize the tensor list once before using.
-MATERIALIZE_OPTIONALTENSORLIST = CodeTemplate("""\
+MATERIALIZE_OPTIONALTENSORLIST = CodeTemplate(
+    """\
 auto ${tensorlist_name}_materialized = ${tensorlist_name}.materialize();
-""")
+"""
+)
 
 # See [Note: IOptTensorListRef]
 # 'cpp_list_type' is needed here for supporting code generation using
@@ -421,8 +440,8 @@ for (const typename ${cpp_list_type}::value_type& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         ${tensorlist_name}[i]->storage()));
 }
@@ -438,19 +457,23 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
-if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
-AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+if (${tensor_name}.has_storage() && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name})) {
+  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+}
 """
 )
 
@@ -464,8 +487,8 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_impl_saved[i])
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_impl_saved[i] && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
 """
@@ -483,7 +506,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i]->getIntrusivePtr());
 }
@@ -510,6 +533,11 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # just in case
     "_cudnn_rnn",
     "dequantize_self",
+    # lift() should never actually be called with a requires_grad=True tensor,
+    "lift",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -743,7 +771,7 @@ def gen_variable_type_func(
 
         if (
             fn.info is None
-            and not get_base_name(f) in RESET_GRAD_ACCUMULATOR
+            and not str(f.func.name.name) in RESET_GRAD_ACCUMULATOR
             and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE
             and len(gen_differentiable_outputs(fn)) > 0
             and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE
@@ -823,7 +851,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argument_type(a, binds=a.name, structured_type_override=f.part_of_structured_group).cpp_type()
+        cpp_type = cpp.argument_type(
+            a, binds=a.name, structured_type_override=f.part_of_structured_group
+        ).cpp_type()
 
         if not is_differentiable(a.name, a.type, info):
             return None
@@ -866,7 +896,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         and (len(differentiable_outputs) > 0)
     )
 
-    if info is not None and info.has_derivatives and not requires_derivative:
+    if (
+        info is not None
+        and info.has_derivatives
+        and not requires_derivative
+        # out= ops are allowed to have zero returns which cause requires_derivative to be False
+        # we shouldn't error out though (out= ops for autograd just redispatch)
+        and len(f.func.returns) > 0
+    ):
         raise RuntimeError(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
@@ -980,7 +1017,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type == 'at::Tensor' or arg.cpp_type in TENSOR_LIST_LIKE_CTYPES:
+            if arg.cpp_type == "at::Tensor" or arg.cpp_type in TENSOR_LIST_LIKE_CTYPES:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -1058,8 +1095,12 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
-            elif type == BaseCType(tensorListT) or type == ListCType(OptionalCType(BaseCType(tensorT))) or \
-                    type == BaseCType(iTensorListRefT) or type == BaseCType(iOptTensorListRefT):
+            elif (
+                type == BaseCType(tensorListT)
+                or type == ListCType(OptionalCType(BaseCType(tensorT)))
+                or type == BaseCType(iTensorListRefT)
+                or type == BaseCType(iOptTensorListRefT)
+            ):
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
@@ -1089,7 +1130,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
     ) -> str:
         """Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+        dispatcher_sig = DispatcherSignature.from_schema(
+            f.func, structured_type_override=f.part_of_structured_group
+        )
         dispatcher_exprs = dispatcher_sig.exprs()
 
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -1134,9 +1177,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for unpacked_binding in unpacked_bindings:
             arg = unpacked_binding.name
             noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
-            if noref_cpp_type == BaseCType(tensorListT) or noref_cpp_type == BaseCType(iTensorListRefT):
+            if noref_cpp_type == BaseCType(tensorListT) or noref_cpp_type == BaseCType(
+                iTensorListRefT
+            ):
                 if noref_cpp_type == BaseCType(iTensorListRefT):
-                    stmts_before_call += [MATERIALIZE_TENSORLIST.substitute(tensorlist_name=arg)]
+                    stmts_before_call += [
+                        MATERIALIZE_TENSORLIST.substitute(tensorlist_name=arg)
+                    ]
                     tensorlist_name = f"{arg}_materialized"
                 else:
                     tensorlist_name = arg
@@ -1146,19 +1193,31 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name),
                 ]
                 stmts_after_call += [
-                    ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
-                    ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name),
+                    ENFORCE_SAME_TENSORLIST_STORAGE.substitute(
+                        tensorlist_name=tensorlist_name
+                    ),
+                    ENFORCE_SAME_TENSORLIST_IMPL.substitute(
+                        tensorlist_name=tensorlist_name
+                    ),
                 ]
-            elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))) or noref_cpp_type == BaseCType(iOptTensorListRefT):
+            elif noref_cpp_type == ListCType(
+                OptionalCType(BaseCType(tensorT))
+            ) or noref_cpp_type == BaseCType(iOptTensorListRefT):
                 if noref_cpp_type == BaseCType(iOptTensorListRefT):
-                    stmts_before_call += [MATERIALIZE_OPTIONALTENSORLIST.substitute(tensorlist_name=arg)]
+                    stmts_before_call += [
+                        MATERIALIZE_OPTIONALTENSORLIST.substitute(tensorlist_name=arg)
+                    ]
                     tensorlist_name = f"{arg}_materialized"
                 else:
                     tensorlist_name = arg
 
                 stmts_before_call += [
-                    SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name, cpp_list_type=noref_cpp_type),
-                    SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name),
+                    SAVE_OPTIONALTENSORLIST_STORAGE.substitute(
+                        tensorlist_name=tensorlist_name, cpp_list_type=noref_cpp_type
+                    ),
+                    SAVE_OPTIONALTENSORLIST_IMPL.substitute(
+                        tensorlist_name=tensorlist_name
+                    ),
                 ]
                 stmts_after_call += [
                     ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(
@@ -1325,7 +1384,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     and is_tensor_list_type(differentiable_inputs[0].type)
                 ):
                     raise RuntimeError(
-                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided '
                         "forward AD formula does not use any input tangent) even though a forward gradient "
                         "formula has been defined for it. This case should only happen for function that "
                         "take a single TensorList as input. All other cases are not supported right now."
@@ -1544,7 +1603,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # Save only after the forward AD has been set up
         body.append(emit_save_outputs())
 
-    if base_name in RESET_GRAD_ACCUMULATOR:
+    if str(f.func.name.name) in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to
         # `reset_grad_accumulator` in an operator that's not `inplace`, you can

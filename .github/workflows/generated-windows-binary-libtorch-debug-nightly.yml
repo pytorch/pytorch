@@ -24,11 +24,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: windows-binary-libtorch-debug
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  PYTORCH_RETRY_TEST_CASES: 1
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
@@ -123,7 +119,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -200,7 +196,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -290,7 +286,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -433,7 +429,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -510,7 +506,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -600,7 +596,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-without-deps-debug
@@ -743,7 +739,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -820,7 +816,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -910,7 +906,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-with-deps-debug
@@ -1053,7 +1049,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1130,7 +1126,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1220,7 +1216,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-static-without-deps-debug
@@ -1364,7 +1360,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1442,7 +1438,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1533,7 +1529,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-with-deps-debug
@@ -1677,7 +1673,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1755,7 +1751,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1846,7 +1842,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-shared-without-deps-debug
@@ -1990,7 +1986,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2068,7 +2064,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2159,7 +2155,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-with-deps-debug
@@ -2303,7 +2299,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2381,7 +2377,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2472,7 +2468,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_3-static-without-deps-debug
@@ -2616,7 +2612,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_6-shared-with-deps-debug
@@ -2694,7 +2690,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-with-deps-debug
@@ -2785,7 +2781,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-with-deps-debug
@@ -2929,7 +2925,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_6-shared-without-deps-debug
@@ -3007,7 +3003,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-without-deps-debug
@@ -3098,7 +3094,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-shared-without-deps-debug
@@ -3242,7 +3238,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_6-static-with-deps-debug
@@ -3320,7 +3316,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-with-deps-debug
@@ -3411,7 +3407,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-with-deps-debug
@@ -3555,7 +3551,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: libtorch-cuda11_6-static-without-deps-debug
@@ -3633,7 +3629,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-without-deps-debug
@@ -3724,7 +3720,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_6-static-without-deps-debug

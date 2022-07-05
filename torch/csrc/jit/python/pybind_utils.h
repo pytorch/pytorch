@@ -66,6 +66,17 @@ TORCH_API IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
+// Hack to overload the behavior of toIValue to accept Python
+// numbers in places where a Tensor is expected
+// See also torch::should_allow_numbers_as_tensors
+class ToIValueAllowNumbersAsTensors {
+  bool old_;
+
+ public:
+  ToIValueAllowNumbersAsTensors(bool enable);
+  ~ToIValueAllowNumbersAsTensors();
+};
+
 // Wrap Python function to guard deref
 // NB: Need VISIBILITY_HIDDEN for silencing compiler error,
 // 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
@@ -693,8 +704,31 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    guardAgainstNamedTensor<at::Tensor>(tensor);
-    return py::cast(autograd::Variable(std::move(tensor)));
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      auto scalar_type = tensor.scalar_type();
+      switch (scalar_type) {
+        case at::ScalarType::Bool:
+          return py::cast(*tensor.data_ptr<bool>());
+        case at::ScalarType::Long:
+          return py::cast(*tensor.data_ptr<int64_t>());
+        case at::ScalarType::Double:
+          return py::cast(*tensor.data_ptr<double>());
+        case at::ScalarType::ComplexDouble:
+          // TODO: https://github.com/pytorch/pytorch/issues/77134
+          return py::cast(static_cast<std::complex<double>>(
+              *tensor.data_ptr<c10::complex<double>>()));
+        default:
+          TORCH_CHECK(
+              false,
+              "Missing cases in 'toPyObject' wrapped number handling! Can't convert ",
+              scalar_type,
+              " to a Python object");
+      }
+    } else {
+      guardAgainstNamedTensor<at::Tensor>(tensor);
+      return py::cast(autograd::Variable(std::move(tensor)));
+    }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
@@ -814,6 +848,10 @@ inline py::object toPyObject(IValue ivalue) {
 #else
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
+  } else if (ivalue.isSymInt()) {
+    auto si = ivalue.toSymInt();
+    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
+                            : py::cast(si.expect_int());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -1192,7 +1230,8 @@ inline py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (overloaded_args.size() > 0 ||
+      at::impl::PythonTorchFunctionTLS::get_mode()) {
     std::vector<py::object> overloaded_types;
     overloaded_types.reserve(overloaded_args.size());
     for (auto& oarg : overloaded_args) {

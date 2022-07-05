@@ -1,9 +1,10 @@
 #pragma once
 
-#include <memory>
 #include <c10/macros/Macros.h>
+#include <memory>
 
-namespace at { namespace functorch {
+namespace at {
+namespace functorch {
 
 // NOTE [functorch TLS in pytorch/pytorch]
 //
@@ -15,7 +16,8 @@ namespace at { namespace functorch {
 // We need to store a pointer due to the indirection:
 // inside functorch, we will create a subclass of FunctorchTLSBase called
 // FuncTorchTLSImpl that actually contains metadata, like the DynamicLayerStack.
-// FuncTorchTLSBase doesn't have any metadata because it hasn't been defined yet.
+// FuncTorchTLSBase doesn't have any metadata because it hasn't been defined
+// yet.
 //
 // Here in pytorch/pytorch, we will pass around FuncTorchTLSBase*, but inside
 // functorch, we will assign a FuncTorchTLSImpl* to the FunctorchTLSBase*.
@@ -38,9 +40,11 @@ struct TORCH_API FuncTorchTLSBase {
 TORCH_API std::unique_ptr<FuncTorchTLSBase> getCopyOfFuncTorchTLS();
 
 // sets the functorch tls. always does a deep copy.
-TORCH_API void setFuncTorchTLS(const std::shared_ptr<const FuncTorchTLSBase>& state);
+TORCH_API void setFuncTorchTLS(
+    const std::shared_ptr<const FuncTorchTLSBase>& state);
 
 // get a mutable reference to the functorch tls
 TORCH_API std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor();
 
-}}
+} // namespace functorch
+} // namespace at

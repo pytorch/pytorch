@@ -160,7 +160,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
 
     com = CodeOnlyModule(body)
 
-    graph = KeepModules().trace(com)
+    tracer_extras = body.get('_tracer_extras', {})
+    graph = KeepModules().trace(com, **tracer_extras)
 
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
@@ -240,7 +241,10 @@ class _WrappedCall:
     def _generate_error_message(frame_summary: traceback.FrameSummary) -> str:
         # auxiliary variables (for readability)
         err_lineno = frame_summary.lineno
-        err_line_len = len(frame_summary.line)
+        assert err_lineno is not None
+        line = frame_summary.line
+        assert line is not None
+        err_line_len = len(line)
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
@@ -260,7 +264,7 @@ class _WrappedCall:
             if self.cls_call is not None:
                 return self.cls_call(obj, *args, **kwargs)
             else:
-                return super(self.cls, obj).__call__(*args, **kwargs)
+                return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \
@@ -369,6 +373,10 @@ class GraphModule(torch.nn.Module):
         self._tracer_cls = None
         if self.graph._tracer_cls and '<locals>' not in self.graph._tracer_cls.__qualname__:
             self._tracer_cls = self.graph._tracer_cls
+
+        self._tracer_extras = {}
+        if self.graph._tracer_extras:
+            self._tracer_extras = self.graph._tracer_extras
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -638,7 +646,7 @@ class {module_name}(torch.nn.Module):
         cls_call = cls.__call__ if "__call__" in vars(cls) else None
 
         if '_wrapped_call' not in vars(cls):
-            cls._wrapped_call = _WrappedCall(cls, cls_call)
+            cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)

@@ -603,7 +603,8 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 
       // Check for contiguity of `vec` and update `vec_stride` accordingly
       const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
-      vec_stride = vec_contiguous.stride(0);
+      // A vector can be contiguous and have a stride of zero if it has it is of length 1
+      vec_stride = std::max<int64_t>(vec_contiguous.stride(0), 1LL);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();

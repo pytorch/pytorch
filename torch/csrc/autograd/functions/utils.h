@@ -1,10 +1,10 @@
 #pragma once
 
 #include <torch/csrc/Export.h>
+#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/core/Tensor.h>
@@ -13,7 +13,8 @@
 #include <memory>
 #include <vector>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
 
@@ -21,12 +22,20 @@ using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
  * Wraps the tensor outputs in variables and creates the grad_fn and sets the
  * grad_fn if necessary.
  */
-TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                                     const function_constructor& ctr);
+TORCH_API variable_list wrap_outputs(
+    const variable_list& inputs,
+    tensor_list&& outputs,
+    const function_constructor& ctr);
 
-///  Checks that inputs contains exactly `args` items and that the first `required_args`
+///  Checks that inputs contains exactly `args` items and that the first
+///  `required_args`
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.
-TORCH_API void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1, bool allow_undefined=false);
+TORCH_API void check_input_variables(
+    const char* name,
+    const variable_list& inputs,
+    int args,
+    int required_args = -1,
+    bool allow_undefined = false);
 
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;
@@ -65,11 +74,11 @@ inline void set_history(
     const std::shared_ptr<Node>& grad_fn) {
   AT_ASSERT(grad_fn);
   if (variable.defined()) {
-    // If the codegen triggers this, you most likely want to add your newly added function
-    // to the DONT_REQUIRE_DERIVATIVE list in tools/autograd/gen_variable_type.py
+    // If the codegen triggers this, you most likely want to add your newly
+    // added function to the DONT_REQUIRE_DERIVATIVE list in
+    // tools/autograd/gen_variable_type.py
     TORCH_INTERNAL_ASSERT(isDifferentiableType(variable.scalar_type()));
-    auto output_nr =
-        grad_fn->add_input_metadata(variable);
+    auto output_nr = grad_fn->add_input_metadata(variable);
     impl::set_gradient_edge(variable, {grad_fn, output_nr});
   } else {
     grad_fn->add_input_metadata(Node::undefined_input());
@@ -104,4 +113,5 @@ inline bool isFwGradDefined(const at::OptionalTensorRef& t) {
   return isFwGradDefined(*t);
 }
 
-}}
+} // namespace autograd
+} // namespace torch
