@@ -34,5 +34,8 @@ from ao.sparsity.test_data_sparsifier import TestNormDataSparsifiers  # noqa: F4
 # Data Scheduler
 from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
 
+# Activation Sparsifier
+from ao.sparsity.test_activation_sparsifier import TestActivationSparsifier  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()
