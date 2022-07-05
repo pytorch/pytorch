@@ -1970,6 +1970,17 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+- func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: empty_symint_cpu
+    CUDA: empty_symint_cuda
+    MPS: empty_symint_mps
+    Meta: empty_symint_meta
+    MkldnnCPU: empty_symint_mkldnn
+    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
+    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2667,13 +2678,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -2962,11 +2966,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: xlogy_out
-
-- func: logdet(Tensor self) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: logdet
 
 - func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -4353,11 +4352,6 @@
   dispatch:
     CompositeExplicitAutograd: as_strided_scatter
 
-- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: slogdet
-
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
@@ -5280,6 +5274,11 @@
   dispatch:
     SparseCPU: log_softmax_backward_sparse_cpu
     SparseCUDA: log_softmax_backward_sparse_cuda
+
+- func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
+  python_module: sparse
+  dispatch:
+    CPU: spdiags
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9469,6 +9468,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9480,12 +9480,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
@@ -11592,16 +11594,28 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
 
-- func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_slogdet
+- func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_slogdet.sign
 
-- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
-  python_module: linalg
+- func: _linalg_slogdet.sign(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots) -> (Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_slogdet_out
+    CPU, CUDA: _linalg_slogdet_out
+
+- func: linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet)
+  python_module: linalg
+
+- func: linalg_slogdet.out(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  python_module: linalg
+
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  variants: function, method
+
+- func: slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  variants: function
+
+- func: logdet(Tensor self) -> Tensor
+  variants: function, method
 
 - func: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
@@ -11820,13 +11834,19 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
-  structured_delegate: _linalg_solve.result
+- func: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
+  structured_delegate: _linalg_solve_ex.result
 
-- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+- func: _linalg_solve_ex.result(Tensor A, Tensor B, *, bool left=True, bool check_errors=False, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots, Tensor(d!) info) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots, Tensor(d!) info)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_solve_out
+    CPU, CUDA: _linalg_solve_ex_out
+
+- func: linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor info)
+  python_module: linalg
+
+- func: linalg_solve_ex.out(Tensor A, Tensor B, *, bool left=True, bool check_errors=False, Tensor(a!) result, Tensor(b!) info) -> (Tensor(a!) result, Tensor(b!) info)
+  python_module: linalg
 
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
@@ -13025,3 +13045,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar
