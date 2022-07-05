@@ -1,6 +1,6 @@
 import inspect
 from functools import wraps
-from typing import Callable, Dict, List, Set
+from typing import Callable, Dict, List, Set, Tuple
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -47,6 +47,8 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
+    return wrapped_fn
+
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
 ) -> None:
@@ -63,17 +65,29 @@ def _validate_pass_schedule_constraint(
 @compatibility(is_backward_compatible=False)
 def topological_sort_passes(
     passes: List[Callable], constraints: List[Callable]
-) -> List[Callable]:
+) -> Tuple[List[Callable], bool]:
+    """
+    Args
+        passes: Passes that we are ordering
+        constraints: Constraints applied on these passes
+
+    Returns
+        A sorted list of callables and a boolean of if a circular dependency
+        existed
+    """
+
     if len(constraints) == 0:
-        return passes
+        return passes, False
 
     # Construct a graph
     graph: Dict[Callable, Set[Callable]] = {}
     visited: Dict[Callable, bool] = {}
+    res: List[Callable] = []
     for p in passes:
         graph[p] = set()
         visited[p] = False
 
+    circular_dependency = False
     for i, a in enumerate(passes):
         for j, b in enumerate(passes):
             if i == j:
@@ -83,25 +97,25 @@ def topological_sort_passes(
                 if not constraint(a, b):
                     if b in graph[a]:
                         graph[a].remove(b)
+                        circular_dependency = True
                     graph[b].add(a)
 
     # Topologically sort the graph
-    def topological_sort_util(graph, p, visited, res):
+    def topological_sort_util(graph, p):
         visited[p] = True
 
         for dep in graph[p]:
             if not visited[dep]:
-                topological_sort_util(graph, dep, visited, res)
+                topological_sort_util(graph, dep)
 
         res.append(p)
 
-    res: List[Callable] = []
     for p in passes:
         if not visited[p]:
-            topological_sort_util(graph, p, visited, res)
+            topological_sort_util(graph, p)
 
     res.reverse()
-    return res
+    return res, circular_dependency
 
 @compatibility(is_backward_compatible=True)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
@@ -155,7 +169,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[nn.Module], PassResult]] = []
+    passes: List[Callable[[nn.Module], nn.Module]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -205,8 +219,14 @@ class PassManager:
         """
         Finds a valid traversal order based on the given constraints and orders
         the passes based on this order.
+
+        If a circular dependency exists between the constraints and steps = 1,
+        then we will raise an error because if steps != 1 this means that we
+        will re-run the passes, allowing for circular dependencies.
         """
-        self.passes = topological_sort_passes(self.passes, self.constraints)
+        self.passes, circular_dep = topological_sort_passes(self.passes, self.constraints)
+        if circular_dep and self.steps == 1:
+            raise RuntimeError("Circular dependency detected within the constraints and steps was set to 1")
 
     def add_checks(self, check: Callable) -> None:
         """
@@ -235,13 +255,15 @@ class PassManager:
         the graph stops changing, or until `steps` number of times.
         """
         # Order the passes based on the constraints
-        self.solve_constraints()
+        if not self._validated:
+            self.solve_constraints()
 
         # Check graph invariants
         self.check(module)
 
         # Run the set of passes `steps` number of times or until the graph stops
         # changing
+        overall_modified = False
         for _ in range(self.steps):
             modified = False
 
@@ -257,7 +279,8 @@ class PassManager:
                     self.check(module)
 
             # If the graph no longer changes, then we can stop running these passes
+            overall_modified = overall_modified or modified
             if not modified:
                 break
 
-        return module
+        return PassResult(module, overall_modified)

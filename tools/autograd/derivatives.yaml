@@ -495,8 +495,13 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: at::linalg_lu_solve(LU, pivots, A_t).diagonal(0, -2, -1).sum(-1) * result
+  result: at::linalg_lu_solve(LU, pivots, A_t, /*left*/true, /*adjoint*/!A_p.is_complex() && A_p.is_contiguous()).diagonal(0, -2, -1).sum(-1) * result
   output_differentiability: [True, False, False]
+
+- name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  A: slogdet_backward(grad_sign, grad_logabsdet, A, sign, LU, pivots)
+  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
+  output_differentiability: [True, True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
   tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
@@ -934,9 +939,6 @@
 
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
-
-- name: logdet(Tensor self) -> Tensor
-  self: logdet_backward(grad, self, result)
 
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
@@ -1435,18 +1437,10 @@
   src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
-- name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
-
-- name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
-
-- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+- name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
   result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
-  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
+  output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
@@ -1819,11 +1813,6 @@
 - name: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
-
-- name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction, log_target)
-  target: kl_div_target_backward(grad, self, target, reduction, log_target)
-  result: apply_loss_reduction(kl_div_backward(self_t, self_p, target_p, at::Reduction::None, log_target) +  kl_div_target_backward(target_t, self_p, target_p, at::Reduction::None, log_target), reduction)
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
@@ -2202,7 +2191,7 @@
   input, weight, bias: "grad.defined() ? convolution_backward_overrideable(grad, input, weight, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, false, output_padding, groups, grad_input_mask)
+  grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask)
 
 - name: slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
   self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, true, output_padding, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -2303,11 +2292,6 @@
   self: zeros_like(grad)
   result: at::where((self_p > min_val).logical_and(self_p < max_val), grad_output_t, at::zeros({}, result.options()).expand_as(result))
 
-- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
-  self: zeros_like(grad)
-  target: zeros_like(grad)
-
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
@@ -2374,6 +2358,7 @@
   # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   self: zeros_like(grad)
+  result: rrelu_with_noise_backward(grad_output_t, self_p, noise, lower, upper, training, false)
 
 - name: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
   grad_output: reflection_pad1d(grad, padding)
