@@ -93,7 +93,6 @@ __all__ = [
     "prod",
     "cumsum",
     "t",
-    "numpy_T",
     "expand",
     "expand_as",
     "embedding",
@@ -159,6 +158,7 @@ __all__ = [
     "upsample_trilinear3d",
     "bitwise_not",
     "wrap_logical_op_with_cast_to",
+    "wrap_logical_op_with_cast_to_and_from",
     "wrap_logical_op_with_negation",
     "eq",
     "ne",
@@ -768,12 +768,6 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-def numpy_T(g, input):
-    ndim = symbolic_helper._get_tensor_rank(input)
-    perm = list(reversed(range(0, ndim)))
-    return g.op("Transpose", input, perm_i=perm)
-
-
 def expand(g, self, size, implicit):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
@@ -1069,19 +1063,20 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
-    weight_sizes = symbolic_helper._get_tensor_sizes(weight)
-    weight_rank = len(weight_sizes)
     if self_rank is not None:
         if self_rank > 2:
             # make weight unidirectional broadcastable
             weight = symbolic_helper._unsqueeze_helper(
                 g, weight, list(range(1, self_rank - 1))
             )
-        elif self_rank == 0 and weight_sizes == [1]:
-            # self and weight are both scalar but weight has rank == 1, squeeze weight.
-            weight = symbolic_helper._squeeze_helper(g, weight, [0])
-            weight_rank = 0
+        elif self_rank == 0:
+            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
+            # about whether this is allowed, but some implementations enforce
+            # rank(self) >= rank(weight), which makes sense.
+            self = symbolic_helper._unsqueeze_helper(g, self, [0])
+            self_rank = 1
 
+    weight_rank = symbolic_helper._get_tensor_rank(weight)
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
@@ -1693,8 +1688,25 @@ def bitwise_not(g, inp):
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
+            return g.op(
+                "Cast",
+                fn(g, input, other),
+                to_i=symbolic_helper.cast_pytorch_to_onnx[to_type],
+            )
+
+        return wrap_with_cast
+
+    return decorator
+
+
+def wrap_logical_op_with_cast_to_and_from(to_type):
+    def decorator(fn):
+        def wrap_with_cast(g, input, other):
             to_cast_func = globals()[f"_cast_{to_type}"]
-            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
+            return from_cast_func(
+                g, to_cast_func(g, input, False), to_cast_func(g, other, False)
+            )
 
         return wrap_with_cast
 
@@ -1804,17 +1816,17 @@ def __xor_(g, input, other):
         )
 
 
-@wrap_logical_op_with_cast_to("Bool")
+@wrap_logical_op_with_cast_to_and_from("Bool")
 def logical_and(g, input, other):
     return g.op("And", input, other)
 
 
-@wrap_logical_op_with_cast_to("Bool")
+@wrap_logical_op_with_cast_to_and_from("Bool")
 def logical_or(g, input, other):
     return g.op("Or", input, other)
 
 
-@wrap_logical_op_with_cast_to("Bool")
+@wrap_logical_op_with_cast_to_and_from("Bool")
 def logical_xor(g, input, other):
     return g.op("Xor", input, other)
 
@@ -3061,71 +3073,27 @@ def tanhshrink(g, self):
 
 @symbolic_helper.parse_args("v", "f")
 def hardshrink(g, self, lambd):
-    dtype = self.type().scalarType()
-    if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-    lambd_op = g.op(
-        "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
-    )
+    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
-    return g.op(
-        "Where",
-        cond,
-        self,
-        g.op(
-            "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
-        ),
-    )
+    return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
 
 
 @symbolic_helper.parse_args("v", "f")
 def softshrink(g, self, lambd):
-    dtype = self.type().scalarType()
-    if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-    lambd_op = g.op(
-        "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
-    )
+    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
         "Where",
         gt_cond,
         sub(g, self, lambd_op),
-        g.op(
-            "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
-        ),
+        g.op("Constant", value_t=torch.FloatTensor([0])),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
     lt_out = g.op(
         "Where",
         lt_cond,
         add(g, self, lambd_op),
-        g.op(
-            "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-            ),
-        ),
+        g.op("Constant", value_t=torch.FloatTensor([0])),
     )
     return add(g, gt_out, lt_out)
 
@@ -4111,7 +4079,7 @@ def _any(g, *args):
     input_sum = symbolic_helper._reducesum_helper(
         g, input, axes_i=dim, keepdims_i=keepdim
     )
-    return gt(g, input_sum, g.op("Constant", value_t=torch.tensor(0, dtype=torch.long)))
+    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
 
 
 def _all(g, *args):
@@ -4577,14 +4545,7 @@ def index(g, self, index):
 
 
 @symbolic_helper.parse_args("v", "v", "is", "i", "v")
-def linalg_norm(
-    g,
-    self: torch._C.Value,
-    ord: torch._C.Value,
-    dim: List[int],
-    keepdim: int,
-    dtype: torch._C.Value,
-):
+def linalg_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
     ord_value = None
     if dim is None:
@@ -4611,18 +4572,11 @@ def linalg_norm(
 
 
 @symbolic_helper.parse_args("v", "f", "is", "i", "v")
-def linalg_vector_norm(
-    g,
-    self: torch._C.Value,
-    ord: float,
-    dim: List[int],
-    keepdim: int,
-    dtype: torch._C.Value,
-):
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
         self = symbolic_helper._reshape_helper(g, self, [-1])
-        keepdim = 0
+        keepdim = None
 
     if ord == math.inf:
         result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
@@ -4633,31 +4587,20 @@ def linalg_vector_norm(
             "linalg_vector_norm", 9, 11, "ord=0 not supported"
         )
     else:
-        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
+        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
         result = symbolic_helper._reducesum_helper(
             g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
         )
         result = g.op(
             "Pow",
             result,
-            g.op(
-                "Div",
-                g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)),
-                ord_op,
-            ),
+            g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op),
         )
     return result
 
 
 @symbolic_helper.parse_args("v", "v", "is", "i", "v")
-def linalg_matrix_norm(
-    g,
-    self: torch._C.Value,
-    ord: torch._C.Value,
-    dim: List[int],
-    keepdim: int,
-    dtype: torch._C.Value,
-):
+def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
     ord_value = symbolic_helper._parse_arg(ord, "s")
     if ord_value == "fro":

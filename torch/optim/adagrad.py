@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
-__all__ = ['Adagrad', 'adagrad']
 
 class Adagrad(Optimizer):
     r"""Implements Adagrad algorithm.
@@ -189,7 +188,7 @@ def adagrad(
     See :class:`~torch.optim.Adagrad` for details.
     """
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
         )
@@ -304,7 +303,7 @@ def _multi_tensor_adagrad(
         grads = torch._foreach_neg(grads)
 
     if has_sparse_grad is None:
-        has_sparse_grad = any(grad.is_sparse for grad in grads)
+        has_sparse_grad = any([grad.is_sparse for grad in grads])
 
     if has_sparse_grad:
         return _single_tensor_adagrad(

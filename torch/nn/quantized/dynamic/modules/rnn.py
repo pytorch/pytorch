@@ -8,15 +8,8 @@ from torch._jit_internal import Tuple, Optional, List, Union, Dict  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.nn.quantized.modules.utils import _quantize_weight
 
-__all__ = ['pack_weight_bias', 'PackedParameter', 'RNNBase', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell',
-           'GRUCell']
-
-def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
-    return tensor.index_select(dim, permutation)
-
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
-    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
-    return _apply_permutation(tensor, permutation, dim)
+    return tensor.index_select(dim, permutation)
 
 def pack_weight_bias(qweight, bias, dtype):
 
@@ -214,7 +207,7 @@ class RNNBase(torch.nn.Module):
     def permute_hidden(self, hx: Tensor, permutation: Optional[Tensor]) -> Tensor:
         if permutation is None:
             return hx
-        return _apply_permutation(hx, permutation)
+        return apply_permutation(hx, permutation)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -467,7 +460,7 @@ class LSTM(RNNBase):
     ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
-        return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
+        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     # "type: ignore" is required due to issue #43072
     def check_forward_args(  # type: ignore[override]
@@ -710,7 +703,7 @@ class GRU(RNNBase):
     ) -> Tensor:
         if permutation is None:
             return hx
-        return _apply_permutation(hx, permutation)
+        return apply_permutation(hx, permutation)
 
     @torch.jit.ignore
     def forward(self, input, hx=None):

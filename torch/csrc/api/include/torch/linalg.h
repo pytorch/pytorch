@@ -327,25 +327,6 @@ inline std::tuple<Tensor&, Tensor&> qr_out(
   return torch::linalg_qr_out(Q, R, input, mode);
 }
 
-inline std::tuple<Tensor, Tensor> solve_ex(
-    const Tensor& input,
-    const Tensor& other,
-    bool left,
-    bool check_errors) {
-  return torch::linalg_solve_ex(input, other, left, check_errors);
-}
-
-inline std::tuple<Tensor&, Tensor&> solve_ex_out(
-    Tensor& result,
-    Tensor& info,
-    const Tensor& input,
-    const Tensor& other,
-    bool left,
-    bool check_errors) {
-  return torch::linalg_solve_ex_out(
-      result, info, input, other, left, check_errors);
-}
-
 inline Tensor solve(const Tensor& input, const Tensor& other, bool left) {
   return torch::linalg_solve(input, other, left);
 }
@@ -906,27 +887,6 @@ inline Tensor& ldl_solve_out(
     const Tensor& B,
     bool hermitian) {
   return torch::linalg_ldl_solve_out(result, LD, pivots, B, hermitian);
-}
-
-/// Solves a system linear system AX = B
-///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_ex
-inline std::tuple<Tensor, Tensor> solve_ex(
-    const Tensor& input,
-    const Tensor& other,
-    bool left,
-    bool check_errors) {
-  return detail::solve_ex(input, other, left, check_errors);
-}
-
-inline std::tuple<Tensor&, Tensor&> solve_ex_out(
-    Tensor& result,
-    Tensor& info,
-    const Tensor& input,
-    const Tensor& other,
-    bool left,
-    bool check_errors) {
-  return detail::solve_ex_out(result, info, input, other, left, check_errors);
 }
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.

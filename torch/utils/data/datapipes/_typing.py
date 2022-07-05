@@ -357,7 +357,6 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 if datapipe._restored is True:
                     datapipe._restored = False
                 else:
-                    datapipe._number_of_samples_yielded = 0
                     reset_func(*args, **kwargs)
 
             namespace['reset'] = conditional_reset

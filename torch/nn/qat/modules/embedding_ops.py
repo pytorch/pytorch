@@ -3,7 +3,6 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['Embedding', 'EmbeddingBag']
 
 class Embedding(nn.Embedding):
     r"""

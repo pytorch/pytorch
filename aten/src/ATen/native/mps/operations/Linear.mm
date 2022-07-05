@@ -242,9 +242,9 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
     MPSGraphTensor *biasTensor_ = nil;
   };
 
-  auto grad_output_reshaped = grad_output.dim() != 2 ?
+  auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
-  auto input_reshaped = input.dim() != 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;
+  auto input_reshaped = input.dim() > 2 ? input.reshape({-1, input.size(input.dim() - 1)}) : input;
 
   TORCH_CHECK(grad_output_reshaped.is_mps());
   TORCH_CHECK(input_reshaped.is_mps());

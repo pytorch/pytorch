@@ -2,10 +2,6 @@
 
 namespace at { namespace native {
 
-Tensor empty_symint_mkldnn(c10::SymIntArrayRef sizes, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return at::native::empty_mkldnn(c10::asIntArrayRefSlow(sizes), dtype, layout, device, pin_memory, optional_memory_format);
-}
-
 #if AT_MKLDNN_ENABLED()
 
 Tensor empty_mkldnn(IntArrayRef sizes, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {

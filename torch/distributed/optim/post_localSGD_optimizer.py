@@ -20,10 +20,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
         >>>  import torch.nn as nn
         >>>  from torch.distributed.optim import PostLocalSGDOptimizer
-        >>>  from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
-        >>>    PostLocalSGDState,
-        >>>    post_localSGD_hook,
-        >>>  )
+        >>> from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import post_localSGD_hook
         >>>
         >>>  model = nn.parallel.DistributedDataParallel(
         >>>     module, device_ids=[rank], output_device=rank

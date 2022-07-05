@@ -1248,10 +1248,6 @@ class FunctionSchema:
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
 
-    def is_symint_fn(self) -> bool:
-        # TODO: make this more robust
-        return "SymInt" in self.name.overload_name
-
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
         #

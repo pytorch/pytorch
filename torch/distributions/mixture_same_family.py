@@ -4,7 +4,6 @@ from torch.distributions import Categorical
 from torch.distributions import constraints
 from typing import Dict
 
-__all__ = ['MixtureSameFamily']
 
 class MixtureSameFamily(Distribution):
     r"""

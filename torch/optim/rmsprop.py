@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
-__all__ = ['RMSprop', 'rmsprop']
 
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.

@@ -1,14 +1,11 @@
-import gzip
-import io
-import json
 import os
+import requests
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List, Any
 
-import boto3  # type: ignore[import]
-import requests
 import rockset  # type: ignore[import]
+import boto3  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
@@ -110,29 +107,6 @@ def upload_to_rockset(collection: str, docs: List[Any]) -> None:
         api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
     client.Collection.retrieve(collection).add_docs(docs)
-    print("Done!")
-
-
-def upload_to_s3(
-    workflow_run_id: int,
-    workflow_run_attempt: int,
-    collection: str,
-    docs: List[Dict[str, Any]],
-) -> None:
-    print(f"Writing {len(docs)} documents to S3")
-    body = io.StringIO()
-    for doc in docs:
-        json.dump(doc, body)
-        body.write("\n")
-
-    S3_RESOURCE.Object(
-        "ossci-raw-job-status",
-        f"{collection}/{workflow_run_id}/{workflow_run_attempt}",
-    ).put(
-        Body=gzip.compress(body.getvalue().encode()),
-        ContentEncoding="gzip",
-        ContentType="application/json",
-    )
     print("Done!")
 
 

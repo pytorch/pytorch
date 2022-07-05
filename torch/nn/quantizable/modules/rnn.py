@@ -380,8 +380,5 @@ class LSTM(torch.nn.Module):
 
     @classmethod
     def from_observed(cls, other):
-        # The whole flow is float -> observed -> quantized
-        # This class does float -> observed only
-        raise NotImplementedError("It looks like you are trying to convert a "
-                                  "non-quantizable LSTM module. Please, see "
-                                  "the examples on quantizable LSTMs.")
+        return torch.ao.quantization.convert(other, inplace=False,
+                                             remove_qconfig=True)

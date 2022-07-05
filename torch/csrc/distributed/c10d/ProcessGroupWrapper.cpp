@@ -29,7 +29,7 @@ struct CollectiveFingerPrint {
   // input tensor device types
   std::vector<int8_t> tensor_device_types_;
   // input tensor sizes
-  std::vector<std::vector<int64_t>> tensor_sizes_;
+  std::vector<c10::IntArrayRef> tensor_sizes_;
 
   explicit CollectiveFingerPrint(
       OpType op_type,
@@ -41,7 +41,7 @@ struct CollectiveFingerPrint {
     for (const at::Tensor& t : input_tensors) {
       tensor_dtypes_.push_back(static_cast<int8_t>(t.dtype().toScalarType()));
       tensor_device_types_.push_back(static_cast<int8_t>(t.device().type()));
-      tensor_sizes_.push_back(t.sizes().vec());
+      tensor_sizes_.push_back(t.sizes());
     }
   }
 
@@ -49,12 +49,10 @@ struct CollectiveFingerPrint {
   CollectiveFingerPrint(
       OpType op_type,
       std::vector<int8_t> tensor_dtypes,
-      std::vector<int8_t> tensor_device_types,
-      std::vector<std::vector<int64_t>> tensor_sizes)
+      std::vector<int8_t> tensor_device_types)
       : op_type_(op_type),
         tensor_dtypes_(tensor_dtypes),
-        tensor_device_types_(tensor_device_types),
-        tensor_sizes_(tensor_sizes) {}
+        tensor_device_types_(tensor_device_types) {}
 
   // Logs collective information in case of a failure.
   friend std::ostream& operator<<(
@@ -81,22 +79,19 @@ struct CollectiveFingerPrint {
   // CollectiveFingerPrint::serialize_fingerprint and deserializes it back to a
   // CollectiveFingerPrint struct
   CollectiveFingerPrint deserialize_fingerprint(at::Tensor serialized_tensor) {
-    OpType optype;
-    auto dtypes = std::vector<int8_t>();
-    auto device_types = std::vector<int8_t>();
-    auto sizes = std::vector<std::vector<int64_t>>();
+    // TODO: Need to add asserts to validate serialized_tensor.sizes() before
+    // deserializing
     int index = 0;
     // 1. OpType
-    optype = OpType(serialized_tensor[index].item<int>());
+    OpType optype = OpType(serialized_tensor[index].item<int>());
     index++;
 
+    std::vector<int8_t> dtypes = std::vector<int8_t>();
+    std::vector<int8_t> device_types = std::vector<int8_t>();
     if (index < serialized_tensor.size(0)) {
       // 2. Num tensors
       int num_tensors = serialized_tensor[index].item<int>();
       index++;
-      dtypes.reserve(num_tensors);
-      device_types.reserve(num_tensors);
-      sizes.reserve(num_tensors);
 
       // 3. Tensor dtypes
       for (int i = 0; i < num_tensors; i++) {
@@ -108,22 +103,8 @@ struct CollectiveFingerPrint {
         device_types.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
-      // 5. Tensor shapes
-      for (int i = 0; i < num_tensors; i++) {
-        // 5a. Shape size
-        int size = serialized_tensor[index].item<int>();
-        index++;
-        // 5b. Shape
-        auto shapeVec = std::vector<int64_t>();
-        shapeVec.reserve(size);
-        for (int j = 0; j < size; j++) {
-          shapeVec.push_back(serialized_tensor[index].item<int64_t>());
-          index++;
-        }
-        sizes.push_back(shapeVec);
-      }
     }
-    return CollectiveFingerPrint(optype, dtypes, device_types, sizes);
+    return CollectiveFingerPrint(optype, dtypes, device_types);
   }
 
  private:
@@ -161,8 +142,8 @@ struct CollectiveFingerPrint {
           std::stringstream ss;
           ss << "Detected mismatch between collectives on ranks. Rank "
              << pg->getRank() << " is running collective: " << *this
-             << ", but Rank " << rank
-             << " is running collective: " << rank_fingerprint << ".";
+             << ", but Rank " << rank << " is running collective: "
+             << opTypeToString(rank_fingerprint.op_type_) << ".";
           TORCH_CHECK(false, ss.str());
         }
       }
@@ -188,7 +169,6 @@ struct CollectiveFingerPrint {
     }
     // 5. Shapes
     for (const auto& sizes : tensor_sizes_) {
-      data->push_back(sizes.size());
       for (const auto& s : sizes) {
         data->push_back(s);
       }
@@ -219,7 +199,6 @@ std::ostream& operator<<(
     // Convert dtype and device type info to string.
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
-    std::vector<std::string> size_strs;
     for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
       dtype_strs.emplace_back(
           c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
@@ -229,20 +208,14 @@ std::ostream& operator<<(
       device_type_strs.emplace_back(
           c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
     }
-    if (!collective_fingerprint.tensor_sizes_.empty()) {
-      for (const auto& single_tensor_shape_num :
-           collective_fingerprint.tensor_sizes_[0]) {
-        size_strs.emplace_back(std::to_string(single_tensor_shape_num));
-      }
-    }
 
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
         "OpType=",
         opTypeToString(collective_fingerprint.op_type_),
-        ", TensorShape=[",
-        c10::Join(", ", size_strs),
-        "], TensorDtypes=",
+        ", TensorShape=",
+        (collective_fingerprint.tensor_sizes_)[0],
+        ", TensorDtypes=",
         (dtype_strs),
         ", TensorDeviceTypes=",
         (device_type_strs),
@@ -419,16 +392,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
   runCollectiveChecks(OpType::BARRIER, {});
   return pg_->barrier(opts);
-}
-
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::
-    _reduce_scatter_base(
-        at::Tensor& outputBuffer,
-        at::Tensor& inputBuffer,
-        const ReduceScatterOptions& opts) {
-  runCollectiveChecks(
-      OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
-  return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {

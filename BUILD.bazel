@@ -1357,7 +1357,7 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.1.0",
+        "third_party/miniz-2.0.8",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1424,7 +1424,7 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         ":caffe2_protos",
-        "//third_party/miniz-2.1.0:miniz",
+        "//third_party/miniz-2.0.8:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",

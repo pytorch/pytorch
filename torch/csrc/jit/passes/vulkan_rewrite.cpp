@@ -99,24 +99,6 @@ void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
   gru_rewriter.runOnGraph(graph);
 }
 
-void insertPrePackedLstmOp(std::shared_ptr<Graph>& graph) {
-  std::string lstm_pattern = R"(
-      graph(%input.1, %hx:Tensor[], %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
-        %y.1 : Tensor, %hn.1 : Tensor, %cn.1 : Tensor = aten::lstm(%input.1, %hx, %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
-        return (%y.1, %hn.1, %cn.1) )";
-  std::string prepacked_ops_pattern = R"(
-      graph(%input.1, %hx:Tensor[], %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
-        %packed_weights_biases = vulkan_prepack::create_lstm_context(
-            %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
-        %hx.1 : Tensor, %cx.1 : Tensor = prim::ListUnpack(%hx)
-        %y.1 : Tensor, %hn.1 : Tensor, %cn.1 : Tensor = vulkan_prepack::run_lstm_context(%input.1, %hx.1, %cx.1, %packed_weights_biases)
-        return (%y.1, %hn.1, %cn.1) )";
-
-  SubgraphRewriter lstm_rewriter;
-  lstm_rewriter.RegisterRewritePattern(lstm_pattern, prepacked_ops_pattern);
-  lstm_rewriter.runOnGraph(graph);
-}
-
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
@@ -206,7 +188,6 @@ void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
   insertPrePackedGruOp(graph);
-  insertPrePackedLstmOp(graph);
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {

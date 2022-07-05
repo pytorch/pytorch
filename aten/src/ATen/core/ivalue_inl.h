@@ -991,7 +991,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
         guts::if_constexpr<std::is_convertible<
-            typename c10::invoke_result_t<T &&, Future&>,
+            typename std::result_of<T && (Future&)>::type,
             IValueWithStorages>::value>(
             [&](auto identity) {
               IValue value;

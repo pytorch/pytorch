@@ -7,8 +7,6 @@ from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 
-__all__ = ['Interpreter', 'Transformer']
-
 @compatibility(is_backward_compatible=True)
 class Interpreter:
     """

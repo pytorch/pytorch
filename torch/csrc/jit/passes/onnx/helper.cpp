@@ -167,16 +167,6 @@ Node* createONNXUnsqueeze(
   return unsqueeze_node;
 }
 
-Node* createONNXConstant(
-    Graph* graph,
-    Node* n_to_insert_before,
-    at::Tensor value) {
-  Node* constant_node = graph->create(onnx::Constant, 1);
-  constant_node->insertBefore(n_to_insert_before);
-  constant_node->t_(attr::value, value);
-  return constant_node;
-}
-
 bool isValidToTransformToONNXConcatNode(Node* lc_node) {
   return !lc_node->inputs().empty();
 }

@@ -14,7 +14,6 @@ Tensor _clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
-    const api::Shader::Descriptor& shader_descriptor,
     const std::string& op_name) {
   TORCH_CHECK(
       min || max,
@@ -57,7 +56,7 @@ Tensor _clamp(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          shader_descriptor,
+          VK_KERNEL(clamp),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
@@ -88,14 +87,13 @@ Tensor clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max) {
-  return _clamp(self_arg, min, max, VK_KERNEL(clamp), "aten::clamp");
+  return _clamp(self_arg, min, max, "aten::clamp");
 }
 
 Tensor& _clamp_(
     Tensor& self,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
-    const api::Shader::Descriptor& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -134,7 +132,7 @@ Tensor& _clamp_(
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          shader_descriptor,
+          VK_KERNEL(clamp_),
           v_self.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
@@ -156,18 +154,11 @@ Tensor& _clamp_(
   return self;
 }
 
-Tensor threshold(
-    const Tensor& self,
-    const Scalar& threshold,
-    const Scalar& value) {
-  return _clamp(self, threshold, value, VK_KERNEL(threshold), "aten::threshold");
-}
-
 Tensor& clamp_(
     Tensor& self,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max) {
-  return _clamp_(self, min, max, VK_KERNEL(clamp_), "aten::clamp_");
+  return _clamp_(self, min, max, "aten::clamp_");
 }
 
 Tensor activation(
@@ -291,22 +282,22 @@ Tensor hardtanh(
     const Tensor& self,
     const Scalar& min,
     const Scalar& max) {
-  return ops::_clamp(self, min, max, VK_KERNEL(clamp), "aten::hardtanh");
+  return ops::_clamp(self, min, max, "aten::hardtanh");
 }
 
 Tensor& hardtanh_(
     Tensor& self,
     const Scalar& min,
     const Scalar& max) {
-  return ops::_clamp_(self, min, max, VK_KERNEL(clamp_), "aten::hardtanh_");
+  return ops::_clamp_(self, min, max, "aten::hardtanh_");
 }
 
 Tensor relu(const Tensor& self) {
-  return ops::_clamp(self, 0, c10::nullopt, VK_KERNEL(clamp), "aten::relu");
+  return ops::_clamp(self, 0, c10::nullopt, "aten::relu");
 }
 
 Tensor& relu_(Tensor& self) {
-  return ops::_clamp_(self, 0, c10::nullopt, VK_KERNEL(clamp_), "aten::relu_");
+  return ops::_clamp_(self, 0, c10::nullopt, "aten::relu_");
 }
 
 Tensor hardswish(const Tensor& self) {
@@ -488,6 +479,13 @@ Tensor& tanh_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(tanh_), "aten::tanh_");
 }
 
+
+Tensor threshold(
+    const Tensor& self,
+    const Scalar& threshold,
+    const Scalar& value) {
+  return ops::_clamp(self, threshold, value, "aten::threshold");
+}
 
 #ifdef USE_VULKAN_API
 

@@ -19,8 +19,6 @@ void aten_format(Stack& stack);
 
 void size(Stack& stack);
 
-void sym_size(Stack& stack);
-
 void device(Stack& stack);
 
 void dtype(Stack& stack);

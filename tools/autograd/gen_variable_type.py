@@ -141,8 +141,6 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
-    # This function returns nested_tensor shape as a tensor that is non-differentiable
-    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -238,8 +236,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
-    "std_mean",
-    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
@@ -324,7 +320,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_linalg_det",
+    "_det_lu_based_helper",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -340,8 +336,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pixel_shuffle",
     "pixel_unshuffle",
     "linalg_lu_solve",
-    "_linalg_slogdet",
-    "_linalg_solve_ex",
+    "_linalg_solve",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {

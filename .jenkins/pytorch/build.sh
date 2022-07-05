@@ -8,8 +8,6 @@ set -ex
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=./common-build.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
@@ -159,6 +157,11 @@ fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
+
+# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang

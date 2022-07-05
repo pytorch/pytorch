@@ -127,62 +127,6 @@ Tensor& normal_mps_(Tensor& self, double mean, double std, c10::optional<Generat
   return normal_mps_out(mean_t, std_t, gen, self);
 }
 
-Tensor normal_mps(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  Tensor output = empty_mps(
-                      mean.sizes(),
-                      mean.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-
-  Tensor std_t = empty_mps(
-                      output.sizes(),
-                      output.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-  std_t.fill_(std);
-
-  return normal_mps_out(mean, std_t, gen, output);
-}
-
-Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor output = empty_mps(
-                      std.sizes(),
-                      std.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-
-  Tensor mean_t = empty_mps(
-                      output.sizes(),
-                      output.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-  mean_t.fill_(mean);
-
-  return normal_mps_out(mean_t, std, gen, output);
-}
-
-Tensor normal_mps(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  auto shape = at::infer_size(mean.sizes(), std.sizes());
-
-  Tensor output = empty_mps(
-                      shape,
-                      mean.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-
-  return normal_mps_out(mean, std, gen, output);
-}
-
 Tensor& normal_mps_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   TORCH_CHECK(std >= 0.0, "normal_mps_out expects std >= 0.0, but found std=", std);
 
