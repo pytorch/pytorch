@@ -109,7 +109,7 @@ class Adam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
-                        differentiable=differentiable)
+                        differentiable=differentiable, fused=fused)
         super(Adam, self).__init__(params, defaults)
 
         if fused:
@@ -118,11 +118,8 @@ class Adam(Optimizer):
             if not all(p.is_cuda for pg in self.param_groups for p in pg):
                 raise RuntimeError("WIP FusedAdam requires all the params to be hosted on CUDA device")
             # TODO(crcrpar): Give the compatibility with CUDA Graph.
-            if capturable:
-                raise RuntimeError("WIP FusedAdam does not support CUDA Graph at the moment.")
-            # TODO(crcrpar): Support AMSGrad.
-            if amsgrad:
-                raise RuntimeError("WIP FusedAdam does not support AMSGrad at the moment.")
+            # if capturable:
+            #     raise RuntimeError("WIP FusedAdam does not support CUDA Graph at the moment.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -515,7 +512,7 @@ def _fused_adam(
     found_inf: Optional[Tensor],
 ) -> None:
     torch._foreach_add_(state_steps, 1)
-    torch._fused_adam(
+    torch._fused_adam_(
         params,
         grads,
         exp_avgs,
@@ -533,6 +530,7 @@ def _fused_adam(
         inv_grad_scale=inv_grad_scale,
         found_inf=found_inf,
     )
-    # TODO(crcrpar): Ameliorate this.
+    # NOTE(crcrpar): Is there a better way to handle a situation where `GradScaler` is used
+    # and `inf` grads are found.
     if found_inf is not None:
         torch._foreach_sub_(state_steps, [found_inf] * len(state_steps))
