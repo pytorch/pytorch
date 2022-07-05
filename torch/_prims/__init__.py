@@ -720,7 +720,6 @@ imag = _make_prim(
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-        complex_only=True,
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
@@ -780,7 +779,6 @@ real = _make_prim(
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-        complex_only=True,
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
