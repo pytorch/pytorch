@@ -20,6 +20,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+from torch.testing._internal.common_device_type import onlyCUDA, skipCUDAIfRocm
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
 # load_tests from common_utils is used to automatically filter tests for
@@ -37,8 +38,6 @@ def drosenbrock(tensor):
     return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
-# TODO(crcrpar): Add following test cases:
-#   - FusedAdam vs Adam with & without GradScaler
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -463,41 +462,9 @@ class TestOptim(TestCase):
                 lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
             )
 
-    def test_multi_tensor_optimizers(self):
+    def _test_derived_optimizers(self, optimizer_pairs_with_flags):
         if not torch.cuda.is_available():
             return
-
-        optimizer_pairs_with_flags = [
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
-            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
-        ]
 
         kIterations = 4
         device = 'cuda'
@@ -540,6 +507,53 @@ class TestOptim(TestCase):
 
                 for k in st_p_state:
                     self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
+
+    @onlyCUDA
+    def test_multi_tensor_optimizers(self):
+        optimizer_pairs_with_flags = [
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
+            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
+            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
+            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
+            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
+            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
+            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
+            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
+            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
+        ]
+        self._test_derived_optimizers(optimizer_pairs_with_flags)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_fused_optimizers(self):
+        optimizer_pairs_with_flags = [
+            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=True)),
+            ((optim.Adam, optim._fused.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.Adam, optim._fused.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=False)),
+        ]
+        self._test_derived_optimizers(optimizer_pairs_with_flags)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
