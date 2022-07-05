@@ -45,7 +45,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -64,7 +63,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -82,7 +80,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -102,7 +99,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -121,7 +117,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -139,7 +134,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -159,7 +153,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -178,7 +171,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -196,7 +188,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -216,7 +207,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -235,7 +225,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -253,7 +242,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -274,7 +262,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -294,7 +281,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -313,7 +299,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -334,7 +319,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -354,7 +338,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -373,7 +356,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -394,7 +376,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -414,7 +395,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -433,7 +413,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -454,7 +433,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -474,7 +452,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -493,7 +470,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda10.2
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -514,7 +490,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -534,7 +509,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -553,7 +527,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -574,7 +547,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -594,7 +566,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -613,7 +584,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -634,7 +604,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -654,7 +623,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -673,7 +641,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -694,7 +661,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -714,7 +680,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -733,7 +698,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.3
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -754,7 +718,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -774,7 +737,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -793,7 +755,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -814,7 +775,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -834,7 +794,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -853,7 +812,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -874,7 +832,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -894,7 +851,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -913,7 +869,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -934,7 +889,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -954,7 +908,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -973,7 +926,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.6
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -994,7 +946,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1014,7 +965,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1033,7 +983,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1054,7 +1003,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1074,7 +1022,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1093,7 +1040,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1114,7 +1060,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1134,7 +1079,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1153,7 +1097,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1174,7 +1117,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1194,7 +1136,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -1213,7 +1154,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi

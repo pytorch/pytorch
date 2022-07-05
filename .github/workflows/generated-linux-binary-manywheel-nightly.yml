@@ -45,7 +45,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu
@@ -63,7 +62,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu
@@ -80,7 +78,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu
@@ -100,7 +97,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda10_2
@@ -119,7 +115,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda10_2
@@ -137,7 +132,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda10_2
@@ -157,7 +151,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_3
@@ -176,7 +169,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_3
@@ -194,7 +186,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_3
@@ -214,7 +205,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_6
@@ -233,7 +223,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_6
@@ -251,7 +240,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_6
@@ -271,7 +259,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_0
@@ -290,7 +277,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_0
@@ -308,7 +294,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_0
@@ -328,7 +313,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_1_1
@@ -347,7 +331,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_1_1
@@ -365,7 +348,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_1_1
@@ -384,7 +366,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu
@@ -402,7 +383,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu
@@ -419,7 +399,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu
@@ -439,7 +418,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda10_2
@@ -458,7 +436,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda10_2
@@ -476,7 +453,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda10_2
@@ -496,7 +472,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_3
@@ -515,7 +490,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_3
@@ -533,7 +507,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_3
@@ -553,7 +526,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_6
@@ -572,7 +544,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_6
@@ -590,7 +561,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_6
@@ -610,7 +580,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_0
@@ -629,7 +598,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_0
@@ -647,7 +615,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_0
@@ -667,7 +634,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_1_1
@@ -686,7 +652,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_1_1
@@ -704,7 +669,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_1_1
@@ -723,7 +687,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
@@ -741,7 +704,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
@@ -758,7 +720,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
@@ -778,7 +739,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda10_2
@@ -797,7 +757,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda10_2
@@ -815,7 +774,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda10_2
@@ -835,7 +793,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_3
@@ -854,7 +811,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_3
@@ -872,7 +828,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_3
@@ -892,7 +847,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_6
@@ -911,7 +865,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_6
@@ -929,7 +882,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_6
@@ -949,7 +901,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_0
@@ -968,7 +919,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_0
@@ -986,7 +936,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_0
@@ -1006,7 +955,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_1_1
@@ -1025,7 +973,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_1_1
@@ -1043,7 +990,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_1_1
@@ -1062,7 +1008,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
@@ -1080,7 +1025,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
@@ -1097,7 +1041,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
@@ -1117,7 +1060,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda10_2
@@ -1136,7 +1078,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda10_2
@@ -1154,7 +1095,6 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda10_2
@@ -1174,7 +1114,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_3
@@ -1193,7 +1132,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_3
@@ -1211,7 +1149,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_3
@@ -1231,7 +1168,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_6
@@ -1250,7 +1186,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_6
@@ -1268,7 +1203,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_6
@@ -1288,7 +1222,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_0
@@ -1307,7 +1240,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_0
@@ -1325,7 +1257,6 @@ jobs:
       DESIRED_CUDA: rocm5.0
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_0
@@ -1345,7 +1276,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_1_1
@@ -1364,7 +1294,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_1_1
@@ -1382,7 +1311,6 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_1_1

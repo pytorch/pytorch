@@ -1,10 +1,10 @@
 {% import 'common.yml.j2' as common %}
 
 {%- macro binary_env(config, is_windows=False) -%}
-    env:!{{ binary_env_as_input(config, is_windows) }}
+    env:!{{ binary_env_as_input(config, is_windows, True) }}
 {%- endmacro %}
 
-{%- macro binary_env_as_input(config, is_windows=False) -%}
+{%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -17,7 +17,9 @@
       GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
 {%- endif %}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+{%- if include_skip_tests %}
       SKIP_ALL_TESTS: 1
+{%- endif %}
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}

@@ -126,7 +126,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
       build_name: wheel-py3_7-cpu
@@ -228,7 +227,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
       build_name: wheel-py3_8-cpu
@@ -330,7 +328,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cpu
@@ -432,7 +429,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cpu

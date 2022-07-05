@@ -248,7 +248,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cpu
     secrets:
@@ -476,7 +475,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cuda11_3
     secrets:
@@ -704,7 +702,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cuda11_6
     secrets:
@@ -929,7 +926,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
     secrets:
@@ -1157,7 +1153,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_3
     secrets:
@@ -1385,7 +1380,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_6
     secrets:
@@ -1610,7 +1604,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
     secrets:
@@ -1838,7 +1831,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_3
     secrets:
@@ -2066,7 +2058,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_6
     secrets:
@@ -2291,7 +2282,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
     secrets:
@@ -2519,7 +2509,6 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_3
     secrets:
@@ -2747,7 +2736,6 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_6
     secrets:

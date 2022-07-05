@@ -129,7 +129,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -237,7 +236,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -345,7 +343,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
@@ -453,7 +450,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
