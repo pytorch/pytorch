@@ -29,7 +29,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
-    _get_full_detached_param,
+    get_full_params,
     _get_state_dict,
     SkipModel,
     _zero_model,
@@ -350,7 +350,7 @@ class TestFSDPStateDict(FSDPTest):
         )
         model = self._get_simple_nested_model(mixed_precision=mixed_precision)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
-        initial_params = _get_full_detached_param(model)
+        initial_params = get_full_params(model)
         for _ in range(6):
             inp = torch.randn(1, 10, device=torch.cuda.current_device())
             output = model(*inp)
@@ -360,7 +360,7 @@ class TestFSDPStateDict(FSDPTest):
             loss.backward()
             optim.step()
 
-        trained_params = _get_full_detached_param(model)
+        trained_params = get_full_params(model)
         # Ensure some training occured
         self.assertNotEqual(initial_params, trained_params)
         # Save a copy of the state_dict
@@ -392,7 +392,7 @@ class TestFSDPStateDict(FSDPTest):
 
         with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
             model.load_state_dict(state_dict)
-        loaded_params = _get_full_detached_param(model)
+        loaded_params = get_full_params(model)
         self.assertEqual(loaded_params, trained_params)
 
     def _initialize_model(
