@@ -58,12 +58,6 @@ def int_inference_rule(n: Node, symbols, constraints, counter):
     """
     raise NotImplementedError('Not yet implemented')
 
-# TODO
-@register_inference_rule("ne")
-def ne_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(getattr)
@@ -368,6 +362,38 @@ def arange_inference_rule(n: Node, symbols, constraints, counter):
 
     return [BinConstraintT(arange, TensorType([d1]), op_eq), Disj([both_dyn, both_numbers])], counter
 
+def gen_broadcasting_constraints(arg1, arg2, symbols, counter, output_var):
+    # retrive arg variables
+    e1 = symbols[arg1]  # n.args[0]
+    e2 = symbols[arg2]  # n.args[1]
+
+    # additional vars that don't correspond to expressions
+    e11, counter = gen_tvar(counter)
+    e22, counter = gen_tvar(counter)
+
+    # generate constraints
+    c1 = TGreatestUpperBound(output_var, e11, e22)
+    c2 = ApplyBroadcasting(e11, e22, e1, e2)
+    c3 = BinConstraintT(e11, e22, op_consistency)
+    return [c1, c2, c3], counter
+
+
+@register_inference_rule(torch.ne)
+@register_inference_rule("ne")
+def ne_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    We generate the same constraints as we do for addition. We assume the arguments can only
+    be tensors here, unlike addition where we have scalar addition.
+    """
+
+    # create and store the new variable
+    my_add, counter = gen_tvar(counter)
+    symbols[n] = my_add
+
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+    return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
+
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
@@ -377,19 +403,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
     symbols[n] = my_add
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
-        # retrive arg variables
-        e1 = symbols[n.args[0]]
-        e2 = symbols[n.args[1]]
-
-        # additional vars that don't correspond to expressions
-        e11, counter = gen_tvar(counter)
-        e22, counter = gen_tvar(counter)
-
-        # generate constraints
-        c1 = TGreatestUpperBound(my_add, e11, e22)
-        c2 = ApplyBroadcasting(e11, e22, e1, e2)
-        c3 = BinConstraintT(e11, e22, op_consistency)
-        return [c1, c2, c3], counter
+        return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
 
     elif isinstance(n.args[0], Node) and isinstance(n.args[1], int):
         e1 = symbols[n.args[0]]
@@ -434,6 +448,40 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
 
     return [Disj([both_dyn, *const])], counter
 
+
+@register_inference_rule(torch.nn.LayerNorm)
+def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, counter):
+    """
+    Input and output shapes should be equal.
+    Input should be consistent with the normalized_shape
+    """
+    assert isinstance(n.args[0], Node)
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+    input = symbols[n.args[0]]
+
+    input_dyn = BinConstraintT(input, Dyn, op_eq)
+    output_dyn = BinConstraintT(output, Dyn, op_eq)
+
+    c1 = Conj([input_dyn, output_dyn])
+
+    c2 = []
+    for i in range(1, MAX_TENSOR_RANK + 1):
+        new_dims_rhs, counter = gen_tensor_dims(i, counter)
+        nat_constraints = gen_nat_constraints(new_dims_rhs)
+
+        c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims_rhs), op_eq),
+                           BinConstraintT(output, TensorType(new_dims_rhs), op_eq)] +
+                          add_layer_norm_constraints(new_dims_rhs, list(module_instance.normalized_shape)) +
+                          nat_constraints)
+        c2.append(c_tensor_i)
+
+
+    return [Disj([c1, Disj(c2)])], counter
+
+    # return [BinConstraintT(input, output, op_eq),
+    #         BinConstraintT(input, normalized_shape, op_consistency)], counter
+
 @register_inference_rule(torch.nn.Dropout)
 @register_inference_rule(torch.nn.ReLU)
 def relu_inference_rule(n: Node, module_instance, symbols, constraints, counter):
@@ -477,6 +525,26 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
 
 
     return [Disj([c1, Disj(c2)])], counter
+
+def add_layer_norm_constraints(input_dim, normalized_dim):
+    """
+    The constraints say that the type has te form: [*, 1024, 1024]
+     while the normalized_dim have the form [1024, 1024]
+    Args:
+        input_dim: Input shape of layer norm
+        normalized_dim: normalized_dim parameter of the module instance
+
+    """
+
+    # in this case we return false since there's a pattern mismatch
+    if len(normalized_dim) > len(input_dim):
+        return [F()]
+
+    else:
+        constraints = []
+        for i, n in zip(reversed(input_dim), reversed(normalized_dim)):
+            constraints.append(BinConstraintD(i, n, op_consistency))
+        return constraints
 
 
 def add_linear_constraints(dims1, dims2, module_instance):
