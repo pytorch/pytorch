@@ -1,47 +1,49 @@
 # Owner(s): ["oncall: distributed"]
 
-from enum import Enum, auto
 import functools
 import os
 import tempfile
 import unittest
+from enum import Enum, auto
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel as FSDP,
-    CPUOffload,
     BackwardPrefetch,
+    CPUOffload,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    size_based_auto_wrap_policy,
-    enable_wrap,
     _or_policy,
-    wrap,
     _wrap_batchnorm_individually,
+    always_wrap_policy,
+    enable_wrap,
+    size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
+    wrap,
 )
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-)
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
     DummyProcessGroup,
     FSDPInitMode,
     FSDPTest,
-    CUDAInitMode,
-    _maybe_cuda,
     TransformerWithSharedParams,
+    _maybe_cuda,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
-    run_tests,
-    find_free_port,
     TestCase,
-    parametrize,
+    find_free_port,
     instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
 )
-from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
+
 
 class BatchNormNet(nn.Module):
     def __init__(self):

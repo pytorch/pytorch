@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
