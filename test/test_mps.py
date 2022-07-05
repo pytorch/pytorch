@@ -1452,6 +1452,24 @@ class TestMPS(TestCase):
             x_mps = x_cpu.to('mps')
             self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
 
+    def test_to_non_contiguous_src(self):
+        # test view and non-contiguous tensor
+        x = torch.randn((3, 2), dtype=torch.float).permute((1, 0))
+        x_mps = x.to("mps")
+        self.assertEqual(x._is_view(), True)
+        self.assertEqual(x.is_contiguous(), False)
+        self.assertEqual(x, x_mps)
+        self.assertEqual(x.stride(), x_mps.stride())
+
+        # test non-view and non-contiguous tensor
+        src = torch.randn(6, dtype=torch.float).reshape(3, 2)
+        index = torch.tensor([[0, 0], [1, 1], [2, 2]])
+        x = torch.empty_strided((3, 2), (1, 3), dtype=torch.float).scatter_(0, index, src)
+        x_mps = x.to("mps")
+        self.assertEqual(x._is_view(), False)
+        self.assertEqual(x.is_contiguous(), False)
+        self.assertEqual(x, x_mps)
+        self.assertEqual(x.stride(), x_mps.stride())
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'
