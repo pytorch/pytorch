@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import itertools
-from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT
+from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT, MAX_TENSOR_RANK
 from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar
 from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
@@ -745,7 +745,7 @@ def gen_consistency_constraints(constraint: Constraint, counter: int):
 
     all_constraints = []
 
-    for i in range(1, 5):
+    for i in range(1, MAX_TENSOR_RANK + 1):
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
@@ -773,7 +773,7 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
 
     all_constraints = []
 
-    for i in range(1, 5):
+    for i in range(1, MAX_TENSOR_RANK + 1):
         c = []
         dims1, counter = gen_tensor_dims(i, counter)
         c1tensor = TensorType(dims1)
