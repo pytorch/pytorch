@@ -440,7 +440,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             return model
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
-            fsdp_model = FSDP(model, auto_wrap_policy=always_wrap_policy)
+            fsdp_model = FSDP(model, auto_wrap_policy=always_wrap_policy, **fsdp_kwargs)
             if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
                 fsdp_model = fsdp_model.cuda()
             return fsdp_model
