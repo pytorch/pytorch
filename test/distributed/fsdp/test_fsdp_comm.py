@@ -11,7 +11,13 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import CUDAInitMode, FSDPInitMode, FSDPTest, NestedWrappedModule, TransformerWithSharedParams
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    NestedWrappedModule,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -39,7 +45,6 @@ class PassType(Enum):
 
 class TestCommunication(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
-    # TODO (awgu): refactor this?
     def _init_model(
         self,
         nested_model: bool,

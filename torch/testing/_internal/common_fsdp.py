@@ -417,6 +417,7 @@ class NestedWrappedModule(FSDPTestModel):
 
 
 class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
+    @staticmethod
     def init(
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
