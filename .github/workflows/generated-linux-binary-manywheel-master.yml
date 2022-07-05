@@ -41,6 +41,7 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda10_2
@@ -59,6 +60,7 @@ jobs:
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda10_2

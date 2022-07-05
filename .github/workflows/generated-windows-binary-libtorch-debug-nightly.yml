@@ -256,6 +256,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -492,6 +493,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -728,6 +730,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -964,6 +967,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1203,6 +1207,7 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1442,6 +1447,7 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1681,6 +1687,7 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1920,6 +1927,7 @@ jobs:
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2159,6 +2167,7 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2398,6 +2407,7 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2637,6 +2647,7 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2876,6 +2887,7 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
