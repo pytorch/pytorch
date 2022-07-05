@@ -754,15 +754,16 @@ class FSDPTest(MultiProcessTestCase):
 
     def _train_for_several_steps(
         self,
-        model,
-        num_steps,
-        autocast,
-        lr=0.01,
-        fsdp_cpu_offload=None,
-        norm_type=None,
-        save_model=False,
-        mixed_precision=None,
-        use_sharded_grad_scaler=False,
+        model: nn.Module,
+        num_steps: int,
+        autocast: bool,
+        lr: float = 0.01,
+        fsdp_cpu_offload: Optional[CPUOffload] = None,
+        norm_type: Optional[Union[float, int]] = None,
+        save_model: bool = False,
+        mixed_precision: Optional[MixedPrecision] = None,
+        use_sharded_grad_scaler: bool = False,
+        use_pure_fp16: bool = False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -771,12 +772,13 @@ class FSDPTest(MultiProcessTestCase):
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        module = model.module if isinstance(model, (DDP, FSDP)) else model
         for _ in range(num_steps):
             optim.zero_grad()
             with torch.cuda.amp.autocast(enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
-                input = model.module.get_input(torch.device("cuda"))
-                if mixed_precision and not isinstance(model, FSDP):
+                input = module.get_input(torch.device("cuda"))
+                if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
                     else:
@@ -789,21 +791,23 @@ class FSDPTest(MultiProcessTestCase):
                         # p._is_sharded=False
                         self.assertEqual(p.device, torch.device("cpu"))
 
-                loss = model.module.get_loss(input, output).to(model_device)
+                loss = module.get_loss(input, output).to(model_device)
             loss = sharded_grad_scaler.scale(loss)
 
-            if not mixed_precision:
+            if not mixed_precision and not use_pure_fp16:
                 assert (
                     loss.dtype == torch.float32
                 ), "loss data type should be float32, as the original \
                     parameter data type is float32."
             else:
+                if use_pure_fp16:
+                    self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
-                if isinstance(model, FSDP):
+                elif isinstance(model, FSDP):
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
-            model.module.run_backward(loss)
+            module.run_backward(loss)
             if norm_type is not None:
                 max_norm = 0.3
                 if isinstance(model, FSDP):
@@ -833,7 +837,6 @@ class FSDPTest(MultiProcessTestCase):
                 # Zero params, if save/load state_dict did not work properly, this
                 # would break the parity test with DDP.
                 _zero_model(model)
-
                 model.load_state_dict(state_dict)
 
         if isinstance(model, FSDP):
@@ -854,6 +857,7 @@ class FSDPTest(MultiProcessTestCase):
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         use_sharded_grad_scaler: bool = False,
+        use_pure_fp16: bool = False,
         norm_type: Optional[Union[float, int]] = None,
         init_kwargs: Optional[Dict[str, Any]] = None,
         **fsdp_kwargs,
@@ -888,6 +892,8 @@ class FSDPTest(MultiProcessTestCase):
             ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
             ref_model = ref_init_fn(model)
+        if use_pure_fp16:
+            ref_model = ref_model.half()
         ref_loss = self._train_for_several_steps(
             ref_model,
             num_iters,
@@ -897,6 +903,7 @@ class FSDPTest(MultiProcessTestCase):
             mixed_precision=mixed_precision,
             norm_type=norm_type,
             use_sharded_grad_scaler=use_sharded_grad_scaler,
+            use_pure_fp16=use_pure_fp16,
         )
         ddp_params = list(ref_model.parameters())
         # Check against FSDP behavior
@@ -920,6 +927,13 @@ class FSDPTest(MultiProcessTestCase):
             )
         except Exception as e:
             raise ValueError(f"Initializing {model_class} raised error {str(e)}")
+        if not isinstance(fsdp_model, FSDP):
+            # Enforce that we wrap with top-level FSDP since some test models
+            # may not do so in their `init()` method
+            fsdp_model = FSDP(fsdp_model, self.process_group, **fsdp_kwargs)
+        if use_pure_fp16:
+            # Change the model parameter dtype after FSDP initialization
+            fsdp_model = fsdp_model.half()
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             fsdp_model = fsdp_model.cuda()
         offload_params = cpu_offload is not None and cpu_offload.offload_params
@@ -947,6 +961,7 @@ class FSDPTest(MultiProcessTestCase):
                 mixed_precision=mixed_precision,
                 norm_type=norm_type,
                 use_sharded_grad_scaler=use_sharded_grad_scaler,
+                use_pure_fp16=use_pure_fp16,
             )
         # No need to check for parameter and loss parity if expecting an error
         if expects_device_error:
