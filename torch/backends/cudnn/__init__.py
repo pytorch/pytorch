@@ -37,8 +37,8 @@ if _cudnn is not None:
                 cudnn_compatible = runtime_minor >= compile_minor
             if not cudnn_compatible:
                 raise RuntimeError(
-                    'cuDNN version incompatibility: PyTorch was compiled against {} '
-                    'but linked against {}'.format(compile_version, runtime_version))
+                    'cuDNN version incompatibility: PyTorch was compiled  against {} '
+                    'but found runtime version {}. Please use cudnn version provided with pytorch.'.format(compile_version, runtime_version))
         return True
 else:
     def _init():
