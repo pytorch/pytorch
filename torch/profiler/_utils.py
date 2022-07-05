@@ -46,19 +46,33 @@ class EventKey:
     def intervals_overlap(self, intervals: List[Interval]):
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
-        for i, interval in enumerate(intervals):
-            # Interval overlaps with next interval
-            if i + 1 < len(intervals) and interval.end > intervals[i +
-                                                                   1].start:
-                if interval.end >= intervals[i + 1].end:
-                    del intervals[i + 1]
-                else:
-                    interval.end = intervals[i + 1].start
-            overlap_start = max(self.event.start_time_ns, interval.start)
-            overlap_end = min(self.event.end_time_ns, interval.end)
+
+        if intervals:
+            overlap_start = max(self.event.start_time_ns, intervals[0].start)
+            overlap_end = min(self.event.end_time_ns, intervals[0].end)
 
             if overlap_start < overlap_end:
                 overlap_time += overlap_end - overlap_start
+
+        i, j = 0, 1
+        while (j < len(intervals)):
+            prev_interval = intervals[i]
+            curr_interval = intervals[j]
+            j += 1
+            if prev_interval.end > curr_interval.start:
+                # Completely subsumed by previous interval
+                if prev_interval.end > curr_interval.end:
+                    j += 1
+                    continue
+                else:
+                    curr_interval.start = prev_interval.end
+                    i = j
+
+            overlap_start = max(self.event.start_time_ns, curr_interval.start)
+            overlap_end = min(self.event.end_time_ns, curr_interval.end)
+            if overlap_start < overlap_end:
+                overlap_time += overlap_end - overlap_start
+
         return overlap_time
 
 

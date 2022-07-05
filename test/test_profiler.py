@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: profiler"]
 import collections
+import expecttest
 import gc
 import io
 import json
@@ -1237,9 +1238,10 @@ class TestExperimentalUtils(TestCase):
 
     @staticmethod
     def load_mock_profile():
-        accept = os.getenv("EXPECTTEST_ACCEPT")
-        json_file_path = os.path.dirname(
-            os.path.realpath(__file__)) + "/profiler_utils_mock_events.json"
+        accept = expecttest.ACCEPT
+        json_file_path = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "profiler_utils_mock_events.json")
         if accept and torch.cuda.is_available():
 
             def garbage_code(x):
@@ -1338,6 +1340,19 @@ class TestExperimentalUtils(TestCase):
                     child.duration_time_ns
                     for child in event_key.event.children
                 ]))
+
+    def test_utils_intervals_overlap(self):
+        event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
+        intervals = [
+            _utils.Interval(0, 9),
+            _utils.Interval(1, 2),
+            _utils.Interval(2, 3),
+            _utils.Interval(3, 4),
+            _utils.Interval(4, 5),
+            _utils.Interval(8, 12),
+        ]
+        print(event.intervals_overlap(intervals))
+        self.assertEqual(event.intervals_overlap(intervals), 5)
 
     def test_utils_compute_queue_depth(self):
 
