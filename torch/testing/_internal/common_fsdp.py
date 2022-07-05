@@ -9,7 +9,7 @@ from contextlib import suppress
 from copy import deepcopy
 from enum import Enum, auto
 from math import inf
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 from unittest import mock
 
 import torch
