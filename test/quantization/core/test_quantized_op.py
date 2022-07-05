@@ -2731,15 +2731,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.LSTM: torch.nn.quantizable.LSTM
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantized.LSTM
-            }
-        }
-
         x = np.random.randn(seq_len, batch_size, input_size)
         scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype)
         x = torch.from_numpy(x).to(torch.float)
@@ -2773,8 +2764,7 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(
-                    lstm, prepare_custom_config_dict=custom_module_config)
+                lstm_prepared = torch.ao.quantization.prepare(lstm)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
                 assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
@@ -2784,8 +2774,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(
-                    lstm_prepared, convert_custom_config_dict=custom_module_config)
+                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
                 assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
@@ -2845,15 +2834,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.MultiheadAttention: torch.nn.quantized.MultiheadAttention
-            }
-        }
-
         for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
             fp_data = [
                 torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
@@ -2893,7 +2873,7 @@ class TestQuantizedOps(TestCase):
                     else:
                         mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     mha_prepared = torch.ao.quantization.prepare(
-                        mha, prepare_custom_config_dict=custom_module_config)
+                        mha)
 
                     # Calibrate
                     y = mha_prepared(*fp_data)
@@ -2903,9 +2883,7 @@ class TestQuantizedOps(TestCase):
                     self.assertEqual(y_ref[1], y[1])  # Weight
 
                     # Quantize
-                    mha_quantized = torch.ao.quantization.convert(
-                        mha_prepared,
-                        convert_custom_config_dict=custom_module_config)
+                    mha_quantized = torch.ao.quantization.convert(mha_prepared)
                     qy = mha_quantized(*q_data)
 
                     # Reference result
