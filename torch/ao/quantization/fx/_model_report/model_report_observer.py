@@ -10,6 +10,13 @@ class ModelReportObserver(ObserverBase):
     Dynamic or Static Quantization is more appropriate for their model given the general
     distributions of their data.
 
+    Args:
+        ch_axis (int, optional): The channel axis for which the range and outlier stats are computed
+            Default: 1
+        comp_percentile (float, optional): The percentile to compare against 100 percentile to find outliers
+            Should be between 0 and 1 exclusive
+            Default: 0.9
+
     * :attr:`num_batches_tracked` specifies number of batches passed through the observer
 
     * :attr:`average_batch_activation_range` defines average across the ranges of each batch passed through
@@ -20,15 +27,25 @@ class ModelReportObserver(ObserverBase):
 
     * :attr:`ch_axis` defines the channel being used to compute per channel min max stats
 
+    * :attr:`min_val` defines the per channel minimum values passed through
+
+    * :attr:`max_val` defines the per channel maximum values passed through
+
+    * :attr:`comp_percentile` defines comparison percentile to find outliers
+
+    * :attr:`average_percentile_ratio` defines the per channel average percentile ratios
+
+    * :attr:`percentile_batches_tracked` defines the number of percentile batches tracked for each channel
+
     Note: this tool is meant for FX Graph Mode Quantization
     """
 
-    def __init__(self, ch_axis: int = 1):
+    def __init__(self, ch_axis: int = 1, comp_percentile: float = 0.9):
         super().__init__(torch.qint8)
         self.num_batches_tracked = 0
 
         # keep track of the min and mix of the range for average batch and epoch as a whole
-        self.average_batch_activation_range = torch.tensor(float(0))
+        self.average_batch_activation_range: torch.Tensor = torch.tensor(float(0))
         self.epoch_activation_min = torch.tensor(float("inf"))
         self.epoch_activation_max = torch.tensor(float("-inf"))
 
@@ -37,12 +54,18 @@ class ModelReportObserver(ObserverBase):
         self.min_val: torch.Tensor = torch.tensor([])
         self.max_val: torch.Tensor = torch.tensor([])
 
+        # keep track of percentile ratio information per channel
+        self.comp_percentile: torch.Tensor = torch.tensor([comp_percentile])
+        self.average_percentile_ratio: torch.Tensor = torch.tensor([])
+        self.percentile_batches_tracked: torch.Tensor = torch.tensor([])
+
     def forward(self, x):
         x_copy = x.detach()  # avoid keeping autograd tape
         x_copy = x_copy.to(self.epoch_activation_min.dtype)
 
         x_copy = self._calculate_range_stats(x_copy)
         x_copy = self._calculate_min_max_stats(x_copy)
+        x_copy = self._calculate_percentile_stats(x_copy)
 
         # return the passed in the value
         return x
@@ -113,6 +136,77 @@ class ModelReportObserver(ObserverBase):
 
         return x_copy
 
+    def _calculate_percentile_stats(self, x_copy):
+        r"""Calculates and stores the per_channel percentile stats with forward values.
+        Does calculation based on channel axis: self.ch_axis
+
+        Args
+            x_copy: A copy of the forward data
+
+        Returns the passed in x_copy
+        """
+        # get the dimension of the copy
+        x_dim = x_copy.size()
+
+        new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
+        new_axis_list[self.ch_axis] = 0
+        new_axis_list[0] = self.ch_axis
+        y = x_copy.permute(new_axis_list)
+        # Need to match dtype of min/max because the updates to buffers
+        # are done in place and types need to match for comparisons
+        y = y.to(self.min_val.dtype)
+        y = torch.flatten(y, start_dim=1)
+        y = y.to(self.min_val.dtype)
+
+        # find the percentile values along the axis
+        # we want both 100th percentile and comp_percentile
+        quantiles_list = [self.comp_percentile, 1.00]
+        quantiles_to_find = torch.tensor(quantiles_list, dtype=self.min_val.dtype)
+
+        # find the quantiles
+        comp_quantile = torch.quantile(y, quantiles_to_find[0], dim=self.ch_axis, interpolation="lower")
+        cent_quartile = torch.quantile(y, quantiles_to_find[1], dim=self.ch_axis, interpolation="lower")
+
+        # if any of the channels have 0s, we ignore that channel for this calculation
+        ch_no_zeros: torch.Tensor = (comp_quantile != torch.tensor([0])) | (cent_quartile != torch.tensor([0]))
+        binary_ch_no_zeros: torch.Tensor = ch_no_zeros.int()  # transform boolean values to int values
+
+        # possibilities to get nan as an answer
+        #   will ignore any of these three cases with 0s and just not deal with them for now
+        # case (1) 0 in numerator: issue if 0 is largest, all negative, and rest are really negative
+        # case (2) 0 in denominator: is possible unless case 3, we just ignore
+        # case (3) 0 in both: not outlier, channel just kinda useless, ignore
+
+        # get the ratio and get rid of nan values
+        quantile_ratios = cent_quartile / comp_quantile
+        quantile_ratios = torch.nan_to_num(quantile_ratios)
+        print(max(quantile_ratios))
+        # update averages, remembering to only update if didn't have zeros
+        ratio_if_not_zero = binary_ch_no_zeros * quantile_ratios
+
+        # if num_batches and average_ratio are not initialized, we want to initialize them
+        if self.percentile_batches_tracked.shape[0] == 0 or self.average_percentile_ratio.shape[0] == 0:
+            self.percentile_batches_tracked = torch.zeros_like(binary_ch_no_zeros)
+            self.average_percentile_ratio = torch.zeros_like(ratio_if_not_zero)
+
+        # get current num batches and average ratio
+        num_batches = self.percentile_batches_tracked
+        average_ratio = self.average_percentile_ratio
+
+        # calculate new_number of batches, new_ratios, and get rid of nans because of 0 size batches
+        new_number_of_batches: torch.Tensor = num_batches + binary_ch_no_zeros
+        new_ratios: torch.Tensor = ((average_ratio * num_batches) + ratio_if_not_zero) / new_number_of_batches
+        new_ratios = torch.nan_to_num(new_ratios)
+        # print(new_ratios, new_number_of_batches)
+
+        # update the values locally
+        self.percentile_batches_tracked.copy_(new_number_of_batches)
+        self.average_percentile_ratio.copy_(new_ratios)
+
+        return x_copy
+
+
+
     @torch.jit.export
     def get_batch_to_epoch_ratio(self):
         epoch_activation_range = self.epoch_activation_max - self.epoch_activation_min
@@ -133,6 +227,10 @@ class ModelReportObserver(ObserverBase):
         self.average_batch_activation_range = torch.tensor(float(0))
         self.epoch_activation_min = torch.tensor(float("inf"))
         self.epoch_activation_max = torch.tensor(float("-inf"))
+        self.min_val = torch.tensor([])
+        self.max_val = torch.tensor([])
+        self.average_percentile_ratio = torch.tensor([])
+        self.percentile_batches_tracked = torch.tensor([])
 
     @torch.jit.export
     def calculate_qparams(self):
