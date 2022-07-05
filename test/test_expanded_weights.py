@@ -494,14 +494,16 @@ def supported_inputs(op, sample_inputs, supported_inputs=True):
     """
     def filter_fn(input):
         convolutions = ["nn.functional.conv1d", "nn.functional.conv2d", "nn.functional.conv3d"]
+        batched_input_size = dict(zip(convolutions, [3, 4, 5]))
         if op.name == "nn.functional.linear":
-            is_supported_input = len(input.input.shape) > 1  # input of rank 1 means no batch dim
+            is_supported_input = input.input.dim() > 1  # input of rank 1 means no batch dim
         elif op.name == "nn.functional.layer_norm":
             normalized_shape = input.args[0]
             is_supported_input = input.input.shape != normalized_shape  # would cause inter-batch operations
         elif op.name in convolutions:
             # currently can't deal with padding computation on Python level
             is_supported_input = 'padding' not in input.kwargs or not isinstance(input.kwargs['padding'], str)
+            is_supported_input = is_supported_input and input.input.dim() == batched_input_size[op.name]
         elif op.name == "nn.functional.embedding":
             idx = input.args[0]
             is_supported_input = len(idx.shape) > 1  # there's no batch size
