@@ -825,7 +825,7 @@ if(USE_FBGEMM)
       # See https://github.com/pytorch/pytorch/issues/74352
       target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
       if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.1.6)
-        OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0.0))
+        OR("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0.0))
         # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
         target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
       endif()
