@@ -10534,17 +10534,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       # Reference: https://github.com/pytorch/pytorch/issues/50692
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_method_grad',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    ),
-                   # acosh is not defined at x < 1 (real) or |z| < 1 (complex)
+                   # acosh is not defined at x < 1 (real)
                    reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: (torch.abs(x) < 1 if x.is_complex() else x < 1),
+                       condition=lambda x: (x < 1 if not x.is_complex() else torch.zeros_like(x, dtype=torch.bool)),
                        safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
