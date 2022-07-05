@@ -66,7 +66,6 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
 
 def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
-
     regex = {
         "pull": False,
         "trunk": False,
