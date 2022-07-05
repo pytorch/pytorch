@@ -60,11 +60,9 @@ class MaxPosCalculator {
 
   // Returns the maximum position producer can be inlined based on consumer
   // given the set ComputeAtMode
-  size_t getMaxPosC2P(TensorView* from, TensorView* to) const;
-
-  // Returns the maximum position consumer can be inlined based on producer
-  // given the set ComputeAtMode
-  size_t getMaxPosP2C(TensorView* from, TensorView* to) const;
+  size_t getMaxProducerPosFromConsumer(
+      TensorView* producer,
+      TensorView* consumer) const;
 
   MaxPosCalculator(ComputeAtMode mode);
 };
@@ -73,16 +71,6 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
   // Checks producers and consumers to see what the maximum position in tv is
   // that can be shared across both directions.
   size_t getMaxPosAll(TensorView* tv);
-
-  // Returns the inline position in consumer that producer should be inlined as
-  // based on consumer, taking into consideration the max possible returned by
-  // getMaxPos{P2C, C2P}, the compute at mode type.
-  size_t getFromPosC2P(TensorView* from, TensorView* to);
-
-  // Returns the inline position in producer that consumer should be inlined as
-  // based on producer, taking into consideration the max possible returned by
-  // getMaxPos{P2C, C2P}, the compute at mode type.
-  size_t getFromPosP2C(TensorView* from, TensorView* to);
 
   // We use mapped_reference_pos_ to keep track of the outer axes information of
   // the reference tensor. That is, mapped_reference_pos_[tv] answers the
@@ -95,7 +83,7 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
 
   // Actually set the computeAt position. This does not necessarily equal to
   // mapped_reference_pos_[tv] because we don't want to inline certain things.
-  void setCAPos(TensorView* tv, size_t pos);
+  void setCAPos(TensorView* tv);
 
   const MaxPosCalculator max_pos_calc;
   std::unordered_set<TensorView*> selected_;
