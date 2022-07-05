@@ -32,6 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -627,7 +628,6 @@ class FullyShardedDataParallel(nn.Module):
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
 
     """
-
     def __init__(
         self,
         module: nn.Module,
@@ -4294,4 +4294,9 @@ def clean_tensor_name(tensor_name: str) -> str:
     # call `replace()` twice separately
     tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
     tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    # TODO: Explicitly replacing checkpoint_wrapper prefix is not ideal,
+    # as it increases coupling between CheckpointWrapper and FSDP. This is also not
+    # scalable for additional wrapped modules, we should come up with a general solution
+    # for this issue.
+    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX + ".", "")
     return tensor_name
