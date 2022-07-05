@@ -46,9 +46,9 @@ def parse_xml_report(
         # jit/test_dce.py). For sharding/test selection purposes, we want to
         # record the file that invoked the test.
         #
-        # To do this, we leverage an implementation detail of xmlrunner, which
-        # is that reports are created under a folder with the same name as the
-        # invoking file.
+        # To do this, we leverage an implementation detail of how we write out
+        # tests (https://bit.ly/3ajEV1M), which is that reports are created
+        # under a folder with the same name as the invoking file.
         case["invoking_file"] = report.parent.name
         test_cases.append(case)
 
