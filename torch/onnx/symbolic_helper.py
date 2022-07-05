@@ -1131,12 +1131,12 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
 
 def _avgpool_helper(
     tuple_fn: Callable[[Any], Sequence[int]],
-    padding: Union[int, Tuple[int, ...]],
+    padding: Union[int, Sequence[int]],
     kernel_size,
     stride,
     divisor_override,
     name,
-) -> Tuple[int]:
+) -> Tuple[int, ...]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
         _unimplemented(name, "divisor_override")
     return tuple(tuple_fn(padding))

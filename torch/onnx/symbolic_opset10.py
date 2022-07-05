@@ -1,5 +1,5 @@
 import sys
-from typing import Tuple, Union
+from typing import Sequence, Tuple, Union
 import warnings
 
 import torch
@@ -147,9 +147,9 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(
         g,
         input: _C.Value,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Union[int, Tuple[int, ...]],
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Sequence[int],
         ceil_mode: int,
         count_include_pad: int,
         divisor_override=None,
