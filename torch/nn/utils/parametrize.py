@@ -289,18 +289,18 @@ def _inject_new_class(module: Module) -> None:
 
     def default_deepcopy(self, memo):
         # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
-        if id(self) in memo:
-            return memo[id(self)]
-        else:
-            replica = self.__new__(self.__class__)
-            memo[id(self)] = replica
-            replica.__dict__ = deepcopy(self.__dict__, memo)
-            # Also save all slots if they exist.
-            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-            for slot in slots_to_save:
-                if hasattr(self, slot):
-                    setattr(replica, slot, deepcopy(getattr(self, slot), memo))
-            return replica
+        obj = memo.get(id(self), None)
+        if obj is not None:
+            return obj
+        replica = self.__new__(self.__class__)
+        memo[id(self)] = replica
+        replica.__dict__ = deepcopy(self.__dict__, memo)
+        # Also save all slots if they exist.
+        slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+        for slot in slots_to_save:
+            if hasattr(self, slot):
+                setattr(replica, slot, deepcopy(getattr(self, slot), memo))
+        return replica
 
     def getstate(self):
         raise RuntimeError(
