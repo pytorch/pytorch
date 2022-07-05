@@ -57,8 +57,8 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
 
         # set grad_sample field for weight and bias with per sample gradients
         if hasattr(ctx, "weight"):
-            set_grad_sample_if_exists(weight,
-                                      lambda _: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * grad_output))
+            set_grad_sample_if_exists(weight, grad_output,
+                                      lambda _, go: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * go))
         if hasattr(ctx, "bias"):
-            set_grad_sample_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output))
+            set_grad_sample_if_exists(bias, grad_output, lambda _, go: torch.einsum("ni...->ni", go))
         return tuple(results)

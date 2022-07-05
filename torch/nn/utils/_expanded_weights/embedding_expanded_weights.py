@@ -23,7 +23,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         input, weight = ctx.input, ctx.weight
         padding_idx, scale_grad_by_freq, sparse = ctx.padding_idx, ctx.scale_grad_by_freq, ctx.sparse
 
-        def weight_per_sample_grad(weight):
+        def weight_per_sample_grad(weight, grad_output):
             batch_size = input.shape[0]
             embedding_dim = weight.shape[1]
             index = (
@@ -50,5 +50,5 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         results = results + [None] * 6
 
         # set grad_sample field for weight with per sample gradients
-        set_grad_sample_if_exists(weight, weight_per_sample_grad)
+        set_grad_sample_if_exists(weight, grad_output, weight_per_sample_grad)
         return tuple(results)

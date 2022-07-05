@@ -30,7 +30,7 @@ def conv_normalizer(input, weight, bias=None, stride=1, padding=0, dilation=1, g
 
 def conv_backward(func, ctx, grad_output):
 
-    def weight_grad_sample(weight):
+    def weight_grad_sample(weight, grad_output):
         if (batch_size < THRESHOLD and groups == 1):
             return conv_group_weight_grad_sample(ctx.input, grad_output, weight_shape, stride, padding, dilation, batch_size, func)
         else:
@@ -70,8 +70,8 @@ def conv_backward(func, ctx, grad_output):
     results = results + [None] * 6
 
     # set grad_sample field for weight and bias with per sample gradients
-    set_grad_sample_if_exists(ctx.weight, weight_grad_sample)
-    set_grad_sample_if_exists(ctx.bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2))
+    set_grad_sample_if_exists(ctx.weight, grad_output, weight_grad_sample)
+    set_grad_sample_if_exists(ctx.bias, grad_output, lambda _, go: go.reshape(*go.shape[:2], -1).sum(dim=2))
     return tuple(results)
 
 def conv_unfold_weight_grad_sample(input, grad_output, weight_shape, kernel_size, stride, padding, dilation, groups, func):

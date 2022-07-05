@@ -31,7 +31,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
 
-        def weight_per_sample_grad(weight):
+        def weight_per_sample_grad(weight, grad_output):
             return sum_over_all_but_batch_and_last_n(F.layer_norm(input, normalized_shape, eps=ctx.eps) * grad_output, weight.dim())
 
         input, normalized_shape = ctx.args
@@ -53,7 +53,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
 
         # set grad_sample field for weight and bias with per sample gradients
         if hasattr(ctx, "weight"):
-            set_grad_sample_if_exists(ctx.weight, weight_per_sample_grad)
+            set_grad_sample_if_exists(ctx.weight, grad_output, weight_per_sample_grad)
         if hasattr(ctx, "bias"):
-            set_grad_sample_if_exists(ctx.bias, lambda bias: sum_over_all_but_batch_and_last_n(grad_output, bias.dim()))
+            set_grad_sample_if_exists(ctx.bias, grad_output, lambda bias, go: sum_over_all_but_batch_and_last_n(go, bias.dim()))
         return tuple(results)

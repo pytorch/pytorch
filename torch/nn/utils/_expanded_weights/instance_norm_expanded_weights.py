@@ -54,7 +54,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         results = results + [None] * 7
 
         # set grad_sample field for weight and bias with per sample gradients
-        set_grad_sample_if_exists(weight,
-                                  lambda _: torch.einsum("ni...->ni", F.instance_norm(input, eps=eps) * grad_output))
-        set_grad_sample_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output))
+        set_grad_sample_if_exists(weight, grad_output,
+                                  lambda _, go: torch.einsum("ni...->ni", F.instance_norm(input, eps=eps) * go))
+        set_grad_sample_if_exists(bias, grad_output, lambda _, go: torch.einsum("ni...->ni", go))
         return tuple(results)

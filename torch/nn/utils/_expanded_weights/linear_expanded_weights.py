@@ -34,6 +34,6 @@ class LinearPerSampleGrad(torch.autograd.Function):
         results.extend([None] * 2)  # weight and bias don't compute batched gradients
 
         # weight and bias get their grad_sample fields set directly if they exist
-        set_grad_sample_if_exists(weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input))
-        set_grad_sample_if_exists(bias, lambda _: torch.einsum("n...k->nk", grad_output))
+        set_grad_sample_if_exists(weight, grad_output, lambda _, go: torch.einsum("n...i,n...j->nij", go, input))
+        set_grad_sample_if_exists(bias, grad_output, lambda _, go: torch.einsum("n...k->nk", go))
         return tuple(results)
