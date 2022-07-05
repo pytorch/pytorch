@@ -18,20 +18,23 @@ class Model(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3)
         self.conv2 = nn.Conv2d(32, 32, kernel_size=3)
+        self.identity1 = nn.Identity()
         self.max_pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.linear1 = nn.Linear(4608, 128)
+        self.identity2 = nn.Identity()
         self.linear2 = nn.Linear(128, 10)
 
     def forward(self, x):
         out = self.conv1(x)
         out = self.conv2(out)
+        out = self.identity1(out)
         out = self.max_pool1(out)
 
         batch_size = x.shape[0]
         out = out.reshape(batch_size, -1)
 
-        out = F.relu(self.linear1(out))
+        out = F.relu(self.identity2(self.linear1(out)))
         out = self.linear2(out)
         return out
 
@@ -100,8 +103,25 @@ class _ActivationSparsifierUtils:
 
         sparse_config_layer2 = {'sparsity_level': 0.1}
 
-        return [(register_layer1_args, sparse_config_layer1), (register_layer2_args, sparse_config_layer2)]
+        register_layer3_args = {
+            'layer': model.identity1,
+            'mask_fn': _vanilla_norm_sparsifier
+        }
 
+        sparse_config_layer3 = {'sparsity_level': 0.3}
+
+        register_layer4_args = {
+            'layer': model.identity2,
+            'features': [0, 10, 105],
+            'feature_dim': 1,
+            'mask_fn': _vanilla_norm_sparsifier
+        }
+
+        sparse_config_layer4 = {'sparsity_level': 0.1}
+
+        layer_config_list = [(register_layer1_args, sparse_config_layer1), (register_layer2_args, sparse_config_layer2)]
+        layer_config_list += [(register_layer3_args, sparse_config_layer3), (register_layer4_args, sparse_config_layer4)]
+        return layer_config_list
 
 class _ActivationSparsiferTestCase(TestCase):
     """Runner class for unit tests that comprises functions to test each functionality
@@ -227,6 +247,45 @@ class _ActivationSparsiferTestCase(TestCase):
         for _, config in activation_sparsifier.data_groups.items():
             assert 'data' not in config
 
+    def check_squash_mask(self, activation_sparsifier, data):
+        """Makes sure that squash_mask() works as usual. Specifically, checks
+        if the sparsifier hook is attached correctly.
+        This is achieved by only looking at the identity layers and making sure that
+        the output == layer(input * mask).
+
+        Args:
+            activation_sparsifier (sparsifier object)
+                activation sparsifier object that is being tested.
+
+            data (torch tensor)
+                dummy batched data
+        """
+        # create a forward hook for checking ouput == layer(input * mask)
+        def check_output(name):
+            mask = activation_sparsifier.get_mask(name)
+            features = activation_sparsifier.data_groups[name].get('features')
+            feature_dim = activation_sparsifier.data_groups[name].get('feature_dim')
+
+            def hook(module, input, output):
+                input_data = input[0]
+                if features is None:
+                    assert torch.all(mask * input_data == output)
+                else:
+                    for feature_idx in range(0, len(features)):
+                        feature = torch.Tensor([features[feature_idx]], device=input_data.device).long()
+                        inp_data_feature = torch.index_select(input_data, feature_dim, feature)
+                        out_data_feature = torch.index_select(output, feature_dim, feature)
+
+                        assert torch.all(mask[feature_idx] * inp_data_feature == out_data_feature)
+            return hook
+
+        for name, config in activation_sparsifier.data_groups.items():
+            if 'identity' in name:
+                config['layer'].register_forward_hook(check_output(name))
+
+        activation_sparsifier.model(data)
+
+
 
 class TestActivationSparsifier(_ActivationSparsiferTestCase):
     def test_activation_sparsifier(self):
@@ -271,3 +330,8 @@ class TestActivationSparsifier(_ActivationSparsiferTestCase):
 
         # self.check_step()
         self.check_step(activation_sparsifier, data_agg_actual)
+
+        # STEP 4: squash mask
+        activation_sparsifier.squash_mask()
+
+        self.check_squash_mask(activation_sparsifier, data_list[0])
