@@ -1,4 +1,4 @@
-import _frozen_importlib_external
+import _frozen_importlib_external # type: ignore[import]
 import builtins
 import importlib
 import inspect
