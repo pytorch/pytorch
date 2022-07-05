@@ -2225,7 +2225,7 @@ torch.cuda.synchronize()
             self.assertEqual(s1.get_growth_interval(), 2)
             self.assertEqual(s1._init_growth_tracker, 0)
 
-    def _create_scaling_models_optimizers(self, device="cuda"):
+    def _create_scaling_models_optimizers(self, device="cuda", optimizer_ctor=torch.optim.SGD):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
         # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
         mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
@@ -2233,12 +2233,12 @@ torch.cuda.synchronize()
         for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
             s.data.copy_(c.data)
 
-        opt_control = torch.optim.SGD(mod_control.parameters(), lr=1.0)
-        opt_scaling = torch.optim.SGD(mod_scaling.parameters(), lr=1.0)
+        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0)
+        opt_scaling = optimizer_ctor(mod_scaling.parameters(), lr=1.0)
 
         return mod_control, mod_scaling, opt_control, opt_scaling
 
-    def _create_scaling_case(self, device="cuda", dtype=torch.float):
+    def _create_scaling_case(self, device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD):
         data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
@@ -2248,13 +2248,13 @@ torch.cuda.synchronize()
 
         skip_iter = 2
 
-        return self._create_scaling_models_optimizers(device=device) + (data, loss_fn, skip_iter)
+        return self._create_scaling_models_optimizers(device=device, optimizer_ctor=optimizer_ctor) + (data, loss_fn, skip_iter)
 
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
-    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7):
+    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case(optimizer_ctor=optimizer_ctor)
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
@@ -2279,7 +2279,7 @@ torch.cuda.synchronize()
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
-    def test_grad_scaling_autocast(self):
+    def test_grad_scaling_autocast(self, optimizer_ctor=torch.optim.SGD):
         try_pickle = False
 
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2303,10 +2303,13 @@ torch.cuda.synchronize()
             return scaler
 
         # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3, optimizer_ctor=optimizer_ctor)
         # this will be picked up by try_pickle within run():
         try_pickle = True
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3, optimizer_ctor=optimizer_ctor)
+
+    def test_grad_scaling_autocast_with_fused_adam(self):
+        self.test_grad_scaling_autocast(torch.optim._fused.Adam)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
