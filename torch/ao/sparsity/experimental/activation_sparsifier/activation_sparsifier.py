@@ -3,7 +3,7 @@ import torch
 from collections import defaultdict
 from torch import nn
 import copy
-from ...sparsifier.utils import module_to_fqn
+from ...sparsifier.utils import fqn_to_module, module_to_fqn
 import warnings
 
 __all__ = ['ActivationSparsifier']
@@ -196,6 +196,10 @@ class ActivationSparsifier:
         # attach agg hook
         self.data_groups[name]['hook'] = agg_hook
 
+        # for serialization purposes, we know whether aggregate_hook is attached
+        # or sparsify_hook()
+        self.data_groups[name]['aggregate_mode'] = True
+
     def get_mask(self, name: str = None, layer: nn.Module = None):
         """
         Returns mask associated to the layer.
@@ -301,3 +305,85 @@ class ActivationSparsifier:
             # unhook agg hook
             configs['hook'].remove()
             configs['hook'] = configs['layer'].register_forward_pre_hook(self.__sparsify_hook(name))
+            configs['agg_mode'] = False  # signals that sparsify hook is now attached
+
+    def __get_serializable_data_groups(self):
+        """Exclude hook and layer from the config keys before serializing
+
+        TODO: Might have to treat functions (reduce_fn, mask_fn etc) in a different manner while serializing.
+              For time-being, functions are treated the same way as other attributes
+        """
+        data_groups: Dict[str, Any] = defaultdict()
+        for name, config in self.data_groups.items():
+            new_config = {key: value for key, value in config.items() if key not in ['hook', 'layer']}
+            data_groups[name] = new_config
+        return data_groups
+
+    def state_dict(self) -> Dict[str, Any]:
+        r"""Returns the state of the sparsifier as a :class:`dict`.
+
+        It contains:
+        * state - contains name -> mask mapping.
+        * data_groups - a dictionary containing all config information for each
+            layer
+        * defaults - the default config while creating the constructor
+        """
+        data_groups = self.__get_serializable_data_groups()
+
+        return {
+            'state': self.state,
+            'data_groups': data_groups,
+            'defaults': self.defaults
+        }
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
+
+        Args:
+        * state_dict - the dictionary that to which the current sparsifier needs to be restored to
+        """
+        state = state_dict['state']
+        data_groups, defaults = state_dict['data_groups'], state_dict['defaults']
+
+        self.__set_state__({'state': state, 'data_groups': data_groups, 'defaults': defaults})
+
+    def __get_state__(self) -> Dict[str, Any]:
+
+        data_groups = self.__get_serializable_data_groups()
+        return {
+            'defaults': self.defaults,
+            'state': self.state,
+            'data_groups': data_groups,
+        }
+
+    def __set_state__(self, state: Dict[str, Any]) -> None:
+        self.__dict__.update(state)
+
+        # need to attach layer and hook info into the data_groups
+        for name, config in self.data_groups.items():
+            # fetch layer
+            layer = fqn_to_module(self.model, name)
+            assert layer is not None  # satisfy mypy
+
+            # if agg_mode is True, then layer in aggregate mode
+            if config['aggregate_mode']:
+                hook = layer.register_forward_pre_hook(self.__aggregate_hook(name))
+
+            else:
+                hook = layer.register_forward_pre_hook(self.__sparsify_hook(name))
+
+            config['layer'] = layer
+            config['hook'] = hook
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + ' ('
+        for name, config in self.data_groups.items():
+            format_string += '\n'
+            format_string += '\tData Group\n'
+            format_string += f'\t    name: {name}\n'
+            for key in sorted(config.keys()):
+                if key in ['data', 'hook', 'reduce_fn', 'mask_fn', 'aggregate_fn']:
+                    continue
+                format_string += f'\t    {key}: {config[key]}\n'
+        format_string += ')'
+        return format_string
