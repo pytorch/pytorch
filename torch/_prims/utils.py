@@ -9,8 +9,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
-# nvFuser imports are conditional on CUDA being available
-if torch.cuda.is_available():
+# nvFuser imports are conditional on being compiled with CUDA
+if hasattr(torch._C, "_nvfuser"):
     from torch._C._nvfuser import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
