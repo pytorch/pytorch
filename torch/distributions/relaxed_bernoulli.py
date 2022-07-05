@@ -6,7 +6,6 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import SigmoidTransform
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 
-__all__ = ['LogitRelaxedBernoulli', 'RelaxedBernoulli']
 
 class LogitRelaxedBernoulli(Distribution):
     r"""

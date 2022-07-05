@@ -6,7 +6,6 @@ from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Beta']
 
 class Beta(ExponentialFamily):
     r"""

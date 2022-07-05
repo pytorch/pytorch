@@ -11,8 +11,6 @@ from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
 
-__all__ = ['Wishart']
-
 _log_2 = math.log(2)
 
 

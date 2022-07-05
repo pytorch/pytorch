@@ -4,8 +4,6 @@
 #include <ATen/ArrayRef.h>
 #include <ATen/FunctionalStorageImpl.h>
 #include <ATen/core/List.h>
-#include <ATen/core/boxing/KernelFunction.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <c10/core/DispatchKey.h>
 
@@ -122,14 +120,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
 
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override;
-
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
-      bool allow_tensor_metadata_change) const override;
-
   ~FunctionalTensorWrapper() override = default;
 
   // FunctionalTensorWrapper overrides all custom size/stride function,
@@ -140,23 +130,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
-  c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
-
-  // This is used to re-implement shallow_copy_and_detach for
-  // FunctionalTensorWrapper. The implementation is identical, but we just need
-  // to return a subclass instead of a plain TensorImpl.
-  // TODO: maybe it's possible to arrange for that to happen automatically
-  // without an override here?
-  template <typename VariableVersion>
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
-      VariableVersion&& version_counter,
-      bool allow_tensor_metadata_change) const;
 
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
@@ -272,37 +251,5 @@ class TORCH_API FunctionalizationReapplyViewsGuard {
 };
 
 } // namespace impl
-
-// Helper function to call an out-of-place composite aten kernel that may use
-// mutations / views internally, and functionalize them.
-TORCH_API void functionalize_op_helper(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack);
-
-template <class Op, class ReturnType, class... ParameterTypes>
-struct _functionalize_aten_op final {};
-
-template <class Op, class ReturnType, class... ParameterTypes>
-struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
-  static ReturnType call(ParameterTypes... args) {
-    auto op = c10::Dispatcher::singleton()
-                  .findSchemaOrThrow(
-                      (const char*)Op::name, (const char*)Op::overload_name)
-                  .typed<ReturnType(ParameterTypes...)>();
-
-    return c10::impl::BoxedKernelWrapper<ReturnType(ParameterTypes...)>::call(
-        c10::KernelFunction::make_boxed_function<functionalize_op_helper>,
-        nullptr,
-        op,
-        // BoxedKernelWrapper knows to ignore this keyset argument,
-        // because functionalize_op_helper doesn't take in a DispatchKeySet
-        c10::DispatchKeySet(),
-        args...);
-  }
-};
-
-template <class Op>
-using functionalize_aten_op = _functionalize_aten_op<Op, typename Op::schema>;
-
 } // namespace functionalization
 } // namespace at

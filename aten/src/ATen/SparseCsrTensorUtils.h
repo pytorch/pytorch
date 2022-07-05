@@ -181,38 +181,6 @@ inline std::string plainIndicesName(Layout layout) {
       [&] { return "row_indices"; });
 }
 
-inline std::string compressedDimName(Layout layout) {
-  switch (layout) {
-    case kSparseCsr:
-      return "row";
-    case kSparseCsc:
-      return "column";
-    case kSparseBsr:
-      return "row block";
-    case kSparseBsc:
-      return "column block";
-    default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-      return "";
-  }
-}
-
-inline std::string plainDimName(Layout layout) {
-  switch (layout) {
-    case kSparseCsr:
-      return "column";
-    case kSparseCsc:
-      return "row";
-    case kSparseBsr:
-      return "column block";
-    case kSparseBsc:
-      return "row block";
-    default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-      return "";
-  }
-}
-
 inline int rowDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedRow(layout) ? 2 : 1);
 }

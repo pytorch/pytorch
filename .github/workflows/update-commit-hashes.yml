@@ -27,12 +27,11 @@ jobs:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
       PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
-  # keeps failing, issue at https://github.com/pytorch/pytorch/issues/80745
-  # update-vision-commit-hash:
-  #   uses: ./.github/workflows/_update-commit-hash.yml
-  #   with:
-  #     repo-name: vision
-  #     branch: main
-  #   secrets:
-  #     MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-  #     PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+  update-vision-commit-hash:
+    uses: ./.github/workflows/_update-commit-hash.yml
+    with:
+      repo-name: vision
+      branch: main
+    secrets:
+      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

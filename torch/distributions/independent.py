@@ -4,8 +4,6 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from typing import Dict
 
-__all__ = ['Independent']
-
 class Independent(Distribution):
     r"""
     Reinterprets some of the batch dims of a distribution as event dims.

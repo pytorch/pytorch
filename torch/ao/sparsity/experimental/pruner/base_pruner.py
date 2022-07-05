@@ -121,9 +121,7 @@ class BasePruner(BaseSparsifier):
             module = stack.pop()
             for name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
-                    child_fqn = module_to_fqn(model, child)
-                    assert isinstance(child_fqn, str)  # for mypy
-                    self.config.append({'tensor_fqn': child_fqn + '.weight'})
+                    self.config.append({'tensor_fqn': module_to_fqn(model, child) + '.weight'})
                 else:
                     if NEEDS_ZEROS is not None and type(child) in NEEDS_ZEROS and hasattr(self, "prune_bias") and self.prune_bias:
                         # only useful for Pruner
@@ -155,7 +153,6 @@ class BasePruner(BaseSparsifier):
             if type(module_config) is tuple:
                 first_layer, next_layer = module_config
                 assert isinstance(first_layer, nn.Conv2d) and isinstance(next_layer, nn.BatchNorm2d)
-                assert isinstance(module_config, tuple)  # for mypy
                 module_config = {'module': module_config}
                 local_args = copy.deepcopy(self.defaults)
                 local_args.update(module_config)
@@ -177,7 +174,7 @@ class BasePruner(BaseSparsifier):
                 local_args['tensor_name'] = tensor_name_list
             else:
                 if isinstance(module_config, nn.Module):
-                    module_config = {'module': module_config}  # type: ignore[dict-item]
+                    module_config = {'module': module_config}
 
                 local_args = copy.deepcopy(self.defaults)
                 local_args.update(module_config)
@@ -185,7 +182,6 @@ class BasePruner(BaseSparsifier):
                 # now that we're working with a dict, does it have the new format?
                 if local_args.get('tensor_fqn', None) is not None:
                     tensor_fqn = local_args.get('tensor_fqn')
-                    assert isinstance(tensor_fqn, str)  # for mypy
                     info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
 
                     for key in info_from_tensor_fqn.keys():
@@ -203,7 +199,6 @@ class BasePruner(BaseSparsifier):
                         module_fqn = module_fqn[1:]
                     local_args['module_fqn'] = module_fqn
                     local_args['tensor_name'] = "weight"
-                    assert isinstance(module_fqn, str)  # for mypy
                     local_args['tensor_fqn'] = module_fqn + ".weight"
             self.groups.append(local_args)
 

@@ -2,8 +2,6 @@
 
 #include <torch/csrc/lazy/core/ir.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <mutex>
 #include <string>
 
@@ -24,13 +22,13 @@ class TORCH_API OpKindWrapper {
 
  private:
   const OpKind& get() const {
-    c10::call_once(once_, [this]() { op_kind_ = OpKind::Get(name_); });
+    std::call_once(once_, [this]() { op_kind_ = OpKind::Get(name_); });
     return op_kind_;
   }
 
   const char* name_;
   mutable OpKind op_kind_;
-  mutable c10::once_flag once_;
+  mutable std::once_flag once_;
 };
 
 const OpKindWrapper ltc_all_to_all("lazy_tensors::all_to_all");

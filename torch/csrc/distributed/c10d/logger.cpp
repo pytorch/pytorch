@@ -5,8 +5,6 @@
 #include <fmt/format.h>
 #include <string>
 
-#include <c10/util/CallOnce.h>
-
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
 #endif
@@ -54,10 +52,10 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-c10::once_flag log_graph_static_flag;
+std::once_flag log_graph_static_flag;
 
 void Logger::log_if_graph_static(bool is_static) {
-  c10::call_once(log_graph_static_flag, [this, is_static]() {
+  std::call_once(log_graph_static_flag, [this, is_static]() {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     // It is useful to report the iteration that training finished at.
     ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;

@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import Optimizer, required
 from typing import List, Optional
 
-__all__ = ['SGD', 'sgd']
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).
@@ -258,7 +257,7 @@ def _multi_tensor_sgd(params: List[Tensor],
         return
 
     if has_sparse_grad is None:
-        has_sparse_grad = any(grad.is_sparse for grad in grads)
+        has_sparse_grad = any([grad.is_sparse for grad in grads])
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)

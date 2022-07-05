@@ -8,8 +8,6 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/tensor/python_tensor.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
@@ -64,8 +62,8 @@ std::string type_to_string(const at::DeprecatedTypeProperties& type) {
 
 at::TensorOptions options_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
-  static c10::once_flag cpu_once;
-  static c10::once_flag cuda_once;
+  static std::once_flag cpu_once;
+  static std::once_flag cuda_once;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
       cuda_map;
@@ -83,14 +81,14 @@ at::TensorOptions options_from_string(const std::string& str) {
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin())
           .first == cuda_prefix.end()) {
     // torch.cuda. is prefix of str
-    c10::call_once(cuda_once, []() {
+    std::call_once(cuda_once, []() {
       for (auto type : autograd::VariableType::allCUDATypes()) {
         cuda_map.emplace(type_to_string(*type), type);
       }
     });
     map = &cuda_map;
   } else {
-    c10::call_once(cpu_once, []() {
+    std::call_once(cpu_once, []() {
       for (auto type : autograd::VariableType::allCPUTypes()) {
         cpu_map.emplace(type_to_string(*type), type);
       }

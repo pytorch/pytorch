@@ -15,8 +15,6 @@ from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight, WeightedQuantizedModule
 from torch.nn.utils import fuse_conv_bn_weights
 
-__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']
-
 _SUPPORTED_PADDING = {
     'zeros',
     'reflect'

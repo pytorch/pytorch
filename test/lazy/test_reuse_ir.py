@@ -121,7 +121,7 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm") >= 7
+        assert metrics.counter_value("IrNodeReused_torch::lazy::TSNativeBatchNormForward") >= 7
         metrics.reset()
         torch._lazy.ir_cache.reset()
 

@@ -66,17 +66,6 @@ TORCH_API IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
-// Hack to overload the behavior of toIValue to accept Python
-// numbers in places where a Tensor is expected
-// See also torch::should_allow_numbers_as_tensors
-class ToIValueAllowNumbersAsTensors {
-  bool old_;
-
- public:
-  ToIValueAllowNumbersAsTensors(bool enable);
-  ~ToIValueAllowNumbersAsTensors();
-};
-
 // Wrap Python function to guard deref
 // NB: Need VISIBILITY_HIDDEN for silencing compiler error,
 // 'torch::jit::PythonFunctionGuard' declared with greater visibility than the

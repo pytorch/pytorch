@@ -13,8 +13,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace lazy {
 
-static const torch::lazy::Output kNullOutput = torch::lazy::Output();
-
 size_t Output::Hasher::operator()(const Output& output) const {
   return StdHashCombine(
       reinterpret_cast<std::ptrdiff_t>(output.node), output.index);
@@ -140,15 +138,8 @@ Shape Node::computeShape(const std::function<Shape()>& shape_fn) {
 const std::vector<Output>& Node::operands() const {
   return operands_as_outputs_;
 }
-
 const Output& Node::operand(size_t i) const {
   return operands_as_outputs_.at(i);
-}
-
-const Output& Node::nullable_operand(size_t i) const {
-  // We use kNullOutput instead of kNullValue here to avoid implicit casting,
-  // which would prevent this method from returning a reference.
-  return i < operands_as_outputs_.size() ? operand(i) : kNullOutput;
 }
 
 std::string Node::ToString() const {

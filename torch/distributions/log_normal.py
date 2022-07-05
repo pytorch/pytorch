@@ -3,7 +3,6 @@ from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
-__all__ = ['LogNormal']
 
 class LogNormal(TransformedDistribution):
     r"""

@@ -962,7 +962,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " ...";
       auto results = getBackend()->ExecuteComputation(
-          async->cached_computation->computation,
+          *async->cached_computation->computation,
           async->parameters_data,
           async->device);
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)

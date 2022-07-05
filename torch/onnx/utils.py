@@ -28,7 +28,6 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 import torch
@@ -126,36 +125,30 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 
 
 @contextlib.contextmanager
-def disable_apex_o2_state_dict_hook(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction]
-):
+def disable_apex_o2_state_dict_hook(model):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
     # remove this hook while exporting.
     if not isinstance(model, torch.jit.ScriptFunction):
-        model_hooks = {}  # type: ignore[var-annotated]
+        tmp_map = {}  # type: ignore[var-annotated]
         for module in model.modules():
-            for key, hook in module._state_dict_hooks.items():
-                if type(hook).__name__ == "O2StateDictHook":
-                    if module not in model_hooks:
-                        model_hooks[module] = {}
-                    model_hooks[module][key] = hook
-            if module in model_hooks:
-                for key in model_hooks[module]:
-                    module._state_dict_hooks.pop(key)
-        try:
-            yield
-        finally:
-            # Add the hooks back
-            for module, m_map in model_hooks.items():
-                for key, hook in m_map.items():
-                    module._state_dict_hooks[key] = hook
-    else:
-        try:
-            yield
-        finally:
-            pass
+            for k, v in module._state_dict_hooks.items():
+                if type(v).__name__ == "O2StateDictHook":
+                    if module not in tmp_map:
+                        tmp_map[module] = {}
+                    tmp_map[module][k] = v
+            if module in tmp_map:
+                for k in tmp_map[module].keys():
+                    module._state_dict_hooks.pop(k)
+    try:
+        yield
+    finally:
+        if not isinstance(model, torch.jit.ScriptFunction):
+            # FIXME(justinchuby): tmp_map is possibly unbound
+            for module, m_map in tmp_map.items():
+                for k, v in m_map.items():
+                    module._state_dict_hooks[k] = v
 
 
 @contextlib.contextmanager
@@ -880,60 +873,51 @@ def _check_flatten_did_not_remove(original, jit_flattened):
         )
 
 
-def _create_jit_graph(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[
-    _C.Graph,
-    List[_C.IValue],
-    Optional[Any],
-    Optional[Union[_C.ScriptModule, _C.ScriptFunction]],
-]:
+def _create_jit_graph(model, args):
+    torch_out = None
+    params: Union[List, Tuple]
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
-        torch_out = None
-
-        if isinstance(model, torch.jit.ScriptModule):
-            try:
-                graph = model.forward.graph
-            except AttributeError as e:
-                raise RuntimeError("'forward' method must be a script method") from e
-            _C._jit_pass_onnx_function_substitution(graph)
-            freezed_module = _C._freeze_module(
-                cast(_C.ScriptModule, model._c), preserveParameters=True
-            )
-            module, params = _C._jit_onnx_list_model_parameters(freezed_module)
-            method_graph = module._get_method("forward").graph
-            args_params = tuple(args) + tuple(params)
-            param_count_list = _get_param_count_list(method_graph, args_params)
-            in_vars, _ = torch.jit._flatten(args_params)
-            graph = _C._propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), param_count_list, False, False
-            )
-            return graph, params, torch_out, module
-
-        # torch.jit.ScriptFunction
-        params = []
+    if isinstance(model, torch.jit.ScriptModule):
+        try:
+            graph = model.forward.graph
+        except AttributeError as e:
+            raise RuntimeError("'forward' method must be a script method") from e
+        _C._jit_pass_onnx_function_substitution(graph)
+        freezed_m = _C._freeze_module(model._c, preserveParameters=True)
+        module, params = _C._jit_onnx_list_model_parameters(freezed_m)
+        method_graph = module._get_method("forward").graph
+        args_params = tuple(args) + tuple(params)
+        param_count_list = _get_param_count_list(method_graph, args_params)
+        in_vars, _ = torch.jit._flatten(args_params)
+        graph = _C._propagate_and_assign_input_shapes(
+            method_graph, tuple(in_vars), param_count_list, False, False
+        )
+        return graph, params, torch_out, module
+    elif isinstance(model, torch.jit.ScriptFunction):
+        params = ()
         graph = model.graph
         _C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
+        # FIXME(justinchuby): flattened_args is possibly unbound
         graph = _C._propagate_and_assign_input_shapes(
             graph, flattened_args, param_count_list, False, False
         )
         return graph, params, torch_out, None
-
-    graph, torch_out = _trace_and_get_graph_from_model(model, args)
-    _C._jit_pass_onnx_lint(graph)
-    state_dict = torch.jit._unique_state_dict(model)
-    params = list(state_dict.values())
-    graph_inputs = list(graph.inputs())
-    user_input_num = len(graph_inputs) - len(state_dict)
-    param_names = list(state_dict.keys())
-    for i, inp in enumerate(graph_inputs):
-        if i >= user_input_num:
-            inp.setDebugName(param_names[i - user_input_num])
-    _C._jit_pass_onnx_function_substitution(graph)
-    return graph, params, torch_out, None
+    else:
+        graph, torch_out = _trace_and_get_graph_from_model(model, args)
+        _C._jit_pass_onnx_lint(graph)
+        state_dict = torch.jit._unique_state_dict(model)
+        params = list(state_dict.values())
+        graph_inputs = list(graph.inputs())
+        user_input_num = len(graph_inputs) - len(state_dict)
+        param_names = list(state_dict.keys())
+        for i, inp in enumerate(graph_inputs):
+            if i >= user_input_num:
+                inp.setDebugName(param_names[i - user_input_num])
+        _C._jit_pass_onnx_function_substitution(graph)
+        return graph, params, torch_out, None
 
 
 def _get_named_param_dict(graph, params):

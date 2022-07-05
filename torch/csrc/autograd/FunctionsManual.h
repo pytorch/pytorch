@@ -88,10 +88,6 @@ Tensor norm_jvp(
     const Tensor& self,
     const optional<Scalar>& p_,
     Tensor norm);
-Tensor _nested_from_padded_backward(
-    const Tensor& grad,
-    const Tensor& input,
-    const bool do_transform_0213);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -301,7 +297,7 @@ at::Tensor evenly_distribute_backward(
     at::Tensor grad,
     const at::Tensor& input,
     const at::Tensor& value);
-Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
@@ -322,27 +318,24 @@ at::Tensor std_backward(
     at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction,
     bool keepdim);
-Tensor mean_backward(
-    const Tensor& grad,
-    IntArrayRef shape,
-    IntArrayRef dim,
-    int64_t numel,
+at::Tensor mean_backward(
+    at::Tensor grad,
+    const at::IntArrayRef sizes,
+    at::IntArrayRef dim,
     bool keepdim);
-Tensor var_mean_backward(
-    const Tensor& gvar,
-    const Tensor& gmean,
-    const Tensor& self,
-    at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
-    bool keepdim);
-Tensor std_mean_backward(
-    const Tensor& gstd,
-    const Tensor& gmean,
-    const Tensor& self,
-    const Tensor& std,
-    at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
-    bool keepdim);
+at::Tensor mean_backward(
+    at::Tensor grad,
+    const at::IntArrayRef sizes,
+    int64_t numel);
+at::Tensor var_std_mean_backward(
+    const variable_list& grads,
+    const at::Tensor& self,
+    const at::Tensor& r1,
+    const at::Tensor& r2,
+    at::OptionalIntArrayRef dim,
+    c10::optional<int64_t> correction,
+    bool keepdim,
+    bool is_std);
 at::Tensor masked_scatter_backward(
     const at::Tensor& grad,
     const at::Tensor& mask,
@@ -402,6 +395,12 @@ Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
     c10::optional<double> eps);
+at::Tensor kl_div_double_backward_grad_output(
+    const at::Tensor& grad,
+    const at::Tensor& input,
+    const at::Tensor& target,
+    int64_t reduction,
+    bool log_target);
 Tensor binary_cross_entropy_target_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -414,13 +413,6 @@ Tensor binary_cross_entropy_double_backward_target(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
-    int64_t reduction);
-Tensor binary_cross_entropy_with_logits_backward(
-    const Tensor& grad,
-    const Tensor& input,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt,
     int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(
     const at::Tensor& grad_output,
@@ -489,19 +481,15 @@ at::Tensor softplus_double_backward(
     const at::Tensor& input,
     const at::Scalar& beta,
     const at::Scalar& threshold);
-std::tuple<at::Tensor, at::Tensor> slogdet_jvp(
-    const at::Tensor& LU,
-    const at::Tensor& pivots,
-    const at::Tensor& dA,
-    const at::Tensor& sign,
-    const bool use_A_T);
+at::Tensor logdet_backward(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    const at::Tensor& logdet);
 at::Tensor slogdet_backward(
-    const at::Tensor& grad_sign,
     const at::Tensor& grad_logabsdet,
-    const at::Tensor& A,
+    const at::Tensor& self,
     const at::Tensor& signdet,
-    const at::Tensor& LU,
-    const at::Tensor& pivots);
+    const at::Tensor& logabsdet);
 at::Tensor log1p_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(
@@ -632,6 +620,10 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
+Tensor linalg_det_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& det);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
@@ -651,6 +643,12 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& x1,
     const Tensor& x2,
     const Tensor& res);
+Tensor kl_div_target_backward(
+    Tensor grad_output,
+    Tensor self,
+    Tensor target,
+    int64_t reduction,
+    bool log_target);
 Tensor fft_backward(
     const Tensor& self,
     const Tensor& grad,
@@ -746,12 +744,6 @@ std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& self,
     const Tensor& other,
     std::array<bool, 2> output_mask);
-Tensor amaxamin_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& result,
-    IntArrayRef dim,
-    bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
@@ -823,12 +815,13 @@ Tensor lu_unpack_backward(
     const int64_t m,
     const int64_t n);
 
-Tensor linalg_det_backward(
-    const Tensor& grad,
+Tensor _det_lu_based_helper_backward(
+    const Tensor& det_grad,
     const Tensor& det,
-    const Tensor& A,
-    const Tensor& LU,
-    const Tensor& pivots);
+    const Tensor& self,
+    const Tensor& lu,
+    const Tensor& pivs);
+
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,

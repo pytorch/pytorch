@@ -4,7 +4,6 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
-#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -40,7 +39,6 @@
 
 #include <ATen/ATen.h>
 
-#include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
 #include <iostream>
@@ -257,9 +255,6 @@ c10::IntArrayRef concrete_strides_fn(
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
-c10::SymIntArrayRef concrete_sym_sizes_fn(
-    const c10::impl::PyInterpreter*,
-    const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -273,8 +268,7 @@ class PyInterpreterHolder {
             &concrete_device_fn,
             &concrete_dim_fn,
             &concrete_strides_fn,
-            &concrete_sizes_fn,
-            &concrete_sym_sizes_fn)) {}
+            &concrete_sizes_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2339,22 +2333,6 @@ c10::IntArrayRef concrete_strides_fn(
   return c10::IntArrayRef(start, len);
 }
 
-static std::vector<int64_t> values_from_buffer(
-    const c10::TensorImpl* self,
-    py::handle values) {
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  return result;
-}
-
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self) {
@@ -2377,53 +2355,24 @@ c10::IntArrayRef concrete_sizes_fn(
   }
 
   py::object values = py::reinterpret_steal<py::object>(out.ptr());
-  auto result = values_from_buffer(self, values);
+
+  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  PyObject* subclass = *mb_obj;
+  Py_INCREF(subclass);
+  py::object sub = py::reinterpret_steal<py::object>(subclass);
+
+  py::object os = py::module_::import("torch").attr("overrides");
+  py::function get_buffer =
+      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
+  auto buffer = get_buffer(sub, values, "size");
+  auto result = THPUtils_unpackLongs(buffer.ptr());
   int64_t* start = (int64_t*)result[0];
   int64_t len = result[1];
 
   return c10::IntArrayRef(start, len);
-}
-
-c10::SymIntArrayRef concrete_sym_sizes_fn(
-    const c10::impl::PyInterpreter*,
-    const c10::TensorImpl* self) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-  HANDLE_TH_ERRORS
-  auto out = torchDispatchFromTensorImpl(
-      self,
-      "sym_size",
-      py::module::import("torch")
-          .attr("ops")
-          .attr("aten")
-          .attr("sym_size")
-          .attr("default")
-          .ptr(),
-      "torch.ops.aten");
-
-  if (out == Py_None) {
-    return self->sym_sizes_default();
-  }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_sizes()` are stored in
-  TORCH_CHECK(
-      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.data());
-  }
-
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
-  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 } // anonymous namespace

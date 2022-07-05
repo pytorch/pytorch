@@ -15,40 +15,6 @@ import torch.nn as nn
 from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
 
 
-__all__ = [
-    "default_affine_fixed_qparams_observer",
-    "default_debug_observer",
-    "default_dynamic_quant_observer",
-    "default_fixed_qparams_range_0to1_observer",
-    "default_fixed_qparams_range_neg1to1_observer",
-    "default_float_qparams_observer",
-    "default_float_qparams_observer_4bit",
-    "default_histogram_observer",
-    "default_observer",
-    "default_per_channel_weight_observer",
-    "default_placeholder_observer",
-    "default_reuse_input_observer",
-    "default_symmetric_fixed_qparams_observer",
-    "default_weight_observer",
-    "get_observer_state_dict",
-    "load_observer_state_dict",
-    "per_channel_weight_observer_range_neg_127_to_127",
-    "weight_observer_range_neg_127_to_127",
-    "FixedQParamsObserver",
-    "HistogramObserver",
-    "MinMaxObserver",
-    "MovingAverageMinMaxObserver",
-    "MovingAveragePerChannelMinMaxObserver",
-    "NoopObserver",
-    "ObserverBase",
-    "PerChannelMinMaxObserver",
-    "PlaceholderObserver",
-    "RecordingObserver",
-    "ReuseInputObserver",
-    "UniformQuantizationObserverBase",
-]
-
-
 class _PartialWrapper(object):
     def __init__(self, p):
         self.p = p

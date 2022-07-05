@@ -3,7 +3,6 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Gru.h>
-#include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
@@ -172,20 +171,6 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::gru_run(Tensor input_vk, "
       "Tensor hx_vk, "
       "__torch__.torch.classes.vulkan.GruOpContext G_prepack) -> (Tensor next_input, Tensor hidden_layer)"));
-  m.def(TORCH_SELECTIVE_SCHEMA(
-      "vulkan_prepack::create_lstm_context(Tensor[] params_cpu, "
-      "bool has_biases, "
-      "int num_layers, "
-      "float dropout, "
-      "bool train, "
-      "bool bidirectional, "
-      "bool batch_first) "
-      "-> __torch__.torch.classes.vulkan.VulkanOpContext"));
-  m.def(TORCH_SELECTIVE_SCHEMA(
-      "vulkan_prepack::run_lstm_context(Tensor input_vk, "
-      "Tensor hx_vk, "
-      "Tensor cx_vk, "
-      "__torch__.torch.classes.vulkan.VulkanOpContext L_prepack) -> (Tensor next_input, Tensor hidden_state, Tensor cell_state)"));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
@@ -197,7 +182,6 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack)); // Backwards compatibility
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_gru_context"), TORCH_FN(create_gru_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"), TORCH_FN(gru_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_lstm_context"), TORCH_FN(create_lstm_context));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
@@ -209,7 +193,6 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run)); // Backwards compatibility
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_gru_context"), TORCH_FN(run_gru_context));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"), TORCH_FN(gru_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_lstm_context"), TORCH_FN(run_lstm_context));
 }
 
 Tensor convolution(
