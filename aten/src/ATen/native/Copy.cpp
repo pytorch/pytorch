@@ -212,9 +212,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::metal::metal_copy_(self, src);
   }
 
+#ifdef USE_MPS
   if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
     return at::native::mps::mps_copy_(self, src, non_blocking);
   }
+#endif
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
