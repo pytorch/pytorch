@@ -58,13 +58,16 @@ struct FusedAdamMathFunctor {
             for (int ii = 0; ii < kILP; ii++) {
                 opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
                 opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
+                if (maximize) {
+                    grad = -grad;
+                }
                 if (inv_grad_scale_ptr) {
                     grad *= (*inv_grad_scale_ptr);
                 }
                 opmath_t exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
                 opmath_t exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
                 opmath_t max_exp_avg_sq;
-                if (Depth == kMaxExpAvgSqIdx + 1) {
+                if (amsgrad) {
                     max_exp_avg_sq = static_cast<opmath_t>(r_args[kMaxExpAvgSqIdx][ii]);
                 }
                 if (weight_decay != 0) {
@@ -73,23 +76,23 @@ struct FusedAdamMathFunctor {
                 exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
                 exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
 
+                if (amsgrad) {
+                    max_exp_avg_sq = ::max(max_exp_avg_sq, exp_avg_sq);
+                }
+
                 const opmath_t bias_correction1 = 1 - ::pow(beta1, *step_count);
                 const opmath_t bias_correction2 = 1 - ::pow(beta2, *step_count);
 
                 opmath_t step_size = lr / bias_correction1;
                 const opmath_t step_size_neg = -step_size;
-                const opmath_t denom = ::sqrt(exp_avg_sq) / (::sqrt(bias_correction2) * step_size_neg + eps / step_size_neg);
+                const opmath_t denom = ::sqrt((amsgrad ? max_exp_avg_sq : exp_avg_sq)) / (::sqrt(bias_correction2) * step_size_neg + eps / step_size_neg);
                 step_size *= exp_avg / denom;
-                if (maximize) {
-                    param += step_size * exp_avg / denom;
-                } else {
-                    param -= step_size * exp_avg / denom;
-                }
+                param -= step_size * exp_avg / denom;
                 r_args[kParamIdx][ii] = param;
                 r_args[kGradIdx][ii] = grad;
                 r_args[kExpAvgIdx][ii] = exp_avg;
                 r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
-                if (Depth == kMaxExpAvgSqIdx + 1) {
+                if (amsgrad) {
                     r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq;
                 }
             }
