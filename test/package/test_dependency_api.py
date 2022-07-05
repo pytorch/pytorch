@@ -6,6 +6,8 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
+import torch.nn
+
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
@@ -346,6 +348,29 @@ class TestDependencyAPI(PackageTestCase):
         # "package_a" should still be mocked out.
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
+
+    def test_externing_c_extension(self):
+        """Externing c extensions modules should allow us to still access them especially those found in torch._C."""
+
+        buffer = BytesIO()
+        # The C extension module in question is F.gelu which comes from torch._C._nn
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=64,
+            nhead=2,
+            dim_feedforward=64,
+            dropout=1.0,
+            batch_first=True,
+            activation="gelu",
+            norm_first=True,
+        )
+        with PackageExporter(buffer) as e:
+            e.extern("torch.**")
+            e.intern("**")
+
+            e.save_pickle("model", "model.pkl", model)
+        buffer.seek(0)
+        imp = PackageImporter(buffer)
+        imp.load_pickle("model", "model.pkl")
 
 
 if __name__ == "__main__":
