@@ -795,13 +795,13 @@ class FSDPTest(MultiProcessTestCase):
         norm_type: Optional[Union[float, int]] = None,
         save_model: bool = False,
         mixed_precision: Optional[MixedPrecision] = None,
-        use_sharded_grad_scaler: bool = False,
+        enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
-        sharded_grad_scaler = ShardedGradScaler(enabled=use_sharded_grad_scaler)
+        sharded_grad_scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
@@ -888,7 +888,7 @@ class FSDPTest(MultiProcessTestCase):
         forward_prefetch: bool = False,
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,
-        use_sharded_grad_scaler: bool = False,
+        enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
         norm_type: Optional[Union[float, int]] = None,
         init_kwargs: Optional[Dict[str, Any]] = None,
@@ -935,7 +935,7 @@ class FSDPTest(MultiProcessTestCase):
             fsdp_cpu_offload=cpu_offload,
             mixed_precision=mixed_precision,
             norm_type=norm_type,
-            use_sharded_grad_scaler=use_sharded_grad_scaler,
+            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
             use_pure_fp16=use_pure_fp16,
         )
         ddp_params = list(ref_model.parameters())
@@ -994,7 +994,7 @@ class FSDPTest(MultiProcessTestCase):
                 save_model=save_model,
                 mixed_precision=mixed_precision,
                 norm_type=norm_type,
-                use_sharded_grad_scaler=use_sharded_grad_scaler,
+                enable_sharded_grad_scaler=enable_sharded_grad_scaler,
                 use_pure_fp16=use_pure_fp16,
             )
         # No need to check for parameter and loss parity if expecting an error
