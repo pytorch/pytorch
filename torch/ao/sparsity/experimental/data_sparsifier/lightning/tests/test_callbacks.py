@@ -1,6 +1,6 @@
 from torch.ao import sparsity
 import torch
-import pytorch_lightning as pl
+import pytorch_lightning as pl  # type: ignore
 import torch.nn as nn
 from typing import List
 from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks.data_sparsity import (
@@ -62,7 +62,15 @@ class StepSLScheduler(sparsity.BaseDataScheduler):
 
 class _PostTrainingCallbackTestCase(TestCase):
     def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
-        callback.on_fit_end(42, pl_module)  # 42 is a dummy value as trainer not used
+        """Makes sure that each component of is working as expected while calling the
+        post-training callback.
+        Specifically, check the following -
+            1. sparsifier config is the same as input config
+            2. data sparsifier is correctly attached to the model
+            3. sparsity is achieved after .step()
+            4. non-sparsified values are the same as original values
+        """
+        callback.on_fit_end(42, pl_module)  # 42 is a dummy value
 
         # check sparsifier config
         for key, value in sparsifier_args.items():
@@ -98,8 +106,7 @@ class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
             'sparse_block_shape': (1, 4),
             'zeros_per_block': 4
         }
-        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier,
-                                            data_sparsifier_args=sparsifier_args)
+        callback = PostTrainingDataSparsity(sparsity.DataNormSparsifier, sparsifier_args)
         pl_module = DummyLightningModule(100, [128, 256, 16])
 
         self.run_all_checks(pl_module, callback, sparsifier_args)
@@ -110,15 +117,21 @@ class _TrainingAwareCallbackTestCase(TestCase):
     Simulates model training and makes sure that each hook is doing what is expected
     """
     def _check_on_train_start(self, pl_module, callback, sparsifier_args, scheduler_args):
+        """Makes sure that the data_sparsifier and data_scheduler objects are being created
+        correctly.
+        Basically, confirms that the input args and sparsifier/scheduler args are in-line.
+        """
 
         callback.on_train_start(42, pl_module)  # 42 is a dummy value
 
         # sparsifier and scheduler instantiated
         assert callback.data_scheduler is not None and callback.data_sparsifier is not None
 
+        # data sparsifier args are correct
         for key, value in sparsifier_args.items():
             callback.data_sparsifier.defaults[key] == value
 
+        # data scheduler args are correct
         for key, value in scheduler_args.items():
             assert getattr(callback.data_scheduler, key) == value
 
@@ -130,6 +143,33 @@ class _TrainingAwareCallbackTestCase(TestCase):
             param.data = param + 1
 
     def _check_on_train_epoch_start(self, pl_module, callback):
+        """Basically ensures that the sparsifier's state is correctly being restored.
+        The state_dict() comparison is needed. Consider the flow -
+
+        **Epoch: 1**
+            1. on_train_epoch_start(): Nothing happens (for now)
+            2. on_train_epoch_end():
+                a) the model is copied into the data_sparsifier
+                b) .step() is called
+                c) internally, the state of each layer of the model inside
+                   data sparsifier changes
+
+        **Epoch: 2**
+            1. on_train_epoch_start(): Assume nothing happens
+            2. on_train_epoch_end():
+                a) the model is copied into the data_sparsifier.
+                   But wait! you need the config to attach layer
+                   of the module to the sparsifier. If config is None,
+                   the data_sparsifier uses the default config which we
+                   do not want as the config of each layer changes after
+                   .step()
+
+        Hence, we need to dump and restore the state_dict() everytime because we're
+        copying the model after each epoch.
+        Hence, it is essential to make sure that the sparsifier's state_dict() is being
+        correctly dumped and restored.
+
+        """
         # check if each component of state dict is being loaded correctly
         callback.on_train_epoch_start(42, pl_module)
         if callback.data_sparsifier_state_dict is None:
@@ -163,6 +203,10 @@ class _TrainingAwareCallbackTestCase(TestCase):
             assert value == data_grp1[key]
 
     def _check_on_train_epoch_end(self, pl_module, callback):
+        """Checks the following -
+        1. sparsity is correctly being achieved after .step()
+        2. scheduler and data_sparsifier sparsity levels are in-line
+        """
         callback.on_train_epoch_end(42, pl_module)
         data_scheduler = callback.data_scheduler
         base_sl = data_scheduler.base_param
@@ -170,16 +214,23 @@ class _TrainingAwareCallbackTestCase(TestCase):
         for name, _ in pl_module.model.named_parameters():
             valid_name = _get_valid_name(name)
             mask = callback.data_sparsifier.get_mask(name=valid_name)
+
+            # check sparsity levels
             assert (1.0 - mask.float().mean()) > 0  # some sparsity level achieved
 
             last_sl = data_scheduler.get_last_param()
             last_epoch = data_scheduler.last_epoch
-            # check sparsity levels
+
+            # check sparsity levels of scheduler
             log_last_sl = math.log(last_sl[valid_name])
             log_actual_sl = math.log(base_sl[valid_name] * (data_scheduler.gamma ** last_epoch))
             assert log_last_sl == log_actual_sl
 
     def _check_on_train_end(self, pl_module, callback):
+        """Confirms that the mask is squashed after the training ends
+        This is achieved by making sure that each parameter in the internal container
+        are not parametrized.
+        """
         callback.on_train_end(42, pl_module)
 
         # check that the masks have been squashed
@@ -211,9 +262,9 @@ class TestTrainingAwareCallback(_TrainingAwareCallbackTestCase):
         }
 
         callback = TrainingAwareDataSparsity(
-            data_sparsifier_type=sparsity.DataNormSparsifier,
+            data_sparsifier_class=sparsity.DataNormSparsifier,
             data_sparsifier_args=sparsifier_args,
-            data_scheduler_type=StepSLScheduler,
+            data_scheduler_class=StepSLScheduler,
             data_scheduler_args=scheduler_args
         )
 
