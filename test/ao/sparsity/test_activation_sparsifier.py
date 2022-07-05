@@ -196,6 +196,37 @@ class _ActivationSparsiferTestCase(TestCase):
 
         assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
 
+        return data_agg_actual
+
+    def check_step(self, activation_sparsifier, data_agg_actual):
+        """Checks if .step() works as expected. Specifically, checks if the mask is computed correctly.
+
+        Args:
+            activation_sparsifier (sparsifier object)
+                activation sparsifier object that is being tested.
+
+            data_agg_actual (torch tensor)
+                aggregated torch tensor
+
+        """
+        model = activation_sparsifier.model
+        layer_name = module_to_fqn(model, model.conv1)
+        assert layer_name is not None
+
+        reduce_fn = activation_sparsifier.data_groups[layer_name]['reduce_fn']
+
+        data_reduce_actual = reduce_fn(data_agg_actual)
+        mask_fn = activation_sparsifier.data_groups[layer_name]['mask_fn']
+        sparse_config = activation_sparsifier.data_groups[layer_name]['sparse_config']
+        mask_actual = mask_fn(data_reduce_actual, **sparse_config)
+
+        mask_model = activation_sparsifier.get_mask(layer_name)
+
+        assert torch.all(mask_model == mask_actual)
+
+        for _, config in activation_sparsifier.data_groups.items():
+            assert 'data' not in config
+
 
 class TestActivationSparsifier(_ActivationSparsiferTestCase):
     def test_activation_sparsifier(self):
@@ -233,4 +264,10 @@ class TestActivationSparsifier(_ActivationSparsiferTestCase):
             model(rand_data)
             data_list.append(rand_data)
 
-        self.check_pre_forward_hook(activation_sparsifier, data_list)
+        data_agg_actual = self.check_pre_forward_hook(activation_sparsifier, data_list)
+
+        # STEP 3: sparsifier step
+        activation_sparsifier.step()
+
+        # self.check_step()
+        self.check_step(activation_sparsifier, data_agg_actual)
