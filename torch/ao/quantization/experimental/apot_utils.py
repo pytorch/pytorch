@@ -8,7 +8,13 @@ import math
 r"""Converts floating point input into APoT number
     based on quantization levels
 """
-def float_to_apot(x, levels, indices):
+def float_to_apot(x, levels, indices, alpha):
+    # clip values based on alpha
+    if x < -alpha:
+        return -alpha
+    elif x > alpha:
+        return alpha
+
     levels_lst = list(levels)
     indices_lst = list(indices)
 
