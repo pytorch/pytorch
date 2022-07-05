@@ -46,7 +46,7 @@ def call_for_per_sample_grads(module, batch_size, loss_reduction="mean"):
         else:
             return og_tensor
 
-    if not loss_reduction in ["sum", "mean"]:
+    if loss_reduction not in ["sum", "mean"]:
         raise RuntimeError(f"Expected loss_reduction argument to be sum or mean, got {loss_reduction}")
 
     if not isinstance(module, torch.nn.Module):
