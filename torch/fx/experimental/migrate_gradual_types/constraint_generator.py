@@ -126,7 +126,6 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
-        # Todo: add back natural number constraints
         nat_constraints = gen_nat_constraints(new_dims_rhs_1 + new_dims_rhs_2)
 
         c_tensor_i = Conj([BinConstraintT(linear_input, TensorType(new_dims_rhs_1), op_eq),
