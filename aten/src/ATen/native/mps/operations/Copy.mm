@@ -332,7 +332,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
 
 
   if (src_.is_view()) {
-    src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
+    src = src_.to(dst_.dtype()).expand_as(dst_);
   } else {
     src = src_;
     if (src.dtype() != dst_.dtype()) {
