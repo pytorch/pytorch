@@ -160,21 +160,6 @@
     "sorted_patterns_dict",
     "get_quantize_handler_cls"
   ],
-  "torch.ao.quantization.observer": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
-    "partial"
-  ],
   "torch.ao.quantization.qconfig": [
     "Any",
     "FakeQuantize",
@@ -543,44 +528,6 @@
   "torch.distributed.elastic.rendezvous.dynamic_rendezvous": [
     "get_method_name"
   ],
-  "torch.distributed.elastic.rendezvous.registry": [
-    "RendezvousHandler",
-    "RendezvousParameters",
-    "create_handler"
-  ],
-  "torch.distributed.elastic.rendezvous.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Event",
-    "Optional",
-    "Thread",
-    "Tuple",
-    "Union",
-    "timedelta"
-  ],
-  "torch.distributed.elastic.timer.api": [
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "contextmanager",
-    "getframeinfo",
-    "stack"
-  ],
-  "torch.distributed.elastic.timer.local_timer": [
-    "Any",
-    "Dict",
-    "Empty",
-    "List",
-    "RequestQueue",
-    "Set",
-    "TimerClient",
-    "TimerRequest",
-    "TimerServer",
-    "Tuple"
-  ],
   "torch.distributed.elastic.utils.api": [
     "Any",
     "List",
@@ -613,34 +560,6 @@
     "Union",
     "accumulate"
   ],
-  "torch.distributed.fsdp.fully_sharded_data_parallel": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "FlatParameter",
-    "FlattenParamsWrapper",
-    "Generator",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "NamedTuple",
-    "Optional",
-    "Parameter",
-    "ProcessGroup",
-    "Set",
-    "Shard",
-    "ShardedTensor",
-    "Tuple",
-    "Union",
-    "Variable",
-    "auto",
-    "cast",
-    "contextmanager",
-    "dataclass",
-    "init_from_local_shards"
-  ],
   "torch.distributed.fsdp.utils": [
     "Any",
     "Callable",
@@ -661,25 +580,6 @@
     "Tuple",
     "Type",
     "cast"
-  ],
-  "torch.distributed.launcher.api": [
-    "Any",
-    "Callable",
-    "ChildFailedError",
-    "Dict",
-    "List",
-    "LocalElasticAgent",
-    "Optional",
-    "RendezvousParameters",
-    "SignalException",
-    "Std",
-    "Tuple",
-    "Union",
-    "WorkerSpec",
-    "dataclass",
-    "field",
-    "get_logger",
-    "parse_rendezvous_endpoint"
   ],
   "torch.distributed.nn": [
     "Function",
@@ -1370,6 +1270,7 @@
     "qr",
     "slogdet",
     "solve",
+    "solve_ex",
     "solve_triangular",
     "svd",
     "svdvals",
@@ -1923,7 +1824,6 @@
     "exp2",
     "expit",
     "expm1",
-    "gamma",
     "gammainc",
     "gammaincc",
     "gammaln",
@@ -1950,6 +1850,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k0",
     "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
@@ -2114,19 +2015,6 @@
     "BinaryIO",
     "IO",
     "Union"
-  ],
-  "torch.utils.tensorboard.summary": [
-    "HistogramProto",
-    "Optional",
-    "PrCurvePluginData",
-    "Summary",
-    "SummaryMetadata",
-    "TensorProto",
-    "TensorShapeProto",
-    "TextPluginData",
-    "convert_to_HWC",
-    "make_np",
-    "range"
   ],
   "torch": [
     "BFloat16Storage",
@@ -2293,6 +2181,7 @@
     "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
+    "_linalg_solve_ex",
     "_log_softmax",
     "_log_softmax_backward_data",
     "_logcumsumexp",
