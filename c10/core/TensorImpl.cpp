@@ -395,12 +395,7 @@ c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   if (C10_UNLIKELY(is_python_dispatch())) {
     return load_pyobj_interpreter()->sym_sizes(this);
   }
-
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have sym sizes");
+  return sym_sizes_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
