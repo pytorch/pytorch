@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
-    get_full_params,
     _get_state_dict,
     SkipModel,
     _zero_model,
