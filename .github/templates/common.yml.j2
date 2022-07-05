@@ -1,4 +1,5 @@
-{%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v4" -%}
+{%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v5" -%}
+{%- set download_artifact_s3_action = "seemethere/download-artifact-s3@v4" -%}
 
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
@@ -90,7 +91,6 @@ on:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -193,7 +193,8 @@ on:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
 {%- macro teardown_ec2_linux(pytorch_directory="") -%}

@@ -848,7 +848,7 @@ class TestTracer(JitTestCase):
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
-        except RuntimeError:
+        except AttributeError:
             self.skipTest("Skip the test since c2 ops are not registered.")
 
         class MyModel(torch.nn.Module):

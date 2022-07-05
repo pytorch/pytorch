@@ -3,7 +3,9 @@
 import math
 import numbers
 import operator
+import pickle
 import sys
+import tempfile
 import unittest
 from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
@@ -26,7 +28,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-from torch.fx.experimental.meta_tracer import MetaTracer
+import torch.fx.experimental.meta_tracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -120,7 +122,7 @@ class TestFXExperimental(JitTestCase):
         assert len(serialized_graph1["weights"]) == 4
         assert len(serialized_graph1["modules"]) == 0
         assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["weights"]) == 1
         assert len(serialized_graph2["modules"]) == 1
         assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
@@ -669,8 +671,6 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(3, 3), m(3, 3))
 
     def test_meta_tracer(self):
-        mt = MetaTracer()
-
         class MetaTracerTestModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -679,15 +679,26 @@ class TestFXExperimental(JitTestCase):
 
             def forward(self, x):
                 emb = self.emb(x)
+                emb = emb + torch.arange(emb.shape[-1], dtype=torch.float, device=emb.device)
                 lol = self.layernorm(emb)
                 return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
 
         mttm = MetaTracerTestModule()
         for BS in [15, 35]:
             x = torch.zeros(BS, dtype=torch.long).random_(42)
-            graph = mt.trace(mttm, meta_args={'x' : x.to(device='meta')})
-            gm = torch.fx.GraphModule(mttm, graph)
+            meta_args = {'x' : x.to(device='meta')}
+            gm = torch.fx.experimental.meta_tracer.symbolic_trace(mttm, meta_args=meta_args)
             torch.testing.assert_close(gm(x), mttm(x))
+
+            # Test serialization/deserialization
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with open(f'{tmp_dir}/meta_module.pkl', 'wb') as f:
+                    pickle.dump(gm, f)
+
+                with open(f'{tmp_dir}/meta_module.pkl', 'rb') as f:
+                    loaded = pickle.load(f)
+
+                torch.testing.assert_close(loaded(x), mttm(x))
 
 
     def test_call_to_assert_with_msg(self):
@@ -1669,6 +1680,13 @@ class TestModule(torch.nn.Module):
         )
         self.assertEqual(norm_args_and_kwargs.args, tuple())
 
+    def test_normalize_args_op_overload(self):
+        for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
+            inp1 = torch.rand([1])
+            inp2 = torch.rand([4])
+            args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
+            self.assertIs(kwargs["input"], inp1)
+            self.assertIs(kwargs["the_template"], inp2)
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

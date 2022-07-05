@@ -69,8 +69,6 @@ TEST_F(Kernel, InliningIntermediates) {
       const auto graph_string = format(graph_template, env);
       auto graph = std::make_shared<Graph>();
       parseIR(graph_string, &*graph);
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      auto device = use_cuda ? kCUDA : kCPU;
       TensorExprKernel k(graph);
       auto stmt = k.getCodeGenStmt();
       std::ostringstream oss;
@@ -80,8 +78,6 @@ TEST_F(Kernel, InliningIntermediates) {
 
       // aten_sub should be removed by the CUDA backend by metavar rewriting
       // and by the CPU backend by horizontal fusion.
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,cppcoreguidelines-avoid-magic-numbers)
-      size_t num_out1_uses = use_cuda ? 0 : 5;
       torch::jit::testing::FileCheck().check_not("aten_sub")->run(oss.str());
     }
   }
@@ -1598,12 +1594,14 @@ TEST_F(Kernel, CodegenInspection) {
 Tensor lowerNanToNum(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto input_buf = c10::get<BufHandle>(inputs[0]);
   auto e = Compute(
       "custom_nan_to_num",
       outputShape,
+      outputStrides,
       [&](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         auto load = input_buf.load(indices);

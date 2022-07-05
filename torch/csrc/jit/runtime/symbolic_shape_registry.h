@@ -46,11 +46,19 @@ supported. Concat has been special cased and could be generalized as needed.
 Please file an issue.
 */
 
+struct BoundedShapeGraphs {
+  std::shared_ptr<Graph> lower_bound;
+  std::shared_ptr<Graph> upper_bound;
+};
+
 TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g);
 
 TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+    const FunctionSchema& schema);
+
+TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema);
 
 TORCH_API std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas();

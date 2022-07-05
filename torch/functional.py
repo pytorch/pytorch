@@ -1,5 +1,5 @@
 from typing import (
-    Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
+    List, Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
 
 import torch
@@ -9,7 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
-from ._jit_internal import boolean_dispatch, List
+from ._jit_internal import boolean_dispatch
 from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
@@ -137,7 +137,9 @@ def broadcast_shapes(*shapes):
 
 
 
-def split(tensor, split_size_or_sections, dim=0):
+def split(
+    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
+) -> List[Tensor]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -187,7 +189,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args):
+def einsum(*args: Any) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -1549,6 +1551,23 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
     ``True``.
+
+    .. warning::
+
+        :func:`torch.lu` is deprecated in favor of :func:`torch.linalg.lu_factor`
+        and :func:`torch.linalg.lu_factor_ex`. :func:`torch.lu` will be removed in a
+        future PyTorch release.
+        ``LU, pivots, info = torch.lu(A, compute_pivots)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots = torch.linalg.lu_factor(A, compute_pivots)
+
+        ``LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)
 
     .. note::
         * The returned permutation matrix for every matrix in the batch is

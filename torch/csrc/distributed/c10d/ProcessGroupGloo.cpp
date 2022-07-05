@@ -43,59 +43,59 @@
 #include <gloo/rendezvous/prefix_store.h>
 
 #ifdef _WIN32
-#define GENERATE_ALL_TYPES(type, func, ...)            \
-  switch (type) {                                      \
-    case ::at::ScalarType::Float:                      \
-      func<float>(__VA_ARGS__);                        \
-      break;                                           \
-    case ::at::ScalarType::Double:                     \
-      func<double>(__VA_ARGS__);                       \
-      break;                                           \
-    case ::at::ScalarType::Half:                       \
-      func<gloo::float16>(__VA_ARGS__);                \
-      break;                                           \
-    case ::at::ScalarType::Char:                       \
-      func<int8_t>(__VA_ARGS__);                       \
-      break;                                           \
-    case ::at::ScalarType::Byte:                       \
-      func<uint8_t>(__VA_ARGS__);                      \
-      break;                                           \
-    case ::at::ScalarType::Int:                        \
-      func<int32_t>(__VA_ARGS__);                      \
-      break;                                           \
-    case ::at::ScalarType::Long:                       \
-      func<int64_t>(__VA_ARGS__);                      \
-      break;                                           \
-    default:                                           \
+#define GENERATE_ALL_TYPES(type, func, ...)      \
+  switch (type) {                                \
+    case ::at::ScalarType::Float:                \
+      func<float>(__VA_ARGS__);                  \
+      break;                                     \
+    case ::at::ScalarType::Double:               \
+      func<double>(__VA_ARGS__);                 \
+      break;                                     \
+    case ::at::ScalarType::Half:                 \
+      func<gloo::float16>(__VA_ARGS__);          \
+      break;                                     \
+    case ::at::ScalarType::Char:                 \
+      func<int8_t>(__VA_ARGS__);                 \
+      break;                                     \
+    case ::at::ScalarType::Byte:                 \
+      func<uint8_t>(__VA_ARGS__);                \
+      break;                                     \
+    case ::at::ScalarType::Int:                  \
+      func<int32_t>(__VA_ARGS__);                \
+      break;                                     \
+    case ::at::ScalarType::Long:                 \
+      func<int64_t>(__VA_ARGS__);                \
+      break;                                     \
+    default:                                     \
       TORCH_CHECK(false, "Invalid scalar type"); \
   }
 
 #define HOST_NAME_MAX 256
 #else
-#define GENERATE_ALL_TYPES(type, func, args...)        \
-  switch (type) {                                      \
-    case ::at::ScalarType::Float:                      \
-      func<float>(args);                               \
-      break;                                           \
-    case ::at::ScalarType::Double:                     \
-      func<double>(args);                              \
-      break;                                           \
-    case ::at::ScalarType::Half:                       \
-      func<gloo::float16>(args);                       \
-      break;                                           \
-    case ::at::ScalarType::Char:                       \
-      func<int8_t>(args);                              \
-      break;                                           \
-    case ::at::ScalarType::Byte:                       \
-      func<uint8_t>(args);                             \
-      break;                                           \
-    case ::at::ScalarType::Int:                        \
-      func<int32_t>(args);                             \
-      break;                                           \
-    case ::at::ScalarType::Long:                       \
-      func<int64_t>(args);                             \
-      break;                                           \
-    default:                                           \
+#define GENERATE_ALL_TYPES(type, func, args...)  \
+  switch (type) {                                \
+    case ::at::ScalarType::Float:                \
+      func<float>(args);                         \
+      break;                                     \
+    case ::at::ScalarType::Double:               \
+      func<double>(args);                        \
+      break;                                     \
+    case ::at::ScalarType::Half:                 \
+      func<gloo::float16>(args);                 \
+      break;                                     \
+    case ::at::ScalarType::Char:                 \
+      func<int8_t>(args);                        \
+      break;                                     \
+    case ::at::ScalarType::Byte:                 \
+      func<uint8_t>(args);                       \
+      break;                                     \
+    case ::at::ScalarType::Int:                  \
+      func<int32_t>(args);                       \
+      break;                                     \
+    case ::at::ScalarType::Long:                 \
+      func<int64_t>(args);                       \
+      break;                                     \
+    default:                                     \
       TORCH_CHECK(false, "Invalid scalar type"); \
   }
 #endif
@@ -179,20 +179,16 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
     case ReduceOp::BAND:
-      TORCH_CHECK(false,
-          "Cannot use ReduceOp.BAND with non-integral dtype");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with non-integral dtype");
       break;
     case ReduceOp::BOR:
-      TORCH_CHECK(false,
-          "Cannot use ReduceOp.BOR with non-integral dtype");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with non-integral dtype");
       break;
     case ReduceOp::BXOR:
-      TORCH_CHECK(false,
-          "Cannot use ReduceOp.BXOR with non-integral dtype");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
     case ReduceOp::AVG:
-      TORCH_CHECK(false,
-          "Cannot use ReduceOp.AVG with Gloo");
+      TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
       break;
     case ReduceOp::UNUSED:
       break;
@@ -209,7 +205,7 @@ void band(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for(const auto i : c10::irange(n)) {
+  for (const auto i : c10::irange(n)) {
     tc[i] = ta[i] & tb[i];
   }
 }
@@ -222,7 +218,7 @@ void bor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for(const auto i : c10::irange(n)) {
+  for (const auto i : c10::irange(n)) {
     tc[i] = ta[i] | tb[i];
   }
 }
@@ -235,7 +231,7 @@ void bxor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for(const auto i : c10::irange(n)) {
+  for (const auto i : c10::irange(n)) {
     tc[i] = ta[i] ^ tb[i];
   }
 }
@@ -260,8 +256,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
     case ReduceOp::AVG:
-      TORCH_CHECK(false,
-          "Cannot use ReduceOp.AVG with Gloo");
+      TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
       break;
     case ReduceOp::UNUSED:
       break;
@@ -333,7 +328,7 @@ void initializeStreamsEvents(
     std::vector<c10::Event>& events) {
   streams.reserve(tensors.size());
   events.reserve(tensors.size());
-  for(const auto i : c10::irange(tensors.size())) {
+  for (const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i].device();
     c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
@@ -342,7 +337,8 @@ void initializeStreamsEvents(
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this device. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
+    streams.push_back(
+        impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -350,8 +346,10 @@ void initializeStreamsEvents(
     // new streams in this Work to prevent being freed before the Work finishes.
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
-        impl.recordDataPtrOnStream(tensors[i].indices().storage().data_ptr(), streams[i]);
-        impl.recordDataPtrOnStream(tensors[i].values().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(
+            tensors[i].indices().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(
+            tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
@@ -377,7 +375,8 @@ void initializeStreamsEvents(
     const auto device_id = tensorgroup[0].device().index();
     for (const auto& tensor : tensorgroup) {
       if (tensor.device().index() != device_id) {
-        TORCH_CHECK(false,
+        TORCH_CHECK(
+            false,
             "tensors in the nested tensor vectors need to "
             "be on the same device");
       }
@@ -386,7 +385,7 @@ void initializeStreamsEvents(
 
   streams.reserve(tensors.size());
   events.reserve(tensors.size());
-  for(const auto i : c10::irange(tensors.size())) {
+  for (const auto i : c10::irange(tensors.size())) {
     c10::Device device = tensors[i][0].device();
     c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
@@ -395,7 +394,8 @@ void initializeStreamsEvents(
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this output. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
+    streams.push_back(
+        impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -414,7 +414,7 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 // static
 void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
-  if(work->recordFunctionBeforeCallback_){
+  if (work->recordFunctionBeforeCallback_) {
     work->recordFunctionBeforeCallback_();
   }
   try {
@@ -481,17 +481,19 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
   if (recordingFunction->isActive()) {
     std::function<void()> before_handler =
         [inputTensors, profilingTitle, recordingFunction]() {
-      // The work will be started and completed by different threads.
-      recordingFunction->_setAsync();
-      std::vector<c10::IValue> inputs;
-      if (inputTensors) {
-        inputs.reserve(inputTensors->size());
-        for (const auto& tensor : *inputTensors) {
-          inputs.emplace_back(tensor);
-        }
-      }
-      recordingFunction->before(profilingTitle, inputs);
-    };
+          // The work will be started and completed by different threads.
+          recordingFunction->_setAsync();
+          std::vector<c10::IValue> inputs;
+          if (inputTensors) {
+            inputs.reserve(inputTensors->size());
+            for (const auto& tensor : *inputTensors) {
+              inputs.emplace_back(tensor);
+            }
+          }
+          recordingFunction->before(
+              profilingTitle,
+              c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+        };
     recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
     std::function<void()> end_handler = [recordingFunction]() {
       recordingFunction->end();
@@ -745,7 +747,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   // by a single I/O thread.
   //
   contexts_.reserve(options->devices.size());
-  for(const auto i : c10::irange(options->devices.size())) {
+  for (const auto i : c10::irange(options->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options->timeout);
@@ -760,7 +762,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   workInProgress_.resize(options->threads);
 
   threads_.resize(options->threads);
-  for(const auto i : c10::irange(threads_.size())) {
+  for (const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
 
@@ -867,7 +869,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     broadcast(inputs[rootTensor]);
 
     // Copy to non-root tensors
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       if (i == static_cast<size_t>(rootTensor)) {
         continue;
       }
@@ -907,7 +909,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -916,9 +918,10 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1234,7 +1237,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for(const auto i : c10::irange(metadata.size())) {
+    for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * sparseDim;
       totalSize += counts[i];
     }
@@ -1279,7 +1282,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for(const auto i : c10::irange(metadata.size())) {
+    for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * denseNumel;
       totalSize += counts[i];
     }
@@ -1330,7 +1333,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1338,7 +1341,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       streams[i].synchronize();
     }
 
@@ -1346,7 +1349,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     allreduce(tmp);
 
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -1355,9 +1358,10 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1380,7 +1384,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     // memory must be performed asynchronously, or we block the caller.
     tmp.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(
           inputs[i].coalesce().to(at::DeviceType::CPU, /*non_blocking=*/true));
@@ -1389,7 +1393,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       streams[i].synchronize();
     }
 
@@ -1398,7 +1402,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(output, /*non_blocking=*/true);
       events[i].record(streams[i]);
@@ -1407,9 +1411,10 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1485,8 +1490,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false,
-        "ProcessGroupGloo::allreduce_coalesced: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allreduce_coalesced: " + msg);
   };
   assertNonEmpty(invalidArgument, tensors);
 
@@ -1611,7 +1615,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1619,7 +1623,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       streams[i].synchronize();
     }
 
@@ -1628,7 +1632,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -1637,9 +1641,10 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1767,15 +1772,15 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for(const auto j : c10::irange(outputs[i].size())) {
+      for (const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -1783,11 +1788,11 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       inputStreams[i].synchronize();
     }
 
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       outputStreams[i].synchronize();
     }
 
@@ -1796,9 +1801,9 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       guard.reset_stream(outputStreams[i]);
-      for(const auto j : c10::irange(outputs[i].size())) {
+      for (const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -1807,9 +1812,10 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -1843,7 +1849,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
         "requires input/output tensor lists to have the same length");
   }
 
-  for(const auto i : c10::irange(outputs.size())) {
+  for (const auto i : c10::irange(outputs.size())) {
     const auto expected = inputs.size() * getSize();
     const auto actual = outputs[i].size();
     if (actual != expected) {
@@ -1965,8 +1971,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false,
-        "ProcessGroupGloo::allgather_coalesced: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
   if (input_list.empty()) {
@@ -2020,8 +2025,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false,
-      "no support for _allgather_base in Gloo process group");
+  TORCH_CHECK(false, "no support for _allgather_base in Gloo process group");
 }
 
 namespace {
@@ -2069,7 +2073,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
     // Unflatten into output tensors on root process.
     if (context->rank == root) {
-      for(const auto i : c10::irange(outputs[0].size())) {
+      for (const auto i : c10::irange(outputs[0].size())) {
         outputs[0][i].copy_(flatOutputTensor[i]);
       }
     }
@@ -2100,15 +2104,15 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for(const auto j : c10::irange(outputs[i].size())) {
+      for (const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -2116,11 +2120,11 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       inputStreams[i].synchronize();
     }
 
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       outputStreams[i].synchronize();
     }
 
@@ -2129,9 +2133,9 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       guard.reset_stream(outputStreams[i]);
-      for(const auto j : c10::irange(outputs[i].size())) {
+      for (const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -2140,9 +2144,10 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -2286,10 +2291,10 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.resize(inputs.size());
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs[i].reserve(inputs[i].size());
-      for(const auto j : c10::irange(inputs[i].size())) {
+      for (const auto j : c10::irange(inputs[i].size())) {
         tmpInputs[i].push_back(
             pinnedLike(inputs[i][j]).copy_(inputs[i][j], true));
       }
@@ -2303,10 +2308,10 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void run() override {
     // Synchronize with copy operations.
-    for(const auto i : c10::irange(inputs.size())) {
+    for (const auto i : c10::irange(inputs.size())) {
       inputStreams[i].synchronize();
     }
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       outputStreams[i].synchronize();
     }
 
@@ -2315,7 +2320,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
     // Kick off copy back to the CUDA tensors.
     c10::OptionalStreamGuard guard;
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       guard.reset_stream(outputStreams[i]);
       outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
       outputEvents[i].record(outputStreams[i]);
@@ -2324,9 +2329,10 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
+    for (const auto i : c10::irange(outputs.size())) {
       c10::Device device = outputs[i].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
@@ -2519,7 +2525,8 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     c10::Device device = outputTensor.device();
-    outputEvents.front().block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+    outputEvents.front().block(
+        c10::impl::VirtualGuardImpl(device.type()).getStream(device));
   }
 
   at::Tensor cpuOutput;
@@ -2837,8 +2844,8 @@ void ProcessGroupGloo::monitoredBarrier(
   waitLoop(sendWorkMap);
 
   using namespace std::chrono;
-  C10_UNUSED auto elapsedTime = duration_cast<milliseconds>(
-      steady_clock::now() - startTime);
+  C10_UNUSED auto elapsedTime =
+      duration_cast<milliseconds>(steady_clock::now() - startTime);
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {

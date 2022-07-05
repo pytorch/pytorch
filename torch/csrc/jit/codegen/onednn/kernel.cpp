@@ -10,6 +10,7 @@ namespace fuser {
 namespace onednn {
 
 using namespace dnnl::graph;
+using data_type = dnnl::graph::logical_tensor::data_type;
 
 LlgaKernel::LlgaKernel(const Node* fusionNode)
     : fusionNode_(fusionNode),
@@ -147,15 +148,49 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
     auto opt = c10::TensorOptions(spec.aten_scalar_type()).device(device_);
 
     if (spec.reuses_input_tensor()) {
+#ifdef GRAPH_DEBUG_ENABLED
+      GRAPH_DEBUG("oneDNN Graph would perform inplace computation");
+#endif
       auto inputTensor = inputs[spec.get_input_tensor_index()];
+      auto dataType = spec.dtype();
+      if (C10_UNLIKELY(!useOpaqueLayout(i) && inputTensor.is_mkldnn())) {
+        // If the input tensor was between two partitions, it would've been
+        // wrapped with LlgaTensorImpl. But if it's being reused as the output
+        // tensor which is not between two partitions, then we'd have to re-wrap
+        // it with TensorImpl, as it'd be fed into a PyTorch op.
+#ifdef GRAPH_DEBUG_ENABLED
+        GRAPH_DEBUG("Rewrap tensor");
+#endif
+        auto llgaImpl =
+            static_cast<LlgaTensorImpl*>(inputTensor.unsafeGetTensorImpl());
+        switch (dataType) {
+          case data_type::f32:
+          case data_type::bf16:
+            inputTensor = LlgaTensorImpl::llga_to_aten_tensor(llgaImpl);
+            break;
+          case data_type::s32:
+          default:
+            TORCH_CHECK(
+                false, "Invalid data type ", static_cast<size_t>(dataType));
+        }
+      }
       outputs.push_back(inputTensor);
       runOutputs.push_back(
           {spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr()});
-    } else if (spec.is_opaque()) {
+    } else if (useOpaqueLayout(i)) {
+      // Wrap tensors between partitions with LlgaTensorImpl wrapper, so that we
+      // can bypass guard-check, as strides would be different than those
+      // expected.
+#ifdef GRAPH_DEBUG_ENABLED
+      GRAPH_DEBUG("Between two oneDNN Graph partitions");
+#endif
       auto tensor = empty_llga(spec, opt);
       outputs.push_back(tensor);
       runOutputs.push_back(llga_from_aten_tensor(tensor));
     } else {
+#ifdef GRAPH_DEBUG_ENABLED
+      GRAPH_DEBUG("Neither opaque to PyTorch nor inplace-computation");
+#endif
       auto tensor = at::empty_strided(spec.sizes(), spec.strides(), opt);
       outputs.push_back(tensor);
       runOutputs.push_back(
@@ -216,7 +251,7 @@ void LlgaKernel::run(Stack& stack) {
 
   // Even in case of concurrent threads, the kernel would be initialized once.
   // TODO: Try not using an atomic lock
-  std::call_once(
+  c10::call_once(
       initialized_flag,
       [&](const TensorArgs& inputs) {
         GRAPH_DEBUG("Initializing input logical tensors");

@@ -1,5 +1,4 @@
 import sys
-import collections.abc
 import copy
 from dataclasses import dataclass
 from typing import Callable, Any, Type
@@ -19,15 +18,16 @@ from torch.distributed.algorithms.join import (
     Joinable,
     JoinHook,
 )
-from torch.distributed.utils import (
-    _verify_param_shape_across_processes,
-    _sync_params_and_buffers
-)
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():
+    from torch.distributed.utils import (
+        _verify_param_shape_across_processes,
+        _sync_module_states,
+        _to_kwargs,
+    )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
@@ -36,10 +36,10 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
-from ._functions import _get_stream
 from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
-from .scatter_gather import gather, is_namedtuple, scatter_kwargs
+from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
+__all__ = ['DistributedDataParallel']
 
 logger = logging.getLogger(__name__)
 
@@ -646,7 +646,7 @@ class DistributedDataParallel(Module, Joinable):
         # Verify model equivalence.
         _verify_param_shape_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
-        _sync_params_and_buffers(
+        _sync_module_states(
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
@@ -961,7 +961,12 @@ class DistributedDataParallel(Module, Joinable):
         module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
 
         if self.device_ids:
-            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+            inputs, kwargs = _to_kwargs(
+                inputs,
+                kwargs,
+                self.device_ids[0],
+                self.use_side_stream_for_tensor_copies
+            )
             return module_to_run(*inputs[0], **kwargs[0])
         else:
             return module_to_run(*inputs, **kwargs)
@@ -1066,71 +1071,11 @@ class DistributedDataParallel(Module, Joinable):
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def _recursive_to(self, inputs, target_gpu):
-        r"""
-        Recursively moves input to the target_gpu.
-        """
-
-        def to_map(obj):
-            if isinstance(obj, torch.Tensor):
-                if obj.device == torch.device("cuda", target_gpu):
-                    return (obj,)
-                if not self.use_side_stream_for_tensor_copies:
-                    return (obj.to(target_gpu),)
-                else:
-                    # Perform CPU -> GPU copies in a background stream. This code is
-                    # motivated from similar logic in torch/nn/parallel/_functions.py
-                    stream = _get_stream(target_gpu)
-                    with torch.cuda.stream(stream):
-                        output = obj.to(target_gpu)
-                    # synchronize with the copy stream
-                    with torch.cuda.device(target_gpu):
-                        current_stream = torch.cuda.current_stream()
-                        # Sync the current stream with the copy stream
-                        current_stream.wait_stream(stream)
-                        # Ensure tensor memory is not reused until work on
-                        # main stream is complete
-                        output.record_stream(current_stream)
-                    return (output,)
-            if is_namedtuple(obj):
-                return [type(obj)(*args) for args in zip(*map(to_map, obj))]
-            if isinstance(obj, tuple) and len(obj) > 0:
-                return list(zip(*map(to_map, obj)))
-            if isinstance(obj, str):
-                # Needs to be checked, otherwise it's taken as a sequence infinitely.
-                # This is because the elements of a string are also strings, and so on.
-                return [obj]
-            if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
-                try:
-                    return [type(obj)(i) for i in zip(*map(to_map, obj))]
-                except TypeError:
-                    # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                    return [list(i) for i in zip(*map(to_map, obj))]
-            if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
-                try:
-                    return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
-                except TypeError:
-                    # The mapping type may not support `__init__(iterable)`.
-                    return [dict(i) for i in zip(*map(to_map, obj.items()))]
-            return [obj]
-
-        # Avoid reference cycle
-        try:
-            res = to_map(inputs)
-        finally:
-            to_map = None
-        return res
-
     def to_kwargs(self, inputs, kwargs, device_id):
-        inputs = self._recursive_to(inputs, device_id) if inputs else []
-        kwargs = self._recursive_to(kwargs, device_id) if kwargs else []
-        if len(inputs) < len(kwargs):
-            inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
-        elif len(kwargs) < len(inputs):
-            kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
-        inputs = tuple(inputs)
-        kwargs = tuple(kwargs)
-        return inputs, kwargs
+        # Kept for BC
+        return _to_kwargs(
+            inputs, kwargs, device_id, self.use_side_stream_for_tensor_copies
+        )
 
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
@@ -1170,7 +1115,7 @@ class DistributedDataParallel(Module, Joinable):
         self._authoritative_rank = self._find_common_rank(
             self._distributed_rank, is_last_joiner
         )
-        _sync_params_and_buffers(
+        _sync_module_states(
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,

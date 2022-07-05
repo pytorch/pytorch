@@ -474,6 +474,42 @@ class TestFX(JitTestCase):
         x = torch.randn(5)
         torch.testing.assert_close(traced(x), f(x))
 
+    def test_trace_multiple_funcs(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+            def minus_forward(self, x, y):
+                return x - y
+
+            def multiply_forward(self, x, y):
+                return x * y
+
+        f = Foo()
+        x, y = torch.randn(5), torch.randn(5)
+
+        print(torch.__version__)
+
+        tracer = Tracer()
+        torch.testing.assert_close(GraphModule(f, tracer.trace(f))(x, y), f(x, y))
+
+        tracer.traced_func_name = "minus_forward"
+        torch.testing.assert_close(
+            GraphModule(f, tracer.trace(f))(x, y),
+            f.minus_forward(x, y),
+        )
+
+        tracer.traced_func_name = "multiply_forward"
+        torch.testing.assert_close(
+            GraphModule(f, tracer.trace(f))(x, y),
+            f.multiply_forward(x, y),
+        )
+
+        tracer.traced_func_name = "add_forward"
+        with self.assertRaisesRegex(AssertionError, "doesn't exist in"):
+            tracer.trace(f)
+
+
     def test_graph_unique_names(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -3860,6 +3896,7 @@ class TestFunctionalTracing(JitTestCase):
         "cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
+        "dropout1d": CONTROL_FLOW,
         "dropout2d": CONTROL_FLOW,
         "dropout3d": CONTROL_FLOW,
         "elu": CONTROL_FLOW,
@@ -3908,8 +3945,6 @@ class TestFunctionalTracing(JitTestCase):
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
-
-        "normalize" : MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation

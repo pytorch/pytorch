@@ -7,9 +7,7 @@ from textwrap import dedent
 import torch
 from torch import nn
 from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import (
-    sample_inputs_cat_concat,
-)
+from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 from typing import List, Any
@@ -277,7 +275,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             nn_inps = (
                 (make_arg((40,), 0, 9), torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0)),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 20, sparse=True)),
-                (make_arg(()), torch.nn.Embedding(0, 0, sparse=True)),
+                (make_arg((0,)), torch.nn.Embedding(0, 0, sparse=True)),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 0, sparse=True)),
                 (make_arg((4,), 0, 21), torch.nn.Embedding(22, 5, max_norm=1.0)),
                 (make_arg((2,), 0, 1), torch.nn.Embedding.from_pretrained(torch.arange(6.).view(2, 3), max_norm=2.,
@@ -327,6 +325,43 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inps[1].setType(inps[1].type().with_sizes(args[0].size()))
             inps[2].setType(inps[2].type().with_sizes(args[1].size()))
             self.checkShapeAnalysis(out_size, mod.graph, assert_propagation=True)
+
+    def assert_shape_equal_scripted(self, script_fn, given_ins):
+        expected_res = script_fn(*given_ins)
+        g = script_fn.graph
+        graph_ins = list(g.inputs())
+        self.assertEqual(len(given_ins), len(graph_ins))
+        for inp, graph_in in zip(given_ins, graph_ins):
+            graph_in.setType(graph_in.type().with_sizes(inp.size()))
+
+        out_sizes = [out.size() for out in expected_res]
+        self.checkShapeAnalysis(out_sizes, g, assert_propagation=True)
+
+    def test_convolution_backward(self):
+        # No opinfos for ops that are not part of the Python API
+        # Also, as the return shapes are the input, weight, and bias shape, there is no point
+        # in a really complicated test
+
+        input = torch.randn((16, 16, 8, 8), dtype=torch.float32, device="cpu", requires_grad=True)
+        weight = torch.randn((8, 4, 3, 3), dtype=torch.float32, device="cpu", requires_grad=True)
+        out_grad = torch.randn((16, 8, 8, 8), dtype=torch.float32, device="cpu")
+
+
+        @torch.jit.script
+        def conv_bwd(input, weight, grad):
+            bias_sizes = [8, ]
+            args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
+
+        self.assert_shape_equal_scripted(conv_bwd, (input, weight, out_grad))
+
+        @torch.jit.script
+        def conv_bwd_2(input, weight, grad):
+            bias_sizes = None
+            args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
+            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
+        self.assert_shape_equal_scripted(conv_bwd_2, (input, weight, out_grad))
+
 
     def test_returning_input_symbolic_shapes(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))

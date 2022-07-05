@@ -346,6 +346,32 @@ def gen_pyi(
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     unsorted_function_hints: Dict[str, List[str]] = collections.defaultdict(list)
+
+    for n, n1, n2 in [
+        ("csr", "crow", "col"),
+        ("csc", "ccol", "row"),
+        ("bsr", "crow", "col"),
+        ("bsc", "ccol", "row"),
+    ]:
+        unsorted_function_hints.update(
+            {
+                f"sparse_{n}_tensor": [
+                    f"def sparse_{n}_tensor({n1}_indices: Union[Tensor, List],"
+                    f"{n2}_indices: Union[Tensor, List],"
+                    " values: Union[Tensor, List], size: Optional[_size]=None,"
+                    " *, dtype: Optional[_dtype]=None,"
+                    " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
+                ],
+                f"_sparse_{n}_tensor_unsafe": [
+                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
+                    f"{n2}_indices: Union[Tensor, List],"
+                    " values: Union[Tensor, List], size: List[int],"
+                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
+                    " requires_grad: bool = False) -> Tensor: ..."
+                ],
+            }
+        )
+
     unsorted_function_hints.update(
         {
             "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
@@ -383,24 +409,28 @@ def gen_pyi(
                 " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
                 " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
             ],
-            "sparse_csr_tensor": [
-                "def sparse_csr_tensor(crow_indices: Union[Tensor, List],"
-                "col_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: Optional[_size]=None,"
-                " *, dtype: Optional[_dtype]=None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
-            ],
             "_sparse_coo_tensor_unsafe": [
                 "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
                 " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
-            "_sparse_csr_tensor_unsafe": [
-                "def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],"
-                "col_indices: Union[Tensor, List],"
+            "sparse_compressed_tensor": [
+                "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
+                "plain_indices: Union[Tensor, List],"
+                " values: Union[Tensor, List], size: Optional[_size]=None,"
+                " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
+                " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
+            ],
+            "_sparse_compressed_tensor_unsafe": [
+                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
+                "plain_indices: Union[Tensor, List],"
                 " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
+                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
+                " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
+            ],
+            "_is_functional_tensor": [
+                "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
             "range": [
                 "def range(start: Number, end: Number,"
@@ -587,7 +617,8 @@ def gen_pyi(
             ],
             "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
             "_make_subclass": [
-                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False) -> Tensor: ..."
+                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
+                " dispatch_device: _bool=False) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
@@ -611,7 +642,7 @@ def gen_pyi(
             "cuda": [
                 "def cuda(self, device: Optional[Union[_device, _int, str]]=None, non_blocking: _bool=False) -> Tensor: ..."
             ],
-            "numpy": ["def numpy(self) -> Any: ..."],
+            "numpy": ["def numpy(self, *, force: _bool=False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
@@ -641,6 +672,7 @@ def gen_pyi(
             "is_sparse_csr": ["is_sparse_csr: _bool"],
             "is_quantized": ["is_quantized: _bool"],
             "is_meta": ["is_meta: _bool"],
+            "is_mps": ["is_mps: _bool"],
             "is_ort": ["is_ort: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
@@ -759,33 +791,7 @@ def gen_pyi(
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # TODO: These are deprecated, maybe we shouldn't type hint them
-    legacy_storage_base_hints = []
-    dt = (
-        "Double",
-        "Float",
-        "Long",
-        "Int",
-        "Short",
-        "Char",
-        "Byte",
-        "Bool",
-        "Half",
-        "BFloat16",
-        "ComplexDouble",
-        "ComplexFloat",
-        "QUInt8",
-        "QInt8",
-        "QInt32",
-        "QUInt4x2",
-        "QUInt2x4",
-    )
-    for c in dt:
-        legacy_storage_base_hints.append("class {}StorageBase(object): ...".format(c))
-    for c in dt:
-        legacy_storage_base_hints.append(
-            "class Cuda{}StorageBase(object): ...".format(c)
-        )
+    legacy_storage_base_hints = ["class StorageBase(object): ..."]
 
     legacy_class_hints = []
     for c in (

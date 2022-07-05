@@ -29,40 +29,19 @@ LlgaTensorImpl::LlgaTensorImpl(
           c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
           data_type),
       desc_(desc) {
-  sizes_and_strides_.set_sizes(desc.sizes());
+  set_sizes_and_strides(desc.sizes(), desc.strides());
   refresh_numel();
 }
 
-// The following are publically exposed as methods of Tensor
-c10::IntArrayRef LlgaTensorImpl::strides() const {
-  TORCH_CHECK(false, "Cannot get strides of LlgaTensorImpl");
-}
-int64_t LlgaTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "Cannot get strides of LlgaTensorImpl");
-}
-bool LlgaTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  TORCH_CHECK(false, "Cannot get query is_contiguous on LlgaTensorImpl");
-}
-const at::Storage& LlgaTensorImpl::storage() const {
-  TORCH_CHECK(false, "Cannot access the storage() of LlgaTensorImpl");
-}
-int64_t LlgaTensorImpl::storage_offset() const {
-  TORCH_CHECK(false, "Cannot access the storage_offset() of LlgaTensorImpl");
-}
-
-// The following are some internal inherited methods that we do not support.
-// They should never get called.
-void LlgaTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  TORCH_INTERNAL_ASSERT(false, "Cannot set_size for LlgaTensorImpl");
-}
-void LlgaTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_INTERNAL_ASSERT(false, "Cannot set_stride for LlgaTensorImpl");
-}
-void LlgaTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_INTERNAL_ASSERT(false, "Cannot set_storage_offset for LlgaTensorImpl");
-}
-bool LlgaTensorImpl::has_storage() const {
-  return true;
+at::Tensor LlgaTensorImpl::llga_to_aten_tensor(LlgaTensorImpl* llgaImpl) {
+  auto aten_tensor = at::detail::make_tensor<TensorImpl>(
+      std::move(llgaImpl->storage_),
+      c10::DispatchKeySet(c10::DispatchKey::CPU),
+      llgaImpl->data_type_);
+  auto impl = aten_tensor.unsafeGetTensorImpl();
+  impl->set_storage_offset(llgaImpl->storage_offset_);
+  impl->set_sizes_and_strides(llgaImpl->sizes(), llgaImpl->strides());
+  return aten_tensor;
 }
 
 at::Tensor empty_llga(
