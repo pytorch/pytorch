@@ -125,3 +125,9 @@ class _remote_device(object):
             return True
 
         return False
+
+
+    def __hash__(self):
+        return hash(self._worker_name) ^ \
+            hash(self._device) ^ \
+            hash(self._rank)

@@ -137,8 +137,8 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
         hstart += dilation_h;
       while(wstart < 0)
         wstart += dilation_w;
-      for (int ih = hstart; ih < hend; ih++) {
-        for (int iw = wstart; iw < wend; iw++) {
+      for (int ih = hstart; ih < hend; ih += dilation_h) {
+        for (int iw = wstart; iw < wend; iw += dilation_w) {
           int cached_index = threadIdx.x;
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {

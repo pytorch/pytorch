@@ -40,7 +40,7 @@ def argumenttype_type(
     mutable: bool,
     binds: ArgName,
     remove_non_owning_ref_types: bool = False,
-    structured_type_override: bool
+    structured_type_override: bool,
 ) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
@@ -60,7 +60,7 @@ def argument_type(
     *,
     binds: ArgName,
     remove_non_owning_ref_types: bool = False,
-    structured_type_override: bool
+    structured_type_override: bool,
 ) -> NamedCType:
     return argumenttype_type(
         a.type,
@@ -103,7 +103,7 @@ def argument(
     a: Argument,
     *,
     remove_non_owning_ref_types: bool = False,
-    structured_type_override: bool
+    structured_type_override: bool,
 ) -> Binding:
     return Binding(
         nctype=argument_type(

@@ -78,6 +78,14 @@ torch.backends.cudnn
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
 
+torch.backends.mps
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mps
+
+.. autofunction::  torch.backends.mps.is_available
+
+.. autofunction::  torch.backends.mps.is_built
+
 
 torch.backends.mkl
 ^^^^^^^^^^^^^^^^^^

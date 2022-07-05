@@ -8,6 +8,7 @@ from torch.distributed._shard.partial_tensor import (
     _PartialTensor,
 )
 from torch.distributed._shard.sharding_spec import (
+    ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardMetadata,
 )
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
+    TEST_GPU_NUM
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     _chunk_sharding_specs_list_for_test,
@@ -37,18 +39,18 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestPartialTensorReshard(ShardedTensorTestBase):
     def _run_partial_tensor_n_reshard(
-        self, reshard_spec, input_size, world_size, reduce_op, dtype=torch.float
+        self, reshard_spec, input_size, world_size, reduce_op, dtype=torch.float, pg=None
     ):
         results_compare = []
         local_result = []
-        pg = dist.distributed_c10d._get_default_group()
+        pg = pg if pg is not None else dist.distributed_c10d._get_default_group()
         for rank in range(pg.size()):
             torch.manual_seed(rank)
             results = []
             for _ in range(world_size):
                 tensor = torch.rand(*input_size, dtype=dtype).cuda(self.rank)
                 results.append(tensor)
-                if self.rank == rank:
+                if self.rank % pg.size() == rank:
                     local_result.append(tensor.clone().detach())
             results_compare.append(torch.cat(results))
         parital_tensor = _PartialTensor(
@@ -63,14 +65,32 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             results_compare = torch.max(results_compare, dim=0).values
         rank_idx = None
         for idx, placement in enumerate(reshard_spec.placements):
-            if placement.rank() == self.rank:
+            if placement.rank() == self.rank % pg.size():
                 rank_idx = idx
         local_result_compare = results_compare.chunk(pg.size())[rank_idx]
         self.assertEqual(1, len(local_shards))
         self.assertEqual(local_shards[0].tensor, local_result_compare)
 
+    def _reshard_spec_for_subgroup(self, rank):
+        if rank in [0, 1]:
+            return ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                ],
+            )
+        else:
+            return ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:2",
+                    "rank:1/cuda:3",
+                ],
+            )
+
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_partial_tensor_reshard(self):
         specs = _chunk_sharding_specs_list_for_test([0], seed=7)
@@ -79,9 +99,14 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
         self._run_partial_tensor_n_reshard(spec, [12, 22], 4, dist.ReduceOp.MAX)
         self._run_partial_tensor_n_reshard(spec, [13, 21], 3, dist.ReduceOp.SUM)
         self._run_partial_tensor_n_reshard(spec, [17, 21], 2, dist.ReduceOp.MAX)
+        sub_pgs = [dist.new_group([0, 1]), dist.new_group([2, 3])]
+        pg = sub_pgs[self.rank // 2]
+        spec = self._reshard_spec_for_subgroup(self.rank)
+        self._run_partial_tensor_n_reshard(spec, [12, 22], 4, dist.ReduceOp.MAX, pg=pg)
+        self._run_partial_tensor_n_reshard(spec, [13, 22], 3, dist.ReduceOp.SUM, pg=pg)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_partial_tensor_reshard_errors(self):
         enumerable_sharding_spec = EnumerableShardingSpec(
@@ -118,6 +143,55 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             self._run_partial_tensor_n_reshard(
                 spec, [12, 22], 4, dist.ReduceOp.MAX, dtype=torch.cfloat
             )
+
+class TestPartialTensorOps(ShardedTensorTestBase):
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_transpose(self):
+        partial_tensor = _PartialTensor(torch.rand(5, 10))
+        partial_tensor = partial_tensor.transpose(0, 1)
+        self.assertEqual(partial_tensor.size(), torch.Size((10, 5)))
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_cat(self):
+        t1 = torch.rand(5, 10)
+        t2 = torch.rand(3, 10)
+        t3 = torch.rand(4, 10)
+        partial_tensors = [_PartialTensor(t1), _PartialTensor(t2), _PartialTensor(t3)]
+        partial_concat = torch.cat(partial_tensors)
+        local_concat = torch.cat([t1, t2, t3])
+        self.assertEqual(local_concat.size(), partial_concat.size())
+
+        # Test dim kwarg
+        t1 = torch.rand(5, 10)
+        t2 = torch.rand(5, 12)
+        t3 = torch.rand(5, 11)
+        partial_tensors = [_PartialTensor(t1), _PartialTensor(t2), _PartialTensor(t3)]
+        partial_concat = torch.cat(partial_tensors, dim=1)
+        local_concat = torch.cat([t1, t2, t3], dim=1)
+        self.assertEqual(local_concat.size(), partial_concat.size())
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_cat_errors(self):
+        with self.assertRaisesRegex(
+            RuntimeError, 'All inputs need to be an instance of _PartialTensor'
+        ):
+            torch.cat([_PartialTensor(torch.rand(10)), torch.rand(10)])
+
+        with self.assertRaisesRegex(
+            RuntimeError, 'reduce_ops need to be the same'
+        ):
+            torch.cat([_PartialTensor(torch.rand(10)), _PartialTensor(torch.rand(10), reduce_op=dist.ReduceOp.MAX)])
+
+        with self.assertRaisesRegex(
+            RuntimeError, '"out" kwarg is not supported'
+        ):
+            torch.cat([_PartialTensor(torch.rand(10)), _PartialTensor(torch.rand(10))], out=torch.rand(10))
 
 
 if __name__ == "__main__":

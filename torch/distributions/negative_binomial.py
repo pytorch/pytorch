@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
+__all__ = ['NegativeBinomial']
 
 class NegativeBinomial(Distribution):
     r"""
@@ -60,6 +61,10 @@ class NegativeBinomial(Distribution):
         return self.total_count * torch.exp(self.logits)
 
     @property
+    def mode(self):
+        return ((self.total_count - 1) * self.logits.exp()).floor().clamp(min=0.)
+
+    @property
     def variance(self):
         return self.mean / torch.sigmoid(-self.logits)
 
@@ -96,5 +101,6 @@ class NegativeBinomial(Distribution):
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
+        log_normalization[self.total_count + value == 0.] = 0.
 
         return log_unnormalized_prob - log_normalization

@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Set, List
+from typing import List, Set
 
 
 class DiGraph:

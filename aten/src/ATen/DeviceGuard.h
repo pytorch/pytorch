@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/core/DeviceGuard.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/core/IListRef.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h> // TensorList whyyyyy
 
 namespace at {
@@ -23,7 +23,7 @@ inline c10::optional<Device> device_of(const Tensor& t) {
   }
 }
 
-inline optional<Device> device_of(const optional<Tensor>& t) {
+inline c10::optional<Device> device_of(const c10::optional<Tensor>& t) {
   return t.has_value() ? device_of(t.value()) : nullopt;
 }
 

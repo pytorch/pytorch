@@ -1,14 +1,13 @@
 # Owner(s): ["module: onnx"]
-import torch
 import onnxruntime
-import unittest
-from test_pytorch_onnx_onnxruntime import run_ort, ort_compare_with_pytorch
-from torch._C import parse_ir
 
-def _jit_graph_to_onnx_model(
-        graph,
-        operator_export_type,
-        opset_version):
+import torch
+from torch._C import parse_ir
+from torch.onnx import verification
+from test_pytorch_common import TestCase, run_tests
+
+
+def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     r"""
     This function exports torch::jit::Graph object
     to serialized ONNX ModelProto.
@@ -19,16 +18,27 @@ def _jit_graph_to_onnx_model(
     """
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
     from torch.onnx.utils import _optimize_graph
+
     # Shape inference is required because some ops' symbolic functions
     # generate sub-graphs based on inputs' types.
     _set_onnx_shape_inference(True)
     _set_opset_version(opset_version)
     graph = _optimize_graph(graph, operator_export_type, params_dict={})
     proto, _, _, _ = graph._export_onnx(
-        {}, opset_version, {}, False,
-        operator_export_type, False, False,
-        {}, True, "", {})
+        {},
+        opset_version,
+        {},
+        False,
+        operator_export_type,
+        False,
+        False,
+        {},
+        True,
+        "",
+        {},
+    )
     return proto
+
 
 class _TestJITIRToONNX:
     """Abstract base class for test cases.
@@ -37,6 +47,7 @@ class _TestJITIRToONNX:
     don't run it directly. unitest.TestCase is mixed in as another base class when
     creating concrete sub-types. See MakeTestCase().
     """
+
     opset_version = -1  # Sub-classes must override
     ort_providers = ["CPUExecutionProvider"]
 
@@ -45,13 +56,16 @@ class _TestJITIRToONNX:
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
         onnx_proto = _jit_graph_to_onnx_model(
-            graph,
-            torch.onnx.OperatorExportTypes.ONNX,
-            self.opset_version)
-        ort_sess = onnxruntime.InferenceSession(onnx_proto, providers=self.ort_providers)
-        ort_outs = run_ort(ort_sess, example_inputs)
+            graph, torch.onnx.OperatorExportTypes.ONNX, self.opset_version
+        )
+        ort_sess = onnxruntime.InferenceSession(
+            onnx_proto, providers=self.ort_providers
+        )
+        ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
+        verification._compare_ort_pytorch_outputs(
+            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+        )
 
     def test_example_ir(self):
         graph_ir = """
@@ -68,13 +82,14 @@ class _TestJITIRToONNX:
 
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
-    return type(str(name),
-                (unittest.TestCase,),
-                dict(_TestJITIRToONNX.__dict__,
-                     opset_version=opset_version))
+    return type(
+        str(name),
+        (TestCase,),
+        dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
+    )
 
 
 TestJITIRToONNX_opset14 = MakeTestCase(14)
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

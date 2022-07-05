@@ -50,7 +50,9 @@ Tensor NestedTensor_from_padded_tensor_cpu(
     const Tensor& padded,
     const NestedTensorImpl& nt);
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim);
+void NestedTensor_softmax_dropout(const Tensor& query, Tensor& attn_scores);
+
+Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length);
 
 template <typename T>
 void remove_padding_kernelLauncher(
@@ -81,6 +83,7 @@ void add_padding_kernelLauncher(
     const int* input_sizes,
     int input_dim,
     const std::vector<int64_t>& output_sizes,
-    const int batch_size);
+    const int batch_size,
+    const int output_batch_size);
 } // namespace native
 } // namespace at

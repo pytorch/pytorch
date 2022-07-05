@@ -19,7 +19,7 @@ namespace {
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
 // * Raises an error for half-precision dtypes to allow future support
-ScalarType promote_type_fft(ScalarType type, bool require_complex) {
+ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
     return type;
   }
@@ -28,7 +28,11 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
+    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  } else {
+    TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  }
 
   if (!require_complex) {
     return type;
@@ -36,6 +40,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
 
   // Promote to complex
   switch (type) {
+  case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
@@ -45,7 +50,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
 // Promote a tensor's dtype according to promote_type_fft
 Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
   auto cur_type = t.scalar_type();
-  auto new_type = promote_type_fft(cur_type, require_complex);
+  auto new_type = promote_type_fft(cur_type, require_complex, t.device());
   return (cur_type == new_type) ? t : t.to(new_type);
 }
 

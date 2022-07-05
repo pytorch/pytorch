@@ -102,7 +102,7 @@ def get_S3_object_from_bucket(bucket_name: str, object: str) -> Any:
 
 def case_status(case: Version1Case) -> Status:
     for k in {"errored", "failed", "skipped"}:
-        if case[k]:  # type: ignore[misc]
+        if case[k]:  # type: ignore[literal-required]
             return cast(Status, k)
     return None
 
@@ -240,17 +240,4 @@ def get_previous_reports_for_branch(
                     f"WARNING: Multiple summary objects found for {commit}/{job_name}"
                 )
         commit_index += 1
-    return reports
-
-
-def get_previous_reports_for_pr(
-    pr: str, ci_job_prefix: str = ""
-) -> List[Tuple[Report, str]]:
-    reports: List[Tuple[Report, str]] = []
-    logger.info(f"Grabbing reports from PR: {[pr]}")
-    summaries = get_test_stats_summaries_for_pr(pr=pr, job_prefix=ci_job_prefix)
-    for _, summary in summaries.items():
-        reports.extend(summary)
-    # sort by summary_timestamp
-    reports.sort(reverse=True, key=lambda s: s[1])
     return reports

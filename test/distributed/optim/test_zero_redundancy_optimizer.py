@@ -1173,8 +1173,15 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         layers are assigned to different devices."""
         if self.rank >= 2:
             return
-        self.dist_init(self.rank, world_size=2)
-        self._test_zero_model_parallel(parameters_as_bucket_view)
+        # Disable DDP + ReplicatedTensor when `parameter_as_bucket_view=True`
+        # since then ZeroRedundancyOptimizer modifies the model parameters in
+        # place.
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
+        context = _ddp_replicated_tensor(False) if parameters_as_bucket_view \
+            else suppress()
+        with context:
+            self.dist_init(self.rank, world_size=2)
+            self._test_zero_model_parallel(parameters_as_bucket_view)
 
     def _test_ddp_zero_overlap(
         self,

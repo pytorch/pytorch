@@ -422,7 +422,9 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body.append(format_prerecord_trace(f))
     trace_body.append(declare_returned_variables(f))
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+    dispatcher_sig = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    )
     dispatcher_exprs = dispatcher_sig.exprs()
 
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -432,7 +434,8 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
 
     assign_return_values = (
         f"{tie_return_values(f)} = "
-        if f.func.kind() == SchemaKind.functional and f.func.returns
+        if f.func.kind() in [SchemaKind.functional, SchemaKind.mutable]
+        and f.func.returns
         else ""
     )
 
@@ -476,17 +479,14 @@ def method_definition(f: NativeFunction) -> str:
         return cpp.argument_type(
             a,
             binds="__placeholder__",
-            structured_type_override=f.part_of_structured_group
+            structured_type_override=f.part_of_structured_group,
         ).cpp_type()
 
     formals = ", ".join(
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
-        + [
-            f'{argument_cpp_type(a)} {a.name}'
-            for a in f.func.schema_order_arguments()
-        ]
+        + [f"{argument_cpp_type(a)} {a.name}" for a in f.func.schema_order_arguments()]
     )
 
     return METHOD_DEFINITION.substitute(

@@ -4,7 +4,7 @@
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
  * cd ~/pytorch && python
- * tools/codegen/shape_functions/gen_jit_shape_functions.py
+ * torchgen/shape_functions/gen_jit_shape_functions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -1714,6 +1714,21 @@ def transpose(self: List[int],
   return output_size
 
 )=====")
++ std::string(R"=====(def conv_backwards(grad_output: List[int],
+    input: List[int],
+    weight: List[int],
+    biases: Optional[List[int]]) -> Tuple[List[int], List[int], List[int]]:
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  out0 = annotate(List[int], [])
+  for _2 in range(torch.len(weight)):
+    elem0 = weight[_2]
+    _3 = torch.append(out0, elem0)
+  return (out, out0, [grad_output[1]])
+
+)=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
     end_dim: int) -> List[int]:
@@ -2332,6 +2347,186 @@ def transpose(self: List[int],
   return expandedSizes
 
 )=====")
++ std::string(R"=====(def argmax(self: List[int],
+    dim: Optional[int]=None,
+    keepdim: bool=False) -> List[int]:
+  if torch.__is__(dim, None):
+    _0 = annotate(List[int], [])
+  else:
+    dim0 = unchecked_cast(int, dim)
+    _1 = torch.len(self)
+    if torch.le(_1, 0):
+      dim_post_expr = 1
+    else:
+      dim_post_expr = _1
+    min = torch.neg(dim_post_expr)
+    max = torch.sub(dim_post_expr, 1)
+    if torch.lt(dim0, min):
+      _2 = True
+    else:
+      _2 = torch.gt(dim0, max)
+    if torch.__not__(_2):
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    if torch.lt(dim0, 0):
+      dim1 = torch.add(dim0, dim_post_expr)
+    else:
+      dim1 = dim0
+    out = annotate(List[int], [])
+    _3 = [9223372036854775807, torch.len(self)]
+    for i in range(ops.prim.min(_3)):
+      self_dim = self[i]
+      if torch.eq(i, dim1):
+        if keepdim:
+          _4 = torch.append(out, 1)
+        else:
+          pass
+      else:
+        _5 = torch.append(out, self_dim)
+    _0 = out
+  return _0
+
+def bmm(self: List[int],
+    mat2: List[int]) -> List[int]:
+  _0 = "AssertionError: bmm only supports 3D tensors"
+  _1 = "AssertionError: mismatching batch dimension"
+  _2 = "AssertionError: mismatching contracting dimension"
+  if torch.eq(torch.len(self), 3):
+    pass
+  else:
+    ops.prim.RaiseException(_0)
+  if torch.eq(torch.len(mat2), 3):
+    pass
+  else:
+    ops.prim.RaiseException(_0)
+  if torch.eq(self[0], mat2[0]):
+    pass
+  else:
+    ops.prim.RaiseException(_1)
+  if torch.eq(self[2], mat2[1]):
+    pass
+  else:
+    ops.prim.RaiseException(_2)
+  return [self[0], self[1], mat2[2]]
+
+def _shape_as_tensor(self: List[int]) -> List[int]:
+  return [torch.len(self)]
+
+)=====")
++ std::string(R"=====(def topk(self: List[int],
+    k: int,
+    dim: int=-1) -> Tuple[List[int], List[int]]:
+  _0 = "k ({}) is too big for dimension {} of size {}"
+  if torch.eq(torch.len(self), 0):
+    result = annotate(List[int], [])
+  else:
+    if torch.le(k, self[dim]):
+      pass
+    else:
+      _1 = torch.format(_0, k, dim, self[dim])
+      ops.prim.RaiseException(torch.add("AssertionError: ", _1))
+    result0 = annotate(List[int], [])
+    for _2 in range(torch.len(self)):
+      elem = self[_2]
+      _3 = torch.append(result0, elem)
+    _4 = torch._set_item(result0, dim, k)
+    result = result0
+  return (result, result)
+
+def nll_loss_forward(self: List[int],
+    target: List[int],
+    weight: Optional[List[int]],
+    reduction: int) -> Tuple[List[int], List[int]]:
+  self_dim = torch.len(self)
+  target_dim = torch.len(target)
+  if torch.lt(0, self_dim):
+    _0 = torch.le(self_dim, 2)
+  else:
+    _0 = False
+  if _0:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.le(target_dim, 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(self_dim, 1):
+    no_batch_dim = torch.eq(target_dim, 0)
+  else:
+    no_batch_dim = False
+  if no_batch_dim:
+    _1 = True
+  else:
+    _1 = torch.eq(self[0], target[0])
+  if _1:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  n_classes = self[-1]
+  if torch.__is__(weight, None):
+    _2 = True
+  else:
+    weight0 = unchecked_cast(List[int], weight)
+    if torch.eq(torch.len(weight0), 1):
+      _3 = torch.eq(weight0[0], n_classes)
+    else:
+      _3 = False
+    _2 = _3
+  if _2:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(reduction, 0):
+    _4 = torch.eq(self_dim, 2)
+  else:
+    _4 = False
+  if _4:
+    reduction_shape = [self[0]]
+  else:
+    reduction_shape = annotate(List[int], [])
+  _5 = (reduction_shape, annotate(List[int], []))
+  return _5
+
+)=====")
++ std::string(R"=====(def native_layer_norm(input: List[int],
+    normalized_shape: List[int]) -> Tuple[List[int], List[int], List[int]]:
+  reduction_shape = annotate(List[int], [])
+  num_unreduced_dimensions = torch.sub(torch.len(input), torch.len(normalized_shape))
+  if torch.ge(num_unreduced_dimensions, 0):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  for i in range(num_unreduced_dimensions):
+    _0 = torch.append(reduction_shape, input[i])
+  _1 = torch.__range_length(num_unreduced_dimensions, torch.len(input), 1)
+  for _2 in range(_1):
+    _3 = torch.append(reduction_shape, 1)
+  out = annotate(List[int], [])
+  for _4 in range(torch.len(input)):
+    elem = input[_4]
+    _5 = torch.append(out, elem)
+  _6 = (out, reduction_shape, reduction_shape)
+  return _6
+
+def native_batch_norm(input: List[int],
+    weight: Optional[List[int]],
+    bias: Optional[List[int]],
+    running_mean: Optional[List[int]],
+    running_var: Optional[List[int]],
+    training: bool) -> Tuple[List[int], List[int], List[int]]:
+  if training:
+    _size = [input[1]]
+  else:
+    _size = [0]
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  return (out, _size, _size)
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -2482,6 +2677,24 @@ def transpose(self: List[int],
     _6 = torch.append(out, elem)
   return out
 
+def nonzero_lower_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  return [0, torch.len(input)]
+
+def nonzero_upper_bound(input: List[int]) -> List[int]:
+  if torch.ge(torch.len(input), 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  numel = 1
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    numel = torch.mul(numel, elem)
+  return [numel, torch.len(input)]
+
 )=====")
 ;
 
@@ -2489,6 +2702,7 @@ def transpose(self: List[int],
 const std::string& GetSerializedShapeFunctions() {
   return shape_funcs;
 }
+
 
 const OperatorMap<std::string>& GetShapeFunctionMappings() {
  static const OperatorMap<std::string> shape_mappings {
@@ -2527,6 +2741,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
+    {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
@@ -2544,9 +2759,24 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", "unary"},
     {"aten::dequantize(Tensor self) -> Tensor", "unary"},
     {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
+    {"aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", "argmax"},
+    {"aten::bmm(Tensor self, Tensor mat2) -> Tensor", "bmm"},
+    {"aten::_shape_as_tensor(Tensor self) -> Tensor", "_shape_as_tensor"},
+    {"aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)", "topk"},
+    {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
+    {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
+    {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
+  };
+
+  return shape_mappings;
+}
+
+const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings() {
+ static const OperatorMap<std::pair<std::string, std::string>> shape_mappings {
+    {"aten::nonzero(Tensor self) -> (Tensor)", {"nonzero_lower_bound", "nonzero_upper_bound"}},
   };
 
   return shape_mappings;
