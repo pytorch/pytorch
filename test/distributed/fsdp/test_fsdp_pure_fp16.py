@@ -59,9 +59,7 @@ class TestPureFP16(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            full_params = get_full_params(model)
-            torch.cuda.synchronize()
-            return full_params
+            return get_full_params(model)
 
         return list(model.parameters())
 
