@@ -390,7 +390,9 @@ def translate_args_dispatcher_to_cpp(
                 output_bindings.append(binding)
         return output_bindings
 
-    disp_sig = DispatcherSignature.from_schema(f.func)
+    disp_sig = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    )
     cpp_sig = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
     ).signature
@@ -410,7 +412,9 @@ def generate_static_dispatch_backend_call(
     backend_index: BackendIndex,
     ns: str = "at",
 ) -> str:
-    name = DispatcherSignature.from_schema(f.func).name()
+    name = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    ).name()
     exprs = translate_args_dispatcher_to_cpp(f)
     return f"return {ns}::{backend_index.dispatch_key.lower()}::{name}({exprs});"
 
@@ -420,7 +424,9 @@ def generate_static_dispatch_fallback_call(
     backend_indices: List[BackendIndex],
     ns: str = "at",
 ) -> str:
-    name = DispatcherSignature.from_schema(f.func).name()
+    name = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    ).name()
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
@@ -455,7 +461,9 @@ def static_dispatch(
     elif len(keys) == 0:
         return generate_static_dispatch_fallback_call(f, backend_indices, namespace)
 
-    sig = DispatcherSignature.from_schema(f.func)
+    sig = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    )
     native_tensor_args = [
         a.name
         for a in sig.arguments()
