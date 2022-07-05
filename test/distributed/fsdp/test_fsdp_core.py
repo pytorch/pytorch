@@ -147,13 +147,13 @@ class TestParityWithDDP(FSDPTest):
     # @parametrize("norm_type", [2.0, None])
     @parametrize("norm_type", [None])
     def test_nested_all_wrapped_model(
-            self,
-            cpu_offload: CPUOffload,
-            backward_prefetch: Optional[BackwardPrefetch],
-            forward_prefetch: str,
-            sharding_strategy: Optional[ShardingStrategy],
-            norm_type: Optional[float],
-        ):
+        self,
+        cpu_offload: CPUOffload,
+        backward_prefetch: Optional[BackwardPrefetch],
+        forward_prefetch: str,
+        sharding_strategy: Optional[ShardingStrategy],
+        norm_type: Optional[float],
+    ):
         forward_prefetch = (forward_prefetch == "forward_prefetch")
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for cuda_init_mode in init_modes:
@@ -175,13 +175,13 @@ class TestParityWithDDP(FSDPTest):
     # @parametrize("norm_type", [2.0, None])
     @parametrize("norm_type", [None])
     def test_transformer_parameterized(
-            self,
-            cpu_offload: CPUOffload,
-            backward_prefetch: Optional[ShardingStrategy],
-            forward_prefetch: str,
-            sharding_strategy: Optional[ShardingStrategy],
-            norm_type: Optional[float],
-        ):
+        self,
+        cpu_offload: CPUOffload,
+        backward_prefetch: Optional[ShardingStrategy],
+        forward_prefetch: str,
+        sharding_strategy: Optional[ShardingStrategy],
+        norm_type: Optional[float],
+    ):
         forward_prefetch = (forward_prefetch == "forward_prefetch")
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for cuda_init_mode in init_modes:
@@ -265,13 +265,13 @@ class TestParityWithDDP(FSDPTest):
     # @parametrize("norm_type", [2.0, None])
     @parametrize("norm_type", [None])
     def test_mixture_of_experts(
-            self,
-            cpu_offload: CPUOffload,
-            backward_prefetch: Optional[BackwardPrefetch],
-            forward_prefetch: str,
-            sharding_strategy: Optional[ShardingStrategy],
-            norm_type: Optional[float],
-        ):
+        self,
+        cpu_offload: CPUOffload,
+        backward_prefetch: Optional[BackwardPrefetch],
+        forward_prefetch: str,
+        sharding_strategy: Optional[ShardingStrategy],
+        norm_type: Optional[float],
+    ):
         forward_prefetch = (forward_prefetch == "forward_prefetch")
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for cuda_init_mode in init_modes:

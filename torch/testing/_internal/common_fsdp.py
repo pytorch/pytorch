@@ -182,7 +182,6 @@ class DummyProcessGroup:
         dist_wait.get_future = get_future
         return dist_wait
 
-# TODO (awgu): this can be replaced with one NestedWrappedModel
 class DeterministicModel(torch.nn.Module):
     def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
         super().__init__()

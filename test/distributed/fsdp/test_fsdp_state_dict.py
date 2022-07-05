@@ -46,7 +46,6 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
     _assert_module_states,
     _get_state_dict,
-    _validate,
     _zero_model,
     get_full_params,
 )
