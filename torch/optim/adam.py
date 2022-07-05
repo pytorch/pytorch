@@ -117,9 +117,6 @@ class Adam(Optimizer):
             # under the hood of fused optimizer kernels.
             if not all(p.is_cuda for pg in self.param_groups for p in pg['params']):
                 raise RuntimeError("WIP FusedAdam requires all the params to be hosted on CUDA device")
-            # TODO(crcrpar): Give the compatibility with CUDA Graph.
-            # if capturable:
-            #     raise RuntimeError("WIP FusedAdam does not support CUDA Graph at the moment.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
