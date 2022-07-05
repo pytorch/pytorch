@@ -2195,7 +2195,7 @@ class BaseOperatorName:
             base = base[: -len(functional_suffix)]
             # This seems complicated and unnecessary, so banning dunder methods
             # for now on ops that have a functional + mutable variant (like native_batch_norm).
-            assert not dunder_method
+            assert not dunder_method and not inplace
         else:
             functional_overload = False
 

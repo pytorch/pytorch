@@ -2,6 +2,8 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/InferSize.h>
+#include <ATen/TensorUtils.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
@@ -16,6 +18,7 @@
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/_unsafe_view.h>
 #endif
 
 namespace {
@@ -215,6 +218,57 @@ at::Tensor _to_copy_functionalize(
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
+
+// Why is _unsafe_view special-cased here?
+// Basically just to satisfy autograd's debug asserts.
+// The situation:
+// - _unsafe_view's autograd kernel has debug asserts to confirm
+//   that the input and output alias storage.
+// - _unsafe_view's schema in native_functions.yaml
+//   does not contain alias annotations, so it advertises as non-aliasing.
+// - functionalization will then treat _unsafe_view like a non-aliasing op.
+//   Specifically, autograd will redispatch to functionalization's
+//   boxed fallback kernel, which creates a new FunctionalTensorWrapper output
+//   that does **not** alias storage with the input, tripping the assert.
+// The kernel written here just manually re-ifies the aliasing relationship.
+//
+// Another way to handle this would be to fix unsafe_view's alias annotations
+// in native_functions.yaml, but I think this would be a pessimization.
+// The idea with _unsafe_view is that you're guaranteed that the input
+// is a temporary, and don't actually have to worry about propagating
+// mutations between the input and output.
+at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::IntArrayRef size) {
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    at::AutoDispatchSkipFunctionalize guard;
+    return at::_unsafe_view(self, size);
+  }
+
+  auto self_ = at::functionalization::impl::from_functional_tensor(self);
+  at::Tensor tmp_output;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    tmp_output = at::_unsafe_view(self_, size);
+  }
+
+  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+    [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
+      return at::_unsafe_view(base, size);
+    },
+    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+      return at::_unsafe_view(mutated_view, base.sizes());
+    }
+  );
+
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
+  // See  Note [Propagating strides in the functionalization pass]
+  // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
+  auto inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
+  TORCH_INTERNAL_ASSERT(stride.has_value());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride.value());
+  return out;
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -223,4 +277,5 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("resize_", TORCH_FN(resize__functionalization));
   m.impl("lift", TORCH_FN(lift_functionalize));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
+  m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
 }

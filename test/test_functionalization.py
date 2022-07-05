@@ -203,7 +203,7 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper_functional.default($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper_functional.default($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")  # noqa: B950
 
     def test_as_strided(self):
         def f(x):
