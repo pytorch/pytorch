@@ -34,6 +34,7 @@
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/crow_indices_native.h>
+#include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
@@ -46,6 +47,7 @@
 #include <ATen/ops/sparse_csc_tensor_native.h>
 #include <ATen/ops/sparse_bsr_tensor_native.h>
 #include <ATen/ops/sparse_bsc_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/values_native.h>
 #endif
 
@@ -666,6 +668,14 @@ Tensor row_indices_sparse_csr(const Tensor& self) {
   return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
                                                    "row_indices",
                                                    [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
+}
+
+int64_t sparse_dim_sparse_csr(const SparseCsrTensor& self) {
+  return get_sparse_csr_impl(self)->sparse_dim();
+}
+
+int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
+  return get_sparse_csr_impl(self)->dense_dim();
 }
 
 bool _is_same_size_as_sparse_csr(

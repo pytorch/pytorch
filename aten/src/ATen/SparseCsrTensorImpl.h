@@ -57,6 +57,22 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     return col_indices_.size(-1);
   }
 
+  int64_t batch_dim() const {
+    return crow_indices_.dim() - 1;
+  }
+
+  int64_t block_dim() const {
+    return (layout_ == kSparseBsr || layout_ == kSparseBsc ? 2 : 0);
+  }
+
+  int64_t sparse_dim() const {
+    return 2;
+  }
+
+  int64_t dense_dim() const {
+    return values_.dim() - batch_dim() - block_dim() - 1;
+  }
+
  protected:
   IntArrayRef strides_custom() const override;
 
