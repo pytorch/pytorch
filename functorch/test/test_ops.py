@@ -591,8 +591,6 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('linalg.slogdet'),  # calls .item()
-        xfail('logdet'),  # calls .item()
         xfail('matrix_exp'),  # would benefit from narrow_scatter
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
@@ -762,7 +760,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
-        xfail('nn.functional.kl_div', ''),
+        skip('nn.functional.kl_div', ''),  # will pass when linux cpu binaries update
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
         xfail('linalg.lu_factor_ex', ''),
@@ -783,6 +781,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('linalg.eigh'),  # _linalg_eigh doesn't have batching rule
         xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
+        xfail('logdet'), # _linalg_slogdet doesn't have batching rule
+        xfail('linalg.slogdet'), # _linalg_slogdet doesn't have batching rule
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -881,7 +881,7 @@ class TestOperators(TestCase):
         xfail('linalg.tensorsolve'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-        xfail('nn.functional.kl_div', ''),
+        skip('nn.functional.kl_div', ''),  # will pass when linux cpu binaries update
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -1043,9 +1043,7 @@ class TestOperators(TestCase):
         xfail('cdist', ''),
         xfail('cholesky', ''),
         xfail('eig', ''),
-        xfail('linalg.slogdet', ''),
         xfail('logcumsumexp', ''),
-        xfail('logdet', ''),
         xfail('nn.functional.embedding_bag', ''),
         xfail('nn.functional.grid_sample', ''),
         xfail('nn.functional.hardsigmoid', ''),
@@ -1057,7 +1055,7 @@ class TestOperators(TestCase):
         xfail('renorm', ''),
         xfail('symeig', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-        xfail('nn.functional.kl_div', ''),
+        skip('nn.functional.kl_div', ''),  # will pass when linux cpu binaries update
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
