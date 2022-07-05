@@ -544,11 +544,11 @@ class TestOptim(TestCase):
 
     def test_fused_optimizers(self):
         optimizer_pairs_with_flags = [
-            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim._fused.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.Adam, optim._fused.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.Adam, optim._fused.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=True)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=False)),
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags)
 
