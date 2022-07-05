@@ -1,9 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import functools
 import sys
+from collections import OrderedDict
 from functools import partial
 from itertools import product
+from typing import Callable
 
 import torch
 import torch.cuda.nccl as nccl
@@ -86,40 +89,30 @@ if nccl_supports_bf16:
 # Buffer original dtype, which can differ from model params.
 _BUFFER_ORIG_DTYPE = torch.float64
 
-params = "mp_config,cpu_offload,backward_prefetch,forward_prefetch,full_precision_param_dtype,sharded_grad_scaler"
+params = "mp_config,cpu_offload,full_precision_param_dtype,enable_sharded_grad_scaler"
 cpu_offload_config = [
     CPUOffload(offload_params=True), CPUOffload(offload_params=False)
 ]
-backward_prefetch_config = [
-    BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
-]
-forward_prefetch_config = ["forward_prefetch", "no_forward_prefetch"]
 full_precision_param_dtype_config = [torch.float32, torch.float64]
-sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
+enable_sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
 
 configs = list(product(
     mp_configs,
     cpu_offload_config,
-    backward_prefetch_config,
-    forward_prefetch_config,
     full_precision_param_dtype_config,
-    sharded_grad_scaler,
+    enable_sharded_grad_scaler,
 ))
 
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
     str(CPUOffload(offload_params=False)): "offload_false",
-    str(BackwardPrefetch.BACKWARD_PRE): "backward_prefetch_pre",
-    str(BackwardPrefetch.BACKWARD_POST): "backward_prefetch_post",
-    "forward_prefetch": "forward_prefetch",
-    "no_forward_prefetch": "no_forward_prefetch",
     str(default_mp): "mp_fp16",
     str(mp_only_reduce): "mp_only_reduce",
     str(mp_only_param_and_buf): "mp_only_param_and_buf",
     str(mp_no_mixed_precision): "mp_no_mp",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
-    "enable_sharded_grad_scaler": "sharded_grad_scaler"
+    "enable_sharded_grad_scaler": "enable_sharded_grad_scaler"
 }
 
 if nccl_supports_bf16:
@@ -305,7 +298,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         forward_prefetch,
         full_precision_param_dtype,
         sharding_strategy,
-        sharded_grad_scaler,
+        enable_sharded_grad_scaler,
     ):
         torch.cuda.set_device(self.rank)
         fsdp_models = [
@@ -336,7 +329,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
-                scaler = ShardedGradScaler(enabled=sharded_grad_scaler)
+                scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
                 optim = torch.optim.Adam(model.parameters())
 
                 for _ in range(3):
@@ -442,10 +435,21 @@ class TestFSDPMixedPrecision(FSDPTest):
 
 
 class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
-
     @property
     def world_size(self):
         return 2
+
+    def _configure_subtests(self) -> Callable:
+        """Partially applies a subtest configuration that subtests prefetching
+        settings together."""
+        subtest_config = OrderedDict()
+        subtest_config["forward_prefetch"] = [True, False]
+        subtest_config["backward_prefetch"] = [
+            None,
+            BackwardPrefetch.BACKWARD_PRE,
+            BackwardPrefetch.BACKWARD_PRE,
+        ]
+        return functools.partial(self.run_subtests, subtest_config)
 
     @skip_if_lt_x_gpu(2)
     def test_mixed_precision_no_reshard_after_forward(self):
@@ -459,7 +463,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-            sharded_grad_scaler=False,
+            enable_sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -468,20 +472,17 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         self,
         mp_config,
         cpu_offload,
-        backward_prefetch,
-        forward_prefetch,
         full_precision_param_dtype,
-        sharded_grad_scaler,
+        enable_sharded_grad_scaler,
     ):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        self._run_test_mixed_precision_e2e(
-            mp_config,
-            cpu_offload,
-            backward_prefetch,
-            forward_prefetch,
-            full_precision_param_dtype,
-            ShardingStrategy.FULL_SHARD,
-            sharded_grad_scaler,
+        run_subtests = self._configure_subtests()
+        run_subtests(
+            self._run_test_mixed_precision_e2e,
+            mp_config=mp_config,
+            cpu_offload=cpu_offload,
+            full_precision_param_dtype=full_precision_param_dtype,
+            sharding_strategy=ShardingStrategy.FULL_SHARD,
+            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
         )
 
     def _test_mixed_precision_embedding_table(self, mp_config):
@@ -657,7 +658,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-            sharded_grad_scaler=False,
+            enable_sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -670,7 +671,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.FULL_SHARD,
-            sharded_grad_scaler=False,
+            enable_sharded_grad_scaler=False,
         )
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
