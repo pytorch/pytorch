@@ -2453,6 +2453,12 @@ c10::Layout concrete_layout_fn(
           .ptr(),
       "torch.ops.prim");
 
+  TORCH_CHECK(
+      THPLayout_Check(out.ptr()),
+      "layout returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected Layout");
+
   return toLayout(out.ptr());
 }
 
