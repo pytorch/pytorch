@@ -82,10 +82,7 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  auto has_half_dtype = v.scalar_type() == at::ScalarType::Half
-    || g.scalar_type() == at::ScalarType::Half;
-
-  bool can_use_fused = !has_half_dtype && ((dim == 0) || (dim == v.dim() - 1));
+  bool can_use_fused = (dim == 0) || (dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through

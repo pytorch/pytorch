@@ -296,6 +296,69 @@ class TestProfilerTree(TestCase):
             [memory]"""
         )
 
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            aten::add
+              [memory]
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+            aten::sub
+              [memory]
+            aten::pow
+              aten::result_type
+              aten::to
+              [memory]
+            aten::ones_like
+              aten::empty_like
+                aten::empty_strided
+                  [memory]
+              aten::fill_
+            autograd::engine::evaluate_function: PowBackward0
+              PowBackward0
+                aten::pow
+                  aten::result_type
+                  aten::to
+                  [memory]
+                  aten::copy_
+                aten::mul
+                  [memory]
+                  aten::mul
+                    aten::to
+                      aten::_to_copy
+                        aten::empty_strided
+                          [memory]
+                        aten::copy_
+                    [memory]
+                    [memory]
+                  [memory]
+                aten::mul
+                  [memory]
+                [memory]
+                [memory]
+              [memory]
+            autograd::engine::evaluate_function: SubBackward0
+              SubBackward0
+                aten::neg
+                  [memory]
+              [memory]
+            autograd::engine::evaluate_function: AddBackward0
+              AddBackward0
+            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+              torch::autograd::AccumulateGrad
+                aten::new_empty_strided
+                  aten::empty_strided
+                    [memory]
+                aten::copy_
+            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+              torch::autograd::AccumulateGrad
+                aten::detach
+                  detach
+            [memory]"""
+        )
+
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(torch.has_cuda, "CUDA invokes extra Python functions.")
     @ProfilerTree.test
@@ -310,7 +373,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(304): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(367): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -432,7 +495,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(428): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(491): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -449,7 +512,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(422): forward
+                test_profiler_tree.py(485): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -490,7 +553,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(422): forward
+                test_profiler_tree.py(485): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward

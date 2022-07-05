@@ -278,43 +278,6 @@ Examples::
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
 
-solve_ex = _add_docstr(_linalg.linalg_solve_ex, r"""
-linalg.solve_ex(A, B, *, left=True, check_errors=False, out=None) -> (Tensor, Tensor)
-
-A version of :func:`~solve` that does not perform error checks unless :attr:`check_errors`\ `= True`.
-It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
-
-""" + fr"""
-.. note:: {common_notes["sync_note_ex"]}
-
-.. warning:: {common_notes["experimental_warning"]}
-""" + r"""
-
-Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
-
-Keyword args:
-    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
-    check_errors (bool, optional): controls whether to check the content of ``infos`` and raise
-                                   an error if it is non-zero. Default: `False`.
-    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
-
-Returns:
-    A named tuple `(result, info)`.
-
-Examples::
-
-    >>> A = torch.randn(3, 3)
-    >>> Ainv, info = torch.linalg.solve_ex(A)
-    >>> torch.dist(torch.linalg.inv(A), Ainv)
-    tensor(0.)
-    >>> info
-    tensor(0, dtype=torch.int32)
-
-.. _LAPACK's getrf:
-    https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
-""")
-
 inv_ex = _add_docstr(_linalg.linalg_inv_ex, r"""
 linalg.inv_ex(A, *, check_errors=False, out=None) -> (Tensor, Tensor)
 
@@ -373,10 +336,16 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+""" + fr"""
+.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
+          {common_notes["sync_note"]}
+""" + r"""
+
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
-        absolute value of the determinant of real-valued (resp. complex) square matrices.
+        absolute value (resp. modulus) of the determinant of real-valued (resp. complex)
+        square matrices.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -403,12 +372,18 @@ Computes the sign and natural logarithm of the absolute value of the determinant
 For complex :attr:`A`, it returns the angle and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
-The determinant can be recovered as `sign * exp(logabsdet)`.
-When a matrix has a determinant of zero, it returns `(0, -inf)`.
-
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
+
+""" + fr"""
+.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
+          {common_notes["sync_note"]}
+""" + r"""
+
+.. note:: The determinant can be recovered as `sign * exp(logabsdet)`.
+
+.. note:: When a matrix has a determinant of zero, it returns `(0, -inf)`.
 
 .. seealso::
 
@@ -423,9 +398,9 @@ Keyword args:
 Returns:
     A named tuple `(sign, logabsdet)`.
 
-    `sign` will have the same dtype as :attr:`A`.
-
     `logabsdet` will always be real-valued, even when :attr:`A` is complex.
+
+    `sign` will have the same dtype as :attr:`A`.
 
 Examples::
 
@@ -436,7 +411,7 @@ Examples::
             [-1.6218, -0.9273, -0.0082]])
     >>> torch.linalg.det(A)
     tensor(-0.7576)
-    >>> torch.logdet(A)
+    >>> torch.linalg.logdet(A)
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))

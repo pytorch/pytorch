@@ -82,7 +82,7 @@ static const std::unordered_map<std::string, std::vector<std::string>>
 // If you modify this, you will need to adjust the blocklist in
 // tools/pyi/gen_pyi.py (and add hardcoded signatures for these
 // functions.)
-bool should_allow_numbers_as_tensors(const std::string& name) {
+static bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
       "add",          "add_",          "add_out",
       "div",          "div_",          "div_out",

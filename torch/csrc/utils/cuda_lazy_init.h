@@ -21,7 +21,7 @@ namespace utils {
 // build, which is not good UX.
 //
 void cuda_lazy_init();
-void set_requires_cuda_init(bool value);
+void set_run_yet_variable_to_false();
 
 static void maybe_initialize_cuda(const at::TensorOptions& options) {
   if (options.device().is_cuda()) {

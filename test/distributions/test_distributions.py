@@ -793,14 +793,7 @@ BAD_EXAMPLES = [
 ]
 
 
-class DistributionsTestCase(TestCase):
-    def setUp(self):
-        """The tests assume that the validation flag is set."""
-        torch.distributions.Distribution.set_default_validate_args(True)
-        super(DistributionsTestCase, self).setUp()
-
-
-class TestDistributions(DistributionsTestCase):
+class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -3247,7 +3240,7 @@ class TestDistributions(DistributionsTestCase):
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
-class TestRsample(DistributionsTestCase):
+class TestRsample(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
         num_samples = 100
@@ -3455,7 +3448,7 @@ class TestRsample(DistributionsTestCase):
             ]))
 
 
-class TestDistributionShapes(DistributionsTestCase):
+class TestDistributionShapes(TestCase):
     def setUp(self):
         super(TestDistributionShapes, self).setUp()
         self.scalar_sample = 1
@@ -3917,7 +3910,7 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
 
-class TestKL(DistributionsTestCase):
+class TestKL(TestCase):
 
     def setUp(self):
         super(TestKL, self).setUp()
@@ -4311,7 +4304,7 @@ class TestKL(DistributionsTestCase):
                 ]))
 
 
-class TestConstraints(DistributionsTestCase):
+class TestConstraints(TestCase):
     def test_params_constraints(self):
         normalize_probs_dists = (
             Categorical,
@@ -4363,7 +4356,7 @@ class TestConstraints(DistributionsTestCase):
                 self.assertTrue(ok.all(), msg=message)
 
 
-class TestNumericalStability(DistributionsTestCase):
+class TestNumericalStability(TestCase):
     def _test_pdf_score(self,
                         dist_class,
                         x,
@@ -4580,7 +4573,7 @@ class TestNumericalStability(DistributionsTestCase):
 
 
 # TODO: make this a pytest parameterized test
-class TestLazyLogitsInitialization(DistributionsTestCase):
+class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
         super(TestLazyLogitsInitialization, self).setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
@@ -4627,7 +4620,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-class TestAgainstScipy(DistributionsTestCase):
+class TestAgainstScipy(TestCase):
     def setUp(self):
         super(TestAgainstScipy, self).setUp()
         positive_var = torch.randn(20).exp()
@@ -4801,7 +4794,7 @@ class TestAgainstScipy(DistributionsTestCase):
             self.assertEqual(icdf, scipy_dist.ppf(samples), msg=pytorch_dist)
 
 
-class TestFunctors(DistributionsTestCase):
+class TestFunctors(TestCase):
     def test_cat_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
@@ -4919,9 +4912,9 @@ class TestFunctors(DistributionsTestCase):
         self.assertEqual(actual_jac, expected_jac)
 
 
-class TestValidation(DistributionsTestCase):
+class TestValidation(TestCase):
     def setUp(self):
-        super(TestValidation, self).setUp()
+        super(TestCase, self).setUp()
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
@@ -5014,7 +5007,7 @@ class TestValidation(DistributionsTestCase):
         super(TestValidation, self).tearDown()
 
 
-class TestJit(DistributionsTestCase):
+class TestJit(TestCase):
     def _examples(self):
         for Dist, params in EXAMPLES:
             for param in params:

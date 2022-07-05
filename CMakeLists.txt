@@ -784,11 +784,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
-  if(NOT USE_CUDNN)
-    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
-    # separate PR to cudnn_frontend is needed to address this later on
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=non-virtual-dtor")
-  endif()
   string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
@@ -845,7 +840,6 @@ if(NOT MSVC)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")

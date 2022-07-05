@@ -25,7 +25,7 @@ def define_targets(rules):
             ":caffe2_headers",
             "@com_github_glog//:glog",
             "//c10",
-            "//third_party/miniz-2.1.0:miniz",
+            "//third_party/miniz-2.0.8:miniz",
         ],
     )
 

@@ -93,7 +93,7 @@ work for exploring the contents. Some common ways to interact with ZIP files:
 
 Use the ``file_structure()`` API
 """"""""""""""""""""""""""""""""
-:class:`PackageImporter` provides a ``file_structure()`` method, which will return a printable
+:class:`PackageImporter` and :class:`PackageExporter` provide a ``file_structure()`` method, which will return a printable
 and queryable ``Folder`` object. The ``Folder`` object is a simple directory structure that you can use to explore the
 current contents of a ``torch.package``.
 
@@ -105,10 +105,10 @@ use the glob-style ``include`` and ``exclude`` filtering arguments.
 
     with PackageExporter('my_package.pt') as pe:
         pe.save_pickle('models', 'model_1.pkl', mod)
+        # can limit printed items with include/exclude args
+        print(pe.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
 
     importer = PackageImporter('my_package.pt')
-    # can limit printed items with include/exclude args
-    print(importer.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
     print(importer.file_structure()) # will print out all files
 
 
@@ -146,8 +146,8 @@ You can also query ``Folder`` objects with the ``has_file()`` method.
 
 ::
 
-    importer_file_structure = importer.file_structure()
-    found: bool = importer_file_structure.has_file("package_a/subpackage.py")
+    exporter_file_structure = exporter.file_structure()
+    found: bool = exporter_file_structure.has_file("package_a/subpackage.py")
 
 See why a given module was included as a dependency?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -269,9 +269,9 @@ Steps:
         # save as normal, no extra work necessary
         pe.save_pickle('foo_collection', 'foo1.pkl', foo_1)
         pe.save_pickle('foo_collection', 'foo2.pkl', foo_2)
+        print(pe.file_structure())
 
     pi = PackageImporter('foo_package.pt')
-    print(pi.file_structure())
     imported_foo = pi.load_pickle('foo_collection', 'foo1.pkl')
     print(f"foo_1 string: '{imported_foo.my_string}'")
     print(f"foo_1 export time: {imported_foo.time_exported}")

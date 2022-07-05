@@ -7,7 +7,6 @@ import torch
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
-__all__ = ['Linear']
 
 class Linear(torch.nn.Module):
     r"""

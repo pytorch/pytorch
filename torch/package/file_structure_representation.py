@@ -3,8 +3,6 @@ from typing import Dict, List
 
 from .glob_group import GlobGroup, GlobPattern
 
-__all__ = ["Directory"]
-
 
 class Directory:
     """A file structure representation. Organized as Directory nodes that have lists of

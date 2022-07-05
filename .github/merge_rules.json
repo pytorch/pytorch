@@ -3,12 +3,11 @@
       "name": "ONNX exporter",
       "patterns": [
          ".jenkins/caffe2/*",
-         "aten/src/ATen/core/interned_strings.h",
-         "docs/source/onnx.rst",
-         "docs/source/scripts/onnx/**",
          "scripts/onnx/**",
-         "test/jit/test_export_modes.py",
+         "docs/source/onnx.rst",
          "test/onnx/**",
+         "test/jit/test_export_modes.py",
+         "aten/src/ATen/core/interned_strings.h",
          "tools/onnx/**",
          "torch/_C/__init__.pyi.in",
          "torch/csrc/jit/passes/onnx.*",
@@ -52,26 +51,26 @@
    },
    {
       "name": "CI Pinned Hashes",
-      "patterns": [
-         ".github/ci_commit_pins/vision.txt",
-         ".github/ci_commit_pins/torchdynamo.txt"
-      ],
+      "patterns": [".github/ci_commit_pins/**"],
       "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "pull"
-      ]
-   },
-   {
-      "name": "XLA hash pin update",
-      "patterns": [".github/ci_commit_pins/xla.txt"],
-      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
-      "mandatory_checks_name": [
-         "Facebook CLA Check",
-         "Lint",
-         "pull / linux-bionic-py3_7-clang8-xla / build",
-         "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)"
+         "linux-docs / build-docs (cpp)",
+         "linux-docs / build-docs (python)",
+         "win-vs2019-cpu-py3 / build",
+         "win-vs2019-cuda11.3-py3 / build",
+         "linux-bionic-py3.7-clang9 / build",
+         "linux-xenial-py3.7-clang7-onnx / build",
+         "linux-xenial-py3.7-clang7-asan / build",
+         "linux-vulkan-bionic-py3.7-clang9 / build",
+         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+         "linux-bionic-cuda11.3-py3.7-clang9 / build",
+         "linux-xenial-py3-clang5-mobile-build / build",
+         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
+         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+         "linux-focal-py3.7-gcc7 / build"
       ]
    },
    {
@@ -170,19 +169,6 @@
          "aten/src/ATen/native/mps/**"
       ],
       "approved_by": ["kulinseth", "razarmehr"],
-      "mandatory_checks_name": [
-         "Facebook CLA Check",
-         "Lint",
-         "pull"
-      ]
-   },
-   {
-      "name": "Distributions",
-      "patterns": [
-          "torch/distributions/**",
-          "test/distributions/**"
-      ],
-      "approved_by": ["fritzo", "neerajprad", "alicanb", "vishwakftw"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",

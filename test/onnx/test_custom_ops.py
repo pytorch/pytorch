@@ -2,14 +2,14 @@
 
 import numpy as np
 import onnx
-from test_onnx_common import run_model_test
-from test_pytorch_common import TestCase, run_tests
 from test_pytorch_onnx_caffe2 import do_export
+from test_pytorch_onnx_onnxruntime import run_model_test
 
 import caffe2.python.onnx.backend as c2
 import torch
 import torch.utils.cpp_extension
 from torch.onnx.symbolic_helper import _unimplemented
+from test_pytorch_common import TestCase, run_tests
 
 
 class TestCustomOps(TestCase):

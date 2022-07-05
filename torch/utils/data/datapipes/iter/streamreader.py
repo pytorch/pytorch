@@ -32,6 +32,5 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
             while True:
                 d = stream.read(self.chunk)
                 if not d:
-                    stream.close()
                     break
                 yield (furl, d)

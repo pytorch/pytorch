@@ -147,8 +147,6 @@ class FakeSymbolicTensor(torch.Tensor):
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
-
-        r.sym_shape = sym_shape
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -160,10 +158,6 @@ class FakeSymbolicTensor(torch.Tensor):
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
-
-        if func_overload == torch.ops.aten.sym_size.default:
-            self = args[0]
-            return self.sym_shape
 
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
@@ -298,17 +292,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.sym_size(1)), str(x.sym_size(0)))
         self.assertTrue(str(expand_x.sym_size(1)), str(result.sym_size(0)))
 
-    @skipIfNoSympy
-    def test_aten_ops(self):
-
-        shape_env = ShapeEnv()
-        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.sym_size(0))
-
-        shape_env = ShapeEnv()
-        x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
-        torch.ops.aten.expand.SymInt(x, [x.sym_size(0), x.sym_size(1), x.sym_size(2)])
-
     def test_fx_trace_intlist(self):
         class CustomModule(torch.nn.Module):
             def forward(self, x):
@@ -320,14 +303,6 @@ class TestPySymInt(TestCase):
         # should not TypeError: pad(): argument 'pad' (position 2) must be
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
-
-
-    @skipIfNoSympy
-    def test_meta_symint(self):
-        shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
-        r = torch.empty(a0, device='meta')
-        self.assertIsInstance(r.sym_size(0), CPP_SYMINT_CLASS)
 
 
 if __name__ == '__main__':

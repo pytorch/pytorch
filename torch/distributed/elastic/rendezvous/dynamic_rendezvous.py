@@ -34,8 +34,6 @@ from .api import (
 )
 from .utils import _delay, _PeriodicTimer
 
-__all__ = ['RendezvousBackend', 'RendezvousTimeout', 'RendezvousSettings', 'DynamicRendezvousHandler', 'create_handler']
-
 log = logging.getLogger(__name__)
 
 
@@ -47,6 +45,7 @@ def get_method_name(depth=2):
 
 Token = Any
 """Represents an opaque fencing token used by the rendezvous backend."""
+
 
 class RendezvousBackend(ABC):
     """Represents a backend that holds the rendezvous state."""

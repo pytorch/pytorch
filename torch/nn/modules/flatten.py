@@ -4,7 +4,6 @@ from typing import Tuple, Union
 from torch import Tensor
 from torch.types import _size
 
-__all__ = ['Flatten', 'Unflatten']
 
 class Flatten(Module):
     r"""

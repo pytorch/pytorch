@@ -95,7 +95,7 @@ class TestPrintCommits(TestCase):
         workflow_checks = mock_get_commit_results()
         result = isGreen("sha", workflow_checks)
         self.assertFalse(result[0])
-        self.assertEqual(result[1], "missing required workflows: pull, trunk, lint, linux-binary, windows-binary")
+        self.assertEqual(result[1], "missing required workflows: pull, trunk, lint, linux-binary, android-tests, windows-binary")
 
 if __name__ == "__main__":
     main()

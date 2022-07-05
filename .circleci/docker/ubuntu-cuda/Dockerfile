@@ -65,7 +65,6 @@ ENV INSTALLED_VISION ${VISION}
 ADD ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
-ENV OPENSSL_DIR /opt/openssl
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION

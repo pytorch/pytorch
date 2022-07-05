@@ -5,7 +5,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
-__all__ = ['ModelAverager', 'PeriodicModelAverager']
 
 class ModelAverager(ABC):
     r"""Base class for all model averagers.

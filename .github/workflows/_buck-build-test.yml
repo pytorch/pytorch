@@ -10,6 +10,8 @@ defaults:
 jobs:
   buck-build-test:
     runs-on: ubuntu-latest
+    env:
+      JOB_BASE_NAME: ubuntu-latest-buck
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -62,17 +64,21 @@ jobs:
           command: |
             sh scripts/buck_setup.sh
 
-      - name: Build tools
+      - name: Build glog
         run: |
-          buck build tools: --keep-going
+          buck build third_party:glog
 
-      - name: Run tools tests
-        run: |
-          buck test tools:selective_build_test tools:gen_oplist_test tools:gen_operators_yaml_test
-
-      - name: Build c10
+      - name: Build C10
         run: |
           buck build c10:c10
+
+      - name: Build cpuinfo
+        run: |
+          buck build third_party:cpuinfo
+
+      - name: Build pthreadpool
+        run: |
+          buck build third_party:pthreadpool
 
       - name: Build XNNPACK
         run: |
@@ -80,11 +86,7 @@ jobs:
 
       - name: Build QNNPACK
         run: |
-          buck build aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack
-
-      - name: Test QNNPACK
-        run: |
-          buck test aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack_test
+          buck build aten/src/ATen/native/quantized/cpu/qnnpack/... --keep-going
 
       - name: Build aten_cpu
         run: |
@@ -94,9 +96,9 @@ jobs:
         run: |
           buck build :torch_mobile_core
 
-      - name: Build pt_ops_full
+      - name: Build torch_mobile_all_ops
         run: |
-          buck build :pt_ops_full
+          buck build :torch_mobile_all_ops
 
       - name: Build mobile benchmark
         run: |

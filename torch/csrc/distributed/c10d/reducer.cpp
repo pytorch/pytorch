@@ -69,22 +69,6 @@ class CpuTimer : public Timer {
 
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 
-std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
-  if (result.isPyObject()) {
-    return result.toPyObjectHolder()->extractTensors();
-  }
-  TORCH_INTERNAL_ASSERT(
-      result.isTensor() || result.isTensorList(),
-      "expected the hook result is either a Tensor or a TensorList found ",
-      result.tagKind());
-
-  if (result.isTensor()) {
-    return {result.toTensor()};
-  }
-
-  return result.toTensorVector();
-}
-
 } // namespace
 
 Reducer::Reducer(
@@ -510,10 +494,7 @@ void Reducer::set_divide_factor() {
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
       workHandle->wait();
-      // PyProcessGroup::PyWork doesn't expose value, so fetch it from the
-      // future
-      auto results = extractTensors(workHandle->getFuture()->value());
-
+      auto results = workHandle->result();
       // Guard against the results being empty
       TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();
@@ -697,8 +678,7 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ =
-      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
+  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -2080,8 +2060,7 @@ void verify_params_across_processes(
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
-      ->wait();
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
   for (size_t i = 0; i < world_size; ++i) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();

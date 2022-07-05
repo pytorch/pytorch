@@ -853,7 +853,7 @@ void index_reduce_func_impl(
   const SCATTER_GATHER_OP& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
@@ -932,11 +932,7 @@ void index_reduce_func_impl(
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
-      if (result.is_floating_point() || result.is_complex()) {
-        result.div_(counts);
-      } else {
-        result.div_(counts, "floor");
-      }
+      result.div_(counts);
     }
   }
   else {
@@ -944,7 +940,7 @@ void index_reduce_func_impl(
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       result.scalar_type(), "index_func_", [&result, &source, &dim, &index_contig, &numel, &op, &counts] {
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
@@ -987,11 +983,7 @@ void index_reduce_func_impl(
     });
     if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       counts.masked_fill_(counts == 0, 1);
-      if (result.is_floating_point() || result.is_complex()) {
-        result.div_(counts);
-      } else {
-        result.div_(counts, "floor");
-      }
+      result.div_(counts);
     }
   }
 }

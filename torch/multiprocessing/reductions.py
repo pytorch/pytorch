@@ -37,14 +37,6 @@ class StorageWeakRef(object):
     def __del__(self):
         self._free_weak_ref(self.cdata)
 
-    def __hash__(self):
-        return self.cdata
-
-    def __eq__(self, other):
-        if id(self) == id(other):
-            return True
-        return self.cdata == other.cdata
-
 
 class SharedCache(dict):
     """dictionary from multiprocessing handles to StorageWeakRef"""

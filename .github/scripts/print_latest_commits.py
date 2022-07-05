@@ -1,13 +1,9 @@
-import sys
 from typing import Any, Dict, List, NamedTuple, Tuple
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
 import os
 import re
-
-def eprint(msg: str) -> None:
-    print(msg, file=sys.stderr)
 
 class WorkflowCheck(NamedTuple):
     workflowName: str
@@ -72,6 +68,7 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         "trunk": False,
         "lint": False,
         "linux-binary": False,
+        "android-tests": False,
         "windows-binary": False,
     }
 
@@ -95,13 +92,8 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        eprint(f"Checking {commit}")
-        is_green, msg = isGreen(commit, results)
-        if is_green:
-            eprint("GREEN")
+        if isGreen(commit, results)[0]:
             return commit
-        else:
-            eprint("RED: " + msg)
     return None
 
 def main() -> None:

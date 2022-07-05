@@ -1,8 +1,6 @@
 import torch
 import torch.nn.quantized.functional
 
-__all__ = ['LayerNorm', 'GroupNorm', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d']
-
 class LayerNorm(torch.nn.LayerNorm):
     r"""This is the quantized version of :class:`~torch.nn.LayerNorm`.
 

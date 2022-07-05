@@ -37,7 +37,6 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     init_from_local_shards,
 )
-from torch.distributed.algorithms._comm_hooks import allreduce_hook
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -96,6 +95,7 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
+
 
 def _default_meta_device_init_fn(module):
     """
@@ -927,11 +927,6 @@ class FullyShardedDataParallel(nn.Module):
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
 
-        # setting communication hook to a default
-        self.communication_hook = self._get_default_comm_hook()
-        self.communication_hook_state = self._get_default_comm_hook_state()
-        self._hook_registered = False
-
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
@@ -948,6 +943,7 @@ class FullyShardedDataParallel(nn.Module):
                 m._fsdp_params_exec_order = self._fsdp_params_exec_order
                 m._param_exec_order_policy = True
                 m._param_exec_order_prep_stage = True
+
 
     def _move_module_if_needed(self, module) -> None:
         """
@@ -1575,14 +1571,6 @@ class FullyShardedDataParallel(nn.Module):
             # Due to the use of streams, we need to make sure the previous
             # ``optim.step()`` is done before we all-gather parameters.
             self._wait_for_previous_optim_step()
-
-            # Set a flag on every FlatParameter to track whether its post
-            # backward hook has been called, mainly for validation purpose
-            # in wait_for_post_backward.
-            if self._exec_order_data.is_first_iter:
-                for m in self.fsdp_modules(self):
-                    for p in m.params:
-                        p._post_backward_called = False
 
     @torch.no_grad()
     def _init_param_attributes(self, p: Parameter) -> None:
@@ -2842,11 +2830,6 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
-        p_assert(
-            hasattr(param, '_post_backward_called'),
-            "Expected flag _post_backward_called to exist on param."
-        )
-        param._post_backward_called = True
         with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
             # First hook callback will see PRE state. If we have multiple params,
             # then subsequent hook callbacks will see POST state.
@@ -2914,10 +2897,8 @@ class FullyShardedDataParallel(nn.Module):
                     # reduce_dtype matches the param dtype.
                     param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
-                if self.gradient_predivide_factor > 1 and self.communication_hook is None:
-                    # Average grad by pre-division factor. Together pre- and post-division factors
-                    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
-                    # This is a two-step process to avoid potential underflow and overflow.
+                if self.gradient_predivide_factor > 1:
+                    # Average grad by world_size for consistency with PyTorch DDP.
                     param.grad.div_(self.gradient_predivide_factor)
 
                 grad = param.grad.data
@@ -2944,9 +2925,7 @@ class FullyShardedDataParallel(nn.Module):
                         output, input_flattened, group=self.process_group
                     )
                     if self.gradient_postdivide_factor > 1:
-                        # Average grad by pre-division factor. Together pre- and post-division factors
-                        # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
-                        # This is a two-step process to avoid potential underflow and overflow.
+                        # Average grad by world_size for consistency with PyTorch DDP.
                         output.div_(self.gradient_postdivide_factor)
 
                     # Note that we need to cast grads back to the full precision if
@@ -2995,10 +2974,10 @@ class FullyShardedDataParallel(nn.Module):
                     ), "Currently the way for _is_sharded to be False is \
                         world_size == 1 or sharding_stratagy is set to be NO_SHARD"
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
-                        # if a communication hook was not registered,
-                        # then a default hook (`all_reduce`) will be used
-                        self.communication_hook(self.communication_hook_state, param.grad)
-
+                        dist.all_reduce(param.grad, group=self.process_group)
+                        if self.gradient_postdivide_factor > 1:
+                            # Average grad by world_size for consistency with PyTorch DDP.
+                            param.grad.div_(self.gradient_postdivide_factor)
                     # Note that we need to cast grads back to the full precision if
                     # 1) parameters were in reduced precision during fwd, as grads
                     # would thus be in this reduced precision, or
@@ -3110,43 +3089,24 @@ class FullyShardedDataParallel(nn.Module):
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
                         p_assert(
-                            not p._is_sharded or not p._post_backward_called,
-                            "All sharded parameters that received gradient should "
+                            not p._is_sharded, "All sharded parameters should "
                             "use `_saved_grad_shard`"
                         )
                     if hasattr(p, "_saved_grad_shard"):
                         delattr(p, "_saved_grad_shard")
 
-                    p_assert(
-                        hasattr(p, '_post_backward_called'),
-                        "Expected flag _post_backward_called to be set on param."
-                    )
-                    # Reset _post_backward_called in preparation for the next iteration.
-                    p._post_backward_called = False
-
         # Update root and nested FSDP's hooks and flags.
         for m in self.modules():  # includes self
             if isinstance(m, FullyShardedDataParallel):
+                _finalize_params(m)
+                m._pre_backward_hook_has_run = False
                 if any(p.requires_grad for p in m.parameters()):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
                     # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
-                    if managed_param_requires_grad:
-                        p_assert(
-                            all(hasattr(p, '_post_backward_called') for p in m.params),
-                            "Expected all params to have flag _post_backward_called set!"
-                        )
-                        post_backward_hook_called = any(p._post_backward_called for p in m.params)
-                        if post_backward_hook_called:
-                            m._assert_state(TrainingState_.BACKWARD_POST)
-                        else:
-                            # post backward hook was not called, meaning param
-                            # did not have a gradient computed. It was either unused
-                            # in forward, or unused in loss computation so it did
-                            # not get gradient
-                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+                    if any([p.requires_grad for p in m.params]):
+                        m._assert_state(TrainingState_.BACKWARD_POST)
                     else:
                         m._assert_state(TrainingState_.BACKWARD_PRE)
                 else:
@@ -3158,9 +3118,6 @@ class FullyShardedDataParallel(nn.Module):
                     # 2. output tensors are `requires_grad==False`. In this case,
                     # pre-backward hook is not registered, so it is in IDLE state.
                     m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
-
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
                 m.training_state = TrainingState_.IDLE
 
                 if m._is_root:
@@ -4061,72 +4018,6 @@ class FullyShardedDataParallel(nn.Module):
             return new_osd
         return new_osd  # should never reach here
 
-    def _get_default_comm_hook(self) -> Any:
-        r"""
-        Returns a default communication hook based on a sharding strategy.
-        """
-        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
-            return None
-        else:
-            return allreduce_hook.allreduce_hook
-
-    def _get_default_comm_hook_state(self) -> Any:
-        r"""
-        Returns a default communication hook state based on a sharding strategy.
-        """
-        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
-            return None
-        else:
-            return allreduce_hook.AllReduceState(process_group=self.process_group)
-
-    def register_comm_hook(self, state: object, hook: callable):
-        """
-        Registers a communication hook which is an enhancement that provides a
-        flexible hook to users where they can specify how FSDP aggregates gradients
-        across multiple workers.
-        This hook can be used to implement several algorithms like
-        `GossipGrad <https://arxiv.org/abs/1803.05880>`_ and gradient compression
-        which involve different communication strategies for
-        parameter syncs while training with :class:`FullyShardedDataParallel`.
-
-        .. warning::
-            FSDP only support communication hooks for a ``NO_SHARD`` strategy at this time.
-            If other strategies are used, an error will be raised.
-
-        .. warning ::
-            FSDP communication hook should be registered before running an initial forward pass
-            and only once.
-
-        Args:
-            state (object): Passed to the hook to maintain any state information during the training process.
-                            Examples include error feedback in gradient compression,
-                            peers to communicate with next in `GossipGrad <https://arxiv.org/abs/1803.05880>`_, etc.
-                            It is locally stored by each worker
-                            and shared by all the gradient tensors on the worker.
-            hook (callable): Callable with the following signature:
-                            ``hook: Callable[torch.Tensor] -> None``:
-                            This function takes in a Python tensor, which represents
-                            the full, flattened, unsharded gradient with respect to all variables
-                            corresponding to the model this FSDP unit is wrapping
-                            (that are not wrapped by other FSDP sub-units).
-                            It then performs all necessary processing and returns ``None``.
-
-        """
-        if not self.check_is_root():
-            raise AssertionError("register_comm_hook can only be called on a root instance.")
-        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
-            raise NotImplementedError(
-                "Communication hooks are currently only available for a NO_SHARD strategy."
-            )
-        else:
-            # register same hook for root and all submodules
-            for submodule in self.fsdp_modules(self):
-                assert not submodule._hook_registered, "communication hook can be only registered once"
-                submodule._hook_registered = True
-                assert submodule.communication_hook == self._get_default_comm_hook(),\
-                    f"communication hook should be default, but it is {submodule.communication_hook.__name__} instead"
-                submodule.communication_hook_state = state
-                submodule.communication_hook = hook
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""
@@ -4168,7 +4059,6 @@ def p_assert(cond: Any, s: Any) -> None:
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
-        traceback.print_stack()
         raise AssertionError
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
@@ -4218,26 +4108,30 @@ def _get_param_to_unflat_param_names(
             in the module walk order; if ``False``, then includes all of the
             unflattened parameter names.
     """
+    def _clean_param_name(prefix, param_info):
+        """This replicates the parameter name cleaning logic in model state
+        dict but avoids gathering any parameters."""
+        name = clean_tensor_name(
+            prefix + param_info.module_name + "." + param_info.param_name
+        )
+        return name
+
     def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                module_prefixed_param_names = (
-                    param._param_names if isinstance(param, FlatParameter)
-                    else [param_name]
-                )  # prefixed from `module`
-                fully_prefixed_param_names = [
-                    clean_tensor_name(prefix + name)
-                    for name in module_prefixed_param_names
-                ]  # fully prefixed from the top level including `prefix`
+                prefixed_param_names = [
+                    _clean_param_name(prefix, param_info)
+                    for param_info in param._param_infos
+                ] if isinstance(param, FlatParameter) else [prefix + param_name]
                 # If this parameter has already been visited, then it is a
                 # shared parameter; then, only take the first parameter name
                 is_shared_param = param in param_to_unflat_param_names
                 if not is_shared_param:
-                    param_to_unflat_param_names[param] = fully_prefixed_param_names
+                    param_to_unflat_param_names[param] = prefixed_param_names
                 elif not dedup_shared_params:
-                    param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
+                    param_to_unflat_param_names[param].extend(prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names

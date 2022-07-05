@@ -11,7 +11,6 @@ from . import Sequential, ModuleList, Linear
 from .module import Module
 from ..functional import log_softmax
 
-__all__ = ['AdaptiveLogSoftmaxWithLoss']
 
 _ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 

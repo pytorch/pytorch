@@ -24,15 +24,9 @@ from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
 # Composability
 from ao.sparsity.test_composability import TestComposability  # noqa: F401
 
-# Utilities
-from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
-
 # Data Sparsifier
 from ao.sparsity.test_data_sparsifier import TestBaseDataSparsifier  # noqa: F401
 from ao.sparsity.test_data_sparsifier import TestNormDataSparsifiers  # noqa: F401
-
-# Data Scheduler
-from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()

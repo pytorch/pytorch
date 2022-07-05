@@ -3,7 +3,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/ScanUtils.cuh>
@@ -11,6 +10,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/cuda/cub.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>

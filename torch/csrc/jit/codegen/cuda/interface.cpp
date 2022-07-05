@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -35,7 +34,7 @@ static std::atomic<bool> cuda_fusion_guard_mode{true};
 class NVFuserEnabler {
  private:
   c10::optional<bool> runtime_assigned_fuser_enabled_ = c10::nullopt;
-  c10::once_flag enabled_check_flag_;
+  std::once_flag enabled_check_flag_;
   std::mutex mutex_;
 
  public:
@@ -98,7 +97,7 @@ class NVFuserEnabler {
     if (getCachedNNCNotNVFuser()) {
       return false;
     }
-    c10::call_once(enabled_check_flag_, [&]() {
+    std::call_once(enabled_check_flag_, [&]() {
       // if environment variable is setting the value, we must
       if (!runtime_assigned_fuser_enabled_.has_value() &&
           getCachedFuserEnabledEnvVar().has_value()) {

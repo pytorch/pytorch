@@ -60,24 +60,10 @@ graph {
     op_type: "Slice"
   }
   node {
-    output: "onnx::Concat_12"
-    name: "Constant_5"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 2
-        data_type: 7
-        raw_data: "\020\000\000\000\000\000\000\000\020\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "onnx::Concat_6"
     input: "onnx::Concat_12"
     output: "onnx::Resize_8"
-    name: "Concat_6"
+    name: "Concat_5"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -91,7 +77,7 @@ graph {
     input: ""
     input: "onnx::Resize_8"
     output: "11"
-    name: "Resize_7"
+    name: "Resize_6"
     op_type: "Resize"
     attribute {
       name: "coordinate_transformation_mode"
@@ -115,6 +101,12 @@ graph {
     }
   }
   name: "torch_jit"
+  initializer {
+    dims: 2
+    data_type: 7
+    name: "onnx::Concat_12"
+    raw_data: "\020\000\000\000\000\000\000\000\020\000\000\000\000\000\000\000"
+  }
   input {
     name: "x"
     type {

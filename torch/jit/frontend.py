@@ -1021,11 +1021,6 @@ class ExprBuilder(Builder):
         return ListComp(r, elt_expr, target_expr, iter_expr)
 
     @staticmethod
-    def build_GeneratorExp(ctx, stmt):
-        # Convert Generator expression to ListComp
-        return ExprBuilder.build_ListComp(ctx, stmt)
-
-    @staticmethod
     def build_DictComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
         if (len(stmt.generators) != 1):

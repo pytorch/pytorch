@@ -1,8 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <thread>
 
 #if !AT_NNPACK_ENABLED()
@@ -39,10 +37,10 @@ namespace at {
 namespace native {
 
 static bool init_nnpack() {
-  static c10::once_flag once_;
+  static std::once_flag once_;
   static bool nnpack_successfully_initialized_ = false;
 
-  c10::call_once(once_, []() {
+  std::call_once(once_, []() {
     const nnp_status nnpack_status = nnp_initialize();
     nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
 

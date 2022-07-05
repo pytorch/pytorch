@@ -93,6 +93,12 @@ def get_c2_tvm():
     return bool(int(c2_tvm))
 
 _C2_XPLAT_NO_HPTT_PREPROCESSOR_FLAGS = [
+    "-fexceptions",
+    "-frtti",
+    "-Wno-shadow",
+    "-Wno-unknown-pragmas",
+    "-Wno-unused-variable",
+    "-Wno-sign-compare",
     "-Icaffe2",
     "-Imodules",
     "-DEIGEN_NO_DEBUG",
@@ -133,13 +139,7 @@ def get_c2_xplat_preprocessor_flags():
 def get_c2_xplat_no_hptt_compiler_flags():
     return [
         "-Os",
-        "-fexceptions",
-        "-frtti",
-        "-Wno-shadow",
-        "-Wno-unknown-pragmas",
-        "-Wno-unused-variable",
-        "-Wno-sign-compare",
-    ]
+    ] + get_c2_xplat_no_hptt_preprocessor_flags()
 
 def get_c2_xplat_compiler_flags():
     return get_c2_xplat_no_hptt_compiler_flags() + C2_XPLAT_HPTT_PREPROCESSOR_FLAGS
