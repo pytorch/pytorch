@@ -770,12 +770,11 @@ class FSDPTest(MultiProcessTestCase):
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-        module = model.module if isinstance(model, (DDP, FSDP)) else model
         for _ in range(num_steps):
             optim.zero_grad()
             with torch.cuda.amp.autocast(enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
-                input = module.get_input(torch.device("cuda"))
+                input = model.module.get_input(torch.device("cuda"))
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
@@ -789,7 +788,7 @@ class FSDPTest(MultiProcessTestCase):
                         # p._is_sharded=False
                         self.assertEqual(p.device, torch.device("cpu"))
 
-                loss = module.get_loss(input, output).to(model_device)
+                loss = model.module.get_loss(input, output).to(model_device)
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
@@ -805,7 +804,7 @@ class FSDPTest(MultiProcessTestCase):
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
-            module.run_backward(loss)
+            model.module.run_backward(loss)
             if norm_type is not None:
                 max_norm = 0.3
                 if isinstance(model, FSDP):
