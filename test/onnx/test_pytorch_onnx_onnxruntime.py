@@ -36,6 +36,7 @@ from test_pytorch_common import (
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
     skipTraceTest,
+    skipForAllOpsetVersions
 )
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
@@ -12095,6 +12096,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             **atol_rtol,
         )
 
+    # TODO: The fix of OptionalHasElement is still in master branch, not in release
+    #       Enable the test after it's been released.
+    @skipForAllOpsetVersions()
     @skipTraceTest()
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_uninitialized_optional(self):
