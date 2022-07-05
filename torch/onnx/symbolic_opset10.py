@@ -1,11 +1,11 @@
 import sys
-from typing import Sequence, Tuple, Union
 import warnings
+from typing import Sequence
 
 import torch
-from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
@@ -19,6 +19,39 @@ from torch.onnx._globals import GLOBALS
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
 # release on 04/24/19
+
+
+__all__ = [
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "dequantize",
+    "div",
+    "embedding_bag",
+    "fake_quantize_per_tensor_affine",
+    "flip",
+    "fmod",
+    "isfinite",
+    "isinf",
+    "max_pool1d_with_indices",
+    "max_pool1d",
+    "max_pool2d_with_indices",
+    "max_pool2d",
+    "max_pool3d_with_indices",
+    "max_pool3d",
+    "nan_to_num",
+    "quantize_per_tensor",
+    "Quantized",
+    "slice",
+    "sort",
+    "topk",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 def div(g, self, other, *args):

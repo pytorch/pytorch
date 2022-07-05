@@ -1,8 +1,8 @@
 """This file exports ONNX ops for opset 11."""
 
 import sys
-from typing import Tuple, Union
 import warnings
+from typing import Tuple, Union
 
 import torch
 from torch import _C
@@ -14,6 +14,74 @@ from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
+
+__all__ = [
+    "add",
+    "append",
+    "arange",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "cat",
+    "chunk",
+    "clamp_max",
+    "clamp_min",
+    "clamp",
+    "constant_pad_nd",
+    "cumsum",
+    "Delete",
+    "embedding_bag",
+    "embedding_renorm",
+    "flatten",
+    "gather",
+    "hardtanh",
+    "im2col",
+    "index_fill",
+    "index",
+    "insert",
+    "linalg_det",
+    "linalg_vector_norm",
+    "logdet",
+    "masked_scatter",
+    "masked_select",
+    "mm",
+    "narrow",
+    "normal",
+    "pad",
+    "pixel_shuffle",
+    "pop",
+    "Prim",
+    "reflection_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "relu6",
+    "remainder",
+    "replication_pad",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "round",
+    "scatter",
+    "select",
+    "size",
+    "sort",
+    "split_with_sizes",
+    "split",
+    "squeeze",
+    "stack",
+    "topk",
+    "unbind",
+    "unique_dim",
+    "unsqueeze",
+    "upsample_bicubic2d",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 @symbolic_helper.parse_args("v", "f", "f")
