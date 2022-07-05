@@ -12,7 +12,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import CUDAInitMode, FSDPInitMode, FSDPTest, TransformerWithSharedParams
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -271,9 +271,12 @@ class TestFSDPOptimState(FSDPTest):
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()
-        model = self._get_wrapped_model(group=group, cuda_first=True) if wrap \
-            else self._get_nonwrapped_model(group=group, cuda_first=True)
-        model.eval()  # disable dropout for determinism
+        model = TransformerWithSharedParams.init(
+            group,
+            FSDPInitMode.RECURSIVE if wrap else FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
         optim = optim_class(model.parameters(), lr=0.01)
         return model, optim, None
 
