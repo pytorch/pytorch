@@ -194,6 +194,16 @@ class TestExpandedWeightFunctional(TestCase):
             self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.mean)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    def test_expanded_weights_per_sample_grad_input_no_grad(self, device, dtype, op):
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample_input in supported_inputs(op, sample_inputs):
+            if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
+                sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
+            sample_input.input.requires_grad_(False)
+
+            self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.mean)
+
+    @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_unsupported_expand_weights(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
         unsupported_inputs = supported_inputs(op, sample_inputs, supported_inputs=False)
