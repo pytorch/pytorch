@@ -67,7 +67,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     }
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: outputBuffer
                                                                                     shape: outputShape
-                                                                                 dataType: getMPSDataType(src.scalar_type())] autorelease];
+                                                                                 dataType: getMPSDataType(output.scalar_type())] autorelease];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
