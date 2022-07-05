@@ -1462,7 +1462,7 @@ class TestMPS(TestCase):
         self.assertEqual(x.stride(), x_mps.stride())
 
         # test non-view and non-contiguous tensor
-        src = torch.randn(6, dtype=torch.float).reshape(3, 2)
+        src = torch.randn((3, 2), dtype=torch.float)
         index = torch.tensor([[0, 0], [1, 1], [2, 2]])
         x = torch.empty_strided((3, 2), (1, 3), dtype=torch.float).scatter_(0, index, src)
         x_mps = x.to("mps")
