@@ -443,7 +443,7 @@ class TestExpandedWeightModule(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Batch size must be positive"):
             call_for_per_sample_grads(module, -64, loss_reduction="sum")(input)
         with self.assertRaisesRegex(RuntimeError, r"incorrect for multiple calls"):
-            loss = call_for_per_sample_grads(module, 64, loss_reduction="sum")( input).sum()
+            loss = call_for_per_sample_grads(module, 64, loss_reduction="sum")(input).sum()
             loss.backward()  # populate grad_sample fields
             call_for_per_sample_grads(module, 64, loss_reduction="sum")(input)
         with self.assertRaisesRegex(RuntimeError, r"Expected loss_reduction argument to be sum or mean"):
