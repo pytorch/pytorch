@@ -1,6 +1,6 @@
 from torch.ao import sparsity
 import torch
-import pytorch_lightning as pl
+import pytorch_lightning as pl  # type: ignore
 import torch.nn as nn
 from typing import List
 from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks.data_sparsity import PostTrainingDataSparsity
@@ -35,7 +35,15 @@ class DummyLightningModule(pl.LightningModule):
 
 class _PostTrainingCallbackTestCase(TestCase):
     def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
-        callback.on_fit_end(42, pl_module)  # 42 is a dummy value as trainer not used
+        """Makes sure that each component of is working as expected while calling the
+        post-training callback.
+        Specifically, check the following -
+            1. sparsifier config is the same as input config
+            2. data sparsifier is correctly attached to the model
+            3. sparsity is achieved after .step()
+            4. non-sparsified values are the same as original values
+        """
+        callback.on_fit_end(42, pl_module)  # 42 is a dummy value
 
         # check sparsifier config
         for key, value in sparsifier_args.items():
@@ -71,8 +79,7 @@ class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
             'sparse_block_shape': (1, 4),
             'zeros_per_block': 4
         }
-        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier,
-                                            data_sparsifier_args=sparsifier_args)
+        callback = PostTrainingDataSparsity(sparsity.DataNormSparsifier, sparsifier_args)
         pl_module = DummyLightningModule(100, [128, 256, 16])
 
         self.run_all_checks(pl_module, callback, sparsifier_args)

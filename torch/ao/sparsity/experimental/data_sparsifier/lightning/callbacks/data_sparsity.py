@@ -1,25 +1,12 @@
 from copy import deepcopy
 import torch
-from dataclasses import dataclass, field
-from typing import Any, Optional, Dict
-import pytorch_lightning as pl
+from typing import Any, Optional
+import pytorch_lightning as pl  # type: ignore
 
 from ._data_sparstity_utils import _attach_model_to_data_sparsifier, _log_sparsified_level
 
 
-@dataclass
-class _DataSparsity(pl.callbacks.Callback):
-    data_sparsifier_type: Any
-    data_sparsifier_args: Dict  # this the arguments for sparsifier_type (except data_list)
-    data_sparsifier: Any = field(init=False, default=None)
-    sparsified: Optional[torch.nn.Module] = field(init=False, default=None)
-
-    def __post_init__(self):
-        pass
-
-
-@dataclass
-class PostTrainingDataSparsity(_DataSparsity):
+class PostTrainingDataSparsity(pl.callbacks.Callback):
     """Lightning callback that enables post-training sparsity.
 
     This callback aims to sparsify the model inside lightning module after training.
@@ -29,8 +16,8 @@ class PostTrainingDataSparsity(_DataSparsity):
         <callback_obj>.sparsified
 
     Args:
-        data_sparsifier_type (some implemented class of BaseDataSparsifier)
-            The data sparsifier object of this type is created when the
+        data_sparsifier_class (some implemented class of BaseDataSparsifier)
+            The data sparsifier object of this class is created when the
             training starts.
             Note: Objects should not be passed in here as they are created
             once the training completes.
@@ -45,10 +32,16 @@ class PostTrainingDataSparsity(_DataSparsity):
             2. sparsier step() is called
             3. squashes the mask()
     """
+    def __init__(self, data_sparsifier_class, data_sparsifier_args):
+        super().__init__()
+        self.data_sparsifier_class = data_sparsifier_class
+        self.data_sparsifier_args = data_sparsifier_args
+        self.data_sparsifier: Any = None
+        self.sparsified: Optional[torch.nn.Module] = None
 
     def on_fit_end(self, trainer, pl_module) -> None:
         self.sparsified = deepcopy(pl_module.model).eval()
-        self.data_sparsifier = self.data_sparsifier_type(**self.data_sparsifier_args)
+        self.data_sparsifier = self.data_sparsifier_class(**self.data_sparsifier_args)
 
         _attach_model_to_data_sparsifier(self.sparsified, self.data_sparsifier)
 
