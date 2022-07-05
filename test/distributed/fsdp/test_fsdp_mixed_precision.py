@@ -95,7 +95,7 @@ backward_prefetch_config = [
 ]
 forward_prefetch_config = ["forward_prefetch", "no_forward_prefetch"]
 full_precision_param_dtype_config = [torch.float32, torch.float64]
-sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
+sharded_grad_scaler = ["use_sharded_grad_scaler", None]
 
 configs = list(product(
     mp_configs,
@@ -119,7 +119,7 @@ test_name_mapping = {
     str(mp_no_mixed_precision): "mp_no_mp",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
-    "enable_sharded_grad_scaler": "sharded_grad_scaler"
+    "use_sharded_grad_scaler": "sharded_grad_scaler"
 }
 
 if nccl_supports_bf16:
