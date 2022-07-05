@@ -10503,8 +10503,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                     dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
-                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                   )),
+                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS),)),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
                    aliases=('arccosh', ),
@@ -14473,19 +14472,18 @@ op_db: List[OpInfo] = [
         aten_backward_name='rrelu_with_noise_backward',
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, **kwargs),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.rrelu, input, *args, inplace=True, **kwargs),
         ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
-        supports_autograd=True,
-        assert_autodiffed=False,
-        supports_gradgrad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
         sample_kwargs=lambda device, dtype, input:
-            ({'lower': 0., 'upper': 1.}, {'lower': 0., 'upper': 1.}),
-        inplace_variant=lambda input, *args, **kwargs:
-            wrapper_set_seed(partial(torch.nn.functional.rrelu, inplace=True), input, *args, **kwargs),
+            (dict(lower=0., upper=1., training=True), dict(lower=0., upper=1., training=True)),
+        sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs=dict(lower=0., upper=1., training=True)),
         decorators=(
             DecorateInfo(
                 toleranceOverride({
@@ -14497,11 +14495,17 @@ op_db: List[OpInfo] = [
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # lambda impl
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # In-place operations do not play well with forward AD
             # https://github.com/pytorch/pytorch/issues/77447
             DecorateInfo(unittest.expectedFailure, 'TestGradients',
                          'test_inplace_forward_mode_AD'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),)),
+            # The noise vector that's generated in these tests is not the same elementwise
+            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_batch_vs_slicing'),
+            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_every_other'),
+            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_non_contig_expand'),
+            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),)),
     UnaryUfuncInfo(
         'nn.functional.selu',
         ref=lambda x, inplace=False:
