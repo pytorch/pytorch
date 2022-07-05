@@ -1,6 +1,10 @@
 from typing import Dict, Any
+import torch
 from collections import defaultdict
 from torch import nn
+import copy
+from ...sparsifier.utils import module_to_fqn
+import warnings
 
 __all__ = ['ActivationSparsifier']
 
@@ -95,24 +99,104 @@ class ActivationSparsifier:
 
         self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
+    @staticmethod
+    def __safe_rail_checks(args):
+        """Makes sure that some of the functions and attributes are not passed incorrectly
+        """
+
+        # if features are not None, then feature_dim must not be None
+        features, feature_dim = args['features'], args['feature_dim']
+        if features is not None:
+            assert feature_dim is not None, "need feature dim to select features"
+
+        # all the *_fns should be a function
+        fn_keys = ['aggregate_fn', 'reduce_fn', 'mask_fn']
+        for key in fn_keys:
+            fn = args[key]
+            assert callable(fn), 'function should be callable'
+
+    def __aggregate_hook(self, name):
+        """Returns hook that computes aggregate of activations passing through.
+        """
+
+        # gather some data
+        feature_dim = self.data_groups[name]['feature_dim']
+        features = self.data_groups[name]['features']
+        agg_fn = self.data_groups[name]['aggregate_fn']
+
+        def hook(module, input) -> None:
+            input_data = input[0]
+
+            data = self.data_groups[name].get('data')  # aggregated data
+            if features is None:
+                # no features associated, data should not be a list
+                if data is None:
+                    data = torch.zeros_like(input_data)
+                    self.state[name]['mask'] = torch.ones_like(input_data)
+                out_data = agg_fn(data, input_data)
+            else:
+                # data should be a list [aggregated over each feature only]
+                if data is None:
+                    out_data = [0 for _ in range(0, len(features))]  # create one incase of 1st forward
+                    self.state[name]['mask'] = [0 for _ in range(0, len(features))]
+                else:
+                    out_data = data  # a list
+
+                # compute aggregate over each feature
+                for feature_idx in range(len(features)):
+                    # each feature is either a list or scalar, convert it to torch tensor
+                    feature_tensor = torch.Tensor([features[feature_idx]], device=input_data.device).long()
+                    data_feature = torch.index_select(input_data, feature_dim, feature_tensor)
+                    if data is None:
+                        curr_data = torch.zeros_like(data_feature)
+                        self.state[name]['mask'][feature_idx] = torch.ones_like(data_feature)
+                    else:
+                        curr_data = data[feature_idx]
+                    out_data[feature_idx] = agg_fn(curr_data, data_feature)
+            self.data_groups[name]['data'] = out_data
+        return hook
+
     def register_layer(self, layer: nn.Module, aggregate_fn=None, reduce_fn=None,
-                       mask_fn=None, features=None, feature_dim=None, **config):
+                       mask_fn=None, features=None, feature_dim=None, **sparse_config):
         r"""
         Registers a layer for sparsification. The layer should be part of self.model.
         Specifically, registers a pre-forward hook to the layer. The hook will apply the aggregate_fn
         and store the aggregated activations that is input over each step.
 
-        Optionally, accepts custom aggregate, reduce, create_mask functions and features, dimension.
-
         Note::
-            There is no need to pass in the name of the layer as it is automatically computed as per
-            the fqn convention.
+            - There is no need to pass in the name of the layer as it is automatically computed as per
+              the fqn convention.
 
-            All the functions (fn) passed as argument will be called at a dim, feature level.
+            - All the functions (fn) passed as argument will be called at a dim, feature level.
         """
-        pass
+        name = module_to_fqn(self.model, layer)
+        assert name is not None, "layer not found in the model"  # satisfy mypy
 
-    def get_mask(self, name: str):
+        if name in self.data_groups:  # unregister layer if already present
+            warnings.warn("layer already attached to the sparsifier, deregistering the layer and registering with new config")
+            self.unregister_layer(name=name)
+
+        local_args = copy.deepcopy(self.defaults)
+        update_dict = {
+            'aggregate_fn': aggregate_fn,
+            'reduce_fn': reduce_fn,
+            'mask_fn': mask_fn,
+            'features': features,
+            'feature_dim': feature_dim,
+            'layer': layer
+        }
+        local_args.update((arg, val) for arg, val in update_dict.items() if val is not None)
+        local_args['sparse_config'].update(sparse_config)
+
+        self.__safe_rail_checks(local_args)
+
+        self.data_groups[name] = local_args
+        agg_hook = layer.register_forward_pre_hook(self.__aggregate_hook(name=name))
+
+        # attach agg hook
+        self.data_groups[name]['hook'] = agg_hook
+
+    def get_mask(self, name: str = None, layer: nn.Module = None):
         """
         Returns mask associated to the layer.
 
@@ -122,10 +206,37 @@ class ActivationSparsifier:
 
         Note::
             The shape of the mask is unknown until model.forward() is applied.
-            Hence, if get_mask() is called before model.forward(), then an
+            Hence, if get_mask() is called before model.forward(), an
             error will be raised.
         """
-        pass
+        assert name is not None or layer is not None, "Need at least name or layer obj to retrieve mask"
+
+        if name is None:
+            assert layer is not None
+            name = module_to_fqn(self.model, layer)
+            assert name is not None, "layer not found in the specified model"
+
+        if name not in self.state:
+            raise ValueError("Error: layer with the given name not found")
+
+        mask = self.state[name].get('mask', None)
+
+        if mask is None:
+            raise ValueError("Error: shape unknown, call layer() routine at least once to infer mask")
+        return mask
+
+    def unregister_layer(self, name):
+        """Detaches the sparsifier from the layer
+        """
+
+        # detach any hooks attached
+        self.data_groups[name]['hook'].remove()
+
+        # pop from the state dict
+        self.state.pop(name)
+
+        # pop from the data groups
+        self.data_groups.pop(name)
 
     def step(self):
         """
