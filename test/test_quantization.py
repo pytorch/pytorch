@@ -78,6 +78,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError:
     pass
@@ -89,6 +90,7 @@ try:
     from quantization.fx.test_model_report_fx import TestFxModelReportDetectDynamicStatic  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxModelReportClass  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxDetectInputWeightEqualization  # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxDetectOutliers  # noqa: F401
 except ImportError:
     pass
 

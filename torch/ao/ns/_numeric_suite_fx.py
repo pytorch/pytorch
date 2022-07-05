@@ -85,7 +85,6 @@ across models. Example usage::
 """
 
 import collections
-import copy
 
 import torch
 import torch.nn as nn
@@ -113,6 +112,7 @@ from .fx.utils import (
     rekey_logger_info_on_node_name_of_model,
     maybe_add_missing_fqns,
     get_target_type_str,
+    get_normalized_nth_input,
 )
 
 from .fx.ns_types import (
@@ -125,11 +125,21 @@ from torch.ao.quantization import (
     QConfigMapping,
 )
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.fx.qconfig_utils import generate_qconfig_map
+from torch.ao.ns.fx.n_shadows_utils import (
+    OutputProp,
+    _get_attr_name,
+    _get_attr_wrapper_name,
+    _get_dedup_subgraphs,
+    _get_logger_for_subgraph,
+    _add_logger_to_subgraph_wrapper,
+    SHADOW_WRAPPER_NODE_NAME_PREFIX,
+    create_submodule_from_subgraph,
+    BINARY_FUNCTIONS,
+)
 
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any
 
@@ -157,6 +167,7 @@ class OutputLogger(nn.Module):
         index_within_arg: int,
         index_of_arg: int,
         fqn: Optional[str],
+        qconfig_str: Optional[str] = '',
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -204,6 +215,8 @@ class OutputLogger(nn.Module):
         # collect results of calibration, only results after convert_fx
         # so, we add a flag to control whether this logger collects data
         self.enabled = True
+        # string representation of qconfig
+        self.qconfig_str = qconfig_str
 
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
@@ -500,6 +513,7 @@ def _extract_logger_info_one_model(
                 'index_within_arg': mod.index_within_arg,
                 'index_of_arg': mod.index_of_arg,
                 'fqn': mod.fqn,
+                'qconfig_str': mod.qconfig_str,
             })
             # ensure the list stays sorted
             results[key][mod.results_type][mod.model_name].sort(
@@ -691,83 +705,11 @@ def extend_logger_results_with_comparison(
                     comparison_result = comparison_fn(value_1, value_2)
                     result_2[comparison_name].append(comparison_result)
 
-SHADOW_NODE_NAME_PREFIX = 'shadow'
-SHADOW_WRAPPER_NODE_NAME_PREFIX = 'shadow_wrapper'
-
-# from https://pytorch.org/docs/stable/fx.html#the-interpreter-pattern
-class OutputProp:
-    """
-    Output propagation (modeled from shape propagation).
-    """
-    def __init__(self, mod):
-        self.mod = mod
-        self.graph = mod.graph
-        self.modules = dict(self.mod.named_modules())
-
-    def propagate(self, *args):
-        args_iter = iter(args)
-        env : Dict[str, Node] = {}
-
-        def load_arg(a):
-            return torch.fx.graph.map_arg(a, lambda n: env[n.name])
-
-        def fetch_attr(target : str):
-            target_atoms = target.split('.')
-            attr_itr = self.mod
-            for i, atom in enumerate(target_atoms):
-                if not hasattr(attr_itr, atom):
-                    raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
-                attr_itr = getattr(attr_itr, atom)
-            return attr_itr
-
-        for node in self.graph.nodes:
-            if node.op == 'placeholder':
-                result = next(args_iter)
-            elif node.op == 'get_attr':
-                result = fetch_attr(node.target)
-            elif node.op == 'call_function':
-                result = node.target(*load_arg(node.args), **load_arg(node.kwargs))
-            elif node.op == 'call_method':
-                self_obj, *args = load_arg(node.args)
-                kwargs = load_arg(node.kwargs)
-                result = getattr(self_obj, node.target)(*args, **kwargs)
-            elif node.op == 'call_module':
-                result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
-
-            if isinstance(result, torch.Tensor):
-                # node.shape = result.shape
-                # node.dtype = result.dtype
-                node.traced_result = result
-
-            env[node.name] = result
-
-        # below does not work, maybe a change in FX from stable to master
-        # return load_arg(self.graph.result)
-        return None
-
-def _get_dedup_subgraphs(matches) -> Dict[str, List[Node]]:
-    # the original matches variable is unique by node, make it unique by subgraph
-    # instead
-    seen_nodes = set()
-    subgraphs_dedup = {}
-    for name, cur_match in reversed(matches.items()):
-        was_seen = False
-        for node in cur_match[1]:
-            if node in seen_nodes:
-                was_seen = True
-            seen_nodes.add(node)
-        if was_seen:
-            continue
-        subgraphs_dedup[name] = cur_match[1]
-        # [node_n, ..., node_0], note that the order is reversed
-        # to make it chronological for simple subgraphs
-        subgraphs_dedup[name].reverse()
-
-    return subgraphs_dedup
-
 def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
+    qconfig_mappings: List[QConfigMapping],
+    backend_config_dict: Any,
 ) -> torch.nn.Module:
     """
     Given a model with a graph such as
@@ -790,41 +732,30 @@ def prepare_n_shadows_model(
     This is useful for testing different quantization of multiple layers in
     a single pass through the model.
 
-    High level TODOs:
-    1. add a way to pass in multiple qconfigs per node
-    2. add a way to associate loggers with qconfigs
-    3. figure out a better way to name the output structure
-
-    future: how to build qconfigs per node:
-    1. user passes in N qconfig_mapping objects
-    2. TODO build function which maps each qconfig to each subgraph, then dedupes and
-       returns lists of qconfigs to try per subgraph
-    3. have the code use this function
-
-    future: associating loggers with qconfigs:
-    1. find a way to create a string representation of a qconfig
-    2. add that string representation to a logger
+    High level TODOs for future PRs:
+    1. add deduplication for qconfigs per subgraph
+    2. figure out a better way to name the output structure
+    3. if needed, optimize memory usage (currently, all intermediate activations
+       are stored until results are calculated).
+    4. for now, results are manually printed in an easy to read way. A logical
+       next step would be to automaticaly output the best qconfig, and then
+       automatically output a single model quantized with that best qconfig.
     """
-
-    # For now, use a normal qconfig mapping, and create a shadow mini-module for
-    # each op.
-    # In the future, this will need to be extended with N qconfigs per op.
-    qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_qconfig)
 
     prepare_custom_config = PrepareCustomConfig()\
         .set_non_traceable_module_classes([OutputLogger])
 
-    mt = torch.fx.symbolic_trace(model)
+    tracer = quantize_fx.QuantizationTracer([], [])
+    mt = torch.fx.GraphModule(model, tracer.trace(model))
 
-    # run shape prop and test
+    # run example input propagation, we need this to call prepare_fx on
+    # individual subgraphs
     output_prop = OutputProp(mt)
     output_prop.propagate(*example_inputs)
 
     # Find the set of subgraphs in the original graph which we need to
     # consider.
     modules = dict(mt.named_modules(remove_duplicate=False))
-    # TODO(future PR): make backend_config_dict configurable
-    backend_config_dict = get_native_backend_config_dict()
     patterns = get_pattern_to_quantize_handlers(backend_config_dict)
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
@@ -836,15 +767,15 @@ def prepare_n_shadows_model(
         standalone_module_names, standalone_module_classes, custom_module_classes)
     subgraphs_dedup = _get_dedup_subgraphs(matches)
 
+    # generate node to qconfig for each subgraph
+    # TODO(future PR): deduplicate repeating entries
+    list_of_node_name_to_qconfig = []
+    for qconfig_mapping in qconfig_mappings:
+        node_name_to_qconfig = generate_qconfig_map(
+            mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
+        list_of_node_name_to_qconfig.append(node_name_to_qconfig)
+
     # Iterate through each quantization region in the model
-    # TODO(future PR): support call_function and call_method
-
-    def _get_attr_name(subgraph_idx, subgraph_candidate_idx):
-        return f"{SHADOW_NODE_NAME_PREFIX}_{subgraph_idx}_{subgraph_candidate_idx}"
-
-    def _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx):
-        return f"{SHADOW_WRAPPER_NODE_NAME_PREFIX}_{subgraph_idx}_{subgraph_candidate_idx}"
-
     for (subgraph_idx, (match_name, nodes_in_this_subgraph)) in \
             enumerate(subgraphs_dedup.items()):
         # for now, assume that
@@ -852,92 +783,90 @@ def prepare_n_shadows_model(
         # 2. the last node has one output
         # 3. all the nodes are modules
 
-        # for now, ignore all subgraphs that contain non-modules
+        # for now, ignore all subgraphs that contain non-nodes (tuples, etc)
         # TODO(future PR): implement this
-        if any(not isinstance(node, Node) or node.op != 'call_module' for node in nodes_in_this_subgraph):
+        if any(
+            not isinstance(node, Node)
+            for node in nodes_in_this_subgraph
+        ):
             continue
-
-        # for each subgraph, counter of the candidate. idx=0 is the floating point
-        # (original) version of the subgraph
-        subgraph_candidate_idx = 0
-
-        modules_to_copy = []
-
-        for node in nodes_in_this_subgraph:
-            assert node.op == 'call_module'
-            orig_mod = getattr_from_fqn(mt, node.target)
-            # orig_mod = getattr(mt, node.target)
-            orig_mod_copy = copy.deepcopy(orig_mod)
-            modules_to_copy.append(orig_mod_copy)
 
         first_node = nodes_in_this_subgraph[0]
         last_node = nodes_in_this_subgraph[-1]
-
-        # first, add the logger for the floating point subgraph
-        logger_mod_orig = OutputLogger(
-            first_node.name,  # ref_node_name
-            last_node.name,  # prev_node_name
-            f'subgraph_{subgraph_idx}_{subgraph_candidate_idx}',  # model_name
-            'model',  # ref_name
-            get_target_type_str(last_node, mt),  # prev_node_target_type
-            get_target_type_str(first_node, mt),  # ref_node_target_type
-            NSSingleResultValuesType.NODE_OUTPUT.value,  # results_type
-            0,  # index_within_arg
-            0,  # index_of_arg
-            '',  # fqn (not supported for now)
-        )
-        logger_mod_orig.enabled = False
-
-        attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-        assert not hasattr(mt, attr_name)
-        setattr(mt, attr_name, logger_mod_orig)
-        with mt.graph.inserting_after(last_node):
-            new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
-
-        subgraph_candidate_idx += 1
-
-        # then, add the logger for the quantized subgraph
-        # TODO(future PR): make this happen M-1 times
-        logger_mod = OutputLogger(
-            first_node.name,  # ref_node_name
-            last_node.name,  # prev_node_name
-            f'subgraph_{subgraph_idx}_{subgraph_candidate_idx}',  # model_name
-            'model',  # ref_name
-            get_target_type_str(last_node, mt),  # prev_node_target_type
-            get_target_type_str(first_node, mt),  # ref_node_target_type
-            NSSingleResultValuesType.NODE_OUTPUT.value,  # results_type
-            0,  # index_within_arg
-            0,  # index_of_arg
-            '',  # fqn (not supported for now)
-        )
-        logger_mod.enabled = False
-
-        # Since the current prototype only handles modules, we can use
-        # nn.Sequential. As we add functions and methods, we will have to
-        # revisit this.
-        orig_mod_copy_wrapped = nn.Sequential(*modules_to_copy, logger_mod)
-
         # We used output propagation to populate example values on each
         # node. Use the example values from the previous node as the input
         # to the current node.
-        example_inputs = (first_node.args[0].traced_result,)
-        # example_inputs = (torch.randn(1, 1),)
-        print('first_node', first_node, 'example_inputs', *example_inputs)
+        prev_node = get_normalized_nth_input(first_node, model, 0)
+        example_inputs = (prev_node.traced_result,)
 
-        # add a call to prepare_fx on the wrapper module
-        orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
-            orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
-            prepare_custom_config=prepare_custom_config)
+        for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
-        # attach the wrapper to the model
-        attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
-        assert not hasattr(mt, attr_name)
-        setattr(mt, attr_name, orig_mod_copy_wrapped)
+            if subgraph_candidate_idx == 0:
+                # idx = 0 is the floating point (original) version of the subgraph
+                # We keep the subgraph as is, and add a logger at the end
 
-        # add a call to the wrapper module with a logger
-        with mt.graph.inserting_before(first_node):
-            new_node = mt.graph.call_module(
-                attr_name, args=first_node.args, kwargs=first_node.kwargs)
+                qconfig_str = ''
+                logger_mod_orig = _get_logger_for_subgraph(
+                    mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
+                    qconfig_str)
+
+                attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
+                assert not hasattr(mt, attr_name)
+                setattr(mt, attr_name, logger_mod_orig)
+                with mt.graph.inserting_after(last_node):
+                    new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
+
+            else:
+                # idx > 0 means we have a candidate qconfig to try, so we need
+                # to make a copy of the subgraph, feed it with the right inputs,
+                # and add a logger at the end
+
+                # get the qconfig
+                # subtract one because the first candidate is the floating point
+                # version of the subgraph
+                node_name_to_qconfig = \
+                    list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
+                qconfig = node_name_to_qconfig[first_node.name]
+                qconfig_mapping = QConfigMapping().set_global(qconfig)
+
+                # create a copy of the submodule, wrapped in a separate module
+                orig_mod_copy_wrapped = create_submodule_from_subgraph(
+                    mt, first_node, last_node)
+
+                # add a logger to the end of this submodule
+                # get first and last nodes of the submodule
+                _add_logger_to_subgraph_wrapper(
+                    orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
+                    str(qconfig))
+
+                # add a call to prepare_fx on the wrapper module
+                orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
+                    orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
+                    prepare_custom_config=prepare_custom_config)
+
+                # attach the wrapper to the model
+                attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
+                assert not hasattr(mt, attr_name)
+                setattr(mt, attr_name, orig_mod_copy_wrapped)
+
+                # add a call to the wrapper module from the parent graph
+                with mt.graph.inserting_before(first_node):
+                    # for now, assume that the module only needs one or two
+                    # inputs, and all other args/kwargs are taken care of
+                    # inside the module
+                    # TODO(future PR): adjust this for ops where it does not work
+
+                    if first_node.target in BINARY_FUNCTIONS:
+                        prev_node_0 = get_normalized_nth_input(first_node, model, 0)
+                        prev_node_1 = get_normalized_nth_input(first_node, model, 1)
+                        new_args = (prev_node_0, prev_node_1)
+                    else:
+                        prev_node = get_normalized_nth_input(first_node, model, 0)
+                        new_args = (prev_node,)
+                    new_kwargs = {}
+
+                    new_node = mt.graph.call_module(
+                        attr_name, args=new_args, kwargs=new_kwargs)
 
     mt.recompile()
     return mt
@@ -961,3 +890,213 @@ def extract_results_n_shadows_model(model: torch.nn.Module) -> NSResultsType:
     results: NSResultsType = {}
     _extract_logger_info_one_model(model, results, OutputLogger)
     return results
+
+def group_results_by_subgraph(results: NSResultsType) -> Any:
+    """
+    Creates a comparison of results
+
+    Input:
+
+    {
+      'model': {
+        'node_output': {
+          'subgraph_0_0': [
+            'values': [torch.tensor(...), ...], ...
+            'ref_node_name': ...,
+            'qconfig_str': ...,
+          ],
+          'subgraph_0_1': [
+            'values': [torch.tensor(...), ...], ...
+            'ref_node_name': ...,
+            'qconfig_str': ...,
+          ],
+          ...
+        },
+      },
+    }
+
+    Output:
+    {
+      'subgraph_0': {
+        '0': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': None,
+        },
+        '1': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '...',
+        },
+      },
+    }
+
+    TODO(future PR): add ref_node_target_type, will be useful
+    """
+
+    subgraph_name_to_subgraph_results = collections.defaultdict(dict)
+
+    for subgraph_name_with_idx, subgraph_candidate_results in \
+            results['model']['node_output'].items():
+
+        # convert from `subgraph_m_n` to `subgraph_m` and `n`
+        subgraph_str, subgraph_idx, subgraph_candidate_idx = \
+            subgraph_name_with_idx.split('_')
+        subgraph_name = f'{subgraph_str}_{subgraph_idx}'
+
+        subgraph_results = {
+            'ref_node_name': subgraph_candidate_results[0]['ref_node_name'],
+            'values': subgraph_candidate_results[0]['values'],
+            'qconfig_str': subgraph_candidate_results[0]['qconfig_str'],
+        }
+
+        subgraph_name_to_subgraph_results[subgraph_name][subgraph_candidate_idx] = \
+            subgraph_results
+
+    return dict(subgraph_name_to_subgraph_results)
+
+def create_results_comparison(
+    results_grouped,
+    comparison_fn,
+    comparison_fn_name,
+) -> Any:
+    """
+    Input:
+
+    {
+      'subgraph_0': {
+        '0': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '',
+        },
+        '1': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '...',
+        },
+      },
+    }
+
+    Output:
+    {
+      'subgraph_0': {
+        'ref_node_name': '...',
+        'candidates': {
+          '1': {
+            'qconfig_str': ...,
+            'cmp_fn_name': ...,
+            'cmp_raw': [..., ...],
+            'cmp_mean': ...,
+          },
+          ...,
+        },
+      },
+    }
+    """
+
+    results_comparison = {}
+
+    for subgraph_name, subgraph_results in results_grouped.items():
+
+        candidates = {}
+
+        # name '0' always exists and is always the baseline
+        baseline_values = subgraph_results['0']['values']
+
+        for subgraph_inner_name, subgraph_inner_result in subgraph_results.items():
+            # skip comparing baseline to baseline
+            if subgraph_inner_name == '0':
+                continue
+
+            candidate_values = subgraph_inner_result['values']
+
+            cmp_raw = []
+
+            for baseline_val, candidate_val in zip(baseline_values, candidate_values):
+                cmp_val = comparison_fn(baseline_val, candidate_val)
+                cmp_raw.append(cmp_val)
+
+            cmp_raw_tensor = torch.stack(cmp_raw)
+
+            candidates[subgraph_inner_name] = {
+                'qconfig_str': subgraph_inner_result['qconfig_str'],
+                'cmp_fn_name': comparison_fn_name,
+                'cmp_raw': cmp_raw_tensor,
+                'cmp_mean': torch.mean(cmp_raw_tensor),
+            }
+
+        results_comparison[subgraph_name] = {
+            'ref_node_name': subgraph_results['0']['ref_node_name'],
+            'candidates': candidates,
+        }
+
+    return results_comparison
+
+def print_n_shadows_summary(
+    results_comparison,
+) -> None:
+    """
+    Input:
+
+    {
+      'subgraph_0': {
+        'ref_node_name': 'linear1',
+        'candidates': {
+          '1': {
+            'qconfig_str': ...,
+            'cmp_fn_name': ...,
+            'cmp_raw': [45.0, 55.0],
+            'cmp_mean': 50.0,
+          },
+          ...,
+        },
+      },
+    }
+
+    Prints:
+
+    subgraph_idx | ref_node_name | best_idx | 0    | 1    | ...
+    subgraph_0   | linear1       | 1        | 45.0 | 50.0 | ...
+    """
+
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        print("`print_tabular` relies on the library `tabulate`, "
+              "which could not be found on this machine. Run `pip "
+              "install tabulate` to install the library.")
+
+    results = []
+    for subgraph_name, subgraph_data in results_comparison.items():
+        # print('sd', subgraph_data)
+
+        mean_all_candidates = [
+            candidate['cmp_mean']
+            for candidate_name, candidate in subgraph_data['candidates'].items()
+        ]
+
+        # find top candidate
+        # for now assume high is good and low is bad
+        # TODO(future PR): make this configurable
+        best_val, best_candidate = -10000.0, None
+        for idx, val in enumerate(mean_all_candidates):
+            if val > best_val:
+                best_val = val
+                best_candidate = idx + 1
+
+        data_row = [
+            subgraph_name,
+            subgraph_data['ref_node_name'],
+            best_candidate,
+            *mean_all_candidates,
+        ]
+        results.append(data_row)
+
+    max_candidate_idx_len = -1
+    for data_row in results:
+        max_candidate_idx_len = max(max_candidate_idx_len, len(data_row[1]))
+    candidate_idx_headers = [str(x + 1) for x in range(max_candidate_idx_len)]
+
+    headers = ['subgraph_idx', 'ref_node_name', 'best_idx', *candidate_idx_headers]
+    print(tabulate(results, headers=headers))
