@@ -1960,6 +1960,14 @@
     "Serialization",
     "wrapper_singleton"
   ],
+  "torch.utils.checkpoint": [
+    "Any",
+    "Dict",
+    "Iterable",
+    "List",
+    "Optional",
+    "Tuple"
+  ],
   "torch.utils.cpp_extension": [
     "ExtensionVersioner",
     "FileBaton",
