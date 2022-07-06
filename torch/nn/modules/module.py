@@ -312,7 +312,7 @@ class Module:
         "_load_state_dict_pre_hooks",
         "_load_state_dict_post_hooks",
         "_modules",
-        "_dict",
+        "_dynamic_attributes",
     )
 
     def __init__(self) -> None:
@@ -339,7 +339,7 @@ class Module:
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
-        super().__setattr__('_dict', OrderedDict())
+        super().__setattr__('_dynamic_attributes', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -374,11 +374,10 @@ class Module:
         if persistent is False and isinstance(self, torch.jit.ScriptModule):
             raise RuntimeError("ScriptModule does not support non-persistent buffers")
 
-        #if '_buffers' not in self.__dict__:
-        #    raise AttributeError(
-                #"cannot assign buffer before Module.__init__() call")
-        #elif not isinstance(name, torch._six.string_classes):
-        if not isinstance(name, torch._six.string_classes):
+        if not hasattr(self, "_buffers"):
+            raise AttributeError(
+                "cannot assign buffer before Module.__init__() call")
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -411,12 +410,10 @@ class Module:
                 are ignored. If ``None``, the parameter is **not** included in the
                 module's :attr:`state_dict`.
         """
-        #if '_parameters' not in self.__dict__:
-            #raise AttributeError(
-                #"cannot assign parameter before Module.__init__() call")
-
-        #elif not isinstance(name, torch._six.string_classes):
-        if not isinstance(name, torch._six.string_classes):
+        if not hasattr(self, "_parameters"):
+            raise AttributeError(
+                "cannot assign parameter before Module.__init__() call")
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -1267,34 +1264,18 @@ class Module:
         pass
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
-        #print(id(self), "getting attr", name)
-
-        # slots version
-        if name in self._parameters:
-            return self._parameters[name]
-        if name in self._buffers:
-            return self._buffers[name]
-        if name in self._modules:
-            return self._modules[name]
-        if name in self._dict:
-            return self._dict[name]
-
-        # regular version
-        """
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
-            if name in _buffers:
-                return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
-        """
-
+        if hasattr(self, "_parameters"):
+            if name in self._parameters:
+                return self._parameters[name]
+        if hasattr(self, "_buffers"):
+            if name in self._buffers:
+                return self._buffers[name]
+        if hasattr(self, "_modules"):
+            if name in self._modules:
+                return self._modules[name]
+        if hasattr(self, "_dynamic_attributes"):
+            if name in self._dynamic_attributes:
+                return self._dynamic_attributes[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -1307,14 +1288,7 @@ class Module:
                     else:
                         d.discard(name)
 
-        #print(id(self), "setting attr", name, "to", id(value))
-
-        if name == "__class__":
-            super().__setattr__(name, value)
-            return
-
         params = self._parameters
-        #params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
@@ -1329,7 +1303,6 @@ class Module:
             self.register_parameter(name, value)
         else:
             modules = self._modules
-            #modules = self.__dict__.get('_modules')
             if isinstance(value, Module):
                 if modules is None:
                     raise AttributeError(
@@ -1344,16 +1317,16 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self._buffers
-                #buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
                     buffers[name] = value
+                elif name == "__class__":
+                    super().__setattr__(name, value)
                 else:
-                    self._dict[name] = value
-                    #super().__setattr__(name, value)
+                    self._dynamic_attributes[name] = value
 
     def __delattr__(self, name):
         if name in self._parameters:
@@ -1363,9 +1336,10 @@ class Module:
             self._non_persistent_buffers_set.discard(name)
         elif name in self._modules:
             del self._modules[name]
+        elif name == "__class__":
+            super().__delattr__(name, value)
         else:
-            del self._dict[name]
-            #super().__delattr__(name)
+            del self._dynamic_attributes[name]
 
     def _register_state_dict_hook(self, hook):
         r"""These hooks will be called with arguments: `self`, `state_dict`,
@@ -2050,7 +2024,7 @@ class Module:
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
-        attrs = list(self._dict.keys())
+        attrs = list(self._dynamic_attributes.keys())
         parameters = list(self._parameters.keys())
         modules = list(self._modules.keys())
         buffers = list(self._buffers.keys())
