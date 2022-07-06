@@ -3896,6 +3896,7 @@ class TestFunctionalTracing(JitTestCase):
         "cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
+        "dropout1d": CONTROL_FLOW,
         "dropout2d": CONTROL_FLOW,
         "dropout3d": CONTROL_FLOW,
         "elu": CONTROL_FLOW,
@@ -3944,8 +3945,6 @@ class TestFunctionalTracing(JitTestCase):
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
-
-        "normalize" : MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation

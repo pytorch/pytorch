@@ -96,7 +96,8 @@ class TestONNXOpset(TestCase):
             }
         ]
         ops_10 = [
-            {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}
+            {"op_name": "Constant"},
+            {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]},
         ]
         ops = {9: ops_9, 10: ops_10}
         x = torch.arange(1.0, 6.0, requires_grad=True)
@@ -169,7 +170,7 @@ class TestONNXOpset(TestCase):
     def test_upsample(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
@@ -181,7 +182,7 @@ class TestONNXOpset(TestCase):
             {
                 "op_name": "Upsample",
                 "attributes": [
-                    {"name": "mode", "s": ("nearest").encode(), "type": 3},
+                    {"name": "mode", "s": (b"nearest"), "type": 3},
                     {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6},
                 ],
             }
@@ -190,7 +191,7 @@ class TestONNXOpset(TestCase):
             {"op_name": "Constant"},
             {
                 "op_name": "Upsample",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
         ops = {8: ops8, 9: ops9}
@@ -200,7 +201,7 @@ class TestONNXOpset(TestCase):
     def test_cast_constant(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x - 1
@@ -253,10 +254,12 @@ class TestONNXOpset(TestCase):
             {"op_name": "Shape"},
             {"op_name": "Constant"},
             {"op_name": "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
+            {"op_name": "Constant"},
             {
                 "op_name": "Unsqueeze",
                 "attributes": [{"name": "axes", "i": 0, "type": 7}],
             },
+            {"op_name": "Constant"},
             {"op_name": "Constant"},
             {"op_name": "Slice", "attributes": []},
         ]
@@ -301,7 +304,7 @@ class TestONNXOpset(TestCase):
     def test_dropout(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.dropout = torch.nn.Dropout(0.5)
 
             def forward(self, x):
@@ -381,7 +384,7 @@ class TestONNXOpset(TestCase):
             {"op_name": "Concat"},
             {
                 "op_name": "Upsample",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
         ops_10 = [
@@ -410,7 +413,7 @@ class TestONNXOpset(TestCase):
             {"op_name": "Concat"},
             {
                 "op_name": "Resize",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
 
@@ -426,6 +429,7 @@ class TestONNXOpset(TestCase):
         )
 
         ops_9 = [
+            {"op_name": "Constant"},
             {"op_name": "Shape"},
             {"op_name": "Slice"},
             {"op_name": "Cast"},
@@ -434,10 +438,11 @@ class TestONNXOpset(TestCase):
             {"op_name": "Concat"},
             {
                 "op_name": "Upsample",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
         ops_10 = [
+            {"op_name": "Constant"},
             {"op_name": "Shape"},
             {"op_name": "Constant"},
             {"op_name": "Constant"},
@@ -465,14 +470,14 @@ class TestONNXOpset(TestCase):
             {"op_name": "Constant"},
             {
                 "op_name": "Upsample",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
         ops_10 = [
             {"op_name": "Constant"},
             {
                 "op_name": "Resize",
-                "attributes": [{"name": "mode", "s": ("nearest").encode(), "type": 3}],
+                "attributes": [{"name": "mode", "s": (b"nearest"), "type": 3}],
             },
         ]
         ops = {9: ops_9, 10: ops_10}

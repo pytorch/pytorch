@@ -13,11 +13,11 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 }  // namespace meta

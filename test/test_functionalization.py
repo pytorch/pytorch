@@ -88,9 +88,31 @@ class TestFunctionalization(TestCase):
 
         # We need to sync the input tensors first, in case there are any queued mutations left.
         torch._sync(input_functional)
-        torch._sync(out_functional)
-        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
         self.assertEqual(inpt, torch._from_functional_tensor(input_functional))  # input mutations should still occur
+
+        # Handle tests with multi-tensor outputs
+        if isinstance(out_ref, tuple) and isinstance(out_functional, tuple):
+            out_refs, out_functionals = list(out_ref), list(out_functional)
+        else:
+            out_refs, out_functionals = [out_ref], [out_functional]
+
+        for out_ref_, out_functional_ in zip(out_refs, out_functionals):
+            self.assertEqual(out_ref_.size(), out_functional_.size())
+            torch._sync(out_functional_)
+            out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
+            self.assertEqual(out_ref_, out_functional_unwrapped)
+
+    def test_multiple_views_of_same_base(self):
+        def f(x):
+            y = x.view(-1)
+            z = x.view(-1)
+            x.add_(1)
+            # y should have been updated.
+            y2 = y + 1
+            # z should have been updated too.
+            z2 = z + 1
+            return z2
+        self.assert_functionalization(f, torch.ones(4))
 
     def test_simple(self):
         def f(x):
@@ -153,8 +175,6 @@ $1, $2 = torch._ops.aten.aminmax.default($0, dim=0)""")
             z.add_(1)
             return y
         self.assert_functionalization(f, torch.arange(3, dtype=torch.float32))
-        logs = self.get_logs(f, torch.arange(3, dtype=torch.float32))
-        self.assertExpectedInline('\n'.join(logs), """$0 = input('input')""")
 
     def test_inplace_on_non_view(self):
         def f(x):
@@ -174,6 +194,29 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         [1., 1.],
         [1., 1.]]))""")
 
+    # Some ops that are mutable are neither inplace nor out= ops.
+    # They also need special handling.
+    def test_mutable_op_not_inplace_or_other(self):
+        def f(x):
+            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 0, 1, 0)
+
+        logs = self.get_logs(f, torch.ones(1))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
+
+    def test_as_strided(self):
+        def f(x):
+            y = x.as_strided((2,), (2,), 1)
+            y.add_(1)
+            return x
+        self.assert_functionalization(f, torch.ones(9))
+        logs = self.get_logs(f, torch.ones(9))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.as_strided_copy.default($0, [2], [2], 1)
+$2 = torch._ops.aten.add.Tensor($1, 1)""")
+
     def test_tensor_list_composite(self):
         def f(x):
             # Test an op with TensorList input
@@ -183,16 +226,9 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         logs = self.get_logs(f, torch.ones(2, 2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.expand_copy.default($0, [2, 2])
-$2 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
-        [0., 0., 0., 0.]]), $1, 1, 0, 2)
-$3 = torch._ops.aten.slice_scatter.default(tensor([[0., 0., 0., 0.],
-        [0., 0., 0., 0.],
-        [0., 0., 0., 0.],
-        [0., 0., 0., 0.]]), $2, 0, 0, 2)
-$4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
-$5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
-$6 = torch._ops.aten.expand_copy.default($0, [2, 2])""")
+$1 = torch._ops.aten.block_diag.default([LoggingTensor(tensor([[1., 1.],
+        [1., 1.]])), LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])""")
 
     def test_cat(self):
         def f(x):
@@ -261,7 +297,7 @@ $9 = torch._ops.aten.mul.Tensor($8, $8)""")
             x.transpose_(1, 0)
             y = x[0]
             y.add_(tmp)
-            return y
+            return x
         self.assert_functionalization(f, torch.ones(4, 2))
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
@@ -304,6 +340,18 @@ $2 = torch._ops.aten.add.Tensor($1, 1)
 $3 = torch._ops.aten.mul.Tensor($2, 2)
 $4 = torch._ops.aten.div.Tensor($3, 1)""")
 
+    def test_metadata_change(self):
+        def f(x):
+            # ops like ge_() are allowed to change the dtype of the input.
+            # functionalization should pick up on that.
+            return x.ge_(0)
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.ge.Scalar($0, 0)
+$2 = torch._ops.aten._to_copy.default($1, dtype=torch.float32, layout=torch.strided)""")
+
     def test_only_one_view(self):
         def f(x):
             # This tests that we don't have any unnecessary views in the trace.
@@ -337,36 +385,29 @@ $1 = torch._ops.aten.add.Tensor($0, $0)
 $2 = torch._ops.aten.view_copy.default($1, [8])
 $3 = torch._ops.aten._reshape_alias_copy.default($2, [2, 4], [4, 1])
 $4 = torch._ops.aten.transpose_copy.int($3, 1, 0)
-$5 = torch._ops.aten.view_copy.default($1, [8])
-$6 = torch._ops.aten._reshape_alias_copy.default($5, [2, 4], [4, 1])
-$7 = torch._ops.aten.transpose_copy.int($6, 1, 0)
-$8 = torch._ops.aten.unsqueeze_copy.default($7, 0)
-$9 = torch._ops.aten.view_copy.default($1, [8])
-$10 = torch._ops.aten._reshape_alias_copy.default($9, [2, 4], [4, 1])
-$11 = torch._ops.aten.transpose_copy.int($10, 1, 0)
-$12 = torch._ops.aten.unsqueeze_copy.default($11, 0)
-$13 = torch._ops.aten.squeeze_copy.default($12)
-$14, $15 = torch._ops.aten.split_copy.Tensor($13, 2)
-$16 = torch._ops.aten.add.Tensor($14, tensor([[1., 1.],
+$5 = torch._ops.aten.unsqueeze_copy.default($4, 0)
+$6 = torch._ops.aten.squeeze_copy.default($5)
+$7, $8 = torch._ops.aten.split_copy.Tensor($6, 2)
+$9 = torch._ops.aten.add.Tensor($7, tensor([[1., 1.],
         [1., 1.]]))
-$17 = torch._ops.aten.select_copy.int($3, 0, 0)
-$18 = torch._ops.aten.clone.default($16, memory_format=torch.contiguous_format)
-$19 = torch._ops.aten._unsafe_view.default($18, [4])
-$20 = torch._ops.aten.view_copy.default($1, [8])
-$21 = torch._ops.aten._reshape_alias_copy.default($20, [2, 4], [4, 1])
-$22 = torch._ops.aten.transpose_copy.int($21, 1, 0)
-$23 = torch._ops.aten.unsqueeze_copy.default($22, 0)
-$24 = torch._ops.aten.squeeze_copy.default($23)
-$25 = torch._ops.aten.slice_scatter.default($24, $16, 0, 0, 2)
-$26 = torch._ops.aten.unsqueeze_copy.default($25, 0)
-$27 = torch._ops.aten.squeeze_copy.dim($26, 0)
-$28 = torch._ops.aten.transpose_copy.int($27, 1, 0)
-$29 = torch._ops.aten._reshape_alias_copy.default($28, [8], [1])
-$30 = torch._ops.aten.view_copy.default($29, [4, 2])
-$31 = torch._ops.aten.view_copy.default($30, [8])
-$32 = torch._ops.aten._reshape_alias_copy.default($31, [2, 4], [4, 1])
-$33 = torch._ops.aten.select_copy.int($32, 0, 0)
-$34 = torch._ops.aten.add.Tensor($33, $19)""")
+$10 = torch._ops.aten.select_copy.int($3, 0, 0)
+$11 = torch._ops.aten.clone.default($9, memory_format=torch.contiguous_format)
+$12 = torch._ops.aten._unsafe_view.default($11, [4])
+$13 = torch._ops.aten.view_copy.default($1, [8])
+$14 = torch._ops.aten._reshape_alias_copy.default($13, [2, 4], [4, 1])
+$15 = torch._ops.aten.transpose_copy.int($14, 1, 0)
+$16 = torch._ops.aten.unsqueeze_copy.default($15, 0)
+$17 = torch._ops.aten.squeeze_copy.default($16)
+$18 = torch._ops.aten.slice_scatter.default($17, $9, 0, 0, 2)
+$19 = torch._ops.aten.unsqueeze_copy.default($18, 0)
+$20 = torch._ops.aten.squeeze_copy.dim($19, 0)
+$21 = torch._ops.aten.transpose_copy.int($20, 1, 0)
+$22 = torch._ops.aten._reshape_alias_copy.default($21, [8], [1])
+$23 = torch._ops.aten.view_copy.default($22, [4, 2])
+$24 = torch._ops.aten.view_copy.default($23, [8])
+$25 = torch._ops.aten._reshape_alias_copy.default($24, [2, 4], [4, 1])
+$26 = torch._ops.aten.select_copy.int($25, 0, 0)
+$27 = torch._ops.aten.add.Tensor($26, $12)""")
 
     def test_reapply_views_simple(self):
         def f(x):
@@ -423,11 +464,11 @@ $4 = torch._ops.aten.mul.Tensor($3, $3)""")
 
         # Test 1: copy_() with same dtype and shape
         # to() is a composite op that noops when the dtype/shape match, so nothing gets logged.
-        self.assert_functionalization(f, torch.ones(2))
+        # self.assert_functionalization(f, torch.ones(2))
         logs = self.get_logs(f, torch.ones(2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.expand_copy.default($0, [2])
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 2: copy_() with same dtype, different shape
@@ -435,7 +476,7 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.expand_copy.default($0, [2])
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
 $2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 3: copy_() with different dtype, same shape
@@ -443,18 +484,16 @@ $2 = torch._ops.aten.add.Tensor($1, $0)""")
         logs = self.get_logs(f, torch.ones(2, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
-$2 = torch._ops.aten.expand_copy.default($1, [2])
-$3 = torch._ops.aten.add.Tensor($2, $0)""")
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
+$2 = torch._ops.aten.add.Tensor($1, $0)""")
 
         # Test 4: copy_() with different dtype, different shape
         self.assert_functionalization(f, torch.ones(1, dtype=torch.long))
         logs = self.get_logs(f, torch.ones(1, dtype=torch.long))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float32, layout=torch.strided, device=device(type='cpu'), pin_memory=False)
-$2 = torch._ops.aten.expand_copy.default($1, [2])
-$3 = torch._ops.aten.add.Tensor($2, $0)""")
+$1 = torch._ops.aten.copy.default(tensor([0., 0.]), $0)
+$2 = torch._ops.aten.add.Tensor($1, $0)""")
 
     def test_fill_(self):
         def f(x):
@@ -470,6 +509,83 @@ $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, $0)
 $2 = torch._ops.aten.diagonal_copy.default($1)
 $3 = torch._ops.aten.fill.Scalar($2, 0)""")
+
+    def test_resize_smaller(self):
+        def f(w):
+            # Resizing to a smaller size doesn't affect storage
+            x = w + 1
+            y = x.view(4, 4)
+            y.resize_(3, 3)
+            y2 = y.view(-1)
+            y2.add_(1)
+            z = y + 1
+            return z
+
+        self.assert_functionalization(f, torch.ones(8, 2))
+        logs = self.get_logs(f, torch.ones(8, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$2 = torch._ops.aten.view_copy.default($1, [4, 4])
+$3 = torch._ops.aten.resize.functional($2, [3, 3])
+$4 = torch._ops.aten.as_strided_copy.default($2, [3, 3], [3, 1])
+$5 = torch._ops.aten.view_copy.default($4, [-1])
+$6 = torch._ops.aten.add.Tensor($5, 1)
+$7 = torch._ops.aten.view_copy.default($1, [4, 4])
+$8 = torch._ops.aten.as_strided_copy.default($7, [3, 3], [3, 1])
+$9 = torch._ops.aten.view_copy.default($6, [3, 3])
+$10 = torch._ops.aten.as_strided_scatter.default($7, $9, [3, 3], [3, 1])
+$11 = torch._ops.aten.view_copy.default($10, [8, 2])
+$12 = torch._ops.aten.view_copy.default($11, [4, 4])
+$13 = torch._ops.aten.as_strided_copy.default($12, [3, 3], [3, 1])
+$14 = torch._ops.aten.add.Tensor($13, 1)""")
+
+    def test_resize_larger_valid(self):
+        def f(x):
+            y = x + 1
+            # resizing a tensor to a larger size is only currently allowed
+            # if the tensor-to-resize is not a view / has no outstanding views.
+            # See Note [resize_() in functionalization pass]
+            y.resize_(5, 5)
+            y2 = y.view(25)
+            # Do a mutation to ensure that aliases of the output of resize_()
+            # propagate mutations correctly.
+            # I'm using fill_ specifically because I want to guarantee that
+            # none of the output has uninitialized memory at the end
+            # (since these tests compare the data output against a reference impl)
+            y2.fill_(1)
+            out = y + 1
+            return y, out
+
+        self.assert_functionalization(f, torch.ones(8, 2))
+        logs = self.get_logs(f, torch.ones(8, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, 1)
+$2 = torch._ops.aten.resize.functional($1, [5, 5])
+$3 = torch._ops.aten.view_copy.default($2, [25])
+$4 = torch._ops.aten.fill.Scalar($3, 1)
+$5 = torch._ops.aten.view_copy.default($4, [5, 5])
+$6 = torch._ops.aten.add.Tensor($5, 1)""")
+
+    def test_resize_larger_invalid(self):
+        def f(x):
+            y = x + 1
+            z = y.view(4, 4)
+            # resizing a tensor to a larger size is only currently allowed
+            # if the tensor-to-resize is not a view / has no outstanding views.
+            # See Note [resize_() in functionalization pass]
+            # This should fail
+            z.resize_(5, 5)
+            z2 = z.view(25)
+            z2.fill_(1)
+            out = z + 1
+            return y, out
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r'Attempted to resize a view tensor to a larger size. This is not allowed in the functionalization pass'):
+            self.assert_functionalization(f, torch.ones(8, 2))
 
     def test_nested_functions_propagate_updates(self):
         def g(x):
@@ -509,7 +625,7 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         x1_not_functional = torch.ones(4)
         x2_functional = torch._to_functional_tensor(torch.ones(4))
 
-        # When dealing with mixed functional + nonfunctional tensors,
+        # When dealing with mixed functional + non functional tensors,
         # normal_tensor.add_(functional_tensor) is not valid
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):

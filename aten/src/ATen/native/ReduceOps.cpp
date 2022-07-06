@@ -172,7 +172,7 @@ void meta_func_cum_ops(
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
   }
 
-  meta.set_output(self.sizes(), self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options().dtype(out_dtype));
   namedinference::propagate_names(result, self);
 }
 
@@ -279,8 +279,8 @@ TORCH_META_FUNC(aminmax)
     }
   }
   const auto options = self.options();
-  this->set_output(0, shape, options);
-  this->set_output(1, shape, options);
+  this->set_output_raw_strided(0, shape, {}, options);
+  this->set_output_raw_strided(1, shape, {}, options);
 }
 
 TORCH_META_FUNC(amax)
@@ -670,12 +670,12 @@ template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
-      T1 out = self_data[0];
+      T1 out = c10::load(self_data);
       int idx = 0;
       for (const auto i : c10::irange(self_dim_size)) {
-        T1 curr_elem = self_data[i*self_stride];
+        T1 curr_elem = c10::load(&self_data[i*self_stride]);
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
-            out = self_data[i*self_stride];
+            out = curr_elem;
             idx = i;
         }
         values_data[i*values_stride] = out;
@@ -758,6 +758,12 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
     return input;
   }
   auto result = at::zeros(input.sizes(), input.options());
+
+  // for composite compliance, use out-of-place variant of
+  // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({indices, grad})) {
+    return result.scatter_add(dim, indices, grad);
+  }
   return result.scatter_add_(dim, indices, grad);
 }
 
@@ -1105,18 +1111,6 @@ Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<S
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
-static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
-                        bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
-  auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.fill_(1);
-  } else {
-    prod_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
@@ -1267,7 +1261,7 @@ Tensor nanmean(
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
+  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
@@ -1325,7 +1319,7 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
     result_options = self.options();
   }
   auto result = at::empty({0}, result_options);
-  return at::native::logsumexp_out(self, dims, keepdim, result);
+  return at::logsumexp_outf(self, dims, keepdim, result);
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
@@ -1355,11 +1349,24 @@ void impl_func_norm(
   auto in_dtype = opt_dtype.value_or(self.scalar_type());
   auto out_dtype = result.scalar_type();
 
+  // See the note [Reductions do not use vectorized ops]
+  Tensor self_;
+  if (self.is_cpu() && self.is_complex() && std::abs(p.toDouble()) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
+  } else {
+    self_ = self;
+  }
+
+
   // omit in_dtype in the following call, to avoid make_reduction explicitly
   // casting input to out_dtype
-  auto iter = isComplexType(self.scalar_type())
-      ? meta::make_reduction(self, result, dim, keepdim, in_dtype)
-      : meta::make_reduction_from_out_ty(self, result, dim, keepdim, out_dtype);
+  auto iter = isComplexType(self_.scalar_type())
+      ? meta::make_reduction(self_, result, dim, keepdim, in_dtype)
+      : meta::make_reduction_from_out_ty(self_, result, dim, keepdim, out_dtype);
 
   if (iter.numel() == 0) {
     result.zero_();
@@ -1980,7 +1987,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       char* other_data = data[1];
       for (const auto i : c10::irange(dim_size)) {
         (void)i; //Suppress unused variable warning
-        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+        if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
         }
