@@ -7,7 +7,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.distributed.utils import _replace_by_prefix
 from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
 import torch.nn as nn
-from typing import Dict, Any
+from typing import Any, Dict, Iterator, Tuple
 from functools import partial
 
 _CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
@@ -60,6 +60,18 @@ class CheckpointWrapper(torch.nn.Module):
                 *args,
                 **kwargs,
             )
+
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of _CHECKPOINT_PREFIX.
+        """
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            yield param_name.replace(f"{_CHECKPOINT_PREFIX}.", ""), param
 
     @staticmethod
     def _post_state_dict_hook(
