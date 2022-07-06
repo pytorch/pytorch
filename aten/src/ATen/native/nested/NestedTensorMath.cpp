@@ -102,10 +102,6 @@ at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
       std::move(buffer), std::move(nested_size_tensor));
 }
 
-inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
 // The starting positions of the underlying tensors in contiguous buffer memory
 // i.e. the buffer memory offsets to get the underlying tensors
 inline std::vector<int64_t> NestedTensor_get_offsets(const NestedTensorImpl* self_ptr) {
@@ -693,6 +689,19 @@ Tensor clone_nested(
 
 at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
   return get_nested_size_tensor(self);
+}
+
+Tensor NestedTensor_transpose(const at::Tensor& self){
+  auto curr_size = get_nested_size_tensor(self);
+  auto new_sizes = at::empty_like(curr_size);
+
+  auto curr_col0 = curr_size.index({at::indexing::Slice(), 0});
+  auto curr_col1 = curr_size.index({at::indexing::Slice(), 1});
+
+  new_sizes.index({at::indexing::Slice(), 0}) = curr_col1;
+  new_sizes.index({at::indexing::Slice(), 1}) = curr_col0;
+
+  return wrap_buffer(get_buffer(self), new_sizes);
 }
 
 Tensor dropout_nested(const Tensor& input, double p, bool train) {

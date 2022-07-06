@@ -12443,6 +12443,16 @@
   dispatch:
     CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_encoder_layer_forward
 
+- func: _scaled_dot_product_self_attention(Tensor qkv, int num_heads, float dropout_p=0.0, bool causal=False) -> Tensor
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_scaled_dot_product_self_attention
+
+- func: _flash_scaled_dot_product_self_attention(Tensor qkv, Tensor cumulative_sequence_length, int max_seqlen_batch, int num_heads, float dropout_p, bool causal) -> Tensor
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: flash_scaled_dot_product_self_attention
+
 - func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor)
   variants: function
   dispatch:
