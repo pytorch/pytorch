@@ -1238,7 +1238,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # The index of input column is out of range
         _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, 1, error=TypeError)
+        _helper(None, fn_n1, 1, error=ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
@@ -1310,7 +1310,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # The key of input column is not in dict
         _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, "y", error=TypeError)
+        _helper(None, fn_n1, "y", error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
@@ -1509,7 +1509,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
 
         # invalid input col
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             tuple_input_ds.filter(_mul_filter_fn, input_col=0)
 
         p_mul_filter_fn = partial(_mul_filter_fn, b=1)
