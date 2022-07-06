@@ -197,6 +197,7 @@ _nvfuser_unary_ops = {
     "exp",
     "expm1",
     "floor",
+    "imag",
     "isfinite",
     "lgamma",
     "log",
@@ -205,6 +206,7 @@ _nvfuser_unary_ops = {
     "log10",
     "reciprocal",
     "neg",
+    "real",
     "round",
     "rsqrt",
     "sin",
@@ -723,6 +725,7 @@ imag = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
+    impl_nvfuser=_imag_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
@@ -782,6 +785,7 @@ real = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
+    impl_nvfuser=_real_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
