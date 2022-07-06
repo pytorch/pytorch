@@ -3,11 +3,12 @@
       "name": "ONNX exporter",
       "patterns": [
          ".jenkins/caffe2/*",
-         "scripts/onnx/**",
-         "docs/source/onnx.rst",
-         "test/onnx/**",
-         "test/jit/test_export_modes.py",
          "aten/src/ATen/core/interned_strings.h",
+         "docs/source/onnx.rst",
+         "docs/source/scripts/onnx/**",
+         "scripts/onnx/**",
+         "test/jit/test_export_modes.py",
+         "test/onnx/**",
          "tools/onnx/**",
          "torch/_C/__init__.pyi.in",
          "torch/csrc/jit/passes/onnx.*",
@@ -18,7 +19,11 @@
          "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "NVFuser",
@@ -29,25 +34,65 @@
          "benchmarks/cpp/nvfuser/**"
       ],
       "approved_by": ["csarofeen", "ngimel", "jjsjann123"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
       "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "CI Pinned Hashes",
+      "patterns": [
+         ".github/ci_commit_pins/vision.txt",
+         ".github/ci_commit_pins/torchdynamo.txt"
+      ],
+      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "XLA hash pin update",
+      "patterns": [".github/ci_commit_pins/xla.txt"],
+      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull / linux-bionic-py3_7-clang8-xla / build",
+         "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)"
+      ]
    },
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["mruberry", "ngimel", "janeyx99"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "Mobile",
       "patterns": ["ios/**", "android/**", "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "Linear Algebra",
@@ -64,7 +109,11 @@
          "test/test_linalg.py"
       ],
       "approved_by": ["nikitaved", "mruberry", "pearu", "Lezcano", "IvanYashchuk"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "FFT",
@@ -81,7 +130,11 @@
          "test/cpp/api/fft.cpp"
       ],
       "approved_by": ["mruberry", "peterbell10"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "Sparse",
@@ -103,12 +156,74 @@
          "test/**/*sparse*"
       ],
       "approved_by": ["nikitaved", "cpuhrsch", "pearu", "IvanYashchuk"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "MPS",
+      "patterns": [
+         "test/test_mps.py",
+         "aten/src/ATen/mps/**",
+         "aten/src/ATen/native/mps/**"
+      ],
+      "approved_by": ["kulinseth", "razarmehr"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "Distributions",
+      "patterns": [
+          "torch/distributions/**",
+          "test/distributions/**"
+      ],
+      "approved_by": ["fritzo", "neerajprad", "alicanb", "vishwakftw"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "Distributed",
+       "patterns": [
+         "docs/source/pipeline.rst",
+         "docs/source/distributed*",
+         "docs/source/rpc.rst",
+         "docs/source/rpc/**",
+         "docs/source/_static/img/rpc*",
+         "docs/source/_static/img/*distributed*",
+         "docs/source/elastic/**",
+         "benchmarks/distributed/**",
+         "torch/distributed/**",
+         "torch/nn/parallel/distributed*",
+         "torch/_C/_distributed*",
+         "torch/csrc/distributed/**",
+         "torch/testing/_internal/distributed/**",
+         "test/distributed/**",
+         "test/cpp/dist_autograd/**",
+         "test/cpp/rpc/**"
+      ],
+      "approved_by": ["mrshenli", "pritamdamania87", "d4l3k", "kiukchung", "pietern"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    },
    {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
-      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
    }
 ]

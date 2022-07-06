@@ -26,6 +26,23 @@
 namespace at {
 namespace mps {
 
+class IMpsAllocatorCallback {
+ public:
+  enum class EventType {
+    ALLOCATED, // buffer got allocated to be used immediately
+    RECYCLED,  // buffer pulled from free list to be reused
+    FREED,     // buffer put to free list for future recycling
+    RELEASED,  // buffer memory released
+  };
+  virtual ~IMpsAllocatorCallback() = default;
+  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
+};
+
+// MPS allocator will execute every registered callback when a block of memory is freed.
+C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+#define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
+  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
+
 namespace HeapAllocator {
 
 #define MB(x) round_page(x * 1048576UL)
@@ -98,7 +115,7 @@ struct HeapBlock
       d.type = MTLHeapTypeAutomatic;
       heap = [device newHeapWithDescriptor: d];
       if (heap) {
-        [heap setPurgeableState:MTLPurgeableStateEmpty];
+        [heap setPurgeableState:MTLPurgeableStateNonVolatile];
       }
       [d release];
     }
@@ -209,6 +226,7 @@ private:
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(const AllocParams& p);
   bool release_cached_buffers();
+  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event);
 
   BufferPool& get_pool(size_t Size, bool useShared) {
       return Size <= kMaxSmallAlloc ? (useShared ? m_small_pool_shared : m_small_pool_private) :

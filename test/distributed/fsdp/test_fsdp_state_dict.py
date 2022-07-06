@@ -75,13 +75,13 @@ STATE_DICT_MAPPING = {
 
 
 class Model(Module):
-    def __init__(self, wrap_fsdp, register_buffers=False):
+    def __init__(self, wrap_fsdp, register_buffers=False, ignore_inner=False):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
             self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
         if wrap_fsdp:
-            self.inner = FSDP(self.inner)
+            self.inner = FSDP(self.inner, ignored_modules=([self.inner] if ignore_inner else []))
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
@@ -188,32 +188,6 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
-    def test_load_activation_checkpointed_module(self):
-        # TODO: move this tests to checkpoint_wrapper tests once there is a dedicated
-        # test suite for them: https://github.com/pytorch/pytorch/issues/77478.
-        lin = nn.Linear(10, 10, bias=False).cuda()
-        lin = checkpoint_wrapper(lin)
-        state_dict = deepcopy(lin.state_dict())
-        # Load into non-checkpoint wrapped linear module
-        lin_new = nn.Linear(10, 10, bias=False).cuda()
-        lin_new.load_state_dict(state_dict)
-        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
-            self.assertEqual(p1, p2)
-
-        # Load non-checkpoint wrapped module into checkpoint wrapped one
-        # Make params different
-        for p in lin_new.parameters():
-            with torch.no_grad():
-                p.add_(0.5)
-
-        state_dict = deepcopy(lin_new.state_dict())
-        # Verify checkpoint wrapped linear can load unwrapped linear
-        lin.load_state_dict(state_dict)
-        print(type(lin))
-        for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
-            self.assertEqual(p1, p2)
-
-    @skip_if_lt_x_gpu(2)
     @parametrize("checkpoint_wrap", ["first", "second", "both"])
     def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
         for model_call in [
@@ -312,9 +286,6 @@ class TestFSDPStateDict(FSDPTest):
                 fsdp_state_dict = _get_state_dict(
                     model, cpu_offload.offload_params, fp16
                 )
-
-            # if self.rank == 0:
-            #     print(f"FSDP keys {fsdp_state_dict.keys()}")
 
             ignore_keys = [k for k in fsdp_state_dict.keys() if NON_ROOT_FSDP_PREFIX in k]
 
@@ -669,22 +640,32 @@ class TestFSDPStateDict(FSDPTest):
                 pass
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_with_ignored_modules(self):
+    @parametrize("prefix", [True, False])
+    @parametrize("ignore_inner", [True, False])
+    def test_state_dict_with_ignored_modules(self, prefix, ignore_inner):
         # Initialize an FSDP-wrapped model with an ignored module that includes
         # both parameters and a buffer
-        model = Model(wrap_fsdp=True, register_buffers=True).cuda()
+        model = Model(wrap_fsdp=True, register_buffers=True, ignore_inner=ignore_inner).cuda()
         ignored_modules = [model.outer]
         ignored_tensor_to_tensor_name = {
             model.outer.bias: "outer.bias",
             model.outer.weight: "outer.weight",
-            model.outer.buffer: "outer.buffer",
         }
+        if ignore_inner:
+            ignored_tensor_to_tensor_name = {
+                **ignored_tensor_to_tensor_name,
+                model.inner.bias: "inner.bias",
+                model.inner.weight: "inner.weight",
+            }
+        # Note that when model.inner is not ignored this test also ensures
+        # non-ignored buffers are not cloned.
         buffer_to_buffer_name = {
             model.inner.buffer: "inner.buffer", model.outer.buffer: "outer.buffer",
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
+        prefix_str = "foo." if prefix else ""
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
-            sd1 = fsdp_model.state_dict()
+            sd1 = fsdp_model.state_dict(prefix=prefix_str)
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
         # Check that the ignored parameters and all buffers are not cloned
@@ -692,30 +673,33 @@ class TestFSDPStateDict(FSDPTest):
             **ignored_tensor_to_tensor_name,
             **buffer_to_buffer_name,
         }.items():
-            self.assertTrue(tensor_name in sd1)
-            self.assertEqual(tensor.data_ptr(), sd1[tensor_name].data_ptr())
+            prefixed_tensor_name = f"{prefix_str}{tensor_name}"
+            self.assertTrue(prefixed_tensor_name in sd1)
+            self.assertEqual(tensor.data_ptr(), sd1[prefixed_tensor_name].data_ptr(), f"{prefixed_tensor_name}")
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
         nonwrapped_model = Model(wrap_fsdp=False, register_buffers=True).cuda()
         for param in nonwrapped_model.parameters():
             with torch.no_grad():
                 param.zero_()
-        nonwrapped_model.load_state_dict(sd1)
+
+        to_load = {k[len(prefix_str):] : v for k, v in sd1.items()}
+        nonwrapped_model.load_state_dict(to_load)
         local_params = list(nonwrapped_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
         # Check that if we save a state dict again, the ignored parameters and
         # buffer still have the same data pointer
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
-            sd2 = fsdp_model.state_dict()
+            sd2 = fsdp_model.state_dict(prefix=prefix_str)
         for tensor, tensor_name in {
             **ignored_tensor_to_tensor_name,
             **buffer_to_buffer_name,
         }.items():
-            self.assertTrue(tensor_name in sd1)  # check again just in case
-            self.assertTrue(tensor_name in sd2)
-            self.assertEqual(tensor.data_ptr(), sd2[tensor_name].data_ptr())
-            self.assertEqual(sd1[tensor_name].data_ptr(), sd2[tensor_name].data_ptr())
+            prefixed_tensor_name = f"{prefix_str}{tensor_name}"
+            self.assertTrue(prefixed_tensor_name in sd2)
+            self.assertEqual(tensor.data_ptr(), sd2[prefixed_tensor_name].data_ptr())
+            self.assertEqual(sd1[prefixed_tensor_name].data_ptr(), sd2[prefixed_tensor_name].data_ptr())
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_type(self):

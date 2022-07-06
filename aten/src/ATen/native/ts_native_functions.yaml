@@ -19,7 +19,7 @@ full_codegen:
   - avg_pool2d_backward
   - baddbmm
   - bernoulli
-  - bernoulli_.float
+  - bernoulli.p
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
@@ -59,8 +59,6 @@ full_codegen:
   - gt.Tensor
   - hardsigmoid
   - index_select
-  - kl_div_backward
-  - l1_loss_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
@@ -72,8 +70,8 @@ full_codegen:
   - log_sigmoid_forward
   - lt.Scalar
   - lt.Tensor
-  - masked_fill_.Scalar
-  - masked_fill_.Tensor
+  - masked_fill.Scalar
+  - masked_fill.Tensor
   - max
   - max.dim
   - max_pool2d_with_indices
@@ -86,6 +84,8 @@ full_codegen:
   - mm
   - mul.Tensor
   - mv
+  - native_batch_norm
+  - native_batch_norm_backward
   - native_dropout
   - native_dropout_backward
   - native_layer_norm
@@ -101,12 +101,11 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
-  - random_
-  - random_.from
-  - random_.to
+  - random.functional
+  - random.from_functional
+  - random.to_functional
   - reciprocal
   - relu
-  - relu_
   - remainder.Tensor
   - repeat
   - rsqrt
@@ -141,41 +140,103 @@ full_codegen:
   - upsample_bilinear2d_backward
   - upsample_nearest2d
   - upsample_nearest2d_backward
-  - zero_
+  - zero.functional
   - narrow_copy.SymInt
+  - alias_copy
+  - as_strided_copy
+  - diagonal_copy
+  - expand_copy
+  - permute_copy
+  - _reshape_alias_copy
+  - select_copy.int
+  - detach_copy
+  - slice_copy.Tensor
+  # Not implemented yet because LTC codegen doesn't currently work
+  # for ops that return lists of tensors.
+  #- split_copy.Tensor
+  #- split_with_sizes_copy
+  #- unbind_copy.int
+  - squeeze_copy
+  - squeeze_copy.dim
+  - t_copy
+  - transpose_copy.int
+  - unsqueeze_copy
+  - view_copy
+  - view_copy.dtype
+  - unfold_copy
+  - select_scatter
+  - slice_scatter
+  - diagonal_scatter
+  - as_strided_scatter
 supported:
-  - as_strided
-  - as_strided_
   - clone
   - _copy_from
   - _copy_from_and_resize
-  - diagonal
   - empty.memory_format
   - empty_strided
-  - expand
   - fill_.Scalar
-  - narrow
-  - native_batch_norm
-  - native_batch_norm_backward
   - normal_
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
-  - permute
-  - select.int
-  - slice.Tensor
-  - squeeze
-  - squeeze.dim
-  - squeeze_
-  - squeeze_.dim
-  - t
-  - t_
   - _to_copy
-  - transpose.int
-  - transpose_
-  - unsqueeze
-  - unsqueeze_
-  - view
-  - alias
   - _unsafe_view
+  - lift
+  # Below are all operators that are "composite" in core,
+  # but require us to explicitly re-enable functionalization in order to use them.
+  # Why? These operators are all CompositeExplicitAutograd, which mean that they run
+  # after functionalization,
+  # but their implementations call view operators (which we need to functionalize away).
+  - block_diag
+  - diagonal_backward
+  - slice_backward
+  - new_empty_strided
+  - narrow_copy
+  - pixel_shuffle
+  - pixel_unshuffle
+  - select_backward
+  - _trilinear
+  - linalg_inv_ex
+  - linalg_pinv.atol_rtol_tensor
+  - logsumexp.out
 autograd:
   - max_pool3d
+  - native_group_norm
+
+# Ops that don't have a native schema definitions and are dispatched within Lazy Tensor Core
+non_native:
+  - func: scalar(Scalar value, ScalarType type) -> Tensor
+    opkind: at::prim::Constant
+    properties:
+      - ShapeCompute
+      - TreatScalarsAsConstants
+      - CanBeReusedDeclOnly
+  - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
+  - func: view(Tensor input, int[] output_size) -> Tensor
+    properties:
+      - ShapeCompute
+  - func: cast(Tensor input, ScalarType dtype, ScalarType? stype) -> Tensor
+    opkind: ltc_cast
+    properties:
+      - ShapeCompute
+
+  # View ops only required until proper functionalization pass is introduced into LTC
+  - func: as_strided_view_update(Tensor target, Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
+    opkind: ltc_as_strided_view_update
+  - func: as_strided(Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
+  - func: diagonal_view_update(Tensor target, Tensor input, int offset, int dim1, int dim2) -> Tensor
+    opkind: ltc_diagonal_view_update
+    properties:
+      - ShapeCompute
+  - func: diagonal(Tensor input, int offset, int dim1, int dim2) -> Tensor
+  - func: narrow_view_update(Tensor input, Tensor source, int[] base_indices) -> Tensor
+    opkind: ltc_narrow_view_update
+  - func: narrow(Tensor input, int[] base_indices, int[] sizes) -> Tensor
+  - func: permute(Tensor input, int[] dims) -> Tensor
+  - func: resize(Tensor input, int[] size) -> Tensor
+  - func: select_view_update(Tensor target, Tensor source, int dim, int start, int end, int stride) -> Tensor
+    opkind: ltc_select_view_update
+    properties:
+      - ShapeCompute
+  - func: select(Tensor input, int dim, int start, int end, int stride) -> Tensor
+  - func: squeeze(Tensor input, int dim) -> Tensor
+  - func: unsqueeze(Tensor input, int dim) -> Tensor

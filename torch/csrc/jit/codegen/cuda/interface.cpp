@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -34,9 +35,10 @@ static std::atomic<bool> cuda_fusion_guard_mode{true};
 class NVFuserEnabler {
  private:
   c10::optional<bool> runtime_assigned_fuser_enabled_ = c10::nullopt;
-  std::once_flag enabled_check_flag_;
+  c10::once_flag enabled_check_flag_;
   std::mutex mutex_;
 
+ public:
   static bool nvfuserCanBeEnabled() {
 #ifdef USE_ROCM
     return false;
@@ -46,6 +48,7 @@ class NVFuserEnabler {
 #endif
   }
 
+ private:
   static void assertFuserCanBeEnabled(bool is_enabled) {
     if (!is_enabled) {
       return;
@@ -95,7 +98,7 @@ class NVFuserEnabler {
     if (getCachedNNCNotNVFuser()) {
       return false;
     }
-    std::call_once(enabled_check_flag_, [&]() {
+    c10::call_once(enabled_check_flag_, [&]() {
       // if environment variable is setting the value, we must
       if (!runtime_assigned_fuser_enabled_.has_value() &&
           getCachedFuserEnabledEnvVar().has_value()) {
@@ -111,9 +114,12 @@ class NVFuserEnabler {
     if (getCachedFuserEnabledEnvVar().has_value()) {
       return *getCachedFuserEnabledEnvVar();
     }
-    // 3. default value (if you switch this to true, make sure
-    //    to check nvfuserCanBeEnabled())
+    // 3. default value
+#ifdef FBCODE_CAFFE2
     return false;
+#else
+    return nvfuserCanBeEnabled();
+#endif
   }
 
  public:
@@ -139,6 +145,10 @@ bool isEnabled() {
 
 bool setEnabled(bool is_enabled) {
   return nvfuser_enabler.setEnabled(is_enabled);
+}
+
+bool canBeEnabled() {
+  return nvfuser_enabler.nvfuserCanBeEnabled();
 }
 
 bool getSingletonFusion() {

@@ -52,6 +52,7 @@ Solvers
 
     solve
     solve_triangular
+    lu_solve
     lstsq
 
 Inverses
@@ -114,6 +115,7 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    solve_ex
     lu_factor_ex
     ldl_factor
     ldl_factor_ex

@@ -87,7 +87,7 @@ def gen_empty_impl_names(
         empty_impl = f"at::detail::empty_{dispatch}"
         empty_strided_impl = f"at::detail::empty_strided_{dispatch}"
     elif backend_index.dispatch_key in (
-        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
     ):
@@ -139,6 +139,10 @@ c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, I
 
 
 def gen_resize_out_helper(backend_index: BackendIndex) -> List[str]:
+    if backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
+        # The function isn't used by this key (since only functional ops have a kernel for this key),
+        # so we need to not include it to avoid a defined-but-not-used error.
+        return []
     return [
         """
 void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {
@@ -230,9 +234,6 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
-
-    # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
-    cpp_namespace: str
 
     # The class that all unstructured native functions live under. This is used to improve
     # compiler error messages when a kernel writer adds a native function with the wrong signature.
@@ -335,20 +336,21 @@ class RegisterDispatchKey:
                 "Do not explicitly specify Meta dispatch key on structured "
                 "functions, they will be automatically generated for you"
             )
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        elif (
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
+        ):
             assert not self.backend_index.has_kernel(g.out), (
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured "
                 "functions, they will be automatically generated for you"
             )
         elif metadata is None or not metadata.structured:
             return list(mapMaybe(lambda f: self.gen_unstructured(f, g), g.functions()))
-
         structured_gen = StructuredRegisterDispatchKey(
             self.backend_index,
             self.target,
             self.selector,
             self.rocm,
-            self.cpp_namespace,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
             g,
@@ -443,9 +445,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if metadata is None:
                     return None
                 if self.class_method_name is None:
-                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                    impl_name = f"{metadata.cpp_namespace}::{metadata.kernel}"
                 else:
-                    impl_name = f"{self.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
+                    impl_name = f"{metadata.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
                 args_exprs_str = ", ".join(a.name for a in args)
 
@@ -571,7 +573,7 @@ void set_output_{name}(
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
-            DispatchKey.CompositeExplicitAutograd,
+            DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -602,7 +604,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.CPU,
                 DispatchKey.CUDA,
                 DispatchKey.MPS,
-                DispatchKey.CompositeExplicitAutograd,
+                DispatchKey.CompositeExplicitAutogradNonFunctional,
             )
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
@@ -616,6 +618,10 @@ check_inplace(out, sizes, options);
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);
 {create_proxy}"""
+        elif k is SchemaKind.mutable or k is SchemaKind.scratch:
+            raise AssertionError(
+                f"{k} structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -631,6 +637,10 @@ resize_out(out, sizes, strides, options);
             out_args = ", ".join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
+        elif k is SchemaKind.mutable or k is SchemaKind.scratch:
+            raise AssertionError(
+                f"{k} structured operators are currently not supported"
+            )
         else:
             assert_never(k)
 
@@ -661,7 +671,10 @@ resize_out(out, sizes, strides, options);
                 guard_field = "c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;"
             else:
                 guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        elif (
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
+        ):
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
@@ -696,7 +709,7 @@ resize_out(out, sizes, strides, options);
             return None
 
         # TODO: Now, there is something interesting going on here.  In the code below,
-        # we generate CompositeExplicitAutograd implementations of functional and inplace
+        # we generate CompositeExplicitAutogradNonFunctional implementations of functional and inplace
         # based on the out implementation.  But in fact, out is definable by
         # functional too (just not very efficiently), and this is honestly the
         # MORE likely situation for a backend implementor.  How do we pick?
@@ -707,7 +720,8 @@ resize_out(out, sizes, strides, options);
         # of work to not register one of these "weak" definitions unless there
         # is a strong definition somewhere in the DAG!  So it's not implemented yet.
         if (
-            self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd
+            self.backend_index.dispatch_key
+            == DispatchKey.CompositeExplicitAutogradNonFunctional
             and f.func.kind() is SchemaKind.out
         ):
             # Never generate a default implementation for out, that's what you
@@ -763,7 +777,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif (
-                self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutograd
+                self.backend_index.dispatch_key
+                is DispatchKey.CompositeExplicitAutogradNonFunctional
             ):
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
@@ -772,7 +787,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
                 class_name = f"structured_{metadata.kernel}_{k.name}"
-                parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
+                parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
             if self.backend_index.device_guard:
                 device_check_args = itertools.chain(
@@ -855,7 +870,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+            if (
+                self.backend_index.dispatch_key
+                == DispatchKey.CompositeExplicitAutogradNonFunctional
+            ):
                 # TODO: https://github.com/pytorch/pytorch/issues/53023
                 out_sig_group = CppSignatureGroup.from_native_function(
                     self.g.out, method=False, fallback_binding=f.manual_cpp_binding

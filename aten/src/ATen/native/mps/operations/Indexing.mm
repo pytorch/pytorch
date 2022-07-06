@@ -9,6 +9,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
@@ -18,6 +19,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/SmallVector.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -26,28 +28,114 @@
 namespace at {
 namespace native {
 
+Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
+  using namespace mps;
+
+  Tensor result = at::native::empty_mps(
+                    self.sizes(),
+                    self.scalar_type(),
+                    c10::nullopt,
+                    kMPS,
+                    c10::nullopt,
+                    c10::nullopt);
+
+  auto total_dims = self.dim();
+  // It wraps the dims and checks that there are no repeated dims
+  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
+  NSMutableArray<NSNumber*> * ns_dims = [NSMutableArray<NSNumber*> new];
+
+  for (const auto i : c10::irange(total_dims)) {
+    if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
+      [ns_dims addObject:[NSNumber numberWithInt:i]];
+    }
+  }
+
+  // Nothing to do, we return fast
+  if (dims.size() == 0 || self.numel() <=1) {
+    result.copy_(self);
+    return result;
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+    NSString* ns_dims_key = [[ns_dims valueForKey:@"description"] componentsJoinedByString:@","];
+    // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
+    string key = "flip_mps:" + getTensorsStringKey({self}) + ":" + string([ns_dims_key UTF8String]);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* outputTensor = [mpsGraph reverseTensor:inputTensor
+                                                            axes:ns_dims
+                                                            name:nil];
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()
+    };
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    // Run the graph
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+  return result;
+
+}
+
 Tensor index_select_mps(const Tensor & self,
                          int64_t dim,
                          const Tensor & index) {
   IntArrayRef input_shape = self.sizes();
   auto num_input_dims = input_shape.size();
 
-  IntArrayRef index_shape = index.sizes();
   auto num_indices = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
 
   dim = maybe_wrap_dim(dim, self.dim());
-  int64_t* shape_data = (int64_t*)malloc(num_input_dims * sizeof(int64_t));
+  std::vector<int64_t> shape_data(num_input_dims);
 
   // Calculate new shape
-  for(int i = 0; i < num_input_dims; i++) {
-    if(i == dim)
+  for(auto i : c10::irange(num_input_dims)) {
+    if (i == dim) {
       shape_data[i] = num_indices;
-    else
+    } else {
       shape_data[i] = input_shape[i];
+    }
   }
 
-  IntArrayRef output_shape = IntArrayRef(shape_data, num_input_dims);
+  IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
 
   Tensor result = at::native::empty_mps(
                       output_shape,
@@ -56,8 +144,6 @@ Tensor index_select_mps(const Tensor & self,
                       kMPS,
                       c10::nullopt,
                       c10::nullopt);
-
-  free(shape_data);
 
   index_select_out_mps(self, dim, index, result);
   return result;
@@ -245,13 +331,10 @@ Tensor embedding_dense_backward_mps(
     IntArrayRef indices_shape = indices.sizes();
     int64_t num_indices_dims = indices_shape.size();
 
-    int64_t* outgoing_gradient_shape = (int64_t *) malloc(sizeof(int64_t) * 2);
     int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
-    outgoing_gradient_shape[0] = num_weights;
-    outgoing_gradient_shape[1] = D;
-    int64_t num_outgoing_gradient_dims = 2;
+    c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
     Tensor outgoing_gradient = at::native::empty_mps(
-                                IntArrayRef(outgoing_gradient_shape, num_outgoing_gradient_dims),
+                                IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()),
                                 grad_.scalar_type(),
                                 c10::nullopt,
                                 kMPS,
@@ -288,7 +371,7 @@ Tensor embedding_dense_backward_mps(
             MPSGraphTensor *outgoingGradTensor;
             outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:incomingGradTensor
                             indicesTensor:reshapedIndicesTensor
-                                    shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape, num_outgoing_gradient_dims))
+                                    shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()))
                           batchDimensions:0
                                      mode:MPSGraphScatterModeAdd
                                      name:@"edb"];
@@ -316,7 +399,6 @@ Tensor embedding_dense_backward_mps(
       };
       native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
     }
-    free(outgoing_gradient_shape);
     return outgoing_gradient;
 }
 

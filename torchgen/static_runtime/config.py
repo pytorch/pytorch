@@ -1,10 +1,13 @@
-from torchgen.model import NativeFunctionsGroup
+from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
 
-from typing import Dict
+from typing import Dict, Union
 
 
-def func_name_base_str(g: NativeFunctionsGroup) -> str:
-    return str(g.functional.func.name.name.base)
+def func_name_base_str(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:
+    if isinstance(g, NativeFunctionsGroup):
+        return str(g.functional.func.name.name.base)
+    else:
+        return str(g.view.root_name)
 
 
 is_hand_written_ops_ = frozenset(
@@ -35,6 +38,19 @@ is_hand_written_ops_ = frozenset(
         "sign",
         "sub",
         "tanh",
+        "detach",
+        "expand_as",
+        "flatten",
+        "narrow",
+        "reshape_as",
+        "select",
+        "slice",
+        "softmax",
+        "split",
+        "squeeze",
+        "transpose",
+        "view",
+        "where",
     )
 )
 
@@ -86,9 +102,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name == "take_along_dim":
         if index == 0:
-            arg_map["indices"] = "at::argsort(self0, 1)"
+            arg_map["indices"] = "at::argsort(self0, 1, true)"
         else:
-            arg_map["indices"] = "at::argsort(self1, 1)"
+            arg_map["indices"] = "at::argsort(self1, 1, true)"
         return
     if op_name == "masked_select":
         if index == 0:
@@ -348,4 +364,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["self"] = "at::randint(0, 3, {12}, at::kInt)"
             arg_map["size"] = "24"
             arg_map["out_int32"] = "false"
+        return
+    if op_name in ("diagonal", "linalg_diagonal"):
+        arg_map["offset"] = "0"
+        arg_map["dim0"] = "1"
+        arg_map["dim1"] = "2"
         return

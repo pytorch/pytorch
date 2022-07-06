@@ -1,19 +1,10 @@
 import torch
 from torch.utils._pytree import tree_map
-
 from typing import Iterator, List
 import logging
 import contextlib
 import itertools
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
 
 
 # How the chain of calls works for LoggingTensor:
@@ -72,10 +63,13 @@ class LoggingTensor(torch.Tensor):
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
-class LoggingTensorMode(LoggingTensor):
-    # no_dispatch is only needed if you use enable_torch_dispatch_mode.
-    # It prevents infinite recursion.
-    context = no_dispatch
+class LoggingTensorMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        rs = func(*args, **kwargs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        return rs
 
 class LoggingTensorReentrant(LoggingTensor):
     context = torch.overrides.enable_reentrant_dispatch
@@ -85,10 +79,11 @@ class LoggingTensorHandler(logging.Handler):
     log_list: List[str]
     next_shortid: int
 
-    def __init__(self, log_list: List[str]) -> None:
+    def __init__(self, log_list: List[str], use_shortid_for_all_tensors: bool) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.next_shortid = 0
+        self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
 
     # WARNING: not deterministic over multiple threads, this matters for
     # autograd
@@ -99,7 +94,8 @@ class LoggingTensorHandler(logging.Handler):
         return o._shortid  # type: ignore[attr-defined]
 
     def _fmt(self, a: object) -> str:
-        return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
+        cond_cls = torch.Tensor if self.use_shortid_for_all_tensors else LoggingTensor
+        return f'${self._shortid(a)}' if isinstance(a, cond_cls) else repr(a)
 
     def emit(self, record):
         fmt_args = ", ".join(itertools.chain(
@@ -114,10 +110,10 @@ def log_input(name: str, var: object):
     logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
 
 @contextlib.contextmanager
-def capture_logs() -> Iterator[List[str]]:
+def capture_logs(is_mode=False) -> Iterator[List[str]]:
     logger = logging.getLogger("LoggingTensor")
     log_list: List[str] = []
-    handler = LoggingTensorHandler(log_list)
+    handler = LoggingTensorHandler(log_list, use_shortid_for_all_tensors=is_mode)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -125,3 +121,8 @@ def capture_logs() -> Iterator[List[str]]:
         yield log_list
     finally:
         logger.removeHandler(handler)
+
+@contextlib.contextmanager
+def capture_logs_with_logging_tensor_mode():
+    with push_torch_dispatch_mode(LoggingTensorMode), capture_logs(True) as logs:
+        yield logs

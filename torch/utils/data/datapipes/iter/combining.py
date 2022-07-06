@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVa
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -151,7 +151,7 @@ class _ForkerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
         self.child_pointers = [0] * self.num_instances
@@ -300,7 +300,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        _check_lambda_fn(classifier_fn)
+        _check_unpickable_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -345,6 +345,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
+                StreamWrapper.close_streams(value)
                 continue
             if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
@@ -376,7 +377,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
@@ -432,19 +433,21 @@ class MultiplexerIterDataPipe(IterDataPipe):
     def __init__(self, *datapipes):
         self.datapipes = datapipes
         self.length: Optional[int] = None
+        self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
         while len(iterators):
-            values: List[Any] = []
             for it in iterators:
                 try:
                     value = next(it)
-                    values.append(value)
+                    self.buffer.append(value)
                 except StopIteration:
+                    self.buffer.clear()
                     return
-            for value in values:
+            for value in self.buffer:
                 yield value
+            self.buffer.clear()
 
     def __len__(self):
         if self.length is not None:
@@ -456,6 +459,29 @@ class MultiplexerIterDataPipe(IterDataPipe):
         else:
             self.length = -1
         return len(self)
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.datapipes,
+            self.length,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipes,
+            self.length,
+        ) = state
+        self.buffer = []
+
+    def __del__(self):
+        self.buffer.clear()
 
 
 @functional_datapipe('zip')
@@ -485,8 +511,18 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
-        for data in zip(*self.datapipes):
-            yield data
+        iterators = [iter(datapipe) for datapipe in self.datapipes]
+        try:
+            for data in zip(*iterators):
+                yield data
+        finally:
+            unused = []
+            for iterator in iterators:
+                unused += list(iterator)
+
+            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+            for item in unused:
+                StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:

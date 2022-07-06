@@ -15,6 +15,8 @@
 
 #include <ATen/native/Activation.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <unordered_map>
 #include <utility>
 
@@ -324,38 +326,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> apply() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[permuted_order_[i]] = rank - 1 - i;
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to restore back to non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> restore() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[rank - 1 - i] = permuted_order_[i];
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> apply_vec() const {
+  // note: used for aten::permute API and codegen tranpose API
+  std::vector<int64_t> apply() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       ret.resize(permuted_order_.size());
@@ -365,8 +337,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to restore back to non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> restore_vec() const {
+  // note: used for aten::permute API and codegen transpose API
+  std::vector<int64_t> restore() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       int rank = permuted_order_.size();
@@ -384,10 +356,6 @@ struct MemoryCompare {
       const {
     return format0.permutation_ < format1.permutation_;
   }
-};
-
-bool operator==(const MemoryFormat& a, const MemoryFormat& b) {
-  return a.permutation_ == b.permutation_;
 };
 
 typedef std::map<MemoryFormat, CgValue, MemoryCompare> MemoryFormatMap;
@@ -507,11 +475,11 @@ class ValueHolder {
 
     // restore source permutation
     if (format_s.hasPermutation()) {
-      tv = transpose(tv, format_s.restore());
+      tv = permute(tv, format_s.restore());
     }
     // apply destination permutation
     if (format_d.hasPermutation()) {
-      tv = transpose(tv, format_d.apply());
+      tv = permute(tv, format_d.apply());
     }
     return tv;
   }
@@ -785,13 +753,13 @@ class IrParser {
     for (const auto& i : c10::irange(fusion->inputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->inputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnInput(i, entry->second.apply_vec());
+        fusion->setPermutationOnInput(i, entry->second.apply());
       }
     }
     for (const auto& i : c10::irange(fusion->outputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->outputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnOutput(i, entry->second.restore_vec());
+        fusion->setPermutationOnOutput(i, entry->second.restore());
       }
     }
     return fusion;
@@ -852,7 +820,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() {
+    c10::call_once(once_flag_, []() {
       std::lock_guard<std::mutex> lock(parser_mutex_);
       registerJitOperator();
     });
@@ -3264,7 +3232,18 @@ class IrParser {
   }
 
   bool registerScalar(const JitValue* val) {
-    if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+    if (val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(ComplexType::get()))) {
+      CgValue cg_val = nullptr;
+      if (auto ival = constant_as<c10::complex<double>>(val)) {
+        cg_val = IrBuilder::create<ComplexDouble>(ival.value());
+      } else {
+        cg_val = IrBuilder::create<ComplexDouble>();
+      }
+      value_map_.emplace(val->unique(), cg_val);
+      return true;
+    } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(FloatType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {
@@ -3358,8 +3337,9 @@ class IrParser {
         std::vector<c10::ShapeSymbol> s_vec = opt_s_vec.value();
         // apply permutation
         auto permutation = format.apply();
-        for (const auto& p : permutation) {
-          s_vec[p.second] = opt_s_vec.value()[p.first];
+        for (auto new_axis : c10::irange(permutation.size())) {
+          auto old_axis = permutation.at(new_axis);
+          s_vec[new_axis] = opt_s_vec.value()[old_axis];
         }
 
         // copying stride properties because we need to permute it
@@ -3411,7 +3391,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::once_flag once_flag_;
+  static c10::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
@@ -3422,7 +3402,7 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::once_flag IrParser::once_flag_;
+c10::once_flag IrParser::once_flag_;
 
 ProfileIValueOp* insertProfileIValueOp(
     Node* node,
@@ -3468,7 +3448,7 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
         if (profiled_ints.size() != size_vec.size() ||
             !std::equal(
                 profiled_ints.begin(), profiled_ints.end(), size_vec.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3510,7 +3490,7 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
                 profiled_ints.begin(),
                 profiled_ints.end(),
                 input_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3553,7 +3533,7 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
                 profiled_ints.begin(),
                 profiled_ints.end(),
                 input_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3592,7 +3572,7 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
         const auto& profiled_str = pn->s(strAttr);
         const auto& input_str = value.toStringRef();
         if (input_str != profiled_str) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3631,7 +3611,7 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
         auto profiled_bool = pn->i(boolAttr);
         auto input_bool = value.toBool();
         if (input_bool != profiled_bool) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3670,7 +3650,7 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
         auto profiled_int = pn->i(intAttr);
         auto input_int = value.toInt();
         if (input_int != profiled_int) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3707,7 +3687,7 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
       } else {
         auto profiled_ival = pn->ival(ivalAttr);
         if (value != profiled_ival) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
@@ -3752,7 +3732,7 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
                 input_bools.begin(),
                 input_bools.end(),
                 profiled_ints.begin())) {
-          TORCH_WARN(
+          TORCH_WARN_ONCE(
               __FUNCTION__,
               " sees varying value in profiling, ignoring and this should be handled by GUARD logic");
           pn->s_(profileFailedAttr, "varying profile values");
