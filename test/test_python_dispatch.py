@@ -1137,8 +1137,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             __torch_function__ = torch._C._disabled_torch_function_impl
 
         a = SubTensor(torch.randn(2))
-        mode = PoliteMode()
-        with mode:
+        with PoliteMode() as mode:
             a.abs()
 
         self.assertEqual(mode.pre_count, 2)
