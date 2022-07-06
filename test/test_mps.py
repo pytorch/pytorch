@@ -9,6 +9,7 @@ import warnings
 import subprocess
 import tempfile
 import os
+import pprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1701,18 +1702,30 @@ class TestNLLLoss(TestCase):
         self.assertEqual(input.grad, input_mps.grad.to('cpu'))
 
     def test_as_strided(self):
-        def helper(n, c):
-            values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-            values_1 = [[1.0, 1.0], [1.0, 1.0]]
-            cpu_x = torch.tensor(values, device='cpu')
-            ones1 = torch.tensor(values_1, device='mps')
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-            strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
-            strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+        values_1 = [[1.0, 1.0], [1.0, 1.0]]
+        cpu_x = torch.tensor(values, device='cpu')
+        ones1 = torch.tensor(values_1, device='mps')
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+        strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
+        strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        self.assertEqual(strided_mps, strided_cpu)
+        strided_cpu_out = strided_cpu + ones1.to('cpu')
+        strided_mps_out = strided_mps + ones1
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-            self.assertEqual(strided_mps, strided_cpu)
+        # test with storage offsets
+        cpu_x = torch.rand(3, 3, device='cpu')
+        mps_x = cpu_x.to('mps')
+        strided_cpu1 = torch.as_strided(cpu_x, (2, 2), (1, 2), 0)
+        strided_mps1 = torch.as_strided(mps_x, (2, 2), (1, 2), 0)
+        strided_cpu2 = torch.as_strided(cpu_x, (2, 2), (1, 2), 1)
+        strided_mps2 = torch.as_strided(mps_x, (2, 2), (1, 2), 1)
+        strided_cpu_out = strided_cpu1 - strided_cpu2
+        strided_mps_out = strided_mps1 - strided_mps2
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-        helper(3, 3)
+
 
     def test_sum_backward(self):
         def helper(n, c):
@@ -3585,7 +3598,14 @@ class TestNLLLoss(TestCase):
             softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
             softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
 
+            cpu_grad = torch.randn(softplus_result.shape)
+            grad = cpu_grad.to('mps')
+
+            softplus_result.backward(gradient=grad)
+            softplus_result_cpu.backward(gradient=cpu_grad)
+
             self.assertEqual(softplus_result, softplus_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
@@ -4810,7 +4830,7 @@ class TestGatherScatter(TestCase):
         x_mps = torch.zeros(10, dtype=torch.float32, device="mps")
         x_mps[::2] = 1.0
 
-        x_cpu = torch.zeros(10, dtype=torch.float32, device="mps")
+        x_cpu = torch.zeros(10, dtype=torch.float32, device="cpu")
         x_cpu[::2] = 1.0
 
         self.assertEqual(x_cpu, x_mps)
