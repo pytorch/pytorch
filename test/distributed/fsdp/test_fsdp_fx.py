@@ -14,6 +14,7 @@ class Model(torch.nn.Module):
         super().__init__()
         self.weight1 = torch.nn.Parameter(torch.randn(6, 6))
         self.weight2 = torch.nn.Parameter(torch.randn(6, 6))
+        self.weight_unused = torch.nn.Parameter(torch.randn(2, 2))
         self.layer0 = torch.nn.Linear(6, 6)
         self.layer1 = torch.nn.Linear(6, 6, bias=False)
         self.layer2 = torch.nn.Sequential(

@@ -94,11 +94,9 @@ class TestFSDPExecOrder(FSDPTest):
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
-    @parametrize("iters", [0, 1])
     def test_fsdp_flatten_params_exec_order_symbolic_trace(
         self,
         sharding_strategy: ShardingStrategy,
-        iters: int,
     ):
         """
         Tests ParamExecOrderWrapPolicy with symbolic tracing.
@@ -113,11 +111,6 @@ class TestFSDPExecOrder(FSDPTest):
             self.device,
             wrap_policy=wrap_policy,
         )
-        for _ in range(iters):
-            input = fsdp_model.module.get_input(self.device)
-            output = fsdp_model(*input)
-            loss = fsdp_model.module.get_loss(input, output).to(self.device)
-            loss.backward()
         params_list = list(fsdp_model.parameters())
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters

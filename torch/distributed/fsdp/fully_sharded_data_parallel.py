@@ -936,6 +936,7 @@ class FullyShardedDataParallel(nn.Module):
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         auto_wrap_policy = kwargs["auto_wrap_policy"]
         module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
         if isinstance(
             auto_wrap_policy.tracing_config,
             TracingConfig
@@ -976,8 +977,7 @@ class FullyShardedDataParallel(nn.Module):
             # once the non-recursive wrapping policy is fully implemented.
             for m in execution_info.module_forward_order:
                 if m in module_fsdp_wrap_map:
-                    flat_param = module_fsdp_wrap_map[m]._fsdp_wrapped_module.flat_param
-                    if flat_param is not None:
+                    for flat_param in module_fsdp_wrap_map[m].params:
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
         else:
