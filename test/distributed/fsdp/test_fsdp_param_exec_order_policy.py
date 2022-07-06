@@ -12,10 +12,9 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FlatParameter,
     OptimStateKeyType,
-    ShardingStrategy,
     StateDictType,
 )
-from torch.distributed.fsdp.wrap import HandleInitMode, ParamExecOrderPolicy
+from torch.distributed.fsdp.wrap import HandleInitMode, ParamExecOrderPolicy, ParamExecOrderState
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -55,17 +54,17 @@ class CNN(nn.Module):
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
+        self.fc1 = nn.Linear(16 * 5 * 5, 20)
+        self.fc2 = nn.Linear(20, 20)
+        self.fc3 = nn.Linear(20, 20)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = F.relu(self.fc3(x))
+        x = self.fc2(x)
         return x
 
     @staticmethod
@@ -101,13 +100,19 @@ class TestFSDPExecOrderPolicy(FSDPTest):
 
     def _check_fsdp_param_parity(self, fsdp_model, ref_model):
         with FSDP.summon_full_params(fsdp_model):
-            fsdp_params = list(fsdp_model.parameters())
-            ref_params = list(ref_model.parameters())
-            if len(fsdp_params) != len(ref_params):
-                print(f"[Rank {self.rank}] expected len={len(ref_params)} got {len(fsdp_params)}")
+            fsdp_named_params = list(fsdp_model.named_parameters())
+            ref_named_params = list(ref_model.named_parameters())
+            # sort fsdp_named_params and ref_named_params based on the names.
+            # This sort is needed since for some cases, parameters are generated
+            # in different sequences.
+            fsdp_named_params = sorted(fsdp_named_params, key=lambda x: x[0])
+            ref_named_params = sorted(ref_named_params, key=lambda x: x[0])
+
+            if len(fsdp_named_params) != len(ref_named_params):
+                print(f"[Rank {self.rank}] expected len={len(ref_named_params)} got {len(fsdp_named_params)}")
                 print(f"[Rank {self.rank}] fsdp names: {[n for n, _ in fsdp_model.named_parameters()]}")
-            self.assertEqual(len(fsdp_params), len(ref_params))
-            for p1, p2 in zip(fsdp_model.parameters(), ref_model.parameters()):
+            self.assertEqual(len(fsdp_named_params), len(ref_named_params))
+            for (_, p1), (_, p2) in zip(fsdp_named_params, ref_named_params):
                 torch.testing.assert_close(p1, p2, rtol=1e-4, atol=1e-4)
 
     def _step_model(self, model, inp, optim=None):
@@ -140,7 +145,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
                 self._step_model(fsdp_model, inp, fsdp_optim),
                 self._step_model(ref_model, inp, ref_optim),
             ]
-            losses.append(iter_losses)        
+            losses.append(iter_losses)
         for l1, l2 in losses:
             torch.testing.assert_close(l1, l2)
         self._check_fsdp_param_parity(fsdp_model, ref_model)
@@ -198,7 +203,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         )
         inp_shape = model_class.get_inp_shape()
         fsdp_optim = self._warmup_fsdp(fsdp_model, optim_class, inp_shape)
-        
+
         self._check_fsdp_train_parity(
             fsdp_model, fsdp_optim, ddp_model, ddp_optim, inp_shape, num_iters,
         )
@@ -244,6 +249,35 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         self._check_fsdp_train_parity(
             fsdp_model, fsdp_optim, ddp_model, ddp_optim, inp_shape, num_iters,
         )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("iters", [1, 3])
+    def test_fsdp_flatten_params_exec_order(self, iters: int):
+        model = CNN().cuda()
+        group = dist.distributed_c10d._get_default_group()
+        fsdp_model = FSDP(model, group, auto_wrap_policy=ParamExecOrderPolicy(HandleInitMode.MODULE_LEVEL))
+        self.assertTrue(fsdp_model._use_param_exec_order_policy)
+        self.assertTrue(fsdp_model._param_exec_order_state, ParamExecOrderState.UNINITIALIZED)
+        params_list = copy.deepcopy(list(fsdp_model.parameters()))
+        for _ in range(iters):
+            inp_shape = CNN.get_inp_shape()
+            input = torch.randn(inp_shape).to(self.rank)
+            output = fsdp_model(input)
+            loss = output.sum()
+            loss.backward()
+        params_exec_order_list = list(fsdp_model.parameters())
+        self.assertEqual(
+            params_exec_order_list,
+            [
+                params_list[0],
+                params_list[1],
+                params_list[2],
+                params_list[4],
+                params_list[3]
+            ]
+        )
+        self.assertTrue(fsdp_model._param_exec_order_state, ParamExecOrderState.INITIALIZED)
+
 
 instantiate_parametrized_tests(TestFSDPExecOrderPolicy)
 

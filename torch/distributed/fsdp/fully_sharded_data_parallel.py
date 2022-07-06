@@ -670,6 +670,7 @@ class FullyShardedDataParallel(nn.Module):
         # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
+        self.auto_wrap_policy = auto_wrap_policy
         self._use_param_exec_order_policy = isinstance(auto_wrap_policy, ParamExecOrderPolicy)
         if auto_wrap_policy is not None and not self._use_param_exec_order_policy:
             self._check_wrapped(
@@ -678,6 +679,7 @@ class FullyShardedDataParallel(nn.Module):
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
             if mixed_precision is not None and _contains_batchnorm(module):
+                # TODO (linjianma): do we also need to consider this for ParamExecOrderPolicy?
                 _override_batchnorm_mixed_precision(module)
                 policy_to_use = functools.partial(
                     _or_policy,
@@ -849,8 +851,16 @@ class FullyShardedDataParallel(nn.Module):
             self._pre_forward_handles: List[RemovableHandle] = []
             self._post_forward_handles: List[RemovableHandle] = []
             self._param_exec_order_state = ParamExecOrderState.UNINITIALIZED
+            # A list that stores the handles based on the parameter execution order
+            self._handles_exec_order: List[FlatParamHandle] = []
             handle_init_mode = auto_wrap_policy.handle_init_mode
+            # TODO (linjianma): introduce module level group_policy
             self._register_param_handles_from_root_module(module, handle_init_mode)
+            # self.flat_param_to_handle maps param to handle, it will be used to
+            # get handle execution ordering.
+            self.flat_param_to_handle: Dict[FlatParameter, FlatParamHandle] = dict()
+            for handle in self._handles:
+                self.flat_param_to_handle[handle.flat_param] = handle
         else:
             self._fsdp_wrapped_module = FlattenParamsWrapper(module, params)
             self.params: List[FlatParameter] = []
@@ -859,7 +869,7 @@ class FullyShardedDataParallel(nn.Module):
                 self._register_param_handle(self._fsdp_wrapped_module.handle)
 
         assert getattr(self, FSDP_WRAPPED_MODULE) is self._fsdp_wrapped_module
-        
+
         # Shard module parameters in place
         self._shard_parameters(self._handles)
 
@@ -1025,7 +1035,7 @@ class FullyShardedDataParallel(nn.Module):
                 that contains all parameters in ``params``. This should be the
                 module passed to the :class:`FullyShardedDataParallel`
                 constructor. Internally, parameter names are prefixed starting
-                from this root module. 
+                from this root module.
         """
         if len(params) == 0:
             return
@@ -1292,18 +1302,6 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         assert self._is_root is not None
         return self._is_root
-
-    def _is_param_exec_order_prep_stage(self) -> bool:
-        is_prep_stage = (
-            hasattr(self, "_param_exec_order_prep_stage")
-            and self._param_exec_order_prep_stage
-        )
-        if not is_prep_stage:
-            for p in self.parameters():
-                assert (
-                    not hasattr(p, "_params_exec_order_hook_handle")
-                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
-        return is_prep_stage
 
     @staticmethod
     def fsdp_modules(
@@ -2543,7 +2541,7 @@ class FullyShardedDataParallel(nn.Module):
         and post-forward are called explicitly, while for the non-recursive-
         wrapping path, they are registered as hooks on every (sub)module.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):    
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             # Non-recursive wrapping path (using hooks)
             if self._use_param_exec_order_policy:
                 self._cast_forward_inputs(*args, **kwargs)
@@ -2845,7 +2843,10 @@ class FullyShardedDataParallel(nn.Module):
             if in_summon_full_params:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
-                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
+                if self._use_param_exec_order_policy:
+                    buffer_name = buffer_name.replace(FSDP_WRAPPED_MODULE, "module")
+                else:
+                    buffer_name = buffer_name.replace(FSDP_PREFIX, "")
             yield (buffer_name, buffer)
 
     def named_parameters(
@@ -2864,7 +2865,10 @@ class FullyShardedDataParallel(nn.Module):
             if in_summon_full_params:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
-                param_name = param_name.replace(FSDP_PREFIX, "")
+                if self._use_param_exec_order_policy:
+                    param_name = param_name.replace(FSDP_WRAPPED_MODULE, "module")
+                else:
+                    param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
 
     def _register_pre_backward_hooks(
@@ -2876,7 +2880,7 @@ class FullyShardedDataParallel(nn.Module):
         Registers pre-backward hooks on the tensors that require gradients in
         the forward pass outputs given by ``outputs``, which were computed
         using ``params``.
-        
+
         Returns:
             Forward pass outputs with hooks registered to tensors that require
             gradients.
@@ -3031,6 +3035,15 @@ class FullyShardedDataParallel(nn.Module):
             # then subsequent hook callbacks will see POST state.
             self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
             self.training_state = TrainingState_.BACKWARD_POST
+
+            if (
+                self._use_param_exec_order_policy
+                and self._param_exec_order_state == ParamExecOrderState.UNINITIALIZED
+            ):
+                # In self._handles_exec_order, the handles are ordered based on
+                # the execution order in the backward pass in the first iteration.
+                self._handles_exec_order.append(self.flat_param_to_handle[param])
+
             if param.grad is None:
                 return
 
@@ -3330,7 +3343,10 @@ class FullyShardedDataParallel(nn.Module):
         ):
             # TODO (awgu) (linjianma): replace this `handles_per_flat_param`
             # with something more intelligent
-            handles_per_flat_param = self._bucket_handles(5e2)
+            self._handles_exec_order.reverse()
+            assert set(self._handles_exec_order) == set(self._handles)
+            handles_per_flat_param = self._bucket_handles(self.auto_wrap_policy.bucket_size)
+            delattr(self, "_handles_exec_order")
             self._register_param_handles_from_handles(handles_per_flat_param)
             self._param_exec_order_state = ParamExecOrderState.INITIALIZED
 
@@ -3345,7 +3361,7 @@ class FullyShardedDataParallel(nn.Module):
         handles_per_flat_param: List[List[FlatParamHandle]] = []
         curr_bucket_handles: List[FlatParamHandle] = []
         curr_bucket_size = 0
-        for handle in self._handles:
+        for handle in self._handles_exec_order:
             curr_bucket_size += handle.flat_param._unsharded_size.numel() * handle.flat_param.element_size()
             curr_bucket_handles.append(handle)
             if curr_bucket_size >= bucket_size:
