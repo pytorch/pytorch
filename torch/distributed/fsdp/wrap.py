@@ -293,9 +293,9 @@ class HandleInitMode(Enum):
     This determines how :class:`FlatParameter` s are initially constructed for
     the parameter execution order policy. This construction is temporary, and
     the :class:`FlatParameter` s are reconstructed later.
-    MODULE_LEVEL: For each module, its immediately owned parameters are used to
-                  construct one :class:`FlatParameter`. This construction
-                  matches that of ``always_wrap_policy``.
+    MODULE_LEVEL: For each module or a list of modules, its immediately owned parameters
+                  are used to construct one :class:`FlatParameter`. In ``ParamExecOrderPolicy``,
+                  This construction is based on ``ParamExecOrderPolicy.module_level_group_policy``.
     PARAM_LEVEL: Each original parameter is used to construct one
                  :class:`FlatParameter`.
     """
@@ -309,41 +309,33 @@ class ParamExecOrderState(Enum):
 
 
 @dataclass
-class ParamExecOrderPolicy:
-    """
-    TODO (awgu): coalesce with below and document
-    """
-    handle_init_mode: HandleInitMode
-
-
-@dataclass
 class ParamExecOrderWrapPolicy:
     """
     This is the class used for the wrapping policy that wraps parameters and performs
     the communication scheduling based on the parameter execution order in the forward pass
     (also called non-recursive wrapping policy).
 
-    The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
-    and the wrap transfers these parameters into one FlattenParameter. In both forward and the backward passes,
-    the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
-    These parameters will then be reshaded once they have been used.
-
-    TODO (linjianma): For now, the parameters contained in each wrap of ParamExecOrderWrapPolicy
-    are the parameters in each wrap of the init_policy (a recursive wrapping policy).
-    Later we will wrap parameters based on bucket size.
+    The policy contains multiple ``FlatParamHandle``. Each ``FlatParamHandle`` is a bucket that contains original parameters
+    that will be executed together, and the ``FlatParamHandle`` transfers these parameters into one ``FlattenParameter``.
+    In both forward and the backward passes, the sharded parameters in each ``FlatParamHandle`` will be gathered
+    just before these parameters are used in the passes. These parameters will then be reshaded once they have been used.
 
     Args:
-        init_policy (nn.Module):
-            The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
-            forward and backward iteration, init_policy is used. Parameter execution order is also recorded
-            in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
-
-            The default always_wrap_policy might not be the best choice for every model. For example, for
-            transformer based models, setting transformer_auto_wrap_policy as the init_policy will guarantee
+        handle_init_mode (HandleInitMode):
+            The initial mode used in the policy.
+        bucket_size (int):
+            Bucket size threshold in bytes.
+        module_level_group_policy (Callable):
+            The policy used to guide the wrapping that will be used only if ``handle_init_mode`` is ``HandleInitMode.MODULE_LEVEL``.
+            Modules in one wrap of ``module_level_group_policy`` will always be grouped in one bucket.
+            Note that the default ``always_wrap_policy`` might not be the best choice for every model. For example, for
+            transformer based models, setting ``transformer_auto_wrap_policy`` as the policy will guarantee
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
     """
-    init_policy: Callable = always_wrap_policy
+    handle_init_mode: HandleInitMode
+    bucket_size: int = 1
+    module_level_group_policy: Callable = always_wrap_policy
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
