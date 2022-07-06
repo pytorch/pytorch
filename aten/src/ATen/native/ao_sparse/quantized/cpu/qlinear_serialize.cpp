@@ -11,12 +11,17 @@ namespace ao {
 namespace sparse {
 
 namespace {
-/** Wrap a vector in a Tensor, copying data into its own data pointer */
-template <typename UNDERLYING_DTYPE, typename T, typename U>
-at::Tensor wrap_vector(std::vector<T, U>& vec, c10::ScalarType dtype) {
+/**
+  - Wrap a vector in a Tensor, copying data into its own data pointer.
+  - The type of vec is T& (not vector<T>&) so this works with any vector-like
+    datastructure which has .data() and .size()
+ */
+template <typename UNDERLYING_DTYPE, typename T>
+at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
   at::Tensor t = at::empty(
       {static_cast<long>(vec.size())}, at::device(c10::kCPU).dtype(dtype));
-  std::copy(vec.begin(), vec.end(), t.data_ptr<UNDERLYING_DTYPE>());
+  std::copy(
+      vec.data(), vec.data() + vec.size(), t.data_ptr<UNDERLYING_DTYPE>());
   return t;
 }
 
@@ -110,6 +115,21 @@ BCSRSerializationType PackedLinearWeight::serialize() {
       zero_points.data_ptr<int8_t>(),
       qscheme_per_tensor);
 
+  std::vector<int8_t>& packed_weight_values = std::get<0>(untiled_bcsr);
+  // Add 128 to each weight value. This serialization format is best for
+  // minimizing memory footprint for QNNPack
+
+  at::Tensor weight_values = at::empty(
+      {static_cast<long>(packed_weight_values.size())},
+      at::device(c10::kCPU).dtype(c10::kByte));
+  std::transform(
+      packed_weight_values.begin(),
+      packed_weight_values.end(),
+      weight_values.data_ptr<uint8_t>(),
+      [](int8_t v) {
+        return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
+      });
+
   return BCSRSerializationType(
       SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
       bias_,
@@ -124,8 +144,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
           std::get<1>(untiled_bcsr), c10::kInt), // Row block indices
       wrap_vector<int>(
           std::get<2>(untiled_bcsr), c10::kInt), // Col block indices
-      wrap_vector<int8_t>(
-          std::get<0>(untiled_bcsr), c10::kChar), // Weight values
+      std::move(weight_values),
       w->R,
       w->C);
 }
@@ -174,17 +193,6 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
     TORCH_CHECK(false, "Unsupported quantization scheme.");
   }
 
-  // Subtract 128 from each weight value, to reverse addition done during
-  // prepacking
-  at::Tensor weight_values = at::empty(
-      {static_cast<long>(bcsr_matrix_->values.size())},
-      at::device(c10::kCPU).dtype(c10::kChar));
-  std::transform(
-      bcsr_matrix_->values.begin(),
-      bcsr_matrix_->values.end(),
-      weight_values.data_ptr<int8_t>(),
-      subtract_128);
-
   return BCSRSerializationType(
       SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
       orig_bias_,
@@ -197,7 +205,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
           bcsr_matrix_->row_values, c10::kInt), // Casting from uint32_t to int
       wrap_vector<int>(
           bcsr_matrix_->col_indices, c10::kInt), // Casting from uint32_t to int
-      std::move(weight_values),
+      wrap_vector<uint8_t>(bcsr_matrix_->values, c10::kByte),
       output_channels_,
       input_channels_);
 }

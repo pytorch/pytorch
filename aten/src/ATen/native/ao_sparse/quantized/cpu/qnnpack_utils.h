@@ -34,6 +34,13 @@ struct TORCH_API PackedLinearWeightQnnp
       sparse_linear_op_{nullptr};
   int64_t output_channels_;
   int64_t input_channels_;
+  // Deserialized Tensors are stored to maintain the lifetime of underlying
+  // BCSR data.
+  // These are left empty if PackedLinearWeightQnnp is created via prepacking
+  // rather than deserializing.
+  at::Tensor deserialized_bcsr_row_block_indices_;
+  at::Tensor deserialized_bcsr_col_block_indices_;
+  at::Tensor deserialized_bcsr_weight_values_;
 
   at::Tensor apply(
       const at::Tensor& input,
