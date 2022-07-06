@@ -345,9 +345,9 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         return counter - 1
 
     def unpack(x):
-        unpack_counter = 0
-        if len(storage) == 0:
 
+        def populate_storage():
+            unpack_counter = 0
             def inner_pack(inner):
                 nonlocal unpack_counter
                 storage[unpack_counter] = inner
@@ -372,12 +372,18 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                     with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
                         _unused = function(*args, **kwargs)
 
+        if len(storage) == 0:
+            populate_storage()
+
         if x not in storage:
-            raise RuntimeError(
-                "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                " recomputation being triggered in between, this is not currently supported. Please"
-                " open an issue with details on your use case so that we can prioritize adding this."
-            )
+            # Recompute all activation tensors.
+            storage.clear()
+            populate_storage()
+            # raise RuntimeError(
+            #     "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+            #     " recomputation being triggered in between, this is not currently supported. Please"
+            #     " open an issue with details on your use case so that we can prioritize adding this."
+            # )
 
         return storage.pop(x)
 
