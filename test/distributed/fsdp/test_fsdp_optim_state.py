@@ -7,6 +7,9 @@ from typing import Any, Dict, List, Tuple, Type
 
 import torch
 from torch import distributed as dist
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX, apply_activation_checkpointing_wrapper
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
@@ -477,12 +480,21 @@ class TestFSDPOptimState(FSDPTest):
         device = torch.device("cuda")
         model = NestedModel().to(device)
         wrapped_model = NestedModel.wrap(model, ignore_modules=True)
+        # Add checkpointing to ensure optim_state_dict and state_dict strip out
+        # checkpointing prefixes.
+        apply_activation_checkpointing_wrapper(
+            model,
+            check_fn=lambda module: isinstance(module, torch.nn.Sequential)
+        )
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._step_model(model, optim, device)
         optim_state_dict = FSDP.full_optim_state_dict(wrapped_model, optim, rank0_only=False)
         with FSDP.state_dict_type(wrapped_model, StateDictType.FULL_STATE_DICT):
             state_dict = wrapped_model.state_dict()
         self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
+        # Check that checkpointing prefix was indeed stripped.
+        for key in optim_state_dict["state"]:
+            self.assertNotIn(_CHECKPOINT_PREFIX, key)
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):
