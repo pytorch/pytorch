@@ -495,6 +495,7 @@ test_forward_backward_compatibility() {
   . venv/bin/activate
   if [[ "${BASE_SHA}" = "${SHA1}" ]]; then
     # should we even run anything for this check on trunk?
+    echo "huh"
   else
     git reset --hard "${BASE_SHA}"
     python "${REPO_DIR}/setup.py" bdist_wheel --bdist_dir="${REPO_DIR}/base_bdist_tmp" --dist-dir="${REPO_DIR}/base_dist"
