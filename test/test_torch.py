@@ -366,6 +366,14 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
 
+    @onlyCUDA
+    def test_module_share_memory(self):
+        # Test fix for issue #80733
+        # See https://github.com/pytorch/pytorch/issues/80733
+        model = torch.nn.Linear(3, 1)
+        model_cuda = model.to('cuda')
+        model.share_memory()
+
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
@@ -2934,27 +2942,25 @@ else:
 
     # FIXME: move to indexing test suite
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
-    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
         include_selfs = [True, False]
-        reduction_init = {'prod': 1, 'mean': 0, 'amin': float('inf'), 'amax': -float('inf')}
+        amin_init = float('inf') if dtype.is_floating_point else torch.iinfo(dtype).max
+        amax_init = -float('inf') if dtype.is_floating_point else torch.iinfo(dtype).min
+        reduction_init = {'prod': 1, 'mean': 0, 'amin': amin_init, 'amax': amax_init}
 
-        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+        for dest_noncontig, src_noncontig, index_noncontig in product([True, False], repeat=3):
             for idx_dtype, include_self in product(index_dtypes, include_selfs):
                 for dim in range(len(size)):
                     num_src = np.random.randint(10)
                     num_dest = size[dim]
-                    dest = torch.randn(size, dtype=dtype, device=device)
-                    if not dest_contig:
-                        dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
-                    src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
-                    if not src_contig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        src = torch.testing.make_non_contiguous(src)
+                    dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
+                    src_size = size[:dim] + (num_src,) + size[dim + 1:]
+                    src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
                     idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if not index_contig:
+                    if index_noncontig:
                         # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
                         idx = torch.testing.make_non_contiguous(idx)
                     expected = dest.clone()
@@ -2977,7 +2983,10 @@ else:
                         counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
                         counts.index_add_(0, idx, torch.ones_like(src))
                         counts.masked_fill_(counts == 0, 1)
-                        expected /= counts
+                        if (dtype.is_floating_point):
+                            expected.div_(counts)
+                        else:
+                            expected.div_(counts, rounding_mode="floor")
                     expected = expected.transpose(0, dim)
 
                     self.assertEqual(dest, expected)
