@@ -132,11 +132,16 @@ size_t MaxPosCalculator::getMaxProducerPosFromConsumer(
   return producer->nDims();
 }
 
-size_t InlinePropagator::getMaxPosAll(TensorView* tv) {
+size_t InlinePropagator::getMaxPosAll(TensorView* tv, bool check_siblings) {
   auto max_pos = max_pos_calc.getMaxPosSelf(tv, false, false, false);
   for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
     max_pos = std::min<size_t>(
         max_pos, max_pos_calc.getMaxProducerPosFromConsumer(tv, consumer_tv));
+  }
+  if (check_siblings) {
+    for (auto sibling_tv : ir_utils::siblingTvsOf(tv)) {
+      max_pos = std::min<size_t>(max_pos, getMaxPosAll(sibling_tv, false));
+    }
   }
   return max_pos;
 }

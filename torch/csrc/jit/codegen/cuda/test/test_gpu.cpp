@@ -24167,6 +24167,30 @@ TEST_F(NVFuserTest, FusionSkipReplay_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionInlineRepro1803_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeContigTensor(2);
+
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tvs = Welford(tv1, {1});
+  auto tvo = set(tvs.var_sum);
+  fusion.addOutput(tvo);
+
+  tvo->split(0, 16);
+  tvo->axis(1)->parallelize(ParallelType::Unroll);
+
+  tv0->computeAt(tvo, -1, ComputeAtMode::BestEffort);
+
+  TORCH_CHECK(
+      tvs.var_sum->getComputeAtPosition() == tvs.avg->getComputeAtPosition());
+  TORCH_CHECK(
+      tvs.var_sum->getComputeAtPosition() == tvs.n->getComputeAtPosition());
+  TORCH_CHECK(tvs.var_sum->getComputeAtPosition() == 1);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

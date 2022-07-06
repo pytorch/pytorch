@@ -70,7 +70,7 @@ class MaxPosCalculator {
 class InlinePropagator : public MaxInfoSpanningTree::Propagator {
   // Checks producers and consumers to see what the maximum position in tv is
   // that can be shared across both directions.
-  size_t getMaxPosAll(TensorView* tv);
+  size_t getMaxPosAll(TensorView* tv, bool check_siblings = true);
 
   // We use mapped_reference_pos_ to keep track of the outer axes information of
   // the reference tensor. That is, mapped_reference_pos_[tv] answers the
