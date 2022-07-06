@@ -493,13 +493,23 @@ test_forward_backward_compatibility() {
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
+  if [[ "${BASE_SHA}" = "${SHA1}" ]]; then
+    # should we even run anything for this check on trunk?
+  else
+    git reset --hard "${BASE_SHA}"
+    python "${REPO_DIR}/setup.py" bdist_wheel --bdist_dir="${REPO_DIR}/base_bdist_tmp" --dist-dir="${REPO_DIR}/base_dist"
+    python -mpip install "${REPO_DIR}/base_dist/*.whl"
+    pip show torch
+    python dump_all_function_schemas.py --filename nightly_schemas.txt
+    git reset --hard "${SHA1}"
+  fi
   # install the nightly before the base commit -- fallback to most recent nightly in case of error
-  VERSION=$(cat "${REPO_DIR}/version.txt")
-  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
-  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-  pip show torch
-  python dump_all_function_schemas.py --filename nightly_schemas.txt
+  # VERSION=$(cat "${REPO_DIR}/version.txt")
+  # DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
+  # pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
+  # pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  # pip show torch
+  # python dump_all_function_schemas.py --filename nightly_schemas.txt
   # FC: verify newmodel can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"
@@ -508,6 +518,9 @@ test_forward_backward_compatibility() {
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r venv
+  echo "NOW EXITING VENV"
+  ls "${REPO_DIR}/base_dist/*.whl"
+  ls "${REPO_DIR}/dist/*.whl"
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
