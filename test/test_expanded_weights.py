@@ -480,10 +480,17 @@ class ContextManagerTests(TestBase):
             raise unittest.SkipTest("Can't get per sample gradients for input of rank 1")
         test_case._do_test_multi_input(module, input)
 
+def filter_supported_tests(t):
+    supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm', 'GroupNorm', 'InstanceNorm']
+    if 'module_name' in t and t['module_name'] in supported_modules:
+        return True
+    if 'fullname' in t and any([module + "_" in t['fullname'] for module in supported_modules]):
+        return not('Conv' in t['fullname'] and 'pad' in t['fullname'])
+
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
 supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm', 'GroupNorm', 'InstanceNorm']
-supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
+supported_tests = [t for t in module_tests + new_module_tests if filter_supported_tests(t)]
 for test_param in supported_tests:
     if 'constructor' not in test_param:
         name = test_param.pop('module_name')
