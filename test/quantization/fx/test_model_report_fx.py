@@ -1308,11 +1308,12 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 class TestFxDetectOutliers(QuantizationTestCase):
 
     class LargeBatchModel(torch.nn.Module):
-        def __init__(self):
+        def __init__(self, param_size):
             super().__init__()
-            self.linear = torch.nn.Linear(128, 128)
+            self.param_size = param_size
+            self.linear = torch.nn.Linear(param_size, param_size)
             self.relu_1 = torch.nn.ReLU()
-            self.conv = torch.nn.Conv2d(128, 128, 1)
+            self.conv = torch.nn.Conv2d(param_size, param_size, 1)
             self.relu_2 = torch.nn.ReLU()
 
         def forward(self, x):
@@ -1323,12 +1324,26 @@ class TestFxDetectOutliers(QuantizationTestCase):
             return x
 
         def get_example_inputs(self):
-            return (torch.randn((1, 128, 128, 128)),)
+            param_size = self.param_size
+            return (torch.randn((1, param_size, param_size, param_size)),)
 
-    def _get_prepped_for_calibration_model(self, model, detector_set):
+        def get_outlier_inputs(self):
+            param_size = self.param_size
+            random_vals = torch.randn((1, param_size, param_size, param_size))
+            # change one in some of them to be a massive value
+            random_vals[:, 0:param_size:2, 0, 3] = torch.tensor([3.28e8])
+            return (random_vals,)
+
+
+    def _get_prepped_for_calibration_model(self, model, detector_set, use_outlier_data=False):
         r"""Returns a model that has been prepared for callibration and corresponding model_report"""
         # call the general helper function to callibrate
         example_input = model.get_example_inputs()[0]
+
+        # if we specifically want to test data with outliers replace input
+        if use_outlier_data:
+            example_input = model.get_outlier_inputs()[0]
+
         return _get_prepped_for_calibration_model_helper(model, detector_set, example_input)
 
     @skipIfNoFBGEMM
@@ -1344,7 +1359,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
             # get tst model and callibrate
             prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
-                self.LargeBatchModel(), detector_set
+                self.LargeBatchModel(param_size=128), detector_set
             )
 
             # supported modules to check
@@ -1371,6 +1386,182 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 else:
                     # if it's not a supported type, it shouldn't have observer attached
                     self.assertTrue(not hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
+
+    @skipIfNoFBGEMM
+    def test_no_outlier_report_gen(self):
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+
+            # test with multiple detectors
+            outlier_detector = OutlierDetector(reference_percentile=0.95)
+            dynamic_static_detector = DynamicStaticDetector(tolerance=0.5)
+
+            param_size: int = 4
+            detector_set = set([outlier_detector, dynamic_static_detector])
+            model_report = ModelReport(detector_set)
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 2 detectors
+            self.assertEqual(len(generated_report), 2)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # because we only ran once, all batches run should say statisitically insignificant amount of data
+                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
+                self.assertEqual(sum(sufficient_batches_info), 0)
+
+                # there really should not be any outliers since we used a normal distribution to perform this calculation
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                self.assertEqual(sum(outlier_info), 0)
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+
+    @skipIfNoFBGEMM
+    def test_all_outlier_report_gen(self):
+        # make the percentile 0 and the ratio 1, and then see that everything is outlier according to it
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+            # create detector of interest
+            outlier_detector = OutlierDetector(ratio_threshold=1, reference_percentile=0)
+
+            param_size: int = 16
+            detector_set = set([outlier_detector])
+            model_report = ModelReport(detector_set)
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # because we only ran once, all batches run should say statisitically insignificant amount of data
+                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
+                self.assertEqual(sum(sufficient_batches_info), 0)
+
+                # everything should be an outlier because we said that the max should be equal to the min for all of them
+                # however we will just test and say most should be in case we have several 0 channel values
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                assert sum(outlier_info) >= len(outlier_info) / 2
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+    @skipIfNoFBGEMM
+    def test_multiple_run_consistent_spike_outlier_report_gen(self):
+        # specifically make a row really high consistently in the number of batches that you are testing and try that
+        # generate report after just 1 run, and after many runs (30) and make sure statisically significant difference is there
+        with override_quantized_engine('fbgemm'):
+
+            # detector of interest
+            outlier_detector = OutlierDetector(reference_percentile=0.95)
+
+            param_size: int = 8
+            detector_set = set([outlier_detector])
+            model_report = ModelReport(detector_set)
+            model = self.LargeBatchModel(param_size=param_size)
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                model, detector_set, use_outlier_data=True
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_outlier_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            # now callibrate minimum 30 times to make it statisically significant size
+            for i in range(30):
+                example_input = model.get_outlier_inputs()[0]
+                example_input = example_input.to(torch.float)
+                prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            outlier_str, outlier_dict = generated_report[outlier_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 4 conv + linear + relu
+            self.assertEqual(len(outlier_dict), 4)
+
+            # assert the following are true for all the modules
+            for module_fqn in outlier_dict:
+                # get the info for the specific module
+                module_dict = outlier_dict[module_fqn]
+
+                # because we ran 30 times, we should have at least a couple be significant
+                # could be less because some channels could possibly be all 0
+                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
+                assert sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2
+
+                # half of them should be outliers, because we set a really high value every 2 channels
+                outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
+                self.assertEqual(sum(outlier_info), len(outlier_info) / 2)
+
+                # ensure that the number of ratios and batches counted is the same as the number of params
+                self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
+                self.assertEqual(len(module_dict[OutlierDetector.NUM_BATCHES_KEY]), param_size)
+
+                # for the first one ensure the per channel max values are what we set
+                if module_fqn == "linear.0":
+                    # half of the recorded max values should be what we set
+                    matched_max = sum([val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY]])
+                    self.assertEqual(matched_max, param_size / 2)
 
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):

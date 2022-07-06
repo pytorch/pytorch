@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, Tuple, Callable
+from typing import Any, Dict, Set, Tuple, Callable, List
 
 import torch
 import torch.nn as nn
@@ -932,6 +932,7 @@ class OutlierDetector(DetectorBase):
 
     Args:
         ratio_threshold (float, optional): The threshold for p_r to determine if there are outliers in activations
+            Should be >= 1
             Default: 3.5
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
             Should be between 0 and 1
@@ -951,6 +952,16 @@ class OutlierDetector(DetectorBase):
 
     # names for the pre observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
+
+    # names for dict keys
+    OUTLIER_KEY = "outliers_detected"
+    NUM_BATCHES_KEY = "batches_used"
+    SUFFICIENT_BATCHES_KEY = "sufficient_batches"
+    COMP_METRIC_KEY = "percentile_ratios"
+    RATIO_THRES_KEY = "ratio_threshold"
+    REF_PERCENTILE_KEY = "reference_percentile"
+    CHANNEL_AXIS_KEY = "channel_axis"
+    MAX_VALS_KEY = "max_values"
 
     def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
         # initialize the variables of interest
@@ -975,12 +986,17 @@ class OutlierDetector(DetectorBase):
         """
         # case for insertion of module
         # check if the module has any children and isn't observer
-        if insert:
-            num_children = len(list(module.children()))
-            return num_children == 0 and not isinstance(module, ObserverBase)
+        # check to see if module is of a supported type
+        num_children = len(list(module.children()))
+        is_supported_type = num_children == 0 and not isinstance(module, ObserverBase)
 
-        # All other cases false for now
-        return False
+        # this is check for observer insertion
+        if insert:
+            return is_supported_type
+        else:
+            # this is for report gen and we also need to check if it contains observers
+            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
+            return has_obs
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r""" Determines where observers need to be inserted for the Outlier Detector.
@@ -1023,12 +1039,99 @@ class OutlierDetector(DetectorBase):
 
         return obs_fqn_to_info
 
+    def _calculate_outlier_info(self, percentile_ratios: torch.Tensor, counted_batches: torch.Tensor) -> Dict[str, List[bool]]:
+        r"""
+        Gives info on whether the percentile ratios cacluated would be considered outliers
+        Also gives information on whether the collected data is statistically significant to make this claim
+
+        Args:
+            percentile_ratios (torch.Tensor): The average percentile_ratios per channel calculated by the observer
+            counted_batches (torch.Tensor): The number of batches used for average calculation per tensor
+
+        Returns a dictionary mapping:
+            "outliers_detected" : list of bools per channel that are true if it is considered an outlier
+            "statistically_significant": if the per channel calculation had at least 30 samples
+        """
+        outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
+
+        # get both as flattened lists for easy mapping
+        ratios_list: List = percentile_ratios.tolist()
+        num_batches_list: List = counted_batches.tolist()
+
+        # calculate whether channels were statistically significant
+        significant_size = [True if batch_size >= 30 else False for batch_size in num_batches_list]
+        outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
+
+        # calculate for each channel whether it's an outlier or not based on ratio
+        outlier_detected = [True if ratio > self.ratio_threshold else False for ratio in ratios_list]
+        outlier_dict[self.OUTLIER_KEY] = outlier_detected
+
+        # return the dictionary with the two lists
+        return outlier_dict
+
+    def _generate_info_dict(self, model: GraphModule) -> Dict[str, Dict]:
+        r"""
+        Helper function for generate_detector_report that does the generation of the dictionary.
+        This process is done as specified in generate_detector_report documentation
+
+        Args:
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+
+        Returns a dict mapping relavent module fqns to:
+            whether there were outliers found in activation before
+            the number of batches used for each channel
+            whether the number of applicable batches is above statistical threshold (30)
+            their p_r metric compared to the threshold
+            the threshold used to make the recommendation
+            the reference_percentile used to make the recommendation
+            the channel axis used to determine individual channels
+            the per channel max values
+        """
+        # return dictionary mapping observer fqns to desired info
+        info_dict: Dict[str, Dict] = {}
+
+        for fqn, module in model.named_modules():
+            # if module is supported and it has a pre-observer
+            if self._is_supported(module):
+                # get pre observer for the module
+                pre_obs: ModelReportObserver = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
+
+                # get the number of batches and calculated ratio thresholds
+                num_batches: torch.Tensor = pre_obs.percentile_batches_tracked
+                average_ratios: torch.Tensor = pre_obs.average_percentile_ratio
+
+                # also get the max values
+                max_vals: torch.Tensor = pre_obs.max_val
+
+                # we have to specifically modify how we are recording negative ratio for pre-relu layers
+                negative_mask: torch.Tensor = average_ratios < 0
+                average_ratios = -1 * negative_mask * average_ratios + ~negative_mask * average_ratios
+                fraction_mask: torch.Tensor = (average_ratios < 1)
+                average_ratios = fraction_mask * 1 / average_ratios + ~fraction_mask * average_ratios
+
+                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches)
+
+                # calculate whether ratios were outliers
+                info_dict[fqn] = {
+                    self.CHANNEL_AXIS_KEY: self.ch_axis,
+                    self.REF_PERCENTILE_KEY: self.reference_percentile,
+                    self.RATIO_THRES_KEY: self.ratio_threshold,
+                    self.COMP_METRIC_KEY: average_ratios,
+                    self.NUM_BATCHES_KEY: num_batches,
+                    self.OUTLIER_KEY: outlier_calcs[self.OUTLIER_KEY],
+                    self.SUFFICIENT_BATCHES_KEY: outlier_calcs[self.SUFFICIENT_BATCHES_KEY],
+                    self.MAX_VALS_KEY: max_vals
+                }
+
+        return info_dict
+
     def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
         Takes advantage of the ModelReport Observer which records the relavent percentile information
 
+        # TODO Add suggestion to see if it is stationary or non using that detector, and if static, issue dynamic hard to tell
         Args:
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
@@ -1036,8 +1139,59 @@ class OutlierDetector(DetectorBase):
             String report of of whether there are outliers in the activations around certain modules
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
+                the number of batches used for each channel
+                whether the number of applicable batches is above statistical threshold (30)
                 their p_r metric compared to the threshold
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
+                the channel axis used to determine individual channels
+                the per channel max values
         """
-        pass
+        # generate the information dictionary of outlier information
+        info_dict = self._generate_info_dict(model)
+
+        # now we can generate report based on this information
+        outlier_string = "Outlier detection report: \n"
+
+        # added module check
+        added_module: bool = False
+
+        # some strings to be formatted depending on module we are adding
+        module_suggestion_str = "For Module {} looked at with axis {}: \n"
+        channel_suggestion_str = "\tFor channel {}, we found outliers in the preceding activation data with {}.\n"
+        channel_max_value_str = "a max value across all batches of {}"
+        note_string = "Note: outlier detection is only reliable for {}. We recommend {} to ensure the most accurate results."
+        note_distribution = "stationary distributions"
+        note_rec = "running the static vs. dynamic detector to ensure activation data before modules above is stationary"
+
+        # compile the suggestion string
+        for module_fqn in info_dict:
+            # get module specific info
+            mod_info: Dict[str, Any] = info_dict[module_fqn]
+            # check to see if we already added high level model desc
+            added_model_desc = False
+            # look at each individual channel and add a suggestion
+            for index, outlier_detected in enumerate(mod_info[self.OUTLIER_KEY]):
+                if outlier_detected:
+                    # we found at least 1 outlier
+                    if not added_model_desc:
+                        # add the module level description
+                        outlier_string += module_suggestion_str.format(module_fqn, self.ch_axis)
+                        added_model_desc = True
+
+                    # we mark that we found at least one outlier
+                    added_module = True
+                    max_value_found_str = channel_max_value_str.format(mod_info[self.MAX_VALS_KEY][index])
+                    channel_str = channel_suggestion_str.format(index, max_value_found_str)
+                    outlier_string += channel_str
+
+
+        # if found outlier, give suggestion, else give default response
+        if added_module:
+            # compose the note string
+            note_composed = note_string.format(note_distribution, note_rec)
+            outlier_string += note_composed
+        else:
+            outlier_string += "There were no outliers found in the activations.\n"
+
+        return (outlier_string, info_dict)
