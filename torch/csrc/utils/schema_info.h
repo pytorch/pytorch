@@ -28,6 +28,8 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
 
   bool is_mutable(c10::string_view name);
 
+  bool isNonDeterministic() const;
+
   bool areAliasing(
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs,
