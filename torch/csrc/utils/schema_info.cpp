@@ -67,7 +67,28 @@ bool SchemaInfo::is_mutable(size_t index) {
   return std::any_of(
       input_alias_map_[index].begin(),
       input_alias_map_[index].end(),
-      [this](size_t index) { return FunctionSchema::is_mutable(index); });
+      [this](size_t index) {
+        static const char* batch_norm_literal =
+            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor";
+        static const char* instance_norm_literal =
+            "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor";
+        if (torch::jit::getOperatorForLiteral(batch_norm_literal)->schema() ==
+                *this &&
+            (arguments()[index].name() == "running_mean" ||
+             arguments()[index].name() == "running_var")) {
+          return value_map_.count("training") &&
+              value_map_.at("training").toBool();
+        } else if (
+            torch::jit::getOperatorForLiteral(instance_norm_literal)
+                    ->schema() == *this &&
+            (arguments()[index].name() == "running_mean" ||
+             arguments()[index].name() == "running_var")) {
+          return value_map_.count("use_input_stats") &&
+              value_map_.at("use_input_stats").toBool();
+        } else {
+          return FunctionSchema::is_mutable(index);
+        }
+      });
 }
 
 bool SchemaInfo::is_mutable(c10::string_view name) {
@@ -79,6 +100,13 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
 }
 
 bool SchemaInfo::isNonDeterministic() const {
+  if (torch::jit::getOperatorForLiteral(
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor")
+              ->schema() == *this &&
+      value_map_.count("train") && !value_map_.at("train").toBool()) {
+    return false;
+  }
+
   static const std::vector<const char*> nondeterministic_ops = {
       "aten::dropout(Tensor input, float p, bool train) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
