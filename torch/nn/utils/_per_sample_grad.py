@@ -11,7 +11,7 @@ from torch.utils._pytree import tree_flatten
 
 def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
     r"""
-    call_for_per_sample_grads(module, batch_size, loss_reduction)
+    call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean")
     ``call_for_per_sample_grads`` returns a function that is invoked like the forward
     function of ``module`` and will produce the same result. Then, when backward is invoked,
     the parameters of ``module`` will have a ``grad_sample`` field populated with the per sample
@@ -21,15 +21,15 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
         module: The ``nn.Module`` to get per sample gradients with respect to. All trainable
           parameters will compute per sample gradients, located in a ``grad_sample``
           field when ``backward`` is invoked
-        batch_size: The batch size of the input. Typically the input's first dimension
-        loss_reduction: The reduction used on the loss. Must be "mean" or "sum"
-        args: Tuple of positional args passed to ``module`` to perform the forward pass
-        kwargs: Dict of named args passed to ``module`` to perform the forward pass. Default: None
+        batch_size: The batch size of the input. If None is passed, all tensor arguments in args and kwargs must have
+          the same batch size, which is the size of the first dimension. Otherwise, it must be passed manually.
+          Default: None
+        loss_reduction: The reduction used on the loss. Must be "mean" or "sum". Default: "mean"
 
     Examples::
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> res = call_for_per_sample_grads(model, batched_input.shape[0], batched_input).sum()
+        >>> res = call_for_per_sample_grads(model)(batched_input).sum()
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)
         >>> assert model.weight.grad_sample.shape == (5, 3, 4)
