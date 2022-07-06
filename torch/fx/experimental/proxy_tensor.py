@@ -120,6 +120,9 @@ class ProxyTensor(torch.Tensor):
             proxy.node.meta['tensor_meta'] = {}
         else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        # This detects situations where you accidentally put a ProxyTensor
+        # inside a ProxyTensor for the same trace; this is a layering violation
+        assert not (isinstance(elem, ProxyTensor) and elem.proxy.tracer is proxy.tracer)
         self.elem = elem
         self.proxy = proxy
 
