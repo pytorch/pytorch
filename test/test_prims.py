@@ -156,6 +156,30 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    def test_nvfuser_executor_cached_noncontiguous(self, device):
+        # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.sigmoid(a)
+
+        with TorchRefsMode.push():
+            gm = make_fx(func)(a)
+
+        # First run to create the cache
+        execute(gm, a, executor="nvfuser")
+
+        # a.mT is noncontiguous, but it shouldn't affect correctness
+        expected = execute(gm, a.mT, executor="aten")
+        actual = execute(gm, a.mT, executor="nvfuser")
+        self.assertEqual(expected, actual)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
@@ -178,9 +202,10 @@ class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
-    def test_pytree_output(self, device, dtype):
+    def test_pytree_input_output(self, device, dtype):
         @make_traced
-        def fn(a, b):
+        def fn(a, b_dict):
+            b = b_dict["b"]
             d = {}
             d["c"] = torch.add(a, b)
             return (d, torch.add(a, d["c"]))
@@ -188,9 +213,10 @@ class TestPrims(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
         a = make_arg((5, 5))
         b = make_arg((1, 5))
+        b_dict = {"b": b}
 
-        result_aten = fn(a, b, executor="aten")
-        result_nvfuser = fn(a, b, executor="nvfuser")
+        result_aten = fn(a, b_dict, executor="aten")
+        result_nvfuser = fn(a, b_dict, executor="nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
 
 
