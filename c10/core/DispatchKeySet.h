@@ -367,6 +367,12 @@ class DispatchKeySet final {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
+  // You're allowed to remove a backend bit from a DispatchKeySet,
+  // but you have to be explicit about it (remove_backend() instead of
+  // remove()).
+  constexpr DispatchKeySet remove_backend(BackendComponent b) const {
+    return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
+  }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
     return repr_ == 0;
@@ -627,6 +633,7 @@ C10_API inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradFunctionality,
     DispatchKey::AutogradOther,
+    DispatchKey::AutogradNestedTensor,
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
@@ -735,7 +742,8 @@ constexpr auto autograd_privateuse2_ks =
 constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
-
+constexpr auto autograd_nested =
+    DispatchKeySet(DispatchKey::AutogradNestedTensor);
 // keyset correpsonding to functorch keys that have their own dedicated
 // TensorImpl subclass.
 constexpr auto functorch_transforms_ks = DispatchKeySet(

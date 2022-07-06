@@ -7,6 +7,7 @@ from torch.fx.graph import map_arg
 from .tools_common import NodeList, NodeSet
 from torch.fx._compatibility import compatibility
 
+__all__ = ['getattr_recursive', 'setattr_recursive', 'Component', 'HolderModule', 'split_by_tags']
 
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
@@ -314,6 +315,6 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
         if x.op == "get_attr":
-            setattr(main_root, x.name, getattr(gm, x.target))  # type: ignore[arg-type]
+            setattr(main_root, x.name, getattr_recursive(gm, x.target))  # type: ignore[arg-type]
 
     return torch.fx.GraphModule(main_root, main_g)

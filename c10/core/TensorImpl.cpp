@@ -390,7 +390,12 @@ IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
+
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_sizes(this);
+  }
+
   TORCH_CHECK(
       false,
       "Tensors of type ",
@@ -741,7 +746,12 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
 
 void TensorImpl::FreeMemory() {
   // We'll detach from the old Storage and create a new one
-  storage_ = Storage::create_legacy(storage_.device());
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
+    storage_ = Storage::create_legacy(storage_.device());
+  } else {
+    storage_.reset_legacy();
+  }
   storage_offset_ = 0;
 }
 
