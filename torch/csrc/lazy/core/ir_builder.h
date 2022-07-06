@@ -130,8 +130,6 @@ struct IrBuilder {
   virtual NodePtr MakeSizeAdd(const Value& a, const Value& b) const = 0;
   virtual NodePtr MakeSizeMul(const Value& a, const Value& b) const = 0;
   virtual NodePtr MakeSizeDiv(const Value& a, const Value& b) const = 0;
-
-  virtual ~IrBuilder() = default;
 };
 
 static inline NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) {
