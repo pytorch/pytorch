@@ -154,6 +154,8 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     double momentum, double eps) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
+  TORCH_CHECK(input.dim() >= 1,
+           "Expected input to have at least 2 dimensions.");
 
   int64_t n_input = input.size(1);
   int64_t n = input.numel() / n_input;
@@ -453,8 +455,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
-    if (weight.defined()) out = out * weight[0];
-    if (bias.defined()) out = out + bias[0];
+    if (weight.defined() && weight.numel() > 0) {
+      out = out * weight[0];
+    }
+    if (bias.defined() && bias.numel() > 0) {
+      out = out + bias[0];
+    }
     return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
         out, save_mean, save_invstd, reserve, 0);
   }
@@ -663,6 +669,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+
+  // Handle size-0 inputs
+  if (self.numel() == 0) {
+    auto num_features = self.sizes()[1];
+    auto options = self.options().dtype(
+        at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda()));
+    auto save_mean = at::empty({num_features}, options);
+    auto save_invstd = at::empty({num_features}, options);
+    auto out = self.clone();
+    return std::tuple<Tensor, Tensor, Tensor>(
+        out, save_mean, save_invstd);
+  }
 
   const bool mixed_type = is_mixed_type(self, weight, bias, running_mean, running_var);
   return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {

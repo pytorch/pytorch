@@ -454,6 +454,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
+  // Handle size-0 inputs
+  if (self.numel() == 0) {
+    auto num_features = self.sizes()[1];
+    auto options = self.options().dtype(
+        at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda()));
+    auto save_mean = at::empty({num_features}, options);
+    auto save_invstd = at::empty({num_features}, options);
+    auto output = self.clone();
+    return std::make_tuple(output, save_mean, save_invstd);
+  }
+
   auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
