@@ -82,7 +82,7 @@ def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
 def _patched_create_proxy(
     create_proxy: Callable,
     execution_info: _ExecutionInfo,
-    params_dict: Dict[str, torch.nn.Parameter],
+    prefixed_param_name_to_param: Dict[str, torch.nn.Parameter],
     kind: str,
     target: torch.fx.node.Target,
     args: Tuple[Any, ...],
@@ -102,8 +102,8 @@ def _patched_create_proxy(
             The ``create_proxy`` function to be patched.
         execution_info (_ExecutionInfo):
             Used to record the execution information.
-        params_dict (Dict[str, torch.nn.Parameter]):
-            A dict that maps each parameter name to the parameter.
+        prefixed_param_name_to_param (Dict[str, torch.nn.Parameter]):
+            A dict that maps each prefixed parameter name to the parameter.
         kind (str):
             The type of the target method. One of 'call_function', 'call_method', 'get_attr',
             'call_module', 'placeholder', or 'output'. The semantics of these opcodes are
@@ -130,8 +130,8 @@ def _patched_create_proxy(
         if args is not None:
             named_params: List[Tuple[str, torch.nn.Parameter]] = []
             for arg in args:
-                if isinstance(arg, torch.fx.Proxy) and arg.node.target in params_dict:
-                    param = params_dict[arg.node.target]
+                if isinstance(arg, torch.fx.Proxy) and arg.node.target in prefixed_param_name_to_param:
+                    param = prefixed_param_name_to_param[arg.node.target]
                     named_params.append((arg.node.target, param))
                     if param not in execution_info._traced_param_set:
                         execution_info.param_exec_order.append(param)
@@ -230,9 +230,9 @@ def _patch_tracer(
     tracer.call_module = functools.partial(
         _patched_call_module, original_call_module, execution_info
     )
-    params_dict = dict(root_module.named_parameters())
+    prefixed_param_name_to_param = dict(root_module.named_parameters())
     tracer.create_proxy = functools.partial(
-        _patched_create_proxy, original_create_proxy, execution_info, params_dict
+        _patched_create_proxy, original_create_proxy, execution_info, prefixed_param_name_to_param
     )
     try:
         yield

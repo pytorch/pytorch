@@ -26,11 +26,11 @@ class Model(torch.nn.Module):
         )
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x: Any, flag: bool):
+    def forward(self, x: Any, run_all_layers: bool):
         z = self.relu(self.layer0(x))
         z = self.relu(self.layer2(z))
         z = z @ self.weight1
-        if flag:
+        if run_all_layers:
             z = self.relu(self.layer1(z))
             z = z @ self.weight2
             # used to test the case where a module is called more than once
@@ -40,6 +40,10 @@ class Model(torch.nn.Module):
 
 class TestSymbolicTracing(FSDPTest):
     def test_symbolic_tracing_outputs(self):
+        """
+        test ``execution_info.module_forward_order`` and ``execution_info.module_to_execution_infos``
+        after running ``tracer.trace()`` inside ``_patch_tracer``.
+        """
         model = Model()
         tracer = torch.fx.Tracer()
         execution_info = _init_execution_info(model)
@@ -48,7 +52,7 @@ class TestSymbolicTracing(FSDPTest):
         with _patch_tracer(
             tracer=tracer, root_module=model, execution_info=execution_info
         ):
-            concrete_args = {"flag": True}
+            concrete_args = {"run_all_layers": True}
             tracer.trace(model, concrete_args)
         # the member functions of tracer should not be changed
         self.assertEqual(original_call_module, tracer.call_module)

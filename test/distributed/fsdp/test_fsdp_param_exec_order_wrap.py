@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -28,12 +28,12 @@ class Model(torch.nn.Module):
         )
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x: Any, flag: bool = True):
+    def forward(self, x: Any, use_all_params: bool = True):
         # `layer0` -> `layer2` -> `layer1`
         # the forward execution order is NOT consistent with the model definition order.
         z = self.relu(self.layer0(x))
         z = self.relu(self.layer2(z))
-        if flag:
+        if use_all_params:
             z = self.relu(self.layer1(z))
         return z
 
@@ -47,7 +47,7 @@ class Model(torch.nn.Module):
     def wrap(
         sharding_strategy: ShardingStrategy,
         device: torch.device,
-        wrap_policy=always_wrap_policy,
+        wrap_policy: Callable,
     ) -> torch.nn.Module:
         model = Model()
         fsdp_model = FSDP(
@@ -66,21 +66,23 @@ class TestFSDPExecOrder(FSDPTest):
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
-    @parametrize("iters", [1, 3])
     def test_fsdp_flatten_params_exec_order(
         self,
         sharding_strategy: ShardingStrategy,
-        iters: int,
     ):
-        """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
+        """
+        Test ``_fsdp_params_exec_order`` with ``ParamExecOrderWrapPolicy``,
+        after running one iteration of forward and backward pass.
+        Here ``torch.fx`` is not enabled inside ``ParamExecOrderWrapPolicy``.
+        """
         wrap_policy = ParamExecOrderWrapPolicy(init_policy=always_wrap_policy)
         fsdp_model = Model.wrap(sharding_strategy, self.device, wrap_policy=wrap_policy)
         self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())
-        for _ in range(iters):
-            input = fsdp_model.module.get_input(self.device)
-            output = fsdp_model(*input)
-            loss = fsdp_model.module.get_loss(input, output).to(self.device)
-            loss.backward()
+        # run one iteration to record the execution ordering
+        input = fsdp_model.module.get_input(self.device)
+        output = fsdp_model(*input)
+        loss = fsdp_model.module.get_loss(input, output).to(self.device)
+        loss.backward()
         params_list = list(fsdp_model.parameters())
         # Since the forward execution order is NOT consistent with
         # the model definition order, the ordering in flatten_named_params_exec_order
@@ -102,12 +104,13 @@ class TestFSDPExecOrder(FSDPTest):
         sharding_strategy: ShardingStrategy,
     ):
         """
-        Tests ParamExecOrderWrapPolicy with symbolic tracing.
-        With symbolic tracing enabled, _is_param_exec_order_prep_stage
+        Tests ``ParamExecOrderWrapPolicy`` with symbolic tracing.
+        With symbolic tracing enabled, ``_is_param_exec_order_prep_stage``
         should always set as False.
         """
         wrap_policy = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy, tracing_config=TracingConfig(concrete_args={"flag": False})
+            init_policy=always_wrap_policy,
+            tracing_config=TracingConfig(concrete_args={"use_all_params": False}),
         )
         fsdp_model = Model.wrap(
             sharding_strategy,
