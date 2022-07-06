@@ -4638,6 +4638,7 @@
   dispatch:
     CPU, CUDA: std
     MPS: std_mps
+    QuantizedCPU: std_quantized_cpu
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -4668,6 +4669,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
+    QuantizedCPU: std_out_quantized_cpu
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9700,6 +9702,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
+    MPS: softplus_backward_out_mps
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
