@@ -71,6 +71,14 @@ def _unsqueeze_to_dim(x: Tensor, dim: int):
     return x
 
 
+@register_decomposition(aten.conj_physical)
+@pw_cast_for_opmath
+def conj_physical(x: Tensor) -> Tensor:
+    if x.is_complex():
+        return torch.complex(x.real, -x.imag)
+    return x
+
+
 @register_decomposition(aten.tanh_backward)
 @pw_cast_for_opmath
 def tanh_backward(out_grad: Tensor, y: Tensor):

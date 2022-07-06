@@ -137,8 +137,8 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
-            # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
-            # "torch.ops.aten.tanh_backward": None,
+            "torch.ops.aten.tanh_backward": None,
+            "torch.ops.aten.sigmoid_backward": None,
             # "torch.ops.aten.amax": None,      # missing prim decomp
             "torch.ops.aten.amin": None,
             "torch.ops.aten.reshape": None,
