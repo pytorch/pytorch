@@ -512,7 +512,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}"
     )
-    if a.dtype.is_floating_point:
+    if utils.is_float_dtype(a.dtype):
         return eq(a, float("inf"))
     return zeros_like(a, dtype=torch.bool)
 
@@ -523,7 +523,7 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}"
     )
-    if a.dtype.is_floating_point:
+    if utils.is_float_dtype(a.dtype):
         return eq(a, float("-inf"))
     return zeros_like(a, dtype=torch.bool)
 
