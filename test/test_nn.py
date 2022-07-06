@@ -14376,6 +14376,28 @@ class TestNNDeviceType(NNTestCase):
             bias.requires_grad_(False)
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
+    @onlyCPU
+    def test_conv_contiguous_for_oneDNN(self):
+        for dtype in [torch.float, torch.bfloat16]:
+            conv = nn.Conv2d(
+                1,
+                128,
+                kernel_size=(5, 2),
+                stride=(2, 1),
+                padding=(0, 1),
+                dilation=(1, 1),
+                groups=1,
+                bias=True,
+                padding_mode='zeros').to(dtype=dtype)
+
+            x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
+            x = torch.transpose(x, 1, 4)
+            x2 = x[..., 0]
+            inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
+            backend_actual = torch._C._select_conv_backend(*inputs)
+            backend_expected = torch._C._ConvBackend.Slow2d
+            y = conv(x2)
+            self.assertEqual(backend_actual, backend_expected)
 
     def test_Dropout(self, device):
         input = torch.empty(1000)

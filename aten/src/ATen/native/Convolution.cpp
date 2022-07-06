@@ -248,46 +248,46 @@ bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
     return true;
   }
   auto input_dim = input.dim();
-  bool is_cont = input.is_contiguous(at::MemoryFormat::Contiguous);
+  bool is_contiguous = input.is_contiguous(at::MemoryFormat::Contiguous);
   bool is_channels_last = (input_dim == 4)
       ? input.is_contiguous(at::MemoryFormat::ChannelsLast)
       : input.is_contiguous(at::MemoryFormat::ChannelsLast3d);
-  if (!(is_cont || is_channels_last)) {
+  if (!(is_contiguous || is_channels_last)) {
     return true;
   }
 
   auto dims = input.sizes();
   auto strides = input.strides();
-  bool mkldnn_conv_is_cont = true, mkldnn_conv_is_cl = true;
+  bool mkldnn_conv_is_contiguous = true, mkldnn_conv_is_channels_last = true;
   if (input_dim == 4) {
     const auto n = 0, c = 1, h = 2, w = 3;
-    mkldnn_conv_is_cont =
+    mkldnn_conv_is_contiguous =
         (strides[n] == dims[c] * dims[h] * dims[w] &&
          strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
          strides[w] == 1);
-    mkldnn_conv_is_cl =
+    mkldnn_conv_is_channels_last =
         (strides[n] == dims[h] * dims[w] * dims[c] &&
          strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
          strides[c] == 1);
   } else {
     const auto n = 0, c = 1, d = 2, h = 3, w = 4;
-    mkldnn_conv_is_cont =
+    mkldnn_conv_is_contiguous =
         (strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
          strides[c] == dims[d] * dims[h] * dims[w] &&
          strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
          strides[w] == 1);
-    mkldnn_conv_is_cl =
+    mkldnn_conv_is_channels_last =
         (strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
          strides[d] == dims[h] * dims[w] * dims[c] &&
          strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
          strides[c] == 1);
   }
-  if (is_channels_last && is_cont) {
-    return (mkldnn_conv_is_cont || mkldnn_conv_is_cl);
+  if (is_channels_last && is_contiguous) {
+    return (mkldnn_conv_is_contiguous || mkldnn_conv_is_channels_last);
   } else if (is_channels_last) {
-    return mkldnn_conv_is_cl;
-  } else if (is_cont) {
-    return mkldnn_conv_is_cont;
+    return mkldnn_conv_is_channels_last;
+  } else if (is_contiguous) {
+    return mkldnn_conv_is_contiguous;
   }
   return true;
 }
