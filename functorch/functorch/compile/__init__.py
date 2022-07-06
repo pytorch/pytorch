@@ -27,3 +27,4 @@ from .._src.partitioners import (
     draw_graph,
     draw_joint_graph,
 )
+from .._src import config
