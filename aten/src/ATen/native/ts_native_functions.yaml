@@ -59,7 +59,6 @@ full_codegen:
   - gt.Tensor
   - hardsigmoid
   - index_select
-  - kl_div_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
@@ -174,6 +173,7 @@ supported:
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
+  - empty.SymInt
   - empty_strided
   - fill_.Scalar
   - normal_

@@ -1970,6 +1970,17 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+- func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: empty_symint_cpu
+    CUDA: empty_symint_cuda
+    MPS: empty_symint_mps
+    Meta: empty_symint_meta
+    MkldnnCPU: empty_symint_mkldnn
+    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
+    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2667,13 +2678,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -4634,6 +4638,7 @@
   dispatch:
     CPU, CUDA: std
     MPS: std_mps
+    QuantizedCPU: std_quantized_cpu
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -4664,6 +4669,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
+    QuantizedCPU: std_out_quantized_cpu
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9696,6 +9702,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
+    MPS: softplus_backward_out_mps
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
@@ -13041,3 +13048,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar
