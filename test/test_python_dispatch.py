@@ -278,6 +278,12 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+    def test_error_for_unsupported_ns_or_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            my_lib1 = Library("myns", "BLA")
+
+        with self.assertRaisesRegex(ValueError, "reserved namespace"):
+            my_lib1 = Library("prim", "DEF")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -352,23 +358,20 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
-            y = LoggingTensor(torch.ones(1))
             log_input("x", x)
-            log_input("y", y)
-            torch.ops.aten.kl_div(x, y)
-            torch.ops.aten.kl_div(x, y, 2)
-            torch.ops.aten.kl_div(x, y, log_target=True)
-            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+            torch.ops.aten._foobar(x)
+            torch.ops.aten._foobar(x, False)
+            torch.ops.aten._foobar(x, arg3=False)
+            torch.ops.aten._foobar(x, False, arg3=False)
 
-        # What we are testing here is that we omit reduction
+        # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = input('y')
-$2 = torch._ops.aten.kl_div.default($0, $1)
-$3 = torch._ops.aten.kl_div.default($0, $1, 2)
-$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
+$1 = torch._ops.aten._foobar.default($0)
+$2 = torch._ops.aten._foobar.default($0, False)
+$3 = torch._ops.aten._foobar.default($0, arg3=False)
+$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -744,8 +747,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline('\n'.join(logs), ("$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32," +
+                                                    " device=device(type='cpu'), pin_memory=False)"))
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -766,8 +769,8 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -778,7 +781,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
@@ -790,8 +793,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 

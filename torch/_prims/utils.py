@@ -9,8 +9,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
-# nvFuser imports are conditional on CUDA being available
-if torch.cuda.is_available():
+# nvFuser imports are conditional on being compiled with CUDA
+if hasattr(torch._C, "_nvfuser"):
     from torch._C._nvfuser import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
@@ -23,12 +23,17 @@ if torch.cuda.is_available():
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
         torch.bool: DataType.Bool,
+        # Python scalars
+        complex: DataType.ComplexDouble,
+        float: DataType.Double,
+        int: DataType.Int,
+        bool: DataType.Bool,
     }
 else:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
-def getnvFuserDtype(dtype: torch.dtype):
+def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
     """
     Translates from torch.dtype to nvFuser's DataType enum
     """
@@ -39,6 +44,7 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
+NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
@@ -639,19 +645,23 @@ def dtype_to_type(dtype: torch.dtype) -> type:
     raise ValueError("Invalid dtype!")
 
 
-_type_to_dtype_map = {
-    bool: torch.bool,
-    int: torch.int64,
-    float: torch.float64,
-    complex: torch.complex128,
-}
-
-
 def type_to_dtype(typ: type) -> torch.dtype:
     """
     Computes the corresponding dtype for a Number type.
     """
-    return _type_to_dtype_map[typ]
+
+    assert isinstance(typ, type)
+
+    if typ is bool:
+        return torch.bool
+    if typ is int:
+        return torch.long
+    if typ is float:
+        return torch.get_default_dtype()
+    if typ is complex:
+        return corresponding_complex_dtype(torch.get_default_dtype())
+
+    raise ValueError("Invalid type!")
 
 
 _ordered_types = (bool, int, float, complex)
