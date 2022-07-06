@@ -83,7 +83,6 @@ def to_inference_rule(n: Node, symbols, constraints, counter):
     raise NotImplementedError('Not yet implemented')
 
 
-# TODO:
 @register_inference_rule("masked_fill_")
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     """
