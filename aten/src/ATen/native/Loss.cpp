@@ -187,46 +187,12 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output = at::exp(target) * (target - input);
-  return apply_loss_reduction(output, reduction);
-}
-
-Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output_pos = target * (at::log(target) - input);
-  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto output = at::where(target > 0, output_pos, zeros);
-  return apply_loss_reduction(output, reduction);
-}
-
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  return log_target ? _kl_div_log_target(input, target, reduction)
-                    : _kl_div_non_log_target(input, target, reduction);
-}
-
-Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto grad_expand = grad.expand_as(input);
-  if (!log_target) {
-    auto iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(target)
-      .add_input(grad_expand)
-      .build();
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
-      cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
-        return target_val > 0 ? -target_val * grad_val : 0;
-      });
-    });
-  }
-  else {
-    grad_input = -at::exp(target) * grad_expand;
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    return grad_input / input.numel();
-  }
-  return grad_input;
+  TORCH_CHECK(!input.is_complex() && !target.is_complex(),
+              "kl_div: Complex inputs not supported.")
+  auto output = log_target ? at::exp(target) * (target - input)
+                           : target * (at::log(target) - input);
+  return apply_loss_reduction(output, reduction);
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
