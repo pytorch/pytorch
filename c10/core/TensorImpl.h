@@ -552,8 +552,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
-  // TODO: make it non-virtual after a change to XLA
-  virtual c10::SymIntArrayRef sym_sizes() const {
+  c10::SymIntArrayRef sym_sizes() const {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
