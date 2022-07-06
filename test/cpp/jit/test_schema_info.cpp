@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace utils {
-namespace {
 TEST(FunctionSchemaIsMutableTest, Basic) {
   c10::FunctionSchema schema =
       torch::jit::getOperatorForLiteral(
@@ -26,6 +25,5 @@ TEST(FunctionSchemaIsMutableTest, InvalidArgument) {
   ASSERT_THROW(schema.is_mutable(4), c10::Error);
   ASSERT_THROW(schema.is_mutable("named_argument"), c10::Error);
 }
-} // namespace
 } // namespace utils
 } // namespace torch
