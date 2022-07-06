@@ -185,8 +185,6 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
     // IDs in the current tensor's root domain because the root domain contains
     // raw information.
     bool is_rfactor;
-
-    RootIDInfo() = default;
   };
 
   struct RootDomainInfo : public Information {
