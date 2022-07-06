@@ -135,27 +135,6 @@ class TestOptionalOutput(common_utils.TestCase):
                     if attr.name in ("then_branch", "else_branch"):
                         self.assertEqual(expected_output_type, attr.g.output[0].type)
 
-    def test_uninitialized_optional(self):
-        class Module(torch.nn.Module):
-            def forward(self, y: Optional[Tensor]) -> Optional[Tensor]:
-                if y is not None:
-                    if y.shape[1] < 5:
-                        if y.size(0) == 1:
-                            y = y + 4
-                        else:
-                            return y
-                return y
-
-        y = torch.ones((3, 4), dtype=torch.int)
-        torch.onnx.export(
-            torch.jit.script(Module()),
-            y,
-            io.BytesIO(),
-            opset_version=15,
-            dynamic_axes={"y": {0: "y0", 1: "y1"}},
-            input_names=["y"],
-        )
-
 
 class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
