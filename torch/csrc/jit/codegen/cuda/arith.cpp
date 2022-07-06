@@ -486,12 +486,12 @@ TensorView* real(TensorView* tv) {
 Val* imag(Val* v) {
   if (v->getDataType() == DataType::ComplexDouble) {
     Val* out = newValLike(v, DataType::Double);
-    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
     return out;
   }
   if (v->getDataType() == DataType::ComplexFloat) {
     Val* out = newValLike(v, DataType::Float);
-    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
     return out;
   }
   TORCH_CHECK(false, "imag not supported for non-complex tensors");
