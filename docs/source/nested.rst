@@ -95,7 +95,7 @@ KeyboardInterrupt
 20
 >>> nt.size(2)
 128
->>> torch.stack(nt.unbind()).sizes()
+>>> torch.stack(nt.unbind()).size()
 torch.Size([2, 20, 128])
 >>> torch.stack([a, a]).size()
 torch.Size([2, 20, 128])
