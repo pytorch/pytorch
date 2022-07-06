@@ -265,6 +265,14 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 b = torch.tensor([], device=device, dtype=dtype).set_(error_storage)
 
+    @onlyCUDA
+    def test_module_share_memory(self):
+        # Test fix for issue #80733
+        # See https://github.com/pytorch/pytorch/issues/80733
+        model = torch.nn.Linear(3, 1)
+        model_cuda = model.to('cuda')
+        model.share_memory()
+
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
