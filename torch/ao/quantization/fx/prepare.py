@@ -1353,15 +1353,16 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
             else:
                 for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
                     if _partial_wrapper_equals(
-                        qconfig.activation,
-                        FixedQParamsFakeQuantize.with_args(observer=observer_ctr)):
+                            qconfig.activation,
+                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)):
                         bad_observer = False
                     if _partial_wrapper_equals(qconfig.activation, observer_ctr):
                         bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
                                  "'%s' type: '%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
-                                 "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % (node.format_node(), module_type_or_function_or_method))
+                                 "torch.ao.quantization.get_default_qat_qconfig_mapping"
+                                 " instead." % (node.format_node(), module_type_or_function_or_method))
 
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
