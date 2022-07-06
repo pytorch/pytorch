@@ -28,7 +28,7 @@ on:
         type: string
         description: GPU Arch type
       DOCKER_IMAGE:
-        required: true
+        required: false
         type: string
         description: Docker image to use
       LIBTORCH_CONFIG:
