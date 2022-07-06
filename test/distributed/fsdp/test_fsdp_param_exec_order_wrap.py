@@ -45,7 +45,7 @@ class Model(torch.nn.Module):
         sharding_strategy: ShardingStrategy,
         device: torch.device,
         wrap_policy=always_wrap_policy,
-    ):
+    ) -> torch.nn.Module:
         model = Model()
         fsdp_model = FSDP(
             model, auto_wrap_policy=wrap_policy, sharding_strategy=sharding_strategy

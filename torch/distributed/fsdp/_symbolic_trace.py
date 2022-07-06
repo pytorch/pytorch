@@ -20,12 +20,11 @@ class TracingConfig:
             of some child class of ``torch.fx.Tracer``. For example, one may want to use ``HFTracer``
             for models in Transformers:
             .. _Transformers: https://huggingface.co/docs/transformers/index
-
         concrete_args (Optional[Dict[str, Any]]): Concrete arguments that should not be treated
             as ``torch.fx.Proxy`` when tracing the forward function.
             ``concrete_args`` allows one to partially specialize the forward function,
             including removing control flow or data structures.
-            ``concrete_args`` is also the parameter used in :meth:`~torch.fx.Tracer.trace`.
+            ``concrete_args`` is also the argument used in :meth:`~torch.fx.Tracer.trace`.
     """
 
     tracer: torch.fx.Tracer = torch.fx.Tracer()
@@ -48,11 +47,11 @@ class _ExecutionInfo:
         _traced_param_set: a set containing all parameters that have been traced.
 
         module_execution_info_dict: a dict that maps each module to a list of
-            tuple containing a module and a list of named parameters.
+            tuples each containing a module and a list of named parameters.
             For a given module, each tuple:
             1. either contains this module and part of its ``named_parameters`` that will be executed together,
             2. or contains one of its child modules and all of the child module's ``named_parameters``.
-            The list of tuple is ordered based on the parameter execution order.
+            The list of tuples is ordered based on the parameter execution order.
     """
 
     current_module: torch.nn.Module
@@ -67,7 +66,7 @@ class _ExecutionInfo:
 
 def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
     """
-    Create an instace of _ExecutionInfo with initialization based on ``root_module``.
+    Create an instance of _ExecutionInfo with initialization based on ``root_module``.
 
     Args:
         root_module (torch.nn.Module): the module to get the execution information
@@ -90,23 +89,41 @@ def _patched_create_proxy(
     kwargs: Dict[str, Any],
     name: Optional[str] = None,
     type_expr: Optional[Any] = None,
-):
+    proxy_factory_fn: Callable[[torch.fx.Node], torch.fx.Proxy] = None,
+) -> torch.fx.Proxy:
     """
     Override of :meth:`~torch.fx.Tracer.create_proxy`.
     ``Tracer.create_proxy`` is called in symbolic tracing for each leaf function/method/module.
-    This override intercepts the recording of each of these operations and
+    This override intercepts the recording of each of these operations to
     update ``execution_info.module_execution_info_dict``.
 
     Args:
         create_proxy (Callable):
             The ``create_proxy`` function to be patched.
         execution_info (_ExecutionInfo):
-            Used to repord the execution information.
+            Used to record the execution information.
         params_dict (Dict[str, torch.nn.Parameter]):
-            A dict that maps each parameter name to the parameter
-        kind, target, args, kwargs, name, type_expr: inputs to the ``create_proxy`` function.
+            A dict that maps each parameter name to the parameter.
+        kind (str):
+            The type of the target method. One of 'call_function', 'call_method', 'get_attr',
+            'call_module', 'placeholder', or 'output'. The semantics of these opcodes are
+            described in the ``torch.fx.Graph`` docstring. This is the input to ``create_proxy``.
+        target (torch.fx.node.Target):
+            Contains the string name of the method. This is the input to ``create_proxy``.
+        args (Tuple[Any, ...]):
+            Arguments of the method. This is the input to ``create_proxy``.
+        kwargs (Dict[str, Any]):
+            Keyword arguments of the method. This is the input to ``create_proxy``.
+        name (Optional[str]):
+            An optional string name for the ``Node`` created in ``create_proxy``.
+            This is the input to ``create_proxy``.
+        type_expr (Optional[Any]):
+            An optional type annotation representing the Python type the output of a node will have.
+            This is the input to ``create_proxy``.
+        proxy_factory_fn (Callable[[torch.fx.Node], torch.fx.Proxy]):
+            An alternative proxy constructor used in ``create_proxy``. This is the input to ``create_proxy``.
     """
-    proxy = create_proxy(kind, target, args, kwargs, name, type_expr)
+    proxy = create_proxy(kind, target, args, kwargs, name, type_expr, proxy_factory_fn)
 
     if kind in ["call_function", "call_method"]:
         if args is not None:
@@ -125,7 +142,7 @@ def _patched_create_proxy(
     elif kind == "call_module":
         module = execution_info.current_module
         named_params_list = list(module.named_parameters())
-        if named_params_list != []:
+        if named_params_list:
             execution_info.module_execution_info_dict[module].append(
                 (module, named_params_list)
             )
@@ -147,7 +164,7 @@ def _patched_call_module(
     """
     Override of :meth:`~torch.fx.Tracer.call_module`.
     ``Tracer.call_module`` is called in symbolic tracing for each non-root module.
-    This override intercepts the recording of each operation and
+    This override intercepts the recording of each operation to
     update ``execution_info.module_forward_order`` and ``execution_info.module_execution_info_dict``.
 
     Args:
@@ -155,19 +172,25 @@ def _patched_call_module(
             The ``call_module`` function to be patched.
         execution_info (_ExecutionInfo):
             Used to repord the execution information.
-        module, forward, args, kwargs: inputs to the ``call_module`` function.
+        module (torch.nn.Module):
+            The module for which a call is being emitted.
+        forward (Callable[..., Any]):
+            The ``forward()`` method of the ``torch.nn.Module`` to be invoked.
+        args (Tuple[Any, ...]):
+            ``args`` of the module callsite.
+        kwargs (Dict[str, Any]):
+            ``kwargs`` of the module callsite.
     """
     execution_info.module_forward_order.append(module)
     named_params_list = list(module.named_parameters())
-    if named_params_list != []:
+    if named_params_list:
         execution_info.module_execution_info_dict[execution_info.current_module].append(
             (module, list(module.named_parameters()))
         )
     # Stores away current_module for restoration later
     old_current_module = execution_info.current_module
     execution_info.current_module = module
-    # Initialize execution_info.module_execution_info_dict[module]. Note that if
-    # the forward of module is called multiple times, this will record
+    # Note that if the forward of module is called multiple times, this will record
     # the execution info of the last forward pass.
     execution_info.module_execution_info_dict[module] = []
     output = call_module(module, forward, args, kwargs)
