@@ -25,6 +25,7 @@ struct DisableTorchDispatch {
   c10::impl::ExcludeDispatchKeyGuard guard_;
   c10::impl::ExcludeDispatchKeyGuard guard_tls_snapshot_;
 };
+
 } // namespace torch
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused);

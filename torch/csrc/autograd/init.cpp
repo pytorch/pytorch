@@ -29,6 +29,18 @@
 #include <set>
 #include <unordered_set>
 
+namespace {
+
+struct DisableFuncTorch {
+  DisableFuncTorch()
+      : front_guard_(c10::DispatchKey::FuncTorchDynamicLayerFrontMode),
+        back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
+  c10::impl::ExcludeDispatchKeyGuard front_guard_;
+  c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+}
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
   using namespace torch::profiler::impl;
@@ -415,6 +427,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
+  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch")
       .def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
