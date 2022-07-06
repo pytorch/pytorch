@@ -5,8 +5,10 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <iterator>
 
 #include <pack_block_sparse.h>
 
@@ -75,6 +77,47 @@ block_scanned:
     }
     bcsr_mat.row_values.push_back(num_nnz_blocks);
   }
+  bcsr_mat.row_block_size = row_block_size;
+  bcsr_mat.col_block_size = col_block_size;
+  return bcsr_mat_ptr;
+}
+
+std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
+    const int32_t* col_indices,
+    const int32_t* row_values,
+    const int8_t* values,
+    const int64_t col_indices_size,
+    const int64_t row_values_size,
+    const int64_t values_size,
+    const int64_t row_block_size,
+    const int64_t col_block_size) {
+  std::unique_ptr<BCSRMatrix> bcsr_mat_ptr = std::make_unique<BCSRMatrix>();
+  BCSRMatrix& bcsr_mat = *bcsr_mat_ptr;
+  const auto make_unsigned = [](int32_t v) { return static_cast<uint32_t>(v); };
+  const auto add_128 = [](int8_t v) {
+    return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
+  };
+
+  bcsr_mat_ptr->col_indices.reserve(col_indices_size);
+  bcsr_mat_ptr->row_values.reserve(row_values_size);
+  bcsr_mat_ptr->values.reserve(values_size);
+
+  std::transform(
+      col_indices,
+      col_indices + col_indices_size,
+      std::back_inserter(bcsr_mat_ptr->col_indices),
+      make_unsigned);
+  std::transform(
+      row_values,
+      row_values + row_values_size,
+      std::back_inserter(bcsr_mat_ptr->row_values),
+      make_unsigned);
+  std::transform(
+      values,
+      values + values_size,
+      std::back_inserter(bcsr_mat_ptr->values),
+      add_128);
+
   bcsr_mat.row_block_size = row_block_size;
   bcsr_mat.col_block_size = col_block_size;
   return bcsr_mat_ptr;

@@ -102,6 +102,8 @@ ALLOW_LIST = [
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
+    (r"__getstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 8)),
+    (r"__setstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 8)),
 ]
 
 ALLOW_LIST_COMPILED = [

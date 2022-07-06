@@ -65,14 +65,15 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        qweight, bias, row_block_size, col_block_size = self._weight_bias()
-        return qweight, bias, row_block_size, col_block_size, self.training, self.dtype
+        return self._packed_params, self.training, self.dtype
 
     @torch.jit.export
     def __setstate__(self, state):
-        self.set_weight_bias(state[0], state[1], state[2], state[3])
-        self.training = state[4]
-        self.dtype = state[5]
+        self.weight = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
+        self.bias = None
+        self.row_block_size = 1
+        self.col_block_size = 4
+        (self._packed_params, self.training, self.dtype) = state
 
     def __repr__(self):
         return self._weight_bias().__repr__()
