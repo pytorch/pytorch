@@ -1970,6 +1970,17 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+- func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: empty_symint_cpu
+    CUDA: empty_symint_cuda
+    MPS: empty_symint_mps
+    Meta: empty_symint_meta
+    MkldnnCPU: empty_symint_mkldnn
+    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
+    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4627,6 +4638,7 @@
   dispatch:
     CPU, CUDA: std
     MPS: std_mps
+    QuantizedCPU: std_quantized_cpu
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -4657,6 +4669,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
+    QuantizedCPU: std_out_quantized_cpu
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
