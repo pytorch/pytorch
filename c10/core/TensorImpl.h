@@ -1760,7 +1760,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
-  c10::optional<PyObject*> check_pyobj(impl::PyInterpreter* self_interpreter) {
+  c10::optional<PyObject*> check_pyobj(impl::PyInterpreter* self_interpreter) const {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);
