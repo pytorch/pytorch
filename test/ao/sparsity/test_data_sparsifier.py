@@ -41,6 +41,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         self.check_add_data(data_list, data_with_config, defaults)
         self.check_step(data_list, data_with_config, defaults)
         self.check_state_dict(data_list, data_with_config, defaults)
+        self.check_memory_reference(data_list, data_with_config, defaults)
 
     @staticmethod
     def _get_name_data_config(some_data, defaults=None):
@@ -184,6 +185,26 @@ class _BaseDataSparsiferTestCase(TestCase):
                 assert hasattr(param2, 'mask')
                 self.assertEqual(param1.__dict__, param2.__dict__)
 
+    def check_memory_reference(self, data_list, data_with_config, defaults, **kwargs):
+        """Checks if the data is truly "attached" to the sparsifier. Meaning, when the
+        data is changed outside of the sparsifier, the changes must be reflected on the data
+        inside the data sparsifier as well.
+        This makes sure that the sparsifier is holding the memory reference of the data and
+        not copies.
+
+        This test modifies the data and asserts that data in the sparsifier is changed as well
+        """
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        all_data = data_list + data_with_config
+        for some_data in all_data:
+            name, data, _ = self._get_name_data_config(some_data)
+            weight = sparsifier._extract_weight(data)
+            weight.data = weight + torch.randn(*weight.shape)
+            contained_data = sparsifier.get_data(name=name)
+            assert id(weight.data) == id(contained_data.data)
+            assert torch.all(contained_data == weight)
+
+
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
         This inherits the TestBaseDataSparsifierRuner wherein some functions are
@@ -204,6 +225,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
         self.check_step(data_list, data_with_config, defaults, norm_type=norm_type)
         self.check_step_2_of_4(norm_type=norm_type)
         self.check_sparsity_level(data_list, data_with_config, defaults, norm_type=norm_type)
+        self.check_memory_reference(data_list, data_with_config, defaults, **kwargs)
 
     @staticmethod
     def _get_bounds_on_actual_sparsity(config, tensor_shape):
@@ -226,7 +248,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             return (1.0, 1.0)
         else:
             # min value assumes zeros_per_block is 1
-            min_values_sparsified = number_blocks * sparsity_level
+            min_values_sparsified = round(number_blocks * sparsity_level)
             # max value assumes actual zeros_per_block
             max_values_sparsified = min_values_sparsified * min(values_per_block, zeros_per_block)
             lower_bound = min_values_sparsified / (height * width)
