@@ -11,6 +11,9 @@ __all__ = ['Library', 'impl', 'define']
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
 
+# prim is reserved by TorchScript interpreter
+_reserved_namespaces = ['prim']
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -28,6 +31,10 @@ class Library:
     def __init__(self, ns, kind, dispatch_key=""):
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
+
+        if ns in _reserved_namespaces and kind == "DEF":
+            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
+
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
@@ -100,9 +107,12 @@ class Library:
         return self.m.define(schema, alias_analysis)
 
     def __del__(self):
-        for key in self._op_impls:
-            _impls.remove(key)
-        del self.m
+        # _op_impls might not have been initialized if an error was thrown in __init__
+        _op_impls_ = getattr(self, '_op_impls', None)
+        if _op_impls_:
+            for key in self._op_impls:
+                _impls.remove(key)
+            del self.m
 
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
