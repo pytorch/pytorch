@@ -1413,6 +1413,7 @@ def where(
 # Data Movement References
 #
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
+@register_decomposition(torch.ops.aten.clone)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:

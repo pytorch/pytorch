@@ -1572,9 +1572,8 @@ class TestRefsOpsInfo(TestCase):
         # other
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         # not sure
-        '_refs.copy_to',
-        '_refs.clone',
-        '_refs.equal',
+        '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
+        '_refs.equal',  # 'bool' object has no attribute 'dtype'
     }
 
     @parametrize("op", ref_ops_names)
