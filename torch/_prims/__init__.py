@@ -1140,7 +1140,7 @@ def _as_strided_meta(
     utils.validate_strides(stride)
     utils.validate_shape(size)
 
-    if reduce(operator.mul, size) == 0:
+    if reduce(operator.mul, size, 1) == 0:
         # NOTE: This special case is to avoid having to acquire the storage below
         # as_strided to shapes with no elements are trivially valid, so it's OK
         pass

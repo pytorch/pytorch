@@ -1915,6 +1915,7 @@ def atleast_3d(
     return res if len(res) > 1 else res[0]
 
 
+@register_decomposition(torch.ops.aten.as_strided)
 def as_strided(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
 ) -> TensorLikeType:
