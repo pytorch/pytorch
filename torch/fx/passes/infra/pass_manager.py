@@ -53,9 +53,6 @@ def topological_sort_passes(
         existed
     """
 
-    if len(constraints) == 0:
-        return passes, False
-
     # Construct a graph
     graph: Dict[Callable, Set[Callable]] = {}
     visited: Dict[Callable, bool] = {}
@@ -87,7 +84,7 @@ def topological_sort_passes(
 
         res.append(p)
 
-    for p in passes:
+    for p in passes[::-1]:
         if not visited[p]:
             topological_sort_util(graph, p)
 
