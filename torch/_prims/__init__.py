@@ -385,7 +385,6 @@ def _elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
     args_with_fixed_dtypes: Tuple[TensorLikeType, ...] = None,
-    complex_only=False,
 ) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
