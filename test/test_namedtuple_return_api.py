@@ -21,7 +21,7 @@ all_operators_with_namedtuple_return = {
     'frexp', 'lu_unpack', 'histogram', 'histogramdd',
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
-    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', '_linalg_solve'
+    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
 }
 
 
@@ -85,7 +85,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
-            op(operators=['_linalg_solve'], input=(a,), names=('result', 'LU', 'pivots'), hasout=True),
+            op(operators=['linalg_solve_ex'], input=(a,), names=('result', 'info'), hasout=True),
+            op(operators=['_linalg_solve_ex'], input=(a,), names=('result', 'LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_lu_factor'], input=(), names=('LU', 'pivots'), hasout=True),
             op(operators=['linalg_lu_factor_ex'], input=(), names=('LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_ldl_factor'], input=(), names=('LD', 'pivots'), hasout=True),
