@@ -223,7 +223,6 @@ jobs:
         ]}
 
   linux-bionic-rocm5_1-py3_7-build:
-    if: false
     name: linux-bionic-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
