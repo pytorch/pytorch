@@ -69,7 +69,7 @@ we can track it and plan accordingly.
 size
 +++++++++++++++++++++++++
 
-Even though a NestedTensor does not support .size(), it supports the size along a given dimension if that dimension is regular.
+Even though a NestedTensor does not support .size() (or .shape), it supports .size(i) if dimension i is regular.
 
 >>> a = torch.randn(50, 128) # text 1
 >>> b = torch.randn(32, 128) # text 2
