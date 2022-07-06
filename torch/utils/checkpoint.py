@@ -2,6 +2,7 @@ import torch
 import warnings
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+__all__ = ["checkpoint", "checkpoint_sequential",]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
