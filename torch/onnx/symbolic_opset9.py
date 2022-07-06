@@ -1410,7 +1410,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
-        result_padding = padding
+        adjusted_padding = padding
         if count_include_pad:
             input = g.op(
                 "Pad",
@@ -1419,20 +1419,20 @@ def _avg_pool(name, tuple_fn):
                 mode_s="constant",
                 value_f=0.0,
             )
-            result_padding = (0,) * len(padding)
+            adjusted_padding = (0,) * len(padding)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-            result_padding = result_padding + tuple(
-                a + b for (a, b) in zip(padding_ceil, result_padding)
+            adjusted_padding = adjusted_padding + tuple(
+                a + b for (a, b) in zip(padding_ceil, adjusted_padding)
             )
         else:
-            result_padding = result_padding * 2
+            adjusted_padding = adjusted_padding * 2
         output = g.op(
             "AveragePool",
             input,
             kernel_shape_i=tuple_fn(kernel_size),
             strides_i=tuple_fn(stride),
-            pads_i=result_padding,
+            pads_i=adjusted_padding,
         )
         return output
 
