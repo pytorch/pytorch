@@ -29,6 +29,20 @@ for op, decomp_fn in decomposition_table.items():
     else:
         aten2aten_decomp[op] = decomp_fn
 
+aten2aten_decomp_skips = {
+    "aten.native_layer_norm_backward.default",
+    "aten.embedding_dense_backward.default",   # This is hurting nvfuser's perf
+    "aten.addmm.default"
+}
+
+for op, decomp_fn in decomposition_table.items():
+    if "torch._refs" in decomp_fn.__module__:
+        aten2prim_decomp[op] = decomp_fn
+    else:
+        if str(op) not in aten2aten_decomp_skips:
+            aten2aten_decomp[op] = decomp_fn
+
+
 aten2prim_decomp[torch.ops.aten.to.dtype] = aten_to_dtype
 
 class NvFuserBackend:
@@ -74,14 +88,11 @@ class NvFuserBackend:
             self.partitioner_cache[graph_module] = fused_graph_module
 
         # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
-        num_partitions = 0
         for node in fused_graph_module.graph.nodes:
             # TODO: use a better way to identify fused submodule
             if "fused_" in node.name:
                 fused_module = getattr(fused_graph_module, node.name)
                 fused_module._wrapped_call = self.lower_to_prims_and_execute
-                num_partitions += 1
-        # print(num_partitions)
 
         return fused_graph_module
 
