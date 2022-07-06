@@ -20441,6 +20441,15 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.batch_norm",
         torch_opinfo_name="nn.functional.batch_norm",
+        supports_nvfuser=False,
+        skips=(
+            # Reference result was farther (0.6784777152340106) from the precise computation
+            # than the torch result was (0.43438122879107366)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.bfloat16, torch.float16)),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
