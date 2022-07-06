@@ -155,7 +155,13 @@ __all__ = [
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
+    """ Move all keyword arguments to positional args, except for `to`
+    """
     for n in model.graph.nodes:
+        # skip moving kwargs to args for `to` since it has some overloads
+        # and removing keywords might cause errors
+        if n.op == "call_method" and n.target == "to":
+            continue
         n.args = tuple(get_all_args_as_positional_args(n))
         n.kwargs = {}
     return model

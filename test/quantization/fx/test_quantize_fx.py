@@ -4825,6 +4825,18 @@ class TestQuantizeFx(QuantizationTestCase):
         # # make sure it runs
         # mq(*example_inputs)
 
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                return x.to(memory_format=torch.preserve_format)
+
+        m = M3().eval()
+        example_inputs = (torch.randn(1, 1),)
+        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict, example_inputs)
+        mq = convert_fx(mp)
+        # make sure it runs
+        mq(*example_inputs)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
