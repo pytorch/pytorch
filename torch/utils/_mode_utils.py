@@ -128,9 +128,9 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
             f'must return a {mode_info.mode_class_name()}'
         )
     if old is not None:
-        mode.ancestors = old.ancestors.union({old})
+        mode.ancestors = old.ancestors.union({old})  # type: ignore[attr-defined]
     else:
-        mode.ancestors = set()
+        mode.ancestors = set()  # type: ignore[attr-defined]
     mode_info.set_mode(mode)
     try:
         yield mode
