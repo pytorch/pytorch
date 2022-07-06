@@ -302,6 +302,7 @@ class TestPythonDispatch(TestCase):
 $0 = input('x')
 $1 = torch._ops.aten.mul.Tensor($0, $0)
 $2 = input('grad_y')
+True = torch._ops.aten.is_same_size.default($1, $2)
 $3 = torch._ops.aten.mul.Tensor($2, $0)
 $4 = torch._ops.aten.mul.Tensor($2, $0)
 $5 = torch._ops.aten.add.Tensor($4, $3)''')
@@ -351,23 +352,20 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
-            y = LoggingTensor(torch.ones(1))
             log_input("x", x)
-            log_input("y", y)
-            torch.ops.aten.kl_div(x, y)
-            torch.ops.aten.kl_div(x, y, 2)
-            torch.ops.aten.kl_div(x, y, log_target=True)
-            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+            torch.ops.aten._foobar(x)
+            torch.ops.aten._foobar(x, False)
+            torch.ops.aten._foobar(x, arg3=False)
+            torch.ops.aten._foobar(x, False, arg3=False)
 
-        # What we are testing here is that we omit reduction
+        # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = input('y')
-$2 = torch._ops.aten.kl_div.default($0, $1)
-$3 = torch._ops.aten.kl_div.default($0, $1, 2)
-$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
+$1 = torch._ops.aten._foobar.default($0)
+$2 = torch._ops.aten._foobar.default($0, False)
+$3 = torch._ops.aten._foobar.default($0, arg3=False)
+$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -552,6 +550,7 @@ $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
+True = torch._ops.aten.is_same_size.default($2, $3)
 $4 = torch._ops.aten.mul.Tensor($3, 2)
 $5 = torch._ops.aten.mul.Tensor($4, $0)
 $6 = torch._ops.aten.add_.Tensor($1, $5)''')
@@ -742,8 +741,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline('\n'.join(logs), ("$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32," +
+                                                    " device=device(type='cpu'), pin_memory=False)"))
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -764,8 +763,8 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -776,7 +775,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
@@ -788,8 +787,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -1041,7 +1040,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 with A("layer2"):
                     torch.empty([])
 
-    def test_ctor_in_with_modes(self):
+    def test_make_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
             def __new__(cls, elem, mode):
                 r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -1049,8 +1048,62 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 r.mode = mode
                 return r
 
-            def __torch_dispatch(self, func, types, args=(), kwargs=None):
-                with self.mode:
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        class BasicMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with BasicMode():  # we can't nest two modes that call make_subclass because it only accepts vanilla tensors
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
+
+    def test_make_wrapper_subclass_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
                     return func(*args, **kwargs)
 
         class Mode(TorchDispatchMode):
@@ -1073,6 +1126,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with Mode():
             y = x + x
             z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with Mode():
+                y = x + x
+                z = y + y
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
