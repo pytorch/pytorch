@@ -52,6 +52,12 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
       "The weight tensor for ao::sparse::qlinear_prepack (fbgemm) should"
       " be 2-dimensional.");
 
+  TORCH_CHECK(
+      out_features_block_size == 1 && in_features_block_size == 4,
+      "The out and in features block sizes for ao::sparse::qlinear_prepack",
+      " (fbgemm) should be 1 and 4 respectively (got ", out_features_block_size,
+      " and ", in_features_block_size, ")");
+
   auto N = weight.size(0);
   auto K = weight.size(1);
 
@@ -138,29 +144,28 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const c10::optional<at::Tensor>& bias,
     const int64_t out_features_block_size,
     const int64_t in_features_block_size)
-    : LinearPackedParamsBase(
-          out_features_block_size,
-          in_features_block_size),
-      orig_weight_(weight),
-      orig_bias_(bias) {
+    : LinearPackedParamsBase(out_features_block_size, in_features_block_size),
+      orig_bias_(bias),
+      q_scheme_(weight.qscheme()),
+      output_channels_(weight.size(0)),
+      input_channels_(weight.size(1)) {
   TORCH_CHECK(
       weight.dim() == 2,
       "ao::sparse::qlinear (qnnpack): Weight tensor rank should be == 2");
   TORCH_CHECK(out_features_block_size > 0, "Row block size must be > 0.");
   TORCH_CHECK(in_features_block_size > 0, "Row block size must be > 0.");
 
-  int64_t rows_w = weight.size(0);
   if (bias.has_value()) {
     bias_ = bias.value();
   } else {
-    bias_ = at::zeros(rows_w, weight.options().dtype(at::kFloat));
+    bias_ = at::zeros(output_channels_, weight.options().dtype(at::kFloat));
   }
   TORCH_CHECK(
-      (bias_.ndimension() == 1 && bias_.size(0) == rows_w),
+      (bias_.ndimension() == 1 && bias_.size(0) == output_channels_),
       "ao::sparse::qlinear_prepack (qnnpack): Given weight of size ",
       weight.sizes(),
       ", expected bias to be 1-dimensional with ",
-      rows_w,
+      output_channels_,
       " elements",
       ", but got bias of size ",
       bias_.sizes(),
@@ -168,9 +173,8 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 
   // Given bias is supposed to be 1 dim, it is already contiguous,
   // but the weight might be non-contiguous.
-  at::Tensor weight_contig = orig_weight_.contiguous();
+  at::Tensor weight_contig = weight.contiguous();
 
-  q_scheme_ = orig_weight_.qscheme();
   std::tie(w_zero_points_, w_scales_) =
       make_zero_points_and_scales_tensor(weight_contig);
   const float* weight_scales_data = w_scales_.data_ptr<float>();
@@ -188,8 +192,8 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   }
   bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(
       reinterpret_cast<uint8_t*>(qnnp_w_data),
-      orig_weight_.size(0), /* output_channels */
-      orig_weight_.size(1), /* input_channels */
+      output_channels_,
+      input_channels_,
       out_features_block_size,
       in_features_block_size,
       w_zero_points_.data());
