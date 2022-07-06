@@ -422,8 +422,8 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         Once the above is done, create an instance of _NormDataSparsifierTestRunner and call run_tests()
     """
     def test_tensors(self):
-        tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
-        tensor4, tensor5 = torch.randn(10, 10), torch.randn(4, 4)
+        tensor1, tensor2, tensor3 = torch.randn(1, 10), torch.randn(4, 4), torch.randn(1, 5)
+        tensor4, tensor5 = torch.randn(1, 2), torch.randn(4, 4)
         data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('tensor3', tensor3)]
         defaults = {'sparsity_level': 0.5, 'sparse_block_shape': (1, 4), 'zeros_per_block': 4}
 
@@ -443,7 +443,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
                             data_with_config=data_with_config, norm_type='L2')
 
     def test_nn_parameters(self):
-        param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
+        param1, param2, param3 = nn.Parameter(torch.randn(1, 8)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
         param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(torch.randn(4, 4))
         data_list = [('param1', param1), ('param2', param2), ('param3', param3)]
         defaults = {'sparsity_level': 0.5, 'sparse_block_shape': (1, 4), 'zeros_per_block': 4}
