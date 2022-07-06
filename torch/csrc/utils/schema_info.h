@@ -18,9 +18,12 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema)
       : FunctionSchema(schema), updated_(false) {}
+
   explicit SchemaInfo(const char* signature)
       : FunctionSchema(torch::jit::getOperatorForLiteral(signature)->schema()),
         updated_(false) {}
+
+  bool hasSideEffects() const;
 
   bool is_mutable();
 
