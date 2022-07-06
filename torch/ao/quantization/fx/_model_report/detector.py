@@ -931,16 +931,18 @@ class OutlierDetector(DetectorBase):
         if p_r is above some threshold, then we consider the activations to have significant outliers
 
     Args:
-        ratio_threshold (float): The threshold for p_r to determine if there are outliers in activations
-            Should be between 0 and 1 (both non-inclusive)
+        ratio_threshold (float, optional): The threshold for p_r to determine if there are outliers in activations
+            Default: 3.5
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
+            Should be between 0 and 1
+            Default: 0.975
         ch_axis (int, optional): The channel axis being observed to determine input weight equalization
             Default: 1
 
     * :attr:`ratio_threshold`: The threshold for p_r to determine if there are outliers in activations
-        Should be between 0 and 1
 
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
+        Should be between 0 and 1
 
     * :attr:`ch_axis`: The channel axis being observed to determine outliers
 
@@ -950,7 +952,7 @@ class OutlierDetector(DetectorBase):
     # names for the pre observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
 
-    def __init__(self, ratio_threshold: float = 10.0, reference_percentile: float = 0.90, ch_axis: int = 1):
+    def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
         # initialize the variables of interest
         self.ratio_threshold = ratio_threshold
         self.reference_percentile = reference_percentile

@@ -180,7 +180,6 @@ class ModelReportObserver(ObserverBase):
         # get the ratio and get rid of nan values
         quantile_ratios = cent_quartile / comp_quantile
         quantile_ratios = torch.nan_to_num(quantile_ratios)
-        print(max(quantile_ratios))
         # update averages, remembering to only update if didn't have zeros
         ratio_if_not_zero = binary_ch_no_zeros * quantile_ratios
 
@@ -197,7 +196,6 @@ class ModelReportObserver(ObserverBase):
         new_number_of_batches: torch.Tensor = num_batches + binary_ch_no_zeros
         new_ratios: torch.Tensor = ((average_ratio * num_batches) + ratio_if_not_zero) / new_number_of_batches
         new_ratios = torch.nan_to_num(new_ratios)
-        # print(new_ratios, new_number_of_batches)
 
         # update the values locally
         self.percentile_batches_tracked.copy_(new_number_of_batches)

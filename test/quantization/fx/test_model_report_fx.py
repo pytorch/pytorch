@@ -1124,6 +1124,9 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             z = self.relu(z)
             return z
 
+        def get_fusion_modules(self):
+            return [['conv', 'relu']]
+
     class ReluOnly(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -1308,20 +1311,24 @@ class TestFxDetectOutliers(QuantizationTestCase):
         def __init__(self):
             super().__init__()
             self.linear = torch.nn.Linear(128, 128)
-            self.relu = torch.nn.ReLU()
+            self.relu_1 = torch.nn.ReLU()
             self.conv = torch.nn.Conv2d(128, 128, 1)
+            self.relu_2 = torch.nn.ReLU()
 
         def forward(self, x):
             x = self.linear(x)
-            x = self.relu(x)
+            x = self.relu_1(x)
             x = self.conv(x)
-            x = self.relu(x)
+            x = self.relu_2(x)
             return x
+
+        def get_example_inputs(self):
+            return (torch.randn((1, 128, 128, 128)),)
 
     def _get_prepped_for_calibration_model(self, model, detector_set):
         r"""Returns a model that has been prepared for callibration and corresponding model_report"""
         # call the general helper function to callibrate
-        example_input = torch.arange(128 * 128 * 128).reshape((1, 128, 128, 128))
+        example_input = model.get_example_inputs()[0]
         return _get_prepped_for_calibration_model_helper(model, detector_set, example_input)
 
     @skipIfNoFBGEMM
@@ -1329,47 +1336,41 @@ class TestFxDetectOutliers(QuantizationTestCase):
         # use fbgemm and create our model instance
         # then create model report instance with detector
         # similar to test for InputWeightEqualization but key differences that made refactoring not viable
+        # not explicitly testing fusion because fx workflow automatically
         with override_quantized_engine('fbgemm'):
 
             detector_set = set([OutlierDetector(reference_percentile=0.95)])
             model_report = ModelReport(detector_set)
 
             # get tst model and callibrate
-            non_fused = self._get_prepped_for_calibration_model(self.LargeBatchModel(), detector_set)
-            fused = self._get_prepped_for_calibration_model(self.LargeBatchModel(), detector_set)
+            prepared_for_callibrate_model, mod_report = self._get_prepped_for_calibration_model(
+                self.LargeBatchModel(), detector_set
+            )
 
-            # reporter should still give same counts even for fused model
-            for prepared_for_callibrate_model, mod_report in [non_fused, fused]:
+            # supported modules to check
+            mods_to_check = set([nn.Linear, nn.Conv2d, nn.ReLU])
 
-                # supported modules to check
-                mods_to_check = set([nn.Linear, nn.Conv2d, nn.ReLU])
+            # there should be 4 node fqns that have the observer inserted
+            correct_number_of_obs_inserted = 4
+            number_of_obs_found = 0
+            obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
 
-                # get the set of all nodes in the graph their fqns
-                node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
+            number_of_obs_found = sum(
+                [1 if obs_name_to_find in str(node.target) else 0 for node in prepared_for_callibrate_model.graph.nodes]
+            )
+            self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
-                # there should be 3 node fqns that have the observer inserted
-                correct_number_of_obs_inserted = 3
-                number_of_obs_found = 0
-                obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
+            # assert that each of the desired modules have the observers inserted
+            for fqn, module in prepared_for_callibrate_model.named_modules():
+                # check if module is a supported module
+                is_in_include_list = isinstance(module, tuple(mods_to_check))
 
-                for node in prepared_for_callibrate_model.graph.nodes:
-                    # if the obs name is inside the target, we found an observer
-                    if obs_name_to_find in str(node.target):
-                        number_of_obs_found += 1
-
-                self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
-
-                # assert that each of the desired modules have the observers inserted
-                for fqn, module in prepared_for_callibrate_model.named_modules():
-                    # check if module is a supported module
-                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
-
-                    if is_in_include_list:
-                        # make sure it has the observer attribute
-                        self.assertTrue(hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
-                    else:
-                        # if it's not a supported type, it shouldn't have observer attached
-                        self.assertTrue(not hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
+                if is_in_include_list:
+                    # make sure it has the observer attribute
+                    self.assertTrue(hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
+                else:
+                    # if it's not a supported type, it shouldn't have observer attached
+                    self.assertTrue(not hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
 
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
@@ -1385,7 +1386,7 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
 
     # if they passed in fusion paramter, make sure to test that
     if fused:
-        model = torch.quantization.fuse_modules(model, [['conv', 'relu']])
+        model = torch.quantization.fuse_modules(model, model.get_fusion_modules())
 
     model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
 
