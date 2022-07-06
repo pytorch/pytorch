@@ -87,5 +87,39 @@ TEST(FunctionSchemaAreAliasingTest, Wildcard) {
   ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
   ASSERT_FALSE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, false));
 }
+
+TEST(SchemaInfoAreAliasingTest, AliasingInputs) {
+  SchemaInfo schema(
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
+  ASSERT_FALSE(schema.areAliasing({c10::input, 0}, {c10::input, 1}, true));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", input);
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::input, 1}, true));
+}
+
+TEST(SchemaInfoAreAliasingTest, AliasingOutputs) {
+  SchemaInfo schema(
+      "aten::aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)");
+  ASSERT_FALSE(schema.areAliasing({c10::output, 0}, {c10::output, 1}, true));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("min", input);
+  schema.addArgumentValue("max", input);
+  ASSERT_TRUE(schema.areAliasing({c10::output, 0}, {c10::output, 1}, true));
+}
+
+TEST(SchemaInfoAreAliasingTest, AliasingInputOutput) {
+  SchemaInfo schema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
+  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, true));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", input);
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
+  ASSERT_TRUE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, true));
+  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, false));
+}
+
 } // namespace utils
 } // namespace torch

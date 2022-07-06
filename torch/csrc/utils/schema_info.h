@@ -28,6 +28,11 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
 
   bool is_mutable(c10::string_view name);
 
+  bool areAliasing(
+      const c10::SchemaArgument& lhs,
+      const c10::SchemaArgument& rhs,
+      bool check_additional);
+
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
   void addArgumentValues(
@@ -46,6 +51,9 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
 
   // Alias map of inputs with each other
   std::vector<std::unordered_set<size_t>> input_alias_map_;
+
+  // Alias map of outputs to inputs
+  std::vector<std::unordered_set<size_t>> output_alias_map_;
 
   bool updated_;
 };

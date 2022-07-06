@@ -59,6 +59,35 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   return is_mutable(*index);
 }
 
+bool SchemaInfo::areAliasing(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs,
+    bool check_additional) {
+  bool basic_check = FunctionSchema::areAliasing(lhs, rhs, true);
+  if (check_additional) {
+    if (!updated_) {
+      generateAliasMaps();
+    }
+    if (lhs.type == c10::input && rhs.type == c10::input) {
+      return input_alias_map_[lhs.index].count(rhs.index) || basic_check;
+    } else if (lhs.type == c10::output && rhs.type == c10::output) {
+      for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
+        for (size_t rhs_alias_input : output_alias_map_[rhs.index]) {
+          if (lhs_alias_input == rhs_alias_input) {
+            return true;
+          }
+        }
+      }
+      return basic_check;
+    } else if (lhs.type == c10::output) {
+      return output_alias_map_[lhs.index].count(rhs.index) || basic_check;
+    } else {
+      return output_alias_map_[rhs.index].count(lhs.index) || basic_check;
+    }
+  }
+  return basic_check;
+}
+
 at::IValue SchemaInfo::flattenZeroDimIValue(const at::IValue& value) const {
   if (value.isList()) {
     c10::List<at::IValue> value_list = value.toList();
@@ -73,6 +102,8 @@ void SchemaInfo::generateAliasMaps() {
   updated_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       arguments().size(), std::unordered_set<size_t>());
+  output_alias_map_ = std::vector<std::unordered_set<size_t>>(
+      returns().size(), std::unordered_set<size_t>());
   for (size_t i = 0; i < arguments().size(); i++) {
     for (size_t j = i; j < arguments().size(); j++) {
       if (i == j) {
@@ -85,6 +116,15 @@ void SchemaInfo::generateAliasMaps() {
           input_alias_map_[i].insert(j);
           input_alias_map_[j].insert(i);
         }
+      }
+    }
+  }
+  for (size_t i = 0; i < arguments().size(); i++) {
+    for (size_t j = 0; j < returns().size(); j++) {
+      if (FunctionSchema::areAliasing(
+              {c10::input, i}, {c10::output, j}, true)) {
+        output_alias_map_[j].insert(
+            input_alias_map_[i].begin(), input_alias_map_[i].end());
       }
     }
   }
