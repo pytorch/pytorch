@@ -20439,6 +20439,10 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.gelu",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.batch_norm",
+        torch_opinfo_name="nn.functional.batch_norm",
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
         skips=(

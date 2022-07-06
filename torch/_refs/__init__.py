@@ -198,6 +198,7 @@ __all__ = [
     "hsplit",
     "hstack",
     "narrow",
+    "native_batch_norm",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -2147,7 +2148,7 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
 
 def _normalize(
     a: Tensor, norm_dims: DimsType, eps: float
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Computes mean and 1/std of a tensor along norm_dims.
 
     Used as a helper function for normalization layers.
@@ -2161,14 +2162,130 @@ def _normalize(
         out (Tensor): normalized tensor.
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
+        unbiased_var (Tensor): variance of the tensor along norm_dims.
     """
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
-    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
-    rstd = torch.rsqrt(biased_var + eps)
+    unbiased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    rstd = torch.rsqrt(unbiased_var + eps)
     out = (a - mean) * rstd
-    return out, mean, rstd
+    return out, mean, rstd, unbiased_var
+
+
+# squeeze backwards from ndims-1 to 0
+def _squeeze_multiple(a: Tensor, dims: List[int]) -> Tensor:
+    ndim = a.dim()
+    wrapped_dims = utils.canonicalize_dims(ndim, dims)
+    assert isinstance(wrapped_dims, tuple)
+    for idx in range(ndim - 1, -1, -1):
+        if idx in wrapped_dims:
+            a = a.squeeze(idx)
+    return a
+
+
+# unsqueeze forwards from 0 to ndims-1
+def _unsqueeze_multiple(x: Tensor, dims: List[int]):
+    for dim in dims:
+        x = x.unsqueeze(dim)
+    return x
+
+
+def _momentum_update(a_hat: Tensor, a_update: Tensor, momentum: float):
+    return (momentum * a_hat) + ((1 - momentum) * a_update)
+
+
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if len(input.shape) > 1:
+        reduction_dims = [0] + list(range(2, input.ndim))
+        num_features = input.shape[1]
+    else:
+        reduction_dims = []
+        num_features = 0
+
+    utils.check(
+        running_mean is not None or training,
+        lambda: "running_mean must be defined in evalution mode",
+    )
+    utils.check(
+        running_var is not None or training,
+        lambda: "running_var must be defined in evalution mode",
+    )
+    utils.check(
+        running_mean is None or num_features == running_mean.numel(),
+        lambda: "running_mean should contain " + str(num_features),
+    )
+    utils.check(
+        running_var is None or num_features == running_var.numel(),
+        lambda: "running_var should contain " + str(num_features),
+    )
+    utils.check(
+        weight is None or (weight.ndim == 1 and weight.shape[0] == num_features),
+        lambda: "Expected weight to be a vector of size equal to the number of channels in input, "
+        + "but got weight of shape "
+        + str(weight.shape)  # type: ignore[union-attr]
+        + " and input of shape "
+        + str(input.shape),
+    )
+    utils.check(
+        bias is None or (bias.ndim == 1 and bias.shape[0] == num_features),
+        lambda: "Expected bias to be a vector of size equal to the number of channels in input, "
+        + "but got weight of shape "
+        + str(bias.shape)  # type: ignore[union-attr]
+        + " and input of shape "
+        + str(input.shape),
+    )
+
+    if training:
+        out, save_mean, save_rstd, unbiased_var = _normalize(input, reduction_dims, eps)
+
+        # update running_mean and running_var
+        if running_mean is not None:
+            squeeze_mean = _squeeze_multiple(save_mean, reduction_dims)
+            running_mean.copy_(_momentum_update(running_mean, squeeze_mean, momentum))
+
+        if running_var is not None:
+            squeeze_var = _squeeze_multiple(unbiased_var, reduction_dims)
+            running_var.copy_(_momentum_update(running_var, squeeze_var, momentum))
+    else:
+        assert running_mean is not None and running_var is not None
+        mean = _unsqueeze_multiple(running_mean, reduction_dims)
+        var = _unsqueeze_multiple(running_var, reduction_dims)
+        rstd = torch.rsqrt(var + eps)
+        out = (input - mean) * rstd
+
+        if input.device.type != "cpu":
+            save_mean = running_mean
+            save_rstd = rstd
+        else:
+            save_mean = torch.zeros_like(input)
+            save_rstd = torch.zeros_like(input)
+
+    if weight is None and bias is not None:
+        unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
+        out = out + unsqueeze_bias
+    elif weight is not None and bias is None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, reduction_dims)
+        out = out * unsqueeze_weight
+    elif weight is not None and bias is not None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, reduction_dims)
+        unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
+        out = out * unsqueeze_weight + unsqueeze_bias
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == "cpu":
+        save_mean = prims.convert_element_type(save_mean, input.dtype)
+        save_rstd = prims.convert_element_type(save_rstd, input.dtype)
+
+    return (out, save_mean, save_rstd)
 
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
@@ -2217,7 +2334,7 @@ def native_layer_norm(
     )
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
-    out, mean, rstd = _normalize(input, reduction_dims, eps)
+    out, mean, rstd, _ = _normalize(input, reduction_dims, eps)
     if weight is None and bias is not None:
         out = out + bias
     elif weight is not None and bias is None:
