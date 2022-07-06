@@ -41,7 +41,7 @@ else:
     _python_dtype_to_nvfuser_dtype_map = {}
 
 
-def getnvFuserDtype(dtype: Union[torch.dtype, type]):
+def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
     """
     Translates from torch.dtype to nvFuser's DataType enum
     """
