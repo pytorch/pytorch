@@ -36,7 +36,7 @@ _device_not_kwarg_ops = (
     aten.to.device,
     aten.to.prim_Device,
     aten._pin_memory.default,
-    aten._resize_output.functional,
+    aten._resize_output.default,
     aten._resize_output.out,
 )
 

@@ -872,6 +872,8 @@ class NativeFunctionsGroup:
         if self.mutable is not None:
             assert self.mutable.func.kind() == SchemaKind.mutable
             assert self.mutable.namespace == self.functional.namespace
+            # See Note [Overload Ambiguity With Functional Variants]
+            assert self.functional.func.name.name.functional_overload
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
@@ -901,7 +903,7 @@ class NativeFunctionsGroup:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
                 f" To do so, it expects a line: 'autogen: {generated_fns_str}'."
-                f" Instead, it found 'autogen: {generated_fns_str}'"
+                f" Instead, it found 'autogen: {expected_generated_fns_str}'"
             )
 
     def signature(self) -> "FunctionSchema":
@@ -2135,6 +2137,26 @@ class BaseOperatorName:
     base: str
     inplace: bool
     dunder_method: bool
+    # Note [Overload Ambiguity With Functional Variants]
+    # A handful of operators have both a "mutable" and a "functional" variant.
+    # (native_batch_norm is a good example, although this isn't the case today).
+    # For those operators, the mutable and functional variant take in the same set of
+    # arguments, but have different alias annotations.
+    # this makes it ambiguous when you try to resolve an OverloadPacket into an overload,
+    # given a set of input arguments.
+    #
+    # So instead of making the "functional" variant in this case a real overload, e.g:
+    #   native_batch_norm (mutable variant)
+    #   native_batch_norm.functional (functional variant)
+    # we make it a new base operator,
+    #   native_batch_norm_functional (functional variant)
+    #
+    # In an ideal world, we would probably invert this so the operators were:
+    #   native_batch_norm.mutable (mutable variant)
+    #   native_batch_norm (functional variant)
+    #
+    # Doing that is BC-breaking though, so we're stuck with the above modeling.
+    functional_overload: bool = False
 
     @staticmethod
     def parse(op: str) -> "BaseOperatorName":
@@ -2165,7 +2187,24 @@ class BaseOperatorName:
                 base = base[:-1]
             else:
                 inplace = False
-        r = BaseOperatorName(base=base, inplace=inplace, dunder_method=dunder_method)
+
+        # See Note [Overload Ambiguity With Functional Variants]
+        functional_suffix = "_functional"
+        if base.endswith(functional_suffix):
+            functional_overload = True
+            base = base[: -len(functional_suffix)]
+            # This seems complicated and unnecessary, so banning dunder methods
+            # for now on ops that have a functional + mutable variant (like native_batch_norm).
+            assert not dunder_method and not inplace
+        else:
+            functional_overload = False
+
+        r = BaseOperatorName(
+            base=base,
+            inplace=inplace,
+            dunder_method=dunder_method,
+            functional_overload=functional_overload,
+        )
         assert str(r) == op, f"{str(r)} != {op}"
         return r
 
@@ -2174,7 +2213,13 @@ class BaseOperatorName:
             i = "i" if self.inplace else ""
             return f"__{i}{self.base}__"
         else:
-            i = "_" if self.inplace else ""
+            i = (
+                "_"
+                if self.inplace
+                else "_functional"
+                if self.functional_overload
+                else ""
+            )
             return f"{self.base}{i}"
 
 

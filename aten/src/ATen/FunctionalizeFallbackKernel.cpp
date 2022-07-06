@@ -131,7 +131,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = at::resize_functional(self_, size, memory_format);
+    tmp_output = at::resize(self_, size, memory_format);
   }
 
   auto itemsize = self.dtype().itemsize();
