@@ -418,7 +418,8 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
-        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
+        type_expr = self.tracer.root.forward.__annotations__.get(target, None)
+        return Proxy(self.new_graph.placeholder(target, default_value=default_value, type_expr=type_expr), self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
