@@ -1,7 +1,9 @@
 import typing as t
 
 from torch.nn import Module
-from torch.fx.node import Node
+from torch._ops import OpOverload
+
+from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 
@@ -101,7 +103,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
             # "torch.ops.aten.threshold_backward": None,
             "torch.ops.aten.clamp": None,
-            "torch.ops.aten.where": None,
+            # "torch.ops.aten.where": None,  # Failing with where(): incompatible function arguments: [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
             # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
@@ -127,12 +129,12 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten.var.dim": None,       # missing refs
             "torch.ops.aten.std.dim": None,
             "torch.ops.aten.sum.dim_IntList": None,
-            "torch.ops.aten.mean.dim": None,
+            # "torch.ops.aten.mean.dim": None,      # missing refs
             "torch.ops.aten._grad_sum_to_size": None,
             "torch.ops.aten.sum_to_size": None,
             "torch.ops.aten._autocast_to_reduced_precision": None,
             "torch.ops.aten._autocast_to_full_precision": None,
-            "torch.ops.aten.to.dtype": None,
+            # "torch.ops.aten.to.dtype": None,      # causing segfault
             # "torch.ops.aten.type_as": None,       # missing refs
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
@@ -173,5 +175,12 @@ class NvFuserOperatorSupport(OperatorSupport):
         # nvFuser FX subgraph should be purely functional
         if node.op not in CALLABLE_NODE_OPS:
             return False
+
+        # ops in supported_dict doesn't have overload name
+        # use overloadpacket's qualified_name for OpOverload
+        if isinstance(node.target, OpOverload):
+            target = _get_qualified_name(node.target.overloadpacket)
+            if target in self._support_dict:
+                return True
 
         return super().is_node_supported(submodules, node)
