@@ -7,6 +7,7 @@
  */
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <iterator>
 
@@ -142,4 +143,44 @@ void BCSRMatrix::print() const {
   }
   std::cout << std::endl;
 }
+
+void BCSRMatrix::unpack(
+    int8_t* dst,
+    const int64_t num_rows,
+    const int64_t num_cols,
+    const uint8_t* zero_points) const {
+  for (int64_t i = 0; i < num_rows; i++) {
+    memset(
+        dst + i * num_cols,
+        static_cast<int8_t>(static_cast<int16_t>(zero_points[i]) - 128),
+        num_cols * sizeof(int8_t));
+  }
+
+  const int64_t num_block_rows = static_cast<int64_t>(row_values.size()) - 1;
+  const int64_t block_size = (int64_t)row_block_size * col_block_size;
+  int64_t weight_values_num = 0;
+  for (int64_t block_row_num = 0; block_row_num < num_block_rows;
+       block_row_num++) {
+    const int64_t num_blocks_in_current_block_row =
+        row_values[block_row_num + 1] - row_values[block_row_num];
+    for (int64_t k = 0; k < num_blocks_in_current_block_row;
+         k++) { // iterate over each block in the row
+      const int64_t block_start_row_num = block_row_num * row_block_size;
+      const int64_t block_start_col_num =
+          (int64_t)(col_indices[weight_values_num / block_size]) *
+          col_block_size;
+      for (int64_t l = 0; l < block_size;
+           l++) { // iterate over each value in the block
+        const int64_t row_num = block_start_row_num + l / col_block_size;
+        const int64_t col_num = block_start_col_num + l % col_block_size;
+        if (row_num < num_rows && col_num < num_cols) {
+          dst[row_num * num_cols + col_num] = static_cast<int8_t>(
+              static_cast<int16_t>(values[weight_values_num]) - 128);
+        }
+        weight_values_num++;
+      }
+    }
+  }
+}
+
 } // namsepace qnnpack

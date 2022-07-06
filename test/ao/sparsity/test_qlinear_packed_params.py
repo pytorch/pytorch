@@ -130,11 +130,19 @@ class TestQlinearPackedParams(TestCase):
             self.assertEqual(output_channels_, weight.shape[0])
             self.assertEqual(input_channels_, weight.shape[1])
 
+            # Test Unpacking
+            (weights_, bias_, out_features_block_size_, in_features_block_size_) = lin._weight_bias()
+            self.assertEqual(torch.dequantize(weights_), torch.dequantize(weight))
+            self.assertEqual(bias_, bias)
+            self.assertEqual(out_features_block_size_, row_block_size)
+            self.assertEqual(in_features_block_size_, col_block_size)
+
             # Test Deserialization
             with tempfile.TemporaryFile() as file_buff:
                 torch.save(lin, file_buff)
                 file_buff.seek(0)
                 lin2 = torch.load(file_buff)
+                self.assertEqual(lin._weight_bias(), lin2._weight_bias())
                 # Serialize -> Deserialize -> Serialize should match Serialize
                 self.assertEqual(serialized, lin2._packed_params._packed_params.__getstate__())
 

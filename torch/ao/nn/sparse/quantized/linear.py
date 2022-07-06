@@ -11,17 +11,12 @@ class LinearPackedParams(torch.nn.Module):
 
     def __init__(self, row_block_size=1, col_block_size=4, dtype=torch.qint8):
         super().__init__()
-        self.prepack_op = torch.ops.sparse.qlinear_prepack
-        self.unpack_op = torch.ops.sparse.qlinear_unpack
 
         if dtype != torch.qint8:
             raise NotImplementedError("Linear prepacking only supports QINT8")
         self.dtype = dtype
         wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
         self.set_weight_bias(wq, None, row_block_size, col_block_size)
-        # Hack to make torch.jit.script/torch.jit.load work
-        # Once we have self.unpack_op working we wont need this.
-        self.__annotations__['bias'] = Optional[torch.Tensor]
 
     def _get_name(self):
         return "SparseQuantizedLinearPackedParams"
@@ -30,18 +25,12 @@ class LinearPackedParams(torch.nn.Module):
     def set_weight_bias(self, weight: torch.Tensor, bias: Optional[torch.Tensor],
                         row_block_size: Optional[int], col_block_size: Optional[int]) -> None:
         assert row_block_size is not None and col_block_size is not None
-        self._packed_params = self.prepack_op(weight, bias, row_block_size, col_block_size)
-        # TODO: We will save the original weight and bias, because the unpacking is not yet there.
-        self.weight = weight
-        self.bias = bias
-        self.row_block_size = row_block_size
-        self.col_block_size = col_block_size
+        self._packed_params = torch.ops.sparse.qlinear_prepack(weight, bias, row_block_size, col_block_size)
 
     @torch.jit.export
     def _weight_bias(self):
-        # TODO: The unpacking is not yet implemented
-        # return self.unpack_op(self._packed_params)
-        return self.weight, self.bias, self.row_block_size, self.col_block_size
+        (weight, bias, block_sizes) = torch.ops.sparse.qlinear_unpack(self._packed_params)
+        return (weight, bias, block_sizes[0], block_sizes[1])
 
     def forward(self, x):
         return x
@@ -69,10 +58,6 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        self.weight = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
-        self.bias = None
-        self.row_block_size = 1
-        self.col_block_size = 4
         (self._packed_params, self.training, self.dtype) = state
 
     def __repr__(self):

@@ -33,6 +33,18 @@ typedef struct BCSRMatrix {
   uint32_t col_block_size;  // input features block size
   uint32_t row_block_size;  // output features block size
   void print() const;
+  /*
+   * Unpack from BCSR to Dense
+   * - Each value and zero point converted to int8_t by subtracting 128
+   * - num_rows and num_cols are dimensions of dense weight tensor
+   * - dst should be able to hold num_rows * num_cols elements
+   * - zero_points should hold num_rows zero points
+   */
+  void unpack(
+      int8_t* dst,
+      const int64_t num_rows,
+      const int64_t num_cols,
+      const uint8_t* zero_points) const;
 } BCSRMatrix;
 
 std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
