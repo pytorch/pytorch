@@ -47,8 +47,7 @@ void check_inputs_elementwise_op(const Tensor& input1, const Tensor& input2) {
 Tensor _lerp_scalar(
     const Tensor& start_arg,
     const Tensor& end_arg,
-    const Scalar& weight_arg,
-    const std::string& op_name) {
+    const Scalar& weight_arg) {
   check_inputs_elementwise_op(start_arg, end_arg);
   api::Context* const context = api::context();
 
@@ -64,137 +63,132 @@ Tensor _lerp_scalar(
     v_start.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const float weight = weight_arg.to<float>();
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input1_extents;
+    uint32_t fill_1;
+    uvec3 input2_extents;
+    float weight;
+  } block{
+      v_output.extents(),
+      0u,
+      v_start.extents(),
+      0u,
+      v_end.extents(),
+      weight,
+  };
 
-    if C10_LIKELY (v_start.has_image() && v_end.has_image()) {
-      const float weight = weight_arg.to<float>();
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input1_extents;
-        uint32_t fill_1;
-        uvec3 input2_extents;
-        float weight;
-      } block{
-          v_output.extents(),
-          0u,
-          v_start.extents(),
-          0u,
-          v_end.extents(),
-          weight,
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(lerp_scalar),
-          v_output.extents(),
-          adaptive_work_group_size(v_output.extents()),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_start.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_end.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(lerp_scalar),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_start.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      v_end.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
 
 Tensor& _lerp_scalar_(
-    Tensor& self,
+    Tensor& self_arg,
     const Tensor& end_arg,
-    const Scalar& weight_arg,
-    const std::string& op_name) {
-  check_inputs_elementwise_op(self, end_arg);
-  api::Context* const context = api::context();
+    const Scalar& weight_arg) {
+  check_inputs_elementwise_op(self_arg, end_arg);
 
   TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place lerp is only supported on Vulkan tensors.");
+      self_arg.is_vulkan(),
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self);
+  api::Context* const context = api::context();
+
+  vTensor& v_self = convert(self_arg);
 
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
   const vTensor& v_end = convert(end);
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const float weight = weight_arg.to<float>();
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input_extents;
+    float alpha;
+  } block{
+      v_self.extents(),
+      0u,
+      v_end.extents(),
+      weight,
+  };
 
-    if C10_LIKELY (
-        v_self.has_image() && v_end.has_image() && !self.is_same(end)) {
-      const float weight = weight_arg.to<float>();
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input_extents;
-        float alpha;
-      } block{
-          v_self.extents(),
-          0u,
-          v_end.extents(),
-          weight,
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(lerp_scalar_),
-          v_self.extents(),
-          adaptive_work_group_size(v_self.extents()),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_end.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(lerp_scalar_),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_self.extents(),
+      // local work group size
+      adaptive_work_group_size(v_self.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_self.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
+      v_end.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
-  return self;
+  return self_arg;
 }
 
 Tensor _lerp_tensor(
     const Tensor& start_arg,
     const Tensor& end_arg,
-    const Tensor& weight_arg,
-    const std::string& op_name) {
+    const Tensor& weight_arg) {
   check_inputs_elementwise_op(start_arg, end_arg);
   check_inputs_elementwise_op(start_arg, weight_arg);
+
   api::Context* const context = api::context();
 
   const Tensor start = start_arg.is_vulkan() ? start_arg : start_arg.vulkan();
@@ -204,7 +198,7 @@ Tensor _lerp_tensor(
   const vTensor& v_end = convert(end);
 
   const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
-  const vTensor& v_weight = convert(weight);
+  const vTensor& v_weight = convert(weight_arg);
 
   vTensor v_output{
     context,
@@ -212,174 +206,167 @@ Tensor _lerp_tensor(
     v_start.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input1_extents;
+    uint32_t fill_1;
+    uvec3 input2_extents;
+    uint32_t fill_2;
+    uvec3 input3_extents;
+    uint32_t fill_3;
+  } block{
+      v_output.extents(),
+      0u,
+      v_start.extents(),
+      0u,
+      v_end.extents(),
+      0u,
+      v_weight.extents(),
+      0u,
+  };
 
-    if C10_LIKELY (v_start.has_image() && v_end.has_image() && v_weight.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input1_extents;
-        uint32_t fill_1;
-        uvec3 input2_extents;
-        uint32_t fill_2;
-        uvec3 input3_extents;
-        uint32_t fill_3;
-      } block{
-          v_output.extents(),
-          0u,
-          v_start.extents(),
-          0u,
-          v_end.extents(),
-          0u,
-          v_weight.extents(),
-          0u,
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(lerp),
-          v_output.extents(),
-          adaptive_work_group_size(v_output.extents()),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_start.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_end.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_weight.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(lerp),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_start.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      v_end.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      v_weight.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
 
 Tensor& _lerp_tensor_(
-    Tensor& self,
+    Tensor& self_arg,
     const Tensor& end_arg,
-    const Tensor& weight_arg,
-    const std::string& op_name) {
-  check_inputs_elementwise_op(self, end_arg);
-  check_inputs_elementwise_op(self, weight_arg);
-  api::Context* const context = api::context();
+    const Tensor& weight_arg) {
+  check_inputs_elementwise_op(self_arg, end_arg);
+  check_inputs_elementwise_op(self_arg, weight_arg);
 
   TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place lerp is only supported on Vulkan tensors.");
+      self_arg.is_vulkan(),
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self);
+  api::Context* const context = api::context();
+
+  vTensor& v_self = convert(self_arg);
 
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
-  const vTensor& v_end = convert(end);
+  const vTensor& v_end = convert(end_arg);
 
   const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
-  const vTensor& v_weight = convert(weight);
+  const vTensor& v_weight = convert(weight_arg);
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input1_extents;
+    uint32_t fill_1;
+    uvec3 input2_extents;
+    uint32_t fill_2;
+  } block{
+      v_self.extents(),
+      0u,
+      v_end.extents(),
+      0u,
+      v_weight.extents(),
+      0u,
+  };
 
-    if C10_LIKELY (
-        v_self.has_image() && v_end.has_image() && v_weight.has_image() && !self.is_same(end)) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input1_extents;
-        uint32_t fill_1;
-        uvec3 input2_extents;
-        uint32_t fill_2;
-      } block{
-          v_self.extents(),
-          0u,
-          v_end.extents(),
-          0u,
-          v_weight.extents(),
-          0u,
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(lerp_),
-          v_self.extents(),
-          adaptive_work_group_size(v_self.extents()),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_end.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_weight.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(lerp_),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_self.extents(),
+      // local work group size
+      adaptive_work_group_size(v_self.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_self.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
+      v_end.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      v_weight.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
-  return self;
+  return self_arg;
 }
 
-Tensor lerp_scalar(const Tensor& start, const Tensor& end, const Scalar& weight) {
-  return _lerp_scalar(
-      start, end, weight, "aten::lerp.Scalar");
+Tensor lerp_scalar(
+    const Tensor& start, const Tensor& end, const Scalar& weight) {
+  return _lerp_scalar(start, end, weight);
 }
 
-Tensor& lerp_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  return _lerp_scalar_(
-      self, end, weight, "aten::lerp_.Scalar");
+Tensor& lerp_scalar_(
+    Tensor& self, const Tensor& end, const Scalar& weight) {
+  return _lerp_scalar_(self, end, weight);
 }
 
-Tensor lerp_tensor(const Tensor& start, const Tensor& end, const Tensor& weight) {
+Tensor lerp_tensor(
+    const Tensor& start, const Tensor& end, const Tensor& weight) {
   if (weight.sizes().size() == 0) {
-    return _lerp_scalar(
-        start, end, weight.item<float>(), "aten::lerp.Tensor");
+    return _lerp_scalar(start, end, weight.item<float>());
   }
-  return _lerp_tensor(
-      start, end, weight, "aten::lerp.Tensor");
+  return _lerp_tensor(start, end, weight);
 }
 
-Tensor& lerp_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
+Tensor& lerp_tensor_(
+    Tensor& self, const Tensor& end, const Tensor& weight) {
   if (weight.sizes().size() == 0) {
-    return _lerp_scalar_(
-        self, end, weight.item<float>(), "aten::lerp_.Tensor");
+    return _lerp_scalar_(self, end, weight.item<float>());
   }
-  return _lerp_tensor_(
-      self, end, weight, "aten::lerp_.Tensor");
+  return _lerp_tensor_(self, end, weight);
 }
 
 #ifdef USE_VULKAN_API
