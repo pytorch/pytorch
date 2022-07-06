@@ -113,6 +113,7 @@ class Adam(Optimizer):
         super(Adam, self).__init__(params, defaults)
 
         if fused:
+            self._step_supports_amp_scaling = True
             # TODO(crcrpar): Relax the condition by e.g. a logic which accordingly groups tensors
             # under the hood of fused optimizer kernels.
             if not all(p.is_cuda for pg in self.param_groups for p in pg['params']):
