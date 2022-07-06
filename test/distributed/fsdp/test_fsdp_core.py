@@ -3,8 +3,7 @@
 import functools
 import itertools
 import sys
-from collections import OrderedDict
-from typing import Callable, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import torch
@@ -80,18 +79,18 @@ class TestParityWithDDP(FSDPTest):
 
         return modes
 
-    def _configure_subtests(self, cpu_offload: CPUOffload) -> Callable:
-        """Partially applies a subtest configuration that subtests CUDA
-        initialization modes and prefetching settings together."""
-        subtest_config = OrderedDict()
-        subtest_config["cuda_init_mode"] = self._get_cuda_init_modes(cpu_offload)
-        subtest_config["forward_prefetch"] = [True, False]
-        subtest_config["backward_prefetch"] = [
-            None,
-            BackwardPrefetch.BACKWARD_PRE,
-            BackwardPrefetch.BACKWARD_POST,
-        ]
-        return functools.partial(self.run_subtests, subtest_config)
+    def _get_subtest_config(self, cpu_offload: CPUOffload) -> Dict[str, List[Any]]:
+        """Returns a subtest configuration that subtests CUDA initialization
+        modes and prefetching settings together."""
+        return {
+            "cuda_init_mode": self._get_cuda_init_modes(cpu_offload),
+            "forward_prefetch": [False, True],
+            "backward_prefetch": [
+                None,
+                BackwardPrefetch.BACKWARD_PRE,
+                BackwardPrefetch.BACKWARD_POST,
+            ]
+        }
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
@@ -100,8 +99,8 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
     ):
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             NestedWrappedModule,
             FSDPInitMode.RECURSIVE,
@@ -121,8 +120,8 @@ class TestParityWithDDP(FSDPTest):
             buffer_dtype=torch.float16,
             reduce_dtype=torch.float16,
         )
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             NestedWrappedModule,
             FSDPInitMode.RECURSIVE,
@@ -143,8 +142,8 @@ class TestParityWithDDP(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             AlwaysWrapNestedWrappedModule,
             FSDPInitMode.RECURSIVE,
@@ -164,8 +163,8 @@ class TestParityWithDDP(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             TransformerWithSharedParams,
             FSDPInitMode.RECURSIVE,
@@ -186,8 +185,8 @@ class TestParityWithDDP(FSDPTest):
         the optimizer step to exercise the internal CUDA stream usage in that
         the forward pass all-gathers do not start until after the optimizer
         step completes."""
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             NestedWrappedModuleWithDelay,
             FSDPInitMode.RECURSIVE,
@@ -207,8 +206,8 @@ class TestParityWithDDP(FSDPTest):
         using a model with a long CUDA delay before the gradient reduce-scatter
         to exercise the internal CUDA stream usage in that the backward pass
         waits for those reductions to finish."""
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             NestedWrappedModuleWithDelay,
             FSDPInitMode.RECURSIVE,
@@ -233,8 +232,8 @@ class TestParityWithDDP(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             MixtureOfExperts,
             FSDPInitMode.RECURSIVE,
@@ -251,8 +250,8 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
     ):
-        run_subtests = self._configure_subtests(cpu_offload)
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
             MixtureOfExperts,
             FSDPInitMode.RECURSIVE,

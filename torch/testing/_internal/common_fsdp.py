@@ -4,12 +4,11 @@ import functools
 import itertools
 import sys
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
 from enum import Enum, auto
 from math import inf
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
 import torch
@@ -719,7 +718,7 @@ class FSDPTest(MultiProcessTestCase):
 
     def run_subtests(
         self,
-        subtest_config: OrderedDict,
+        subtest_config: Dict[str, List[Any]],
         test_fn: Callable,
         *test_args,
         **test_kwargs: Any,
@@ -731,15 +730,20 @@ class FSDPTest(MultiProcessTestCase):
         process group) over the subtests.
 
         Args:
-            subtest_config (OrderedDict[str, List[Any]]): A mapping from
-                subtest keyword argument to a list of its possible values.
+            subtest_config (Dict[str, List[Any]]): A mapping from subtest
+                keyword argument name to a list of its possible values.
             test_fn (Callable): A callable that runs the actual test.
             test_args: Positional arguments to pass to ``test_fn``.
             test_kwargs: Keyword arguments to pass to ``test_fn``.
         """
-        for values in itertools.product(*subtest_config.values()):
+        # Convert the config mapping to a list to have a fixed order
+        subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+        subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+        subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+        for values in itertools.product(*subtest_config_values):
+            # Map keyword to chosen value
             subtest_kwargs = {
-                kwarg: value for kwarg, value in zip(subtest_config.keys(), values)
+                kwarg: value for kwarg, value in zip(subtest_config_keys, values)
             }
             with self.subTest(**subtest_kwargs):
                 test_fn(*test_args, **test_kwargs, **subtest_kwargs)

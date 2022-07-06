@@ -1,12 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import functools
 import sys
-from collections import OrderedDict
 from functools import partial
 from itertools import product
-from typing import Callable
+from typing import Any, Dict, List
 
 import torch
 import torch.cuda.nccl as nccl
@@ -439,17 +437,17 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def world_size(self):
         return 2
 
-    def _configure_subtests(self) -> Callable:
-        """Partially applies a subtest configuration that subtests prefetching
-        settings together."""
-        subtest_config = OrderedDict()
-        subtest_config["forward_prefetch"] = [True, False]
-        subtest_config["backward_prefetch"] = [
-            None,
-            BackwardPrefetch.BACKWARD_PRE,
-            BackwardPrefetch.BACKWARD_PRE,
-        ]
-        return functools.partial(self.run_subtests, subtest_config)
+    def _get_subtest_config(self) -> Dict[str, List[Any]]:
+        """Returns a subtest configuration that subtests prefetching settings
+        together."""
+        return {
+            "forward_prefetch": [False, True],
+            "backward_prefetch": [
+                None,
+                BackwardPrefetch.BACKWARD_PRE,
+                BackwardPrefetch.BACKWARD_POST,
+            ]
+        }
 
     @skip_if_lt_x_gpu(2)
     def test_mixed_precision_no_reshard_after_forward(self):
@@ -475,8 +473,8 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         full_precision_param_dtype,
         enable_sharded_grad_scaler,
     ):
-        run_subtests = self._configure_subtests()
-        run_subtests(
+        self.run_subtests(
+            self._get_subtest_config(),
             self._run_test_mixed_precision_e2e,
             mp_config=mp_config,
             cpu_offload=cpu_offload,
