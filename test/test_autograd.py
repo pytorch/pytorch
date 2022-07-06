@@ -4521,6 +4521,7 @@ for shape in [(1,), ()]:
         # For verifying first access to ctx.saved_tensors succeeded.
 
         _first_saved_tensor_access_succeeded = False
+        _second_saved_tensor_access_succeeded = False
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -4539,6 +4540,9 @@ for shape in [(1,), ()]:
                 # second access to saved tensors raises because they were
                 # not recomputed.
                 x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+                nonlocal _second_saved_tensor_access_succeeded
+                _second_saved_tensor_access_succeeded = True
+                return grad_out, grad_out, grad_out
 
         x = torch.tensor(1., requires_grad=True)
         y = torch.tensor(2., requires_grad=True)
@@ -4552,13 +4556,10 @@ for shape in [(1,), ()]:
             return out
 
         out = checkpoint(foo, x, y, z, use_reentrant=False)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Attempt to retrieve a tensor saved by autograd multiple times"
-        ):
-            out.sum().backward()
+        out.sum().backward()
 
         self.assertTrue(_first_saved_tensor_access_succeeded)
+        self.assertTrue(_second_saved_tensor_access_succeeded)
 
     def test_access_saved_tensor_twice_without_recomputation_raises(self):
         """
