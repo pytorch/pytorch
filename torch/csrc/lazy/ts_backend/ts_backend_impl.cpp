@@ -7,6 +7,7 @@
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <memory>
 
 namespace at {
 // This function is defined in the codegenerated RegisterDispatchKey.cpp file.
@@ -133,7 +134,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
-      torch::lazy::Computation& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
@@ -195,11 +196,13 @@ std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
 }
 
 std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    torch::lazy::Computation& computation,
+    torch::lazy::ComputationPtr computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
-  torch::jit::GraphExecutor& graph_executor =
-      static_cast<torch::lazy::TSComputation&>(computation).graph_executor();
+  auto ts_computation =
+      std::dynamic_pointer_cast<torch::lazy::TSComputation>(computation);
+  TORCH_CHECK(ts_computation, "Computation isn't TSComputation");
+  torch::jit::GraphExecutor& graph_executor = ts_computation->graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (const auto& argument : arguments) {
     const auto ts_data = std::static_pointer_cast<TSData>(argument);
