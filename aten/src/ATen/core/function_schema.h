@@ -361,7 +361,7 @@ struct FunctionSchema {
   }
   bool is_mutable(size_t index) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size() && index >= 0,
+        index < arguments().size(),
         "Invalid index for schema.");
     const AliasInfo* aliasInfo = arguments()[index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
