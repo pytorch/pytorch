@@ -101,7 +101,9 @@ class Linear(torch.nn.Module):
 
         qweight = torch._empty_affine_quantized([out_features, in_features],
                                                 scale=1, zero_point=0, dtype=torch.qint8)
-        self._packed_params = LinearPackedParams(dtype)
+        self._packed_params = LinearPackedParams(row_block_size=row_block_size,
+                                                 col_block_size=col_block_size,
+                                                 dtype=dtype)
         self._packed_params.set_weight_bias(qweight, bias, row_block_size, col_block_size)
         self.scale = 1.0
         self.zero_point = 0
