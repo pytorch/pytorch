@@ -23,7 +23,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
     def __iter__(self):
         for df in self.source_datapipe:
             # for record in df.to_records(index=False):
-            for record in df:
+            for record in df_wrapper.iterate(df):
                 yield record
 
 

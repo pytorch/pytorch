@@ -278,6 +278,12 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+    def test_error_for_unsupported_ns_or_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            my_lib1 = Library("myns", "BLA")
+
+        with self.assertRaisesRegex(ValueError, "reserved namespace"):
+            my_lib1 = Library("prim", "DEF")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -744,8 +750,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline('\n'.join(logs), ("$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32," +
+                                                    " device=device(type='cpu'), pin_memory=False)"))
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -766,8 +772,8 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -778,7 +784,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
@@ -790,8 +796,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)
 $3 = torch._ops.aten.add.Tensor($1, $2)
 $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
@@ -1759,6 +1765,52 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
+
+    def test_layout_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            data = torch.randn(6, 2)
+
+            class LayoutNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class LayoutCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return torch.sparse_csr
+                    return NotImplemented
+
+            class LayoutDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return data.layout
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.prim.layout'"
+            e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.layout
+
+            e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.sparse_csr)
+
+            e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.strided)
 
 if __name__ == '__main__':
     run_tests()

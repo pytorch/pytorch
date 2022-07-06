@@ -496,7 +496,6 @@ class TestCaptureDataFrame(TestCase):
         self.compare_capture_and_eager(operations)
 
 
-@skipIf(True, "Fix DataFramePipes Tests")
 class TestDataFramesPipes(TestCase):
     """
         Most of test will fail if pandas instaled, but no dill available.
@@ -520,7 +519,9 @@ class TestDataFramesPipes(TestCase):
         dp_numbers = self._get_datapipe().map(lambda x: (x[0], x[1], x[1] + 3 * x[0]))
         df_numbers = self._get_dataframes_pipe()
         df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
-        self.assertEqual(list(dp_numbers), list(df_numbers))
+        expected = list(dp_numbers)
+        actual = list(df_numbers)
+        self.assertEquals(expected, actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -531,7 +532,7 @@ class TestDataFramesPipes(TestCase):
         dp_numbers = self._get_datapipe(range=1000)
         df_result = [tuple(item) for item in df_numbers]
         self.assertNotEqual(list(dp_numbers), df_result)
-        self.assertEqual(list(dp_numbers), sorted(df_result))
+        self.assertEquals(list(dp_numbers), sorted(df_result))
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -541,20 +542,22 @@ class TestDataFramesPipes(TestCase):
         last_batch = df_numbers_list[-1]
         self.assertEqual(4, len(last_batch))
         unpacked_batch = [tuple(row) for row in last_batch]
-        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+        self.assertEquals([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
-        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
+        self.assertEquals(list(dp_numbers), list(df_numbers.unbatch(2)))
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
-        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], list(df_numbers))
+        actual = list(df_numbers)
+        # self.assertFalse(actual)
+        self.assertEquals([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill

@@ -211,13 +211,13 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         conversion: Optional[
             Union[
             Callable[..., Any],
-            # TODO(VitalyFedyunin): Replace with `Callable[[IColumn], Any]`
             Dict[Union[str, Any], Union[Callable, Any]],
-            # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
             ]
         ] = default_collate,
         collate_fn: Optional[Callable] = None,
     ) -> None:
+        # TODO(VitalyFedyunin): Replace `Callable[..., Any]` with `Callable[[IColumn], Any]`
+        # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
         if collate_fn is not None:
             super().__init__(datapipe, fn=collate_fn)
         else:

@@ -4,6 +4,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -39,6 +40,7 @@
 
 #include <ATen/ATen.h>
 
+#include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
 #include <iostream>
@@ -255,6 +257,12 @@ c10::IntArrayRef concrete_strides_fn(
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+c10::SymIntArrayRef concrete_sym_sizes_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
+c10::Layout concrete_layout_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -268,7 +276,9 @@ class PyInterpreterHolder {
             &concrete_device_fn,
             &concrete_dim_fn,
             &concrete_strides_fn,
-            &concrete_sizes_fn)) {}
+            &concrete_sizes_fn,
+            &concrete_sym_sizes_fn,
+            &concrete_layout_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -608,9 +618,9 @@ static PyObject* THPVariable_make_subclass(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
+      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
-  ParsedArgs<5> parsed_args{};
+  ParsedArgs<6> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
@@ -639,6 +649,9 @@ static PyObject* THPVariable_make_subclass(
   if (r.toBool(4)) {
     data.unsafeGetTensorImpl()->set_custom_device(true);
   }
+  if (r.toBool(5)) {
+    data.unsafeGetTensorImpl()->set_custom_layout(true);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
@@ -657,13 +670,13 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
-  ParsedArgs<12> parsed_args{};
+  ParsedArgs<13> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -754,6 +767,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   if (r.toBool(11)) {
     tensor.unsafeGetTensorImpl()->set_custom_device(true);
+  }
+  if (r.toBool(12)) {
+    tensor.unsafeGetTensorImpl()->set_custom_layout(true);
   }
 
   return THPVariable_NewWithVar(
@@ -2333,6 +2349,22 @@ c10::IntArrayRef concrete_strides_fn(
   return c10::IntArrayRef(start, len);
 }
 
+static std::vector<int64_t> values_from_buffer(
+    const c10::TensorImpl* self,
+    py::handle values) {
+  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+
+  py::object os = py::module_::import("torch").attr("overrides");
+  py::function get_buffer =
+      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
+  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
+  auto result = THPUtils_unpackLongs(buffer.ptr());
+  return result;
+}
+
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self) {
@@ -2355,24 +2387,79 @@ c10::IntArrayRef concrete_sizes_fn(
   }
 
   py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
+  auto result = values_from_buffer(self, values);
   int64_t* start = (int64_t*)result[0];
   int64_t len = result[1];
 
   return c10::IntArrayRef(start, len);
+}
+
+c10::SymIntArrayRef concrete_sym_sizes_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  HANDLE_TH_ERRORS
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_size",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_size")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    return self->sym_sizes_default();
+  }
+  // We need to squeeze SymIntNodes and ints into `SymInts`
+  // since it's a format `sym_sizes()` are stored in
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "Symshape must be a list or a tuple");
+  py::list symints;
+  for (auto it = out.begin(); it != out.end(); it++) {
+    auto elm = *it;
+    auto si = torch::is_symint_node(elm)
+        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+        : c10::SymInt{py::cast<int64_t>(elm)};
+    symints.append(si.data());
+  }
+
+  auto result = values_from_buffer(self, symints);
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
+  END_HANDLE_TH_ERRORS_PYBIND
+}
+
+c10::Layout concrete_layout_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "layout",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("prim")
+          .attr("layout")
+          .attr("default")
+          .ptr(),
+      "torch.ops.prim");
+
+  TORCH_CHECK(
+      THPLayout_Check(out.ptr()),
+      "layout returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected Layout");
+
+  return toLayout(out.ptr());
 }
 
 } // anonymous namespace
