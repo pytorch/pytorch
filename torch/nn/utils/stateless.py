@@ -4,8 +4,6 @@ from typing import Any, Callable, Dict, Iterator, List, Tuple
 import torch
 from torch import Tensor
 
-from ..modules import Module
-
 __all__ = ["functional_call"]
 
 # We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
@@ -57,14 +55,6 @@ def _remove_swap(module, name: str, full_path: str) -> None:
         delattr(module, "_attr_to_path")
 
 
-class _ReparametrizedTensor(Module):
-    def __init__(self, tensor):
-        super().__init__()
-        self._tensor = tensor
-
-    def forward(self, original):
-        return self._tensor
-
 @contextlib.contextmanager
 def _reparametrize_module(
     module: 'torch.nn.Module',
@@ -72,17 +62,14 @@ def _reparametrize_module(
 ) -> Iterator[None]:
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
-            #_create_swap_params(parameters_and_buffers),
-            #module, name.split("."), name, (tensor,))
-            torch.nn.utils.parametrize.register_parametrization,
-            module, name.split("."), name, (_ReparametrizedTensor(tensor),))
+            _create_swap_params(parameters_and_buffers),
+            module, name.split("."), name, (tensor,))
     yield
     for name in parameters_and_buffers:
         _apply_func_submodules(
-            #_remove_swap,
-            #module, name.split("."), name, ())
-            torch.nn.utils.parametrize.remove_parametrizations,
-            module, name.split("."), name, (False,))
+            _remove_swap,
+            module, name.split("."), name, ())
+
 
 def _apply_func_submodules(
     func: Callable[..., None],
@@ -92,7 +79,7 @@ def _apply_func_submodules(
     args: Tuple,
 ):
     if len(path) == 1:
-        func(module, path[0], *args)
+        func(module, path[0], full_path, *args)
     else:
         _apply_func_submodules(func, getattr(module, path[0]), path[1:], full_path, args)
 
