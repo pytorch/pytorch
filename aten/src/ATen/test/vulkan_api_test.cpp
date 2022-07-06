@@ -31,10 +31,6 @@ bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
 }
 
-bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
-  return (a - b).abs().max().item<float>() == 0.0f;
-}
-
 void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const auto diff = (a - b).abs();
 
@@ -722,78 +718,6 @@ TEST_F(VulkanAPITest, conv2d_pw) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, conv2d_winograd) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
-
-  constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 1};
-  constexpr std::array<int64_t, 2u> padding{2, 2};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
-
-  constexpr struct {
-    uint32_t batches;
-    uint32_t channels;
-    uint32_t width;
-    uint32_t height;
-
-    std::array<int64_t, 4u> size() const {
-      return {
-        batches,
-        channels,
-        width,
-        height,
-      };
-    }
-  } input {1, 10, 177, 232};
-
-  constexpr struct {
-    uint32_t output_channels;
-    uint32_t input_channels;
-    uint32_t width;
-    uint32_t height;
-
-    std::array<int64_t, 4u> size() const {
-      return {
-        output_channels,
-        input_channels,
-        width,
-        height,
-      };
-    }
-  } weights {13, input.channels, 3, 3};
-
-  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
-
-  const auto output_cpu = at::conv2d(
-      input_cpu,
-      weights_cpu,
-      bias_cpu,
-      stride,
-      padding,
-      dilation,
-      groups);
-
-  const auto output_vulkan = at::conv2d(
-      input_cpu.vulkan(),
-      weights_cpu,
-      bias_cpu,
-      stride,
-      padding,
-      dilation,
-      groups).cpu();
-
-  const bool check = almostEqual(output_cpu, output_vulkan);
-  if (!check) {
-    showRtol(output_cpu, output_vulkan);
-  }
-
-  ASSERT_TRUE(check);
-}
-
 TEST_F(VulkanAPITest, copy) {
   if (!at::is_vulkan_available()) {
     return;
@@ -802,7 +726,7 @@ TEST_F(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
-  const auto check = exactlyEqual(cpu, vulkan.cpu());
+  const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
     showRtol(cpu, vulkan.cpu());
   }
@@ -1736,10 +1660,10 @@ TEST_F(VulkanAPITest, reshape) {
   }
   c10::InferenceMode mode;
 
-  const auto in_cpu = at::rand({47, 11, 83, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({7, 11, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
-  const std::array<int64_t, 2> shape{47 * 83, 11 * 97};
+  const std::array<int64_t, 2> shape{7 * 8, 11 * 9};
 
   const auto out_cpu = at::reshape(in_cpu, shape);
   const auto out_vulkan = at::reshape(in_vulkan, shape);
@@ -1758,10 +1682,10 @@ TEST_F(VulkanAPITest, reshape_) {
   }
   c10::InferenceMode mode;
 
-  const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto cpu = at::rand({9, 4, 12, 6}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
-  const std::array<int64_t, 3> shape{59, 41 * 67, 19};
+  const std::array<int64_t, 3> shape{9, 4 * 6, 12};
 
   cpu.reshape(shape);
   vulkan.reshape(shape);
@@ -3725,6 +3649,92 @@ TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
   ASSERT_TRUE(check_cell);
 }
 
+TEST_F(VulkanAPITest, lstm_prepack_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int input_size = 81;
+  const int hidden_size = 10;
+  const int num_layers = 2;
+  const int L = 1;
+  const int N = 1;
+  const double lstm_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({N, L, input_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto c0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (4 * hidden_size, l == 0 ? input_size : hidden_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
+  for (int l = 0; l < num_layers; ++l) {
+    if (l == 0) {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    } else {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    }
+    weight_hh_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::lstm(in_cpu, {h0_cpu, c0_cpu},
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0],
+        weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::create_lstm_context",
+      "",
+      std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+                                weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto out_vulkan = callOpByName(
+      "vulkan_prepack::run_lstm_context",
+      "",
+      in_cpu.vulkan(), h0_cpu.vulkan(), c0_cpu.vulkan(), prepack[0]);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto cpu_cell = std::get<2>(out_cpu);
+  auto vulkan_output = out_vulkan[0].toTensor();
+  auto vulkan_hidden = out_vulkan[1].toTensor();
+  auto vulkan_cell = out_vulkan[2].toTensor();
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+
+  const auto check_cell = almostEqual(cpu_cell, vulkan_cell.cpu());
+  if (!check_cell) {
+    showRtol(cpu_cell, vulkan_cell.cpu());
+  }
+  ASSERT_TRUE(check_cell);
+}
 
 #if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
 TEST_F(VulkanAPITest, profiling_invalideinputs_exceptions) {
