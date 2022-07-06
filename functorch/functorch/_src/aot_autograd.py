@@ -8,6 +8,8 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch.nn.utils import _stateless
 from functorch._C import CompileCache
+from functorch.experimental import functionalize
+from . import config
 from .decompositions import register_decomposition
 from .partitioners import default_partition
 from .named_members_polyfill import _named_parameters, _named_buffers
@@ -188,6 +190,12 @@ def create_aot_autograd_function(
                             *joint_inputs
                         )
 
+                        if config.use_functionalize:
+                            # Functionalize the foward backward graph. First create a
+                            # fake fn to make functionalize happy
+                            def fake_fn(primals, tangents):
+                                return fx_g(primals, tangents)
+                            fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
