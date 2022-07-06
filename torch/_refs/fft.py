@@ -158,7 +158,7 @@ def _fft_c2c(
     return _apply_norm(ret, norm, input.shape[dim], forward)
 
 
-@out_wrapper
+@out_wrapper()
 def fft(
     input: TensorLikeType,
     n: Optional[int] = None,
@@ -171,7 +171,7 @@ def fft(
         return _fft_r2c("fft", input, n, dim, norm, forward=True, onesided=False)
 
 
-@out_wrapper
+@out_wrapper()
 def ifft(
     input: TensorLikeType,
     n: Optional[int] = None,
@@ -184,7 +184,7 @@ def ifft(
         return _fft_r2c("ifft", input, n, dim, norm, forward=False, onesided=False)
 
 
-@out_wrapper
+@out_wrapper()
 def rfft(
     input: TensorLikeType,
     n: Optional[int] = None,
@@ -194,7 +194,7 @@ def rfft(
     return _fft_r2c("rfft", input, n, dim, norm, forward=True, onesided=True)
 
 
-@out_wrapper
+@out_wrapper()
 def irfft(
     input: TensorLikeType,
     n: Optional[int] = None,
@@ -204,7 +204,7 @@ def irfft(
     return _fft_c2r("irfft", input, n, dim, norm, forward=False)
 
 
-@out_wrapper
+@out_wrapper()
 def hfft(
     input: TensorLikeType,
     n: Optional[int] = None,
@@ -214,7 +214,7 @@ def hfft(
     return _fft_c2r("hfft", input, n, dim, norm, forward=True)
 
 
-@out_wrapper
+@out_wrapper()
 def ihfft(
     input: TensorLikeType,
     n: Optional[int] = None,
