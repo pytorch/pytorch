@@ -58,7 +58,7 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
   ASSERT_TRUE(schema.is_mutable("other"));
 }
 
-TEST(SchmeaInfoIsNonDeterministicTest, Basic) {
+TEST(SchemaInfoIsNonDeterministicTest, Basic) {
   SchemaInfo deterministic_schema_info(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   SchemaInfo nondeterministic_schema_info(
