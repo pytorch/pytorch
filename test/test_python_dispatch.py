@@ -753,6 +753,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
 
+    def test_nested_push_regular(self):
+        with LoggingTensorMode.push() as mode:
+            # This previously errored
+            with LoggingTensorMode():
+                pass
+
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
         y = torch.randn([])
