@@ -18,17 +18,6 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     elif executor == "nvfuser":
         return nvfuser_execute(gm, *args)
 
-            results = []
-            i = 0
-            for o in flat_out:
-                if isinstance(o, TensorView) or isinstance(o, Val):
-                    results.append(nv_results[i])
-                    i += 1
-                else:
-                    results.append(o)
-
-            return torch.utils._pytree.tree_unflatten(results, unflatten_spec)
-
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
     )

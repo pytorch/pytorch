@@ -802,18 +802,6 @@ neg = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-real = _make_prim(
-    schema="real(Tensor self) -> Tensor",
-    meta=partial(
-        _elementwise_meta,
-        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-        complex_only=True,
-    ),
-    return_type=RETURN_TYPE.VIEW,
-    impl_aten=torch.real,
-    doc="",
-)
-
 round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
