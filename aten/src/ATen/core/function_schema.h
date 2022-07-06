@@ -439,7 +439,7 @@ struct FunctionSchema {
   }
   bool is_mutable(size_t index) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size() && index >= 0,
+        index < arguments().size(),
         "Invalid index for schema.");
     const AliasInfo* aliasInfo = arguments()[index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
@@ -453,10 +453,10 @@ struct FunctionSchema {
   }
   bool areAliasing(const SchemaArgument& lhs, const SchemaArgument& rhs) const {
     TORCH_INTERNAL_ASSERT(
-        (lhs.index < getCorrectList(lhs.type).size() && lhs.index >= 0),
+        (lhs.index < getCorrectList(lhs.type).size()),
         "Invalid index for schema.");
     TORCH_INTERNAL_ASSERT(
-        (rhs.index < getCorrectList(rhs.type).size() && rhs.index >= 0),
+        (rhs.index < getCorrectList(rhs.type).size()),
         "Invalid index for schema.");
 
     const Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
