@@ -48,6 +48,7 @@ enum class OpType : std::uint8_t {
   RECVANYSOURCE = 14,
   BARRIER = 15,
   _REDUCE_SCATTER_BASE = 16,
+  _REDUCE = 17,
   UNKNOWN = 100,
 };
 
@@ -243,6 +244,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& /* tensors */,
+      const ReduceOptions& /* opts */ = ReduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce(
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
       const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
         false,

@@ -1087,6 +1087,34 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "_reduce",
+              &::c10d::ProcessGroup::_reduce,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::ReduceOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "_reduce",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& y,
+                 at::Tensor& x,
+                 int rootRank,
+                 ::c10d::ReduceOp op) {
+                ::c10d::ReduceOptions opts;
+                opts.reduceOp = op;
+                opts.rootRank = rootRank;
+                std::vector<at::Tensor> ys = {y};
+                std::vector<at::Tensor> xs = {x};
+                return pg._reduce(ys, xs, opts);
+              },
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("root"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allgather",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<std::vector<at::Tensor>>& output_tensors,
