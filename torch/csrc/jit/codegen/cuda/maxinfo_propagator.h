@@ -40,12 +40,14 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   struct Selector {
     virtual bool allowPasC(TensorView* from, TensorView* to) = 0;
     virtual bool allowCasP(TensorView* from, TensorView* to) = 0;
+    virtual ~Selector() {}
   };
 
   // This is the interface to implement the actual propagation
   struct Propagator {
     virtual void propagateTvPasC(TensorView* from, TensorView* to) = 0;
     virtual void propagateTvCasP(TensorView* from, TensorView* to) = 0;
+    virtual ~Propagator() {}
   };
 
   // This is the interface that specifies the structure of information used to
