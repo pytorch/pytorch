@@ -1825,58 +1825,6 @@ class TestNLLLoss(TestCase):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
 
-    # Huber Loss
-    def test_huber_loss(self):
-        def helper(input, target, reduction, delta):
-            # create the criterion
-            loss = torch.nn.HuberLoss(reduction=reduction, delta=delta)
-
-            if isinstance(input, torch.Tensor):
-                inputCPU = input
-            else:
-                inputCPU = torch.tensor(input, device='cpu', dtype=torch.float, requires_grad=True)
-            if isinstance(target, torch.Tensor):
-                targetCPU = target
-            else:
-                targetCPU = torch.tensor(target, device='cpu', dtype=torch.float, requires_grad=False)
-            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-            targetMPS = targetCPU.detach().clone().to('mps')
-
-            # forward pass
-            outputCPU = loss(inputCPU, targetCPU)
-            outputMPS = loss(inputMPS, targetMPS)
-            self.assertEqual(outputCPU, outputMPS)
-
-            # backward pass
-            if reduction != 'none':
-                # chose 2 just to make the grad_output > 1 in backward pass
-                outputCPU.backward(gradient=torch.full_like(outputCPU, 2))
-                outputMPS.backward(gradient=torch.full_like(outputMPS, 2))
-                self.assertEqual(inputCPU.grad, inputMPS.grad)
-
-        # (input - target) < delta
-        helper([1, 2, 3], [5, 5, 5], 'none', 10.0)
-        helper([2, 3, 4], [4, 5, 6], 'sum', 10.0)
-        helper([7, 8, 9], [4, 5, 6], 'mean', 10.0)
-        # (input - target) >= delta
-        helper([1, 2, 3], [0, 1, 2], 'none', 1.0)
-        helper([[7, 8, 9]], [[4, 5, 6]], 'sum', 1.0)
-        helper([4, 5, 6], [7, 8, 9], 'mean', 1.0)
-
-        # verify if changes in shape would cause cached graph lookup problems
-        helper(
-            torch.randn([7, 5, 2, 4, 6], device='cpu', dtype=torch.float, requires_grad=True),
-            torch.randn([7, 5, 2, 4, 6], device='cpu', dtype=torch.float, requires_grad=False),
-            'sum',
-            1.5
-        )
-        helper(
-            torch.randn([8, 4, 5, 7, 6], device='cpu', dtype=torch.float, requires_grad=True),
-            torch.randn([8, 4, 5, 7, 6], device='cpu', dtype=torch.float, requires_grad=False),
-            'mean',
-            1.5
-        )
-
     # Mean Squared Error
     def test_mse_loss(self):
         def helper(shape, reduction):
@@ -6148,6 +6096,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['torch.float32'],
         'nn.functional.kl_div': ['torch.float32'],
         'nn.functional.l1_loss': ['torch.float32'],
+        'nn.functional.huber_loss': ['torch.float32'],
         'nn.functional.leaky_relu': ['torch.float32'],
         'nn.functional.mse_loss': ['torch.float16', 'torch.float32'],
         'nn.functional.relu': ['torch.float32',
