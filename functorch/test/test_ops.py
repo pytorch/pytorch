@@ -653,13 +653,8 @@ class TestOperators(TestCase):
 
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('nn.functional.batch_norm', device_type='cuda'),
-        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
         xfail('_masked.mean'),
         xfail('_masked.prod'),
-
-        # Causing issues with multiple cpu levels of forward mode AD
-        xfail('nn.functional.batch_norm', device_type='cpu'),
 
         # Not actually a problem: embedding with max_norm mutates the weight
         # and causes different runs to produce different results.
