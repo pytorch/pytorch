@@ -553,7 +553,7 @@ class TestOptim(TestCase):
         self._test_derived_optimizers(optimizer_pairs_with_flags)
 
     def test_adam(self):
-        for optimizer in [optim.Adam, optim_mt.Adam, optim_fused.Adam]:
+        for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
                 lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
                 constructor_accepts_maximize=True
