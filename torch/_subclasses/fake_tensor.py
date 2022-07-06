@@ -483,7 +483,7 @@ class FakeTensorMode(TorchDispatchMode):
             if conversion_made:
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                    f"Please convert all Tensors to FakeTensors first. Found in {func}"
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
                 )
 
             for run_impl_check, op_impl in op_implementations:

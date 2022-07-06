@@ -120,6 +120,9 @@ class ProxyTensor(torch.Tensor):
             proxy.node.meta['tensor_meta'] = {}
         else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        # This detects situations where you accidentally put a ProxyTensor
+        # inside a ProxyTensor for the same trace; this is a layering violation
+        assert not (isinstance(elem, ProxyTensor) and elem.proxy.tracer is proxy.tracer)
         self.elem = elem
         self.proxy = proxy
 
@@ -209,20 +212,23 @@ def wrap_key(f, inps):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer):
+    def __init__(self, tracer, trace_factory=True):
         self.tracer = tracer
+        self.trace_factory = trace_factory
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
-        else:
+        elif self.trace_factory:
             proxy_res = self.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
 
             inner_res = func_overload(*args, **kwargs)
 
             return wrap_output(inner_res, proxy_res)
+        else:
+            return func_overload(*args, **kwargs)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):

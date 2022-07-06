@@ -8,10 +8,11 @@ from typing import Set
 from torch.fx import GraphModule
 from torch.nn import Module
 from torch.utils._pytree import tree_map
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._subclasses import FakeTensorMode
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.fx.experimental.proxy_tensor import make_fx, ProxyTensor, wrap_output
+from torch.fx.experimental.proxy_tensor import make_fx, ProxyTensor, wrap_output, ProxyTorchDispatchMode
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -178,7 +179,8 @@ def cudagraphs(model, inputs):
 
     # Your interpreter
     t = ApplyCudaGraphs(model)
-    with FakeTensorMode.push() as mode:
+    with FakeTensorMode.push() as mode, ProxyTorchDispatchMode.push(t.tracer, trace_factory=False) as proxy_mode:
+        t.proxy_mode = proxy_mode
         t.run(*map(mode.from_tensor, inputs))
     model = t.new_module
     model.recompile()
