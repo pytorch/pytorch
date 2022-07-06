@@ -178,10 +178,6 @@ __all__ = [
     #
     "uniform",
     #
-    # Padding prims
-    #
-    "constant_pad_nd",
-    #
     # FFT prims
     #
     "fft_r2c",
@@ -431,6 +427,9 @@ def _elementwise_meta(
         elif isinstance(arg, Number):
             scalar_type = type(arg)
 
+    if dtype is None and scalar_type is not None:
+        dtype = utils.type_to_dtype(scalar_type)
+
     # Acquires the device (if it exists) or number
     device = None
     number = None
@@ -632,7 +631,7 @@ ceil = _make_elementwise_unary_prim(
 )
 
 
-def _conj_physical_meta(input: TensorLikeType):
+def _conj_physical_meta(input: TensorLikeType) -> TensorLikeType:
     if not input.dtype.is_complex:
         raise RuntimeError("prims.conj_physical is only defined for complex dtypes")
 
@@ -2193,7 +2192,7 @@ copy_to = _make_prim(
 
 
 def _resize_meta(a: TensorLikeType, shape: ShapeType):
-    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
+    return a.resize_(shape)
 
 
 def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
