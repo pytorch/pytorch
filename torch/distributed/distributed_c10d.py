@@ -2441,6 +2441,101 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         work.wait()
 
 
+def reduce_scatter_v(output, input, input_split_sizes=None, op=ReduceOp.SUM, group=None, async_op=False):
+    """
+    Each process reduces and then scatters a flattened tensor split according to
+    input_split_sizes to all processes in a group.
+
+    Args:
+        output (Tensor): Output tensor.
+        input (Tensor): Input tensor to reduce and scatter.
+        input_split_sizes (list[Int], optional): Input split sizes for dim 0
+            if specified None or empty, dim 0 of ``input`` tensor must divide
+            equally by ``world_size``.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        List of async work handles, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    .. warning::
+        `reduce_scatter_v` is experimental and subject to change.
+
+    Examples:
+        >>> input = torch.arange(4) + rank * 4
+        >>> input
+        tensor([0, 1, 2, 3])     # Rank 0
+        tensor([4, 5, 6, 7])     # Rank 1
+        tensor([8, 9, 10, 11])   # Rank 2
+        tensor([12, 13, 14, 15]) # Rank 3
+        >>> output = torch.empty([1], dtype=torch.int64)
+        >>> dist.reduce_scatter_v(output, input)
+        >>> output
+        tensor([24])    # Rank 0
+        tensor([28])    # Rank 1
+        tensor([32])    # Rank 2
+        tensor([36])    # Rank 3
+
+        >>> # Another example with uneven split
+        >>> input
+        tensor([0, 1, 2, 3, 4, 5])                                      # Rank 0
+        tensor([10, 11, 12, 13, 14, 15])                                # Rank 1
+        tensor([20, 21, 22, 23, 24, 25])                                # Rank 2
+        tensor([30, 31, 32, 33, 34, 35])                                # Rank 3
+        >>> input_splits
+        [2, 2, 1, 1]
+        >>> output = torch.empty([input_splits[rank]], dtype=torch.int64)
+        >>> dist.reduce_scatter_v(output, input, input_splits)
+        >>> output
+        tensor([ 60, 64])                             # Rank 0
+        tensor([ 68, 72])                             # Rank 1
+        tensor([ 76])                                 # Rank 2
+        tensor([ 80])                                 # Rank 3
+    """
+    group_size = get_world_size(group)
+    if input_split_sizes is None:
+        return reduce_scatter(output, list(torch.chunk(input, group_size, dim=0)), op, group, async_op)
+
+    _check_single_tensor(output, "output")
+    _check_single_tensor(input, "input")
+    if _rank_not_in_group(group):
+        _warn_not_in_group("reduce_scatter_v")
+        return
+
+    opts = ReduceOptions()
+    opts.reduceOp = op
+
+    backend = get_backend(group)
+    my_rank = get_rank(group)
+    req = None
+
+    start_len = 0
+    with _batch_p2p_manager(backend):
+        for dst in range(group_size):
+            end_len = start_len + input_split_sizes[dst]
+            opts.rootRank = dst
+            input_tensors = [input[start_len:end_len]]
+            if dst == my_rank:
+                output_tensors = [output]
+            else:
+                output_tensors = input_tensors
+            if group is None:
+                default_pg = _get_default_group()
+                work = default_pg._reduce(output_tensors, input_tensors, opts)
+            else:
+                work = group._reduce(output_tensors, input_tensors, opts)
+            start_len = end_len
+            if dst == my_rank:
+                req = work
+
+    if async_op:
+        return req
+    else:
+        req.wait()
+
+
 def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.

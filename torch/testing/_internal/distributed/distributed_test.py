@@ -2196,6 +2196,40 @@ class DistributedTest:
                 rank_to_GPU,
             )
 
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports reduce_scatter_v")
+        @sandcastle_skip_if(BACKEND in DistTestCases.skip_collective["reduce"], f"{BACKEND} does not support reduce")
+        @skip_if_no_gpu
+        def test_reduce_scatter_v_cuda(self):
+            self._barrier()
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            input_split_sizes = []
+            for src in group:
+                input_split_sizes.append(src + 1)
+            start_len = sum(input_split_sizes[:rank])
+            end_len = start_len + input_split_sizes[rank]
+            sum_len = sum(input_split_sizes)
+            master_value = 2
+            worker_value = 10
+
+            for async_val in [True, False]:
+                tensor = _build_tensor(sum_len, worker_value, device_id=device_id)
+                tensor[start_len:end_len].fill_(master_value)
+                out_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float).fill_(-1).cuda(device_id)
+
+                req = dist.reduce_scatter_v(out_tensor, tensor, input_split_sizes, dist.ReduceOp.SUM, group_id, async_val)
+                if async_val:
+                    req.wait()
+
+                expected_value = 2 + (10 * (len(group) - 1))
+                expected_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float)
+                expected_tensor = expected_tensor.fill_(expected_value).cuda(device_id)
+
+                self._barrier()
+                self.assertEqual(out_tensor, expected_tensor)
+
         @skip_if_no_gpu
         @require_backend(DistTestCases.backend_feature["gpu"])
         def test_all_reduce_result_cuda(self):
