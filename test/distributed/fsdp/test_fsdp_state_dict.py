@@ -207,6 +207,9 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("checkpoint_wrap", ["first", "second", "both"])
     def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
+        """Tests saving the state dict, zeroing a target model's parameters, and
+        loading the state dict, where the source and target models may have a
+        checkpoint wrapper."""
         for model_call in [
             partial(self._get_simple_model),
             partial(self._get_simple_nested_model)
@@ -224,8 +227,8 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_rank0_offload_save_load_flow(self):
-        """Tests saving a model checkpoint only on rank 0 and loading it on
-        rank 0 only with ``sync_module_states=True`` to emulate the workflow to
+        """Tests saving a model checkpoint only on rank 0 and loading it only
+        on rank 0 with ``sync_module_states=True`` to emulate the workflow to
         avoid redundant CPU memory usage."""
         auto_wrap_policy = partial(
             transformer_auto_wrap_policy,
