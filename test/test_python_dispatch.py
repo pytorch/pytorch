@@ -278,6 +278,12 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+    def test_error_for_unsupported_ns_or_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            my_lib1 = Library("myns", "BLA")
+
+        with self.assertRaisesRegex(ValueError, "reserved namespace"):
+            my_lib1 = Library("prim", "DEF")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -352,20 +358,23 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1))
             log_input("x", x)
-            torch.ops.aten._foobar(x)
-            torch.ops.aten._foobar(x, False)
-            torch.ops.aten._foobar(x, arg3=False)
-            torch.ops.aten._foobar(x, False, arg3=False)
+            log_input("y", y)
+            torch.ops.aten.kl_div(x, y)
+            torch.ops.aten.kl_div(x, y, 2)
+            torch.ops.aten.kl_div(x, y, log_target=True)
+            torch.ops.aten.kl_div(x, y, 2, log_target=True)
 
-        # What we are testing here is that we omit arg2
+        # What we are testing here is that we omit reduction
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten._foobar.default($0)
-$2 = torch._ops.aten._foobar.default($0, False)
-$3 = torch._ops.aten._foobar.default($0, arg3=False)
-$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
+$1 = input('y')
+$2 = torch._ops.aten.kl_div.default($0, $1)
+$3 = torch._ops.aten.kl_div.default($0, $1, 2)
+$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -1756,6 +1765,52 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
+
+    def test_layout_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            data = torch.randn(6, 2)
+
+            class LayoutNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class LayoutCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return torch.sparse_csr
+                    return NotImplemented
+
+            class LayoutDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return data.layout
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.prim.layout'"
+            e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.layout
+
+            e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.sparse_csr)
+
+            e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.strided)
 
 if __name__ == '__main__':
     run_tests()
