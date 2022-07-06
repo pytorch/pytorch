@@ -127,7 +127,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             if self.rank == 0:
                 wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
             else:
-                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result, c10d.ReduceOp.SUM)
+                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
         self._validate_error(
             exception=cm.exception,
             op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",

@@ -2255,7 +2255,7 @@ class DistributedTest:
                 tensor = tensor.cuda(rank_to_GPU[rank][0])
 
                 opts = AllreduceOptions()
-                opts.reduceOp = dist.ReduceOp(dist.ReduceOp.SUM)
+                opts.reduceOp = dist.ReduceOp.SUM
 
                 if group_id == GroupMember.WORLD:
                     work = _get_default_group().allreduce([tensor], opts)

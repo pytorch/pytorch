@@ -108,7 +108,7 @@ struct BroadcastOptions {
 };
 
 struct AllreduceOptions {
-  ReduceOp reduceOp;
+  ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
@@ -136,7 +136,7 @@ struct ScatterOptions {
 };
 
 struct ReduceScatterOptions {
-  ReduceOp reduceOp;
+  ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

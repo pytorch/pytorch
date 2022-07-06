@@ -563,6 +563,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Ref: [Implicit conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   py::implicitly_convertible<::c10d::ReduceOp::Kind, ::c10d::ReduceOp>();
 
+// #ifdef USE_C10D_NCCL
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && ((NCCL_MAJOR * 100 + NCCL_MINOR) >= 211)
   module
       .def(
           "make_nccl_premul_sum",
@@ -576,6 +578,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
+// #endif
+// #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -1056,6 +1060,15 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  const ::c10d::AllreduceOptions& opts) {
+// #ifdef USE_C10D_NCCL
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && ((NCCL_MAJOR * 100 + NCCL_MINOR) >= 211)
+                if (self->getBackendName() == "nccl") {
+                  if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
+                    return ::c10d::ops::nccl_premulsum_allreduce(self, tensors, opts);
+                  }
+                }
+// #endif
+// #endif
                 return ::c10d::ops::allreduce(self, tensors, opts);
               },
               py::arg("tensors"),
@@ -1069,7 +1082,16 @@ Arguments:
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                return ::c10d::ops::allreduce(self, xs, opts);
+// #ifdef USE_C10D_NCCL
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && ((NCCL_MAJOR * 100 + NCCL_MINOR) >= 211)
+                if (pg->getBackendName() == "nccl") {
+                  if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
+                    return ::c10d::ops::nccl_premulsum_allreduce(pg, xs, opts);
+                  }
+                }
+// #endif
+// #endif
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1083,7 +1105,16 @@ Arguments:
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                return ::c10d::ops::allreduce(self, xs, opts);
+// #ifdef USE_C10D_NCCL
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && ((NCCL_MAJOR * 100 + NCCL_MINOR) >= 211)
+                if (pg->getBackendName() == "nccl") {
+                  if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
+                    return ::c10d::ops::nccl_premulsum_allreduce(pg, xs, opts);
+                  }
+                }
+// #endif
+// #endif
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,

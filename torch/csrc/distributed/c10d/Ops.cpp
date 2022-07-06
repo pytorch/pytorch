@@ -37,7 +37,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
 // NCCL specific PREMUL_SUM Reductions
 // NCCL 2.11.1-1 introduced "User Defined Reduction Operators"
 //   - https://docs.nvidia.com/deeplearning/nccl/archives/nccl_21212/user-guide/docs/api/ops.html
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
 c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce_with_scaling_tensors_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -45,7 +45,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce_with_scaling_ten
     at::TensorList scale_tensors,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  auto scale_tensor_vec = scale_tensors.vec();
+  auto scale_tensors_vec = scale_tensors.vec();
   return process_group->allreduce(
       tensor_vec,
       AllreduceOptions{
@@ -66,11 +66,11 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce_with_scaling_sca
       tensor_vec,
       AllreduceOptions{
         c10d::makeNCCLPreMulSum(double_factor),
-        std:::chrono::milliseconds(timeout)
+        std::chrono::milliseconds(timeout)
       }
-  )
+  );
 }
-#endif
+// #endif
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -216,7 +216,7 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
   m.def(
       "nccl_premulsum_allreduce_with_scaling_tensors_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, nccl_premulsum_allreduce_with_scaling_tensors_)
@@ -225,7 +225,7 @@ TORCH_LIBRARY(c10d, m) {
       "nccl_premulsum_allreduce_with_scaling_scalar_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, nccl_premulsum_allreduce_with_scaling_scalar_)
   );
-#endif
+// #endif
 }
 } // namespace
 
@@ -431,7 +431,7 @@ c10::intrusive_ptr<ProcessGroup::Work> recv(
   return op.call(tensors, process_group, srcRank, tag);
 }
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
 c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
@@ -439,7 +439,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
   TORCH_INTERNAL_ASSERT(process_group->getBackendName() == "nccl", "");
   const auto* preMulSumSupplement = reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(opts.reduceOp.supplement_.get());
   const bool has_tensor = !preMulSumSupplement->tensor_factors.empty();
-  if (!preMulSumSupplement->tensor_factors.empty()) {
+  if (has_tensor) {
     const double double_factor{preMulSumSupplement->double_factor};
     static auto op = c10::Dispatcher::singleton()
                         .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_scalar_", "")
@@ -453,7 +453,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
   } else {
     at::TensorList scale_factors{preMulSumSupplement->tensor_factors};
     static auto op = c10::Dispatcher::singleton()
-                        .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_scalar_", "")
+                        .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_tensors_", "")
                         .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                             at::TensorList,
                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
@@ -463,7 +463,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
     return op.call(tensors, process_group, static_cast<int64_t>(opts.reduceOp), scale_factors, opts.timeout.count());
   }
 }
-#endif
+// #endif
 
 } // namespace ops
 } // namespace c10d
