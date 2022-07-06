@@ -102,6 +102,27 @@ using vec3 = vec<3u>;
 using vec4 = vec<4u>;
 
 } // namespace utils
+
+inline bool operator==(
+    const utils::uvec3& _1,
+    const utils::uvec3& _2) {
+
+  return (_1.data[0u] == _2.data[0u] && \
+          _1.data[1u] == _2.data[1u] && \
+          _1.data[2u] == _2.data[2u]);
+}
+
+inline VkOffset3D create_offset3d(const utils::uvec3& offsets) {
+  return VkOffset3D{
+    static_cast<int32_t>(offsets.data[0u]),
+    static_cast<int32_t>(offsets.data[1u]),
+    static_cast<int32_t>(offsets.data[2u])};
+}
+
+inline VkExtent3D create_extent3d(const utils::uvec3& extents) {
+  return VkExtent3D{extents.data[0u], extents.data[1u], extents.data[2u]};
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
