@@ -65,8 +65,8 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

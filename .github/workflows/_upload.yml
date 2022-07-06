@@ -11,6 +11,14 @@ on:
         type: boolean
         default: true
         description: If true, will download artifacts from s3. Otherwise will use the default github artifact download action
+      PYTORCH_ROOT:
+        required: false
+        type: string
+        description: Root directory for the pytorch/pytorch repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
+      BUILDER_ROOT:
+        required: false
+        type: string
+        description: Root directory for the pytorch/builder repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
       PACKAGE_TYPE:
         required: true
         type: string
