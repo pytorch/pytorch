@@ -1538,7 +1538,7 @@ void argmax_argmin_out_mps
                  input_t.scalar_type() != ScalarType::Half)
                 castInputTensor =  [mpsGraph castTensor:inputTensor
                                                  toType:MPSDataTypeFloat32
-                                                   name:nil];
+                                                   name:@"castInputTensor"];
               else
                 castInputTensor = inputTensor;
 
@@ -1554,7 +1554,7 @@ void argmax_argmin_out_mps
               }
               MPSGraphTensor* outputTensor = [mpsGraph castTensor:argreduceOutTensor
                                                            toType:MPSDataTypeInt64
-                                                             name:nil];
+                                                             name:@"castOutpuTensor"];
 
               newCachedGraph->inputTensor_ = inputTensor;
               newCachedGraph->outputTensor_ = outputTensor;
