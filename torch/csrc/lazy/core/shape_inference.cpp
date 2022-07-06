@@ -499,16 +499,6 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_kl_div_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   // TODO(whc) support cat in codegen and move this to compute_*_cat functions
   std::vector<int64_t> out_shape(
@@ -689,25 +679,25 @@ std::vector<Shape> compute_shape_native_dropout_backward(
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t from,
     c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
@@ -735,7 +725,7 @@ std::vector<Shape> compute_shape_sum(
   ;
 }
 
-std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
+std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
