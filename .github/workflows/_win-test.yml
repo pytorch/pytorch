@@ -15,6 +15,13 @@ on:
         required: true
         type: string
         description: JSON description of what test configs to run.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -79,12 +86,16 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          export PR_BODY="${PR_BODY//[$'\n\r']}"
+
           .jenkins/pytorch/win-test.sh
 
       - name: Get workflow job id
@@ -110,7 +121,6 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
