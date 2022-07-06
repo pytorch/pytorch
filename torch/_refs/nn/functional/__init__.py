@@ -225,7 +225,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_ref_decomposition(torch.ops.aten.softplus)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -262,7 +262,7 @@ def softplus(
 
 
 @register_ref_decomposition(torch.ops.aten.hardshrink)
-@out_wrapper
+@out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # hardshrink(x) = x if x > lambd
@@ -272,7 +272,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
 
 
 @register_ref_decomposition(torch.ops.aten.softshrink)
-@out_wrapper
+@out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # softshrink(x) = x - lambd if x > lambd
@@ -417,7 +417,7 @@ def hardtanh(
 
 
 @register_ref_decomposition(torch.ops.aten.gelu)
-@out_wrapper
+@out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),

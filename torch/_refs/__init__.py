@@ -345,7 +345,7 @@ def _make_elementwise_unary_reference(
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper
+        @out_wrapper()
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -464,7 +464,7 @@ def exp2(a):
 
 # Fill has its own implementation because it has a value parameter
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -557,7 +557,7 @@ def log10(a):
     return prims.log10(a)
 
 
-@out_wrapper
+@out_wrapper()
 def log_softmax(
     a: TensorLikeType,
     dim: int,
@@ -570,7 +570,7 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
-@out_wrapper
+@out_wrapper()
 def logsumexp(
     a: TensorLikeType,
     dim: DimsType,
@@ -593,7 +593,7 @@ def logsumexp(
 
 
 @register_ref_decomposition(torch.ops.aten.nan_to_num)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -760,7 +760,7 @@ def _make_elementwise_binary_reference(
         return prim(a, b)
 
     if has_out:
-        _ref = out_wrapper(_ref)
+        _ref = out_wrapper()(_ref)
 
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
@@ -772,7 +772,7 @@ def _make_elementwise_binary_reference(
 
 # Add has its own implementation because it has an alpha argument
 @register_ref_decomposition(torch.ops.aten.add)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -876,7 +876,7 @@ copysign = _make_elementwise_binary_reference(
 
 
 @register_ref_decomposition(torch.ops.aten.div)
-@out_wrapper
+@out_wrapper()
 def div(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
@@ -910,7 +910,7 @@ eq = _make_elementwise_binary_reference(
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
-@out_wrapper
+@out_wrapper()
 def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
@@ -1274,7 +1274,7 @@ remainder = _make_elementwise_binary_reference(
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
 @register_ref_decomposition(torch.ops.aten.sub)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1338,7 +1338,7 @@ trunc_divide = _make_elementwise_binary_reference(
 
 
 @register_ref_decomposition(torch.ops.aten.clamp)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "min", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1371,7 +1371,7 @@ def clamp(
     return a
 
 
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "min"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1383,7 +1383,7 @@ def clamp_min(
     return clamp(self, min=min)
 
 
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1402,7 +1402,7 @@ def clamp_max(
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
 @register_ref_decomposition(torch.ops.aten.where)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -1532,7 +1532,7 @@ py_all = all
 
 
 @register_ref_decomposition(torch.ops.aten.all)
-@out_wrapper
+@out_wrapper()
 def all(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1555,7 +1555,7 @@ def all(
 
 
 @register_ref_decomposition(torch.ops.aten.any)
-@out_wrapper
+@out_wrapper()
 def any(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1692,7 +1692,7 @@ def _set_correction(
     return correction
 
 
-@out_wrapper
+@out_wrapper()
 def var(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1719,7 +1719,7 @@ def var(
     return result
 
 
-@out_wrapper
+@out_wrapper()
 def std(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1822,7 +1822,7 @@ def var_mean(
 
 
 @register_ref_decomposition(torch.ops.aten.addr)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "vec1", "vec2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1952,7 +1952,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
 
 
 @register_ref_decomposition(torch.ops.aten.cat)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -1987,7 +1987,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper
+@out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = tuple(
         x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
@@ -1997,7 +1997,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper
+@out_wrapper()
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
     aligned_tensors = atleast_3d(*tensors)
@@ -2405,7 +2405,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
 
 
 @register_ref_decomposition(torch.ops.aten.stack)
-@out_wrapper
+@out_wrapper()
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     assert len(tensors) > 0, "stack expects a non-empty TensorList"
     wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
@@ -2421,7 +2421,7 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
-@out_wrapper
+@out_wrapper()
 def softmax(
     a: TensorLikeType,
     dim: int,
@@ -2440,7 +2440,7 @@ def softmax(
 
 
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper
+@out_wrapper()
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
     aligned_tensors = atleast_1d(*tensors)
@@ -2450,7 +2450,7 @@ def hstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper
+@out_wrapper()
 def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
     aligned_tensors = atleast_2d(*tensors)
@@ -2705,7 +2705,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@out_wrapper
+@out_wrapper()
 def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
@@ -2763,7 +2763,7 @@ def empty_strided(
 
 
 # TODO: missing kwargs (e.g. layout)
-@out_wrapper
+@out_wrapper()
 def full(
     shape: ShapeType,
     fill_value: NumberType,
