@@ -258,32 +258,36 @@ bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
 
   auto dims = input.sizes();
   auto strides = input.strides();
+  bool mkldnn_conv_is_cont = true, mkldnn_conv_is_cl = true;
   if (input_dim == 4) {
     const auto n = 0, c = 1, h = 2, w = 3;
-    if ((is_channels_last &&
-         !(strides[n] == dims[h] * dims[w] * dims[c] &&
-           strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-           strides[c] == 1)) &&
-        (is_cont &&
-         !(strides[n] == dims[c] * dims[h] * dims[w] &&
-           strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
-           strides[w] == 1))) {
-      return false;
-    }
+    mkldnn_conv_is_cont =
+        (strides[n] == dims[c] * dims[h] * dims[w] &&
+         strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
+         strides[w] == 1);
+    mkldnn_conv_is_cl =
+        (strides[n] == dims[h] * dims[w] * dims[c] &&
+         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+         strides[c] == 1);
   } else {
     const auto n = 0, c = 1, d = 2, h = 3, w = 4;
-    if ((is_channels_last &&
-         !(strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
-           strides[d] == dims[h] * dims[w] * dims[c] &&
-           strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
-           strides[c] == 1)) &&
-        (is_cont &&
-         !(strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
-           strides[c] == dims[d] * dims[h] * dims[w] &&
-           strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
-           strides[w] == 1))) {
-      return false;
-    }
+    mkldnn_conv_is_cont =
+        (strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
+         strides[c] == dims[d] * dims[h] * dims[w] &&
+         strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
+         strides[w] == 1);
+    mkldnn_conv_is_cl =
+        (strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
+         strides[d] == dims[h] * dims[w] * dims[c] &&
+         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+         strides[c] == 1);
+  }
+  if (is_channels_last && is_cont) {
+    return (mkldnn_conv_is_cont || mkldnn_conv_is_cl);
+  } else if (is_channels_last) {
+    return mkldnn_conv_is_cl;
+  } else if (is_cont) {
+    return mkldnn_conv_is_cont;
   }
   return true;
 }
