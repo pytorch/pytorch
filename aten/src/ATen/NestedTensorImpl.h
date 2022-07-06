@@ -70,7 +70,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   }
   IntArrayRef sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
-  c10::SymIntArrayRef sym_sizes() const override;
+  c10::SymIntArrayRef sym_sizes() const;
   IntArrayRef strides_custom() const override;
 
   // this one is real
