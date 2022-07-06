@@ -46,7 +46,7 @@ class _ExecutionInfo:
 
         _traced_param_set: a set containing all parameters that have been traced.
 
-        module_execution_info_dict: a dict that maps each module to a list of
+        module_to_execution_infos: a dict that maps each module to a list of
             tuples each containing a module and a list of named parameters.
             For a given module, each tuple:
             1. either contains this module and part of its ``named_parameters`` that will be executed together,
@@ -56,7 +56,7 @@ class _ExecutionInfo:
 
     current_module: torch.nn.Module
     module_forward_order: List[torch.nn.Module]
-    module_execution_info_dict: Dict[
+    module_to_execution_infos: Dict[
         torch.nn.Module,
         List[Tuple[torch.nn.Module, List[Tuple[str, torch.nn.Parameter]]]],
     ]
@@ -75,7 +75,7 @@ def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
     return _ExecutionInfo(
         current_module=root_module,
         module_forward_order=[root_module],
-        module_execution_info_dict={root_module: []},
+        module_to_execution_infos={root_module: []},
     )
 
 
@@ -95,7 +95,7 @@ def _patched_create_proxy(
     Override of :meth:`~torch.fx.Tracer.create_proxy`.
     ``Tracer.create_proxy`` is called in symbolic tracing for each leaf function/method/module.
     This override intercepts the recording of each of these operations to
-    update ``execution_info.module_execution_info_dict``.
+    update ``execution_info.module_to_execution_infos``.
 
     Args:
         create_proxy (Callable):
@@ -137,11 +137,11 @@ def _patched_create_proxy(
                         execution_info.param_exec_order.append(param)
                         execution_info._traced_param_set.add(param)
             if named_params:
-                execution_info.module_execution_info_dict[module].append((module, named_params))
+                execution_info.module_to_execution_infos[module].append((module, named_params))
     elif kind == "call_module":
         named_params = list(module.named_parameters())
         if named_params:
-            execution_info.module_execution_info_dict[module].append(
+            execution_info.module_to_execution_infos[module].append(
                 (module, named_params)
             )
         for (_, p) in named_params:
@@ -163,7 +163,7 @@ def _patched_call_module(
     Override of :meth:`~torch.fx.Tracer.call_module`.
     ``Tracer.call_module`` is called in symbolic tracing for each non-root module.
     This override intercepts the recording of each operation to
-    update ``execution_info.module_forward_order`` and ``execution_info.module_execution_info_dict``.
+    update ``execution_info.module_forward_order`` and ``execution_info.module_to_execution_infos``.
 
     Args:
         call_module (Callable):
@@ -182,7 +182,7 @@ def _patched_call_module(
     execution_info.module_forward_order.append(module)
     named_params = list(module.named_parameters())
     if named_params:
-        execution_info.module_execution_info_dict[execution_info.current_module].append(
+        execution_info.module_to_execution_infos[execution_info.current_module].append(
             (module, list(module.named_parameters()))
         )
     # Stores away current_module for restoration later
@@ -190,7 +190,7 @@ def _patched_call_module(
     execution_info.current_module = module
     # Note that if the forward of module is called multiple times, this will record
     # the execution info of the last forward pass.
-    execution_info.module_execution_info_dict[module] = []
+    execution_info.module_to_execution_infos[module] = []
     output = call_module(module, forward, args, kwargs)
     execution_info.current_module = prev_current_module
     return output

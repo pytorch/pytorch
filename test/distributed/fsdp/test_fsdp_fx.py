@@ -71,9 +71,9 @@ class TestSymbolicTracing(FSDPTest):
         self.assertEqual(
             execution_info.module_forward_order, correct_module_forward_order
         )
-        # test execution_info.module_execution_info_dict
+        # test execution_info.module_to_execution_infos
         self.assertEqual(
-            execution_info.module_execution_info_dict[model],
+            execution_info.module_to_execution_infos[model],
             [
                 (model.layer0, list(model.layer0.named_parameters())),
                 (model.layer2, list(model.layer2.named_parameters())),
@@ -84,21 +84,21 @@ class TestSymbolicTracing(FSDPTest):
             ],
         )
         self.assertEqual(
-            execution_info.module_execution_info_dict[model.layer0],
+            execution_info.module_to_execution_infos[model.layer0],
             [(model.layer0, list(model.layer0.named_parameters()))],
         )
         self.assertEqual(
-            execution_info.module_execution_info_dict[model.layer1],
+            execution_info.module_to_execution_infos[model.layer1],
             [(model.layer1, list(model.layer1.named_parameters()))],
         )
         self.assertEqual(
-            execution_info.module_execution_info_dict[model.layer2],
+            execution_info.module_to_execution_infos[model.layer2],
             [
                 (model.layer2[0], list(model.layer2[0].named_parameters())),
                 (model.layer2[2], list(model.layer2[2].named_parameters())),
             ],
         )
-        self.assertEqual(execution_info.module_execution_info_dict[model.relu], [])
+        self.assertEqual(execution_info.module_to_execution_infos[model.relu], [])
         # test tracer.param_exec_order
         correct_param_order = [
             model.layer0.weight,
