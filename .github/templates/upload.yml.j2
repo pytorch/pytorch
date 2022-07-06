@@ -8,6 +8,9 @@
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
+{%- else %}
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in

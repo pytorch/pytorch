@@ -119,6 +119,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-build
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -220,6 +222,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-build
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -321,6 +325,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-build
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -422,6 +428,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-build
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

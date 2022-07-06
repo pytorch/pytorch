@@ -40,6 +40,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -57,6 +59,8 @@ jobs:
     needs: conda-py3_7-cpu-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -73,6 +77,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -91,6 +97,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -109,6 +117,8 @@ jobs:
     needs: conda-py3_7-cuda10_2-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -126,6 +136,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda10_2-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -145,6 +157,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -163,6 +177,8 @@ jobs:
     needs: conda-py3_7-cuda11_3-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -180,6 +196,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_3-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -199,6 +217,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -217,6 +237,8 @@ jobs:
     needs: conda-py3_7-cuda11_6-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -234,6 +256,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_6-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -253,6 +277,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -270,6 +296,8 @@ jobs:
     needs: conda-py3_8-cpu-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -286,6 +314,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -304,6 +334,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -322,6 +354,8 @@ jobs:
     needs: conda-py3_8-cuda10_2-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -339,6 +373,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda10_2-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -358,6 +394,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -376,6 +414,8 @@ jobs:
     needs: conda-py3_8-cuda11_3-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -393,6 +433,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_3-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -412,6 +454,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -430,6 +474,8 @@ jobs:
     needs: conda-py3_8-cuda11_6-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -447,6 +493,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_6-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -466,6 +514,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -483,6 +533,8 @@ jobs:
     needs: conda-py3_9-cpu-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -499,6 +551,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -517,6 +571,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -535,6 +591,8 @@ jobs:
     needs: conda-py3_9-cuda10_2-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -552,6 +610,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda10_2-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -571,6 +631,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -589,6 +651,8 @@ jobs:
     needs: conda-py3_9-cuda11_3-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -606,6 +670,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_3-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -625,6 +691,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -643,6 +711,8 @@ jobs:
     needs: conda-py3_9-cuda11_6-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -660,6 +730,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_6-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -679,6 +751,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -696,6 +770,8 @@ jobs:
     needs: conda-py3_10-cpu-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -712,6 +788,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -730,6 +808,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -748,6 +828,8 @@ jobs:
     needs: conda-py3_10-cuda10_2-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -765,6 +847,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda10_2-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -784,6 +868,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -802,6 +888,8 @@ jobs:
     needs: conda-py3_10-cuda11_3-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -819,6 +907,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_3-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -838,6 +928,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -856,6 +948,8 @@ jobs:
     needs: conda-py3_10-cuda11_6-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -873,6 +967,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_6-test
     with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

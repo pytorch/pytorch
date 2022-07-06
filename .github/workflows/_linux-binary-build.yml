@@ -11,6 +11,14 @@ on:
         required: true
         type: string
         description: The build environment
+      PYTORCH_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/pytorch repository
+      BUILDER_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
