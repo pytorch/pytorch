@@ -89,6 +89,8 @@ class Linear(torch.nn.Module):
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor],
                         row_block_size: Optional[int], col_block_size: Optional[int]) -> None:
         assert row_block_size is not None and col_block_size is not None
+        self.out_features = w.shape[0]
+        self.in_features = w.shape[1]
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
