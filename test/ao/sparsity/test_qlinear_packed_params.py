@@ -126,7 +126,7 @@ class TestQlinearPackedParams(TestCase):
             self.assertEqual(quantization_scheme_, is_per_tensor_quantized)
             self.assertEqual(row_block_indices_, expected_row_block_indices)
             self.assertEqual(col_block_indices_, expected_col_block_indices)
-            self.assertEqual(weights_.tolist(), expected_weights)
+            self.assertEqual(weights_.tolist(), [v + 128 for v in expected_weights])  # weights are serialized as +128
             self.assertEqual(output_channels_, weight.shape[0])
             self.assertEqual(input_channels_, weight.shape[1])
 

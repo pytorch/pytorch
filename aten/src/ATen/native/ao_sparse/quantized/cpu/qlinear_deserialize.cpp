@@ -109,13 +109,28 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
         device(c10::kCPU).dtype(c10::kQInt8));
   }
 
+  const at::Tensor loaded_weight_values =
+      std::get<weight_values_index>(serialized);
+  const uint8_t* loaded_weight_values_ptr =
+      loaded_weight_values.data_ptr<uint8_t>();
+  const int64_t loaded_weight_values_size = loaded_weight_values.numel();
+  // Subtract 128 because we serialize as +128, which s best for
+  // minimizing memory footprint for QNNPack
+  std::vector<int8_t> weight_values(loaded_weight_values_size);
+  std::transform(
+      loaded_weight_values_ptr,
+      loaded_weight_values_ptr + loaded_weight_values_size,
+      weight_values.begin(),
+      [](uint8_t v) {
+        return static_cast<int8_t>(static_cast<int16_t>(v) - 128);
+      });
+
   // Unpack as non backend specific untiled BCSR then pack as Fbgemm tiled BCSR
   // because untiled Fbgemm BCSR currently doesn't exist
   unpack_bcsr(
       reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>()),
       ao::sparse::BCSR(
-          unwrap_vector<int8_t, int8_t>(
-              std::get<weight_values_index>(serialized)), // Weight Values
+          std::move(weight_values),
           unwrap_vector<int32_t, int32_t>(
               std::get<row_block_indices_index>(serialized)), // Row Indices
           unwrap_vector<int32_t, int32_t>(
@@ -219,19 +234,19 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     TORCH_CHECK(false, "Unsupported quantization scheme.");
   }
 
-  const at::Tensor& row_block_indices =
+  deserialized_bcsr_row_block_indices_ =
       std::get<row_block_indices_index>(serialized);
-  const at::Tensor& col_block_indices =
+  deserialized_bcsr_col_block_indices_ =
       std::get<col_block_indices_index>(serialized);
-  const at::Tensor& weight_values = std::get<weight_values_index>(serialized);
+  deserialized_bcsr_weight_values_ = std::get<weight_values_index>(serialized);
 
   bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(
-      col_block_indices.data_ptr<int32_t>(),
-      row_block_indices.data_ptr<int32_t>(),
-      weight_values.data_ptr<int8_t>(),
-      col_block_indices.numel(),
-      row_block_indices.numel(),
-      weight_values.numel(),
+      (uint32_t*)deserialized_bcsr_col_block_indices_.data_ptr<int32_t>(),
+      (uint32_t*)deserialized_bcsr_row_block_indices_.data_ptr<int32_t>(),
+      deserialized_bcsr_weight_values_.data_ptr<uint8_t>(),
+      deserialized_bcsr_col_block_indices_.numel(),
+      deserialized_bcsr_row_block_indices_.numel(),
+      deserialized_bcsr_weight_values_.numel(),
       out_features_block_size_,
       in_features_block_size_);
 }

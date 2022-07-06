@@ -24,7 +24,7 @@ using BCSRSerializationType =
         bool,                       // Quantization Scheme (true: per tensor, false: per channel)
         at::Tensor,                 // Wrapper for Row Block Indices (int32_t)
         at::Tensor,                 // Wrapper for Column Block Indices (int32_t)
-        at::Tensor,                 // Wrapper for Non-Zero Weight Values (int8_t)
+        at::Tensor,                 // Wrapper for Non-Zero Weight Values, each +128 (uint8_t)
         int64_t,                    // Number of Output Channels
         int64_t                     // Number of Input Channels
     >;
