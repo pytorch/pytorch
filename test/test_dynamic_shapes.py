@@ -303,11 +303,11 @@ class TestPySymInt(TestCase):
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.sym_size(0))
+        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.shape[0])
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
-        torch.ops.aten.expand.SymInt(x, [x.sym_size(0), x.sym_size(1), x.sym_size(2)])
+        torch.ops.aten.expand.SymInt(x, [x.shape[0], x.shape[1], x.shape[2]])
 
     def test_fx_trace_intlist(self):
         class CustomModule(torch.nn.Module):
@@ -327,7 +327,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = shape_env.create_symint("a0", 2)
         r = torch.empty(a0, device='meta')
-        self.assertIsInstance(r.sym_size(0), CPP_SYMINT_CLASS)
+        self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
 
 
 if __name__ == '__main__':
