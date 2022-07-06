@@ -232,7 +232,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         pg = self._create_process_group_gloo(store, self.rank, self.world_size, opts)
 
         # Execute 2x the number of operations to ensure we use every device.
-        for fut in [pg.allreduce(torch.ones(i + 1), op=c10d.ReduceOp(c10d.ReduceOp.SUM)).get_future() for i in range(4)]:
+        for fut in [pg.allreduce(torch.ones(i + 1)).get_future() for i in range(4)]:
             fut.wait()
 
     @requires_gloo()
@@ -417,7 +417,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tests = simple_reduce_tests(self.rank, self.world_size)
         for (op, input, expected) in tests:
             opts = c10d.AllreduceOptions()
-            opts.reduceOp = c10d.ReduceOp(op)
+            opts.reduceOp = op
             tensor = fn(input)
             fut = pg.allreduce([tensor], opts).get_future()
             fut.wait()
@@ -429,7 +429,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
         for (op, inputs, output) in tests:
             opts = c10d.AllreduceOptions()
-            opts.reduceOp = c10d.ReduceOp(op)
+            opts.reduceOp = op
             tensors = [fn(input) for input in inputs]
             fut = pg.allreduce(tensors, opts).get_future()
             fut.wait()
@@ -440,7 +440,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
-        fut = pg.allreduce(x, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).get_future()
+        fut = pg.allreduce(x).get_future()
         fut.wait()
         result = fut.value()
         self.assertEqual(
@@ -469,7 +469,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tests = simple_reduce_tests(self.rank, self.world_size)
         for (op, input, expected) in tests:
             opts = c10d.AllreduceOptions()
-            opts.reduceOp = c10d.ReduceOp(op)
+            opts.reduceOp = op
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
@@ -481,7 +481,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
         for (op, inputs, output) in tests:
             opts = c10d.AllreduceOptions()
-            opts.reduceOp = c10d.ReduceOp(op)
+            opts.reduceOp = op
             tensors = [fn(input) for input in inputs]
             work = pg.allreduce(tensors, opts)
             work.wait()
@@ -492,7 +492,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
-        work = pg.allreduce(x, op=c10d.ReduceOp(c10d.ReduceOp.SUM))
+        work = pg.allreduce(x)
         work.wait()
         result = work.result()
         self.assertEqual(
@@ -515,7 +515,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = [
-            pg.allreduce(inputs[i], op=c10d.ReduceOp(c10d.ReduceOp.SUM)).get_future() for i in range(len(inputs))
+            pg.allreduce(inputs[i]).get_future() for i in range(len(inputs))
         ]
         for i, future_handle in enumerate(future_handles):
             future_handle.wait()
@@ -592,7 +592,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         test_cases = simple_coalesced_reduce_tests(self.rank, self.world_size)
         for op, inputs, outputs in test_cases:
             opts = c10d.AllreduceCoalescedOptions()
-            opts.reduceOp = c10d.ReduceOp(op)
+            opts.reduceOp = op
             tensors = [fn(x) for x in inputs]
             fut = pg.allreduce_coalesced(tensors, opts).get_future()
             fut.wait()
@@ -676,7 +676,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for op in [c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX]:
             with self.assertRaisesRegex(RuntimeError, "unsupported reduction operation"):
                 opts = c10d.AllreduceOptions()
-                opts.reduceOp = c10d.ReduceOp(op)
+                opts.reduceOp = op
                 pg.allreduce([t3], opts)
 
     def _test_sparse_allreduce_basics(self, fn):
@@ -1289,7 +1289,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
             for root in range(self.world_size):
                 opts = c10d.ReduceOptions()
-                opts.reduceOp = c10d.ReduceOp(op)
+                opts.reduceOp = op
                 opts.rootRank = root
                 tmp = fn(input)
                 fut = pg.reduce([tmp], opts).get_future()
@@ -1407,7 +1407,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tensors = [torch.full(size, float(i)) for i in range(num)]
         for tensor in tensors:
             # Note: leak the returned work handle
-            pg.allreduce(tensor, op=c10d.ReduceOp(c10d.ReduceOp.SUM))
+            pg.allreduce(tensor)
 
         # Barrier should ensure all previous work has completed
         pg.barrier().get_future().wait()
@@ -1462,7 +1462,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg = create(num=num_process_groups, prefix=i)
             for _ in range(3):
                 tensor = torch.ones([10, 10])
-                pg.allreduce(tensor, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+                pg.allreduce(tensor).wait()
                 self.assertEqual(torch.full([10, 10], float(self.world_size)), tensor)
             del pg
 

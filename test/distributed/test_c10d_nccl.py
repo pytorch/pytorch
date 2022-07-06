@@ -317,14 +317,14 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
-            opts.reduceOp = op if isinstance(op, c10d.ReduceOp) else c10d.ReduceOp(op)
+            opts.reduceOp = op
             work = pg.allreduce(tensors, opts)
             work.wait()
 
         # Sum
         tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
 
-        allreduce(tensors, c10d.ReduceOp(c10d.ReduceOp.SUM))
+        allreduce(tensors, c10d.ReduceOp.SUM)
 
         ndev = float(self.world_size)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
@@ -401,7 +401,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             opts.rootRank = rootRank
             opts.rootTensor = rootTensor
             if op:
-                opts.reduceOp = op if isinstance(op, c10d.ReduceOp) else c10d.ReduceOp(op)
+                opts.reduceOp = op
             work = pg.reduce(xs, opts)
             work.wait()
 
@@ -811,7 +811,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         def reduce_scatter(outputs, input_lists, op):
             opts = c10d.ReduceScatterOptions()
-            opts.reduceOp = op if isinstance(op, c10d.ReduceOp) else c10d.ReduceOp(op)
+            opts.reduceOp = op
             work = pg.reduce_scatter(outputs, input_lists, opts)
             work.wait()
 
@@ -833,7 +833,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for gpu in local_device_ids:
             tensor_lists.append([t.cuda(device=gpu) for t in input_per_gpu])
 
-        reduce_scatter(output, tensor_lists, c10d.ReduceOp(c10d.ReduceOp.SUM))
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.SUM)
 
         for i in range(num_gpus):
             expected = torch.tensor(
@@ -885,24 +885,24 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Sum
         output_tensor = torch.empty_like(input_per_gpu[0][0]).cuda(self.rank)
         input_list = [tensor[0].cuda(self.rank) for tensor in input_per_gpu]
-        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.SUM).wait()
         expected = torch.tensor(
             float((1 + self.world_size) * self.world_size / 2) + self.world_size * self.rank
         )
         self.assertEqualIgnoreType(expected, output_tensor)
 
         # Min
-        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp(c10d.ReduceOp.MIN)).wait()
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MIN).wait()
         expected = torch.tensor(self.rank + 1)
         self.assertEqualIgnoreType(expected, output_tensor)
 
         # Max
-        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp(c10d.ReduceOp.MAX)).wait()
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MAX).wait()
         expected = torch.tensor(self.rank + self.world_size)
         self.assertEqualIgnoreType(expected, output_tensor)
 
         # Product
-        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp(c10d.ReduceOp.PRODUCT)).wait()
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.PRODUCT).wait()
         prod_val = self.rank + 1
         for k in range(1, self.world_size):
             prod_val = prod_val * (self.rank + 1 + k)
@@ -2352,9 +2352,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.world_size,
             timeout=timedelta(seconds=10),
         )
-        process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM))
+        process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM)
         if self.rank == 0:
-            work = process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM))
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM)
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
                 work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
@@ -2464,10 +2464,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         while True:
             try:
                 if not timeout:
-                    process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+                    process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM).wait()
                 else:
                     assert isinstance(timeout, timedelta)
-                    process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait(timeout=timeout)
+                    process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM).wait(timeout=timeout)
             except Exception as e:
                 if self._check_valid_comm_exception(e):
                     return
@@ -2490,13 +2490,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # to coordinate btwn ranks.
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
         failed_collective_timeout = timedelta(milliseconds=100)
-        process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait(timeout=timedelta(seconds=5))
+        process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM).wait(timeout=timedelta(seconds=5))
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
-                process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait(timeout=failed_collective_timeout)
+                process_group.allreduce(torch.rand(10).cuda(self.rank), op=c10d.ReduceOp.SUM).wait(timeout=failed_collective_timeout)
             # Now do a barrier to tell other rank to go ahead.
             pg_gloo.barrier().wait()
         else:
@@ -2623,7 +2623,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertTrue(pg.options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
-        pg.allreduce(t, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+        pg.allreduce(t, op=c10d.ReduceOp.SUM).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
 
@@ -2643,21 +2643,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Test with new_group
         pg = c10d.new_group([0, 1])
         t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-        pg.allreduce(t, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+        pg.allreduce(t, op=c10d.ReduceOp.SUM).wait()
         self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([0])
         if self.rank == 0:
             t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-            pg.allreduce(t, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+            pg.allreduce(t, op=c10d.ReduceOp.SUM).wait()
             self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([1])
         if self.rank == 1:
             t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-            pg.allreduce(t, op=c10d.ReduceOp(c10d.ReduceOp.SUM)).wait()
+            pg.allreduce(t, op=c10d.ReduceOp.SUM).wait()
             self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
