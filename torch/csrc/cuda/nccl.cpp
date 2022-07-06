@@ -450,7 +450,7 @@ void broadcast(
 
 void reduce(
     const std::vector<at::Tensor>& inputs,
-    at::Tensor& output,
+    const at::Tensor& output,
     int32_t root,
     int32_t op,
     const stream_list& streams,
@@ -496,7 +496,7 @@ void reduce(
 }
 
 void reduce(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     int32_t root,
     int32_t op,
     const stream_list& streams,
@@ -506,7 +506,7 @@ void reduce(
 
 void all_reduce(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     int32_t op,
     const stream_list& streams,
     const comm_list& user_comms) {
@@ -548,7 +548,7 @@ void all_reduce(
 
 void reduce_scatter(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     int32_t op,
     const stream_list& streams,
     const comm_list& user_comms) {
@@ -590,7 +590,7 @@ void reduce_scatter(
 
 void all_gather(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
@@ -639,8 +639,8 @@ void all_gather(
 }
 
 void all2all_single_equal_split(
-    at::Tensor& input,
-    at::Tensor& output,
+    const at::Tensor& input,
+    const at::Tensor& output,
     int size,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
@@ -734,8 +734,8 @@ void all2all_single_unequal_split(
 }
 
 void all2all(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
@@ -746,8 +746,8 @@ void all2all(
 
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(outputTensors.size())) {
-    at::Tensor& input = inputTensors[r];
-    at::Tensor& output = outputTensors[r];
+    const at::Tensor& input = inputTensors[r];
+    const at::Tensor& output = outputTensors[r];
     if (input.numel() != 0) {
       NCCL_CHECK(ncclSend(
           input.data_ptr(),
@@ -801,7 +801,7 @@ void send(
 }
 
 void recv(
-    at::Tensor& output,
+    const at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src) {
@@ -826,7 +826,7 @@ void recv(
 
 void gather(
     const at::Tensor& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {
@@ -871,7 +871,7 @@ void gather(
 
 void scatter(
     const std::vector<at::Tensor>& inputs,
-    at::Tensor& outputs,
+    const at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {

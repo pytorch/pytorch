@@ -52,8 +52,8 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+      const std::vector<std::vector<at::Tensor>>& outputTensors,
+      const std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
@@ -65,7 +65,7 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> allreduce(
-      std::vector<at::Tensor>& tensors,
+      const std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
@@ -85,7 +85,7 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
-      std::vector<at::Tensor>& tensors,
+      const std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
@@ -96,8 +96,8 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const std::vector<at::Tensor>& outputTensors,
+      const std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
@@ -109,7 +109,7 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
+      const std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
     PYBIND11_OVERRIDE(
@@ -122,7 +122,7 @@ class PyProcessGroup : public ProcessGroup {
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors,
+      const std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override {
     PYBIND11_OVERRIDE(

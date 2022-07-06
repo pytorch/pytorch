@@ -266,46 +266,49 @@ ReduceFunc toFunction(const ReduceOp& r) {
 }
 
 template <typename T, typename O>
-void setInputs(O& opts, std::vector<at::Tensor>& tensors) {
+void setInputs(O& opts, const std::vector<at::Tensor>& tensors) {
   opts.setInputs(getDataPointers<T>(tensors), tensors[0].numel());
 }
 
 template <typename T, typename O>
-void setInput(O& opts, at::Tensor& tensor) {
+void setInput(O& opts, const at::Tensor& tensor) {
   opts.setInput(getDataPointer<T>(tensor), tensor.numel());
 }
 
 template <typename T, typename O>
-void setInput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+void setInput(O& opts, const at::Tensor& tensor, std::vector<size_t>& counts) {
   opts.setInput(getDataPointer<T>(tensor), counts);
 }
 
 template <typename T, typename O>
-void setInput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
+void setInput(O& opts, const at::Tensor& tensor, std::vector<int64_t>& counts) {
   opts.setInput(getDataPointer<T>(tensor), counts);
 }
 
 template <typename T, typename O>
-void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
+void setOutputs(O& opts, const std::vector<at::Tensor>& tensors) {
   opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
 }
 
 template <typename T, typename O>
-void setOutput(O& opts, at::Tensor& tensor) {
+void setOutput(O& opts, const at::Tensor& tensor) {
   opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
 }
 
 template <typename T, typename O>
-void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+void setOutput(O& opts, const at::Tensor& tensor, std::vector<size_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
 template <typename T, typename O>
-void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
+void setOutput(
+    O& opts,
+    const at::Tensor& tensor,
+    std::vector<int64_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
-at::Tensor pinnedLike(at::Tensor& tensor) {
+at::Tensor pinnedLike(const at::Tensor& tensor) {
   auto* allocator = at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = c10::Storage(
       c10::Storage::use_byte_size_t(),
@@ -366,7 +369,7 @@ void initializeStreamsEvents(
 // streams. It is assumed that the tensors in the nested tensor vectors are
 // on the same device.
 void initializeStreamsEvents(
-    std::vector<std::vector<at::Tensor>>& tensors,
+    const std::vector<std::vector<at::Tensor>>& tensors,
     std::vector<c10::Stream>& streams,
     std::vector<c10::Event>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
@@ -399,7 +402,7 @@ void initializeStreamsEvents(
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
-    for (at::Tensor& tensor : tensors[i]) {
+    for (auto& tensor : tensors[i]) {
       // `tensors` are created on a different stream. Hence, they must record
       // new streams in this Work to prevent being freed before the Work
       // finishes.
@@ -528,7 +531,7 @@ void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
 }
 
 ProcessGroupGloo::SendWork::SendWork(
-    at::Tensor& tensor,
+    const at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : ProcessGroupGloo::Work(
           -1,
@@ -561,7 +564,7 @@ void ProcessGroupGloo::SendWork::abort() {
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
-    at::Tensor& tensor,
+    const at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
     const char* profilingTitle)
     : ProcessGroupGloo::Work(
@@ -839,7 +842,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncBroadcastWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
       uint32_t tag)
@@ -882,7 +885,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
  public:
   AsyncBroadcastCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
       uint32_t tag)
@@ -933,7 +936,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::broadcast: " + msg);
@@ -979,7 +982,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllreduceWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork({inputs}, "gloo:all_reduce", inputs),
@@ -993,7 +996,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
   const ReduceOp reduceOp;
   const uint32_t tag;
 
-  void allreduce(std::vector<at::Tensor>& tensors) {
+  void allreduce(const std::vector<at::Tensor>& tensors) {
     const auto& scalarType = tensors[0].scalar_type();
     gloo::AllreduceOptions opts(context);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
@@ -1024,7 +1027,7 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCoalescedWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
       : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
@@ -1034,7 +1037,7 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
   }
 
  private:
-  void allreduceCoalesced(std::vector<at::Tensor>& tensors) {
+  void allreduceCoalesced(const std::vector<at::Tensor>& tensors) {
     // reduce coalesced, flattened tensors.
     at::Tensor coalescedTensor = flattenDenseTensors(tensors);
     std::vector<at::Tensor> allreduceInput = {coalescedTensor};
@@ -1042,7 +1045,7 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
 
     // separate and reshape tensors.
     size_t offset = 0;
-    for (at::Tensor& tensor : tensors) {
+    for (auto& tensor : tensors) {
       const int64_t tensorNumel = tensor.numel();
       const c10::IntArrayRef tensorShape = tensor.sizes();
       tensor.copy_(coalescedTensor.slice(0, offset, offset + tensorNumel)
@@ -1056,7 +1059,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncSparseAllreduceWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork({inputs}, "gloo:sparse_all_reduce", inputs),
         context(context),
@@ -1143,7 +1146,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   // The nnz for sparse tensors may be different across processes, so first
   // we run allgather on the nnz, and then allgather with max(nnz).
   // We could use an allgatherv for this, if it were available.
-  at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
+  at::Tensor allreduce(const std::vector<at::Tensor>& tensors) {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
     // grad smooths over the confusion for now.  This fixes
@@ -1324,7 +1327,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
       : AsyncAllreduceWork(context, inputs, reduceOp, tag) {
@@ -1374,7 +1377,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
  public:
   AsyncSparseAllreduceCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       uint32_t tag)
       : AsyncSparseAllreduceWork(context, inputs, tag) {
     initializeStreamsEvents(inputs, streams, events);
@@ -1426,7 +1429,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::allreduce: " + msg);
@@ -1487,7 +1490,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::allreduce_coalesced: " + msg);
@@ -1498,12 +1501,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   // input
   // tensors must have the same device, layout and type.
   assertLayoutMatch(invalidArgument, tensors);
-  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.options().type_equal(tensors[0].options());
       })) {
     invalidArgument("tensors must all have the same type");
   }
-  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.device() == tensors[0].device();
       })) {
     invalidArgument("tensors must all be on the same device");
@@ -1551,7 +1554,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncReduceWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
       ReduceOp reduceOp,
@@ -1571,7 +1574,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   const ReduceOp reduceOp;
   const uint32_t tag;
 
-  void reduce(std::vector<at::Tensor>& tensors) {
+  void reduce(const std::vector<at::Tensor>& tensors) {
     const auto& scalarType = tensors[0].scalar_type();
     gloo::ReduceOptions opts(context);
     opts.setRoot(rootRank);
@@ -1604,7 +1607,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
  public:
   AsyncReduceCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
       ReduceOp reduceOp,
@@ -1656,7 +1659,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::reduce: " + msg);
@@ -1711,8 +1714,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllgatherWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(outputs, "gloo:all_gather", inputs),
         context(context),
@@ -1726,8 +1729,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void allgather(
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs) {
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs) {
     const auto& scalarType = inputs[0].scalar_type();
     gloo::AllgatherOptions opts(context);
     opts.setTag(tag);
@@ -1762,8 +1765,8 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
  public:
   AsyncAllgatherCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs,
       uint32_t tag)
       : AsyncAllgatherWork(context, outputs, inputs, tag) {
     initializeStreamsEvents(inputs, inputStreams, inputEvents);
@@ -1833,8 +1836,8 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
-    std::vector<std::vector<at::Tensor>>& outputs,
-    std::vector<at::Tensor>& inputs,
+    const std::vector<std::vector<at::Tensor>>& outputs,
+    const std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::allgather: " + msg);
@@ -1904,8 +1907,8 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllgatherCoalescedWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::vector<at::Tensor>>& output_lists,
-      std::vector<at::Tensor>& input_list,
+      const std::vector<std::vector<at::Tensor>>& output_lists,
+      const std::vector<at::Tensor>& input_list,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
             output_lists,
@@ -1967,8 +1970,8 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
-    std::vector<std::vector<at::Tensor>>& output_lists,
-    std::vector<at::Tensor>& input_list,
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
@@ -2034,8 +2037,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncGatherWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(outputs, "gloo:gather", inputs),
@@ -2052,8 +2055,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void gather(
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs) {
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs) {
     const auto scalarType = inputs[0].scalar_type();
     gloo::GatherOptions opts(context);
     opts.setRoot(root);
@@ -2093,8 +2096,8 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
  public:
   AsyncGatherCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs,
+      const std::vector<std::vector<at::Tensor>>& outputs,
+      const std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
       : AsyncGatherWork(context, outputs, inputs, root, tag) {
@@ -2163,8 +2166,8 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
-    std::vector<std::vector<at::Tensor>>& outputs,
-    std::vector<at::Tensor>& inputs,
+    const std::vector<std::vector<at::Tensor>>& outputs,
+    const std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::gather: " + msg);
@@ -2231,8 +2234,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncScatterWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& outputs,
-      std::vector<std::vector<at::Tensor>>& inputs,
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
@@ -2254,8 +2257,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void scatter(
-      std::vector<at::Tensor>& outputs,
-      std::vector<std::vector<at::Tensor>>& inputs) {
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<std::vector<at::Tensor>>& inputs) {
     const auto scalarType = outputs[0].scalar_type();
     gloo::ScatterOptions opts(context);
     opts.setRoot(root);
@@ -2280,8 +2283,8 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
  public:
   AsyncScatterCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& outputs,
-      std::vector<std::vector<at::Tensor>>& inputs,
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag)
       : AsyncScatterWork(context, outputs, inputs, root, tag) {
@@ -2348,8 +2351,8 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 } // namespace
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
-    std::vector<at::Tensor>& outputs,
-    std::vector<std::vector<at::Tensor>>& inputs,
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::scatter: " + msg);
@@ -2410,8 +2413,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
-    std::vector<at::Tensor>& outputs,
-    std::vector<std::vector<at::Tensor>>& inputs,
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(false, "ProcessGroupGloo does not support reduce_scatter");
 }
@@ -2584,7 +2587,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
   return work;
 }
 
-at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
+const at::Tensor& checkSingleTensor(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
     TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
   }
@@ -2604,7 +2607,7 @@ uint32_t checkTag(int32_t tag) {
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
@@ -2623,7 +2626,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
@@ -2642,7 +2645,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);

@@ -111,7 +111,7 @@ class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
       : ProcessGroupGloo(store, rank, size, options) {}
 
   c10::intrusive_ptr<::c10d::ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
+      const std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
     std::this_thread::sleep_for(kSendDelay);

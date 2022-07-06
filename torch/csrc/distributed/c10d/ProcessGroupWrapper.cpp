@@ -128,7 +128,7 @@ struct CollectiveFingerPrint {
 
  private:
   void verify_tensors(
-      std::vector<at::Tensor>& tensors_to_verify,
+      const std::vector<at::Tensor>& tensors_to_verify,
       c10::intrusive_ptr<ProcessGroup>& pg) {
     // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
@@ -272,21 +272,21 @@ const std::string ProcessGroupWrapper::getBackendName() const {
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast(
-    std::vector<at::Tensor>& data,
+    const std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
   runCollectiveChecks(OpType::BROADCAST, data);
   return pg_->broadcast(data, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce(
-    std::vector<at::Tensor>& data,
+    const std::vector<at::Tensor>& data,
     const AllreduceOptions& opts) {
   runCollectiveChecks(OpType::ALLREDUCE, data);
   return pg_->allreduce(data, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce_coalesced(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   // NOTE: We don't enforce shape checking for allreduce_coalesced because
   // the implementation itself does not enforce it we have tests that use
@@ -297,15 +297,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce_coalesced(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   runCollectiveChecks(OpType::REDUCE, tensors);
   return pg_->reduce(tensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   runCollectiveChecks(OpType::ALLGATHER, inputTensors);
   return pg_->allgather(outputTensors, inputTensors, opts);
@@ -321,8 +321,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::_allgather_base(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather_coalesced(
-    std::vector<std::vector<at::Tensor>>& outputTensorLists,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    const std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   // NOTE: We don't enforce shape checking for allgather_coalesced because
   // the implementation itself does not enforce it we have tests that use
@@ -333,24 +333,24 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather_coalesced(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::gather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   runCollectiveChecks(OpType::GATHER, inputTensors);
   return pg_->gather(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   runCollectiveChecks(OpType::SCATTER, outputTensors);
   return pg_->scatter(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce_scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
   return pg_->reduce_scatter(outputTensors, inputTensors, opts);
@@ -369,8 +369,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall_base(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL, {});
@@ -396,21 +396,21 @@ uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::send(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
   return pg_->send(tensors, dstRank, tag);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recv(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
   return pg_->recv(tensors, srcRank, tag);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recvAnysource(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int tag) {
   return pg_->recvAnysource(tensors, tag);
 }

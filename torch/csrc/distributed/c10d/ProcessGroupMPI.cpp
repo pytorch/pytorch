@@ -384,7 +384,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
@@ -408,7 +408,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
 
@@ -434,13 +434,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   TORCH_CHECK(false, "allreduce_coalesced is currently not supported with MPI");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   checkSingleTensor(tensors);
 
@@ -471,8 +471,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   checkSingleTensor(inputTensors);
   if (outputTensors.size() != 1) {
@@ -520,15 +520,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<std::vector<at::Tensor>>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
   TORCH_CHECK(false, "ProcessGroupMPI does not support allgather_coalesced");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   checkSingleTensor(inputTensors);
 
@@ -603,8 +603,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   checkSingleTensor(outputTensors);
 
@@ -635,7 +635,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
         at::Tensor flatInputTensor;
 
         if (rank_ == opts.rootRank) {
-          std::vector<at::Tensor>& inputDataVec = entry->src;
+          const std::vector<at::Tensor>& inputDataVec = entry->src;
           flatInputTensor = newLikeFlat(inputDataVec);
           sendbuf = flatInputTensor.data_ptr();
 
@@ -680,8 +680,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(false, "ProcessGroupMPI does not support reduce_scatter");
 }
@@ -770,8 +770,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
   TORCH_CHECK(
       inputTensors.size() == size_,
@@ -830,7 +830,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
   checkSingleTensor(tensors);
@@ -859,7 +859,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
   checkSingleTensor(tensors);
@@ -888,7 +888,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int tag) {
   checkSingleTensor(tensors);
 

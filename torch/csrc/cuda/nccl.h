@@ -122,14 +122,14 @@ size_t get_max_count();
 
 TORCH_CUDA_CPP_API void reduce(
     const std::vector<at::Tensor>& inputs,
-    at::Tensor& output,
+    const at::Tensor& output,
     int32_t root = 0,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_CPP_API void reduce(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
@@ -137,41 +137,41 @@ TORCH_CUDA_CPP_API void reduce(
 
 TORCH_CUDA_CPP_API void all_reduce(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_CPP_API void reduce_scatter(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_CPP_API void scatter(
     const std::vector<at::Tensor>& inputs,
-    at::Tensor& outputs,
+    const at::Tensor& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
     int32_t root = 0);
 
 TORCH_CUDA_CPP_API void all_gather(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_CPP_API void gather(
     const at::Tensor& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
     int32_t root = 0);
 
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
-    at::Tensor& input,
-    at::Tensor& output,
+    const at::Tensor& input,
+    const at::Tensor& output,
     int size,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream);
@@ -189,8 +189,8 @@ TORCH_CUDA_CPP_API void all2all_single_unequal_split(
     at::cuda::CUDAStream& stream);
 
 TORCH_CUDA_CPP_API void all2all(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream);
 
@@ -201,7 +201,7 @@ TORCH_CUDA_CPP_API void send(
     int dst);
 
 TORCH_CUDA_CPP_API void recv(
-    at::Tensor& output,
+    const at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src);

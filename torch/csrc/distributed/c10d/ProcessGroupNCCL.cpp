@@ -90,7 +90,7 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
   return it->second;
 }
 
-ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
+ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, const at::Tensor& input) {
   try {
     if (input.scalar_type() == at::kBool) {
       if (reduceOp == ReduceOp::SUM) {
@@ -1325,8 +1325,8 @@ int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
 // Flatten each list in `tensor_lists' for a gather or scatter operation, and
 // ensure compatibility with the corresponding tensor in `other'.
 std::vector<at::Tensor> flatten_for_scatter_gather(
-    std::vector<std::vector<at::Tensor>>& tensor_lists,
-    std::vector<at::Tensor>& other,
+    const std::vector<std::vector<at::Tensor>>& tensor_lists,
+    const std::vector<at::Tensor>& other,
     size_t world_size) {
   if (tensor_lists.size() != other.size()) {
     TORCH_CHECK(
@@ -1407,8 +1407,8 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
-    std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& outputs,
     Fn fn,
     PreProcess pre,
     PostProcess post,
@@ -1531,7 +1531,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     Fn fn,
     int peer,
     OpType opType,
@@ -1654,8 +1654,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
 template <typename Fn>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
-    std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& outputs,
     Fn fn,
     OpType opType,
     const char* profilingTitle) {
@@ -1671,7 +1671,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
 template <typename Fn>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
-    std::vector<at::Tensor>& tensor,
+    const std::vector<at::Tensor>& tensor,
     Fn fn,
     int peer,
     OpType opType,
@@ -1687,13 +1687,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   return collective(
       tensors,
       tensors,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         return ncclAllReduce(
@@ -1710,7 +1710,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   check_gpu_tensors_different_devices(tensors);
 
@@ -1729,7 +1729,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   auto total_numel = check_gpu_tensors_same_device(tensors);
 
@@ -1748,7 +1748,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   check_gpu_tensors_different_devices(tensors);
 
@@ -1766,8 +1766,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   return collective(
       tensors,
       tensors,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
@@ -1784,7 +1784,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   check_gpu_tensors_different_devices(tensors);
   // @lint-ignore CLANGTIDY
@@ -1801,8 +1801,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
   return collective(
       tensors,
       tensors,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
@@ -1821,8 +1821,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   check_gpu_tensors_different_devices(inputTensors);
 
@@ -1845,8 +1845,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return collective(
       inputTensors,
       outputFlattened,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
@@ -1878,15 +1878,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<std::vector<at::Tensor>>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
   TORCH_CHECK(false, "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   check_gpu_tensors_different_devices(outputTensors);
 
@@ -1909,8 +1909,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
   return collective(
       inputFlattened,
       outputTensors,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
@@ -1975,8 +1975,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
   return collective(
       inputs,
       outputs,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
@@ -2084,8 +2084,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     return collective(
         inputTensors,
         outputTensors,
-        [&](at::Tensor& input,
-            at::Tensor& output,
+        [&](const at::Tensor& input,
+            const at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
           // See [Sync Streams].
@@ -2115,8 +2115,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     return collective(
         inputTensors,
         outputTensors,
-        [&](at::Tensor& input,
-            at::Tensor& output,
+        [&](const at::Tensor& input,
+            const at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
           std::vector<size_t> send_lengths(size_);
@@ -2149,8 +2149,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
@@ -2166,8 +2166,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
   return collective(
       inputTensor0,
       outputTensor0,
-      [&](at::Tensor& /* unused */,
-          at::Tensor& /* unused */,
+      [&](const at::Tensor& /* unused */,
+          const at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
@@ -2177,13 +2177,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
   check_gpu_tensors_different_devices(tensors);
   auto ret = pointToPoint(
       tensors,
-      [&](at::Tensor& input,
+      [&](const at::Tensor& input,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int dst) {
@@ -2197,13 +2197,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
   check_gpu_tensors_different_devices(tensors);
   auto ret = pointToPoint(
       tensors,
-      [&](at::Tensor& output,
+      [&](const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int src) {
@@ -2217,8 +2217,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
 }
 #else
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
-    at::Tensor& /* unused */,
-    at::Tensor& /* unused */,
+    const at::Tensor& /* unused */,
+    const at::Tensor& /* unused */,
     std::vector<int64_t>& /* unused */,
     std::vector<int64_t>& /* unused */,
     const AllToAllOptions& /* unused */) {
@@ -2228,8 +2228,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     const AllToAllOptions& /* unused */) {
   TORCH_CHECK(
       false,
@@ -2237,7 +2237,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
   TORCH_CHECK(
@@ -2246,7 +2246,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
   TORCH_CHECK(
@@ -2270,8 +2270,8 @@ void ProcessGroupNCCL::groupEnd() {
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
-    std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    const std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupNCCL::gather: " + msg);
@@ -2326,8 +2326,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   return collective(
       inputTensors,
       outputs,
-      [&](at::Tensor& /* unused */,
-          at::Tensor& /* unused */,
+      [&](const at::Tensor& /* unused */,
+          const at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
@@ -2345,8 +2345,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const std::vector<at::Tensor>& outputTensors,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupNCCL::scatter: " + msg);
@@ -2402,8 +2402,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   return collective(
       outputTensors,
       inputs,
-      [&](at::Tensor& /* unused */,
-          at::Tensor& /* unused */,
+      [&](const at::Tensor& /* unused */,
+          const at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
@@ -2422,7 +2422,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
-    std::vector<at::Tensor>& /* unused */,
+    const std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
   TORCH_CHECK(false, "ProcessGroupNCCL does not support recvAnysource");
 }
@@ -2451,8 +2451,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
   return collective(
       inputs,
       outputs,
-      [&](at::Tensor& input,
-          at::Tensor& output,
+      [&](const at::Tensor& input,
+          const at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(

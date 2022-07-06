@@ -322,7 +322,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
 }
 
 inline at::Tensor newLikeFlat(
-    std::vector<std::vector<at::Tensor>>& tensors,
+    const std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
     TORCH_CHECK(false, "Received an empty list");
@@ -346,7 +346,7 @@ inline at::Tensor newLikeFlat(
       sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
-inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
+inline at::Tensor newLikeFlat(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Received an empty list");
   }

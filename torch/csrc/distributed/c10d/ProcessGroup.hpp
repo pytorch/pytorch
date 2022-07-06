@@ -213,7 +213,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // to the dispatcher.
   // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
         false,
@@ -222,7 +222,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
@@ -231,7 +231,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
     TORCH_CHECK(
         false,
@@ -242,7 +242,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
         false,
@@ -250,8 +250,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      const std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      const std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
@@ -280,8 +280,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      const std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
+      const std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
@@ -292,8 +292,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      const std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      const std::vector<at::Tensor>& /* inputTensors */,
       const GatherOptions& /* opts */ = GatherOptions()) {
     TORCH_CHECK(
         false,
@@ -301,8 +301,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      const std::vector<at::Tensor>& /* outputTensors */,
+      const std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ScatterOptions& /* opts */ = ScatterOptions()) {
     TORCH_CHECK(
         false,
@@ -311,8 +311,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      const std::vector<at::Tensor>& /* outputTensors */,
+      const std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
     TORCH_CHECK(
         false,
@@ -349,8 +349,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      const std::vector<at::Tensor>& /* outputTensors */,
+      const std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) {
     TORCH_CHECK(
         false,
@@ -397,7 +397,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       int /* dstRank */,
       int /* tag */) {
     TORCH_CHECK(
@@ -406,7 +406,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       int /* srcRank */,
       int /* tag */) {
     TORCH_CHECK(
@@ -415,7 +415,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& /* tensors */,
+      const std::vector<at::Tensor>& /* tensors */,
       int /* tag */) {
     TORCH_CHECK(
         false,
