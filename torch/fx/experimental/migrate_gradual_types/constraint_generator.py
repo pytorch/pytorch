@@ -4,7 +4,8 @@ from typing import Callable, Dict, Iterable
 
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
-    Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F
+    Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
+    TVar, DVar
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt
 from torch.fx.node import Target, Node
@@ -294,12 +295,32 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
-    # assert len(n.users) == 0
-    # print(len(n.users))
 
     e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
-    return [BinConstraintD(e1, e2, op_gt)], counter
+
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        if isinstance(e1, TVar) and isinstance(e2, TVar):
+            gt_tensor, counter = gen_tvar(counter)
+            symbols[n] = gt_tensor
+            return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, gt_tensor)
+
+        elif isinstance(e1, DVar) and isinstance(e2, DVar):
+            # This is meant to be used for flow analysis only
+            return [BinConstraintD(e1, e2, op_gt)], counter
+
+        else:
+            raise RuntimeError('Sort Mismatch')
+
+    elif isinstance(n.args[0], Node) and not isinstance(n.args[1], Node):
+        if isinstance(e1, DVar):
+            # This is meant to be used for flow analysis only
+            return [BinConstraintD(e1, e2, op_gt)], counter
+        else:
+            raise NotImplementedError('Method not yet implemented')
+
+    else:
+        raise NotImplementedError('Method not yet implemented')
 
 
 @register_inference_rule(operator.lt)

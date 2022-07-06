@@ -447,6 +447,25 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEquals(s.check(), z3.sat)
 
+    def test_lt_tensor(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4]), y: Dyn):
+                lt = x > y
+                return lt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+
     def test_conditional(self):
         """
         This test case is for the HFmodels interface.
