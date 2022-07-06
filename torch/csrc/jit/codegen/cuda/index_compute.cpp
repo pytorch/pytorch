@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -1172,45 +1171,6 @@ void ensureStaticIndexing(
 
 namespace {
 
-// Map everything we can from reference to provided tv using the provided
-// compute at map. If root_only is true, only root domains are included.
-// We can't simply try to use the provided tv root domains and
-// map those to the reference as the provided tv may have root domains that
-// don't exist in reference. This can happen when the provided tv is from before
-// a view, but all the loops are generated from TVs generated after the view
-// operation.
-std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
-    const TensorView* tv,
-    const std::unique_ptr<ComputeAtMap>& ca_map,
-    const std::unordered_map<IterDomain*, IterDomain*>&
-        reference_concrete_to_id_map,
-    bool root_only = false) {
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
-
-  auto gen_map = [&](const auto& pids) {
-    for (auto p_id : pids) {
-      auto concrete_id =
-          ca_map->getConcreteMappedID(p_id, IdMappingMode::EXACT);
-      auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
-      if (ref_id_it != reference_concrete_to_id_map.end()) {
-        index_map_ref_to_producer[ref_id_it->second] = p_id;
-      }
-    }
-  };
-
-  if (root_only) {
-    gen_map(tv->getRootDomain());
-  } else {
-    auto all_pid_vals = DependencyCheck::getAllValsBetween(
-        {tv->getRootDomain().begin(), tv->getRootDomain().end()},
-        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-    auto all_pids = ir_utils::filterByType<IterDomain>(all_pid_vals);
-    gen_map(all_pids);
-  }
-
-  return index_map_ref_to_producer;
-}
-
 //! Returns an iterdomain that corresponds to the
 //!  indexing sub-expression to hoist or a nullopt
 //!  if the index should not be hoisted.
@@ -1244,37 +1204,6 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
       contig_id_it->second->toString());
 
   return indexed_id;
-}
-
-Val* hoistConsumerIndex(
-    IterDomain* consumer_root_id,
-    const TensorView* consumer_tv,
-    const IndexCompute& consumer_indexing,
-    TensorDomain* ref_td,
-    const IndexCompute& ref_indexing,
-    const std::vector<kir::ForLoop*>& loops,
-    Val* index) {
-  auto maybe_hoisted_consumer_id = getMaybeIndexedIdToHoist(
-      consumer_root_id, consumer_tv, consumer_indexing, index);
-
-  if (!maybe_hoisted_consumer_id.has_value()) {
-    return index;
-  }
-
-  // Insert the index into the common index map. A previously inserted
-  // val can be returned.
-  auto common_index = GpuLower::current()
-                          ->commonIndexMap()
-                          .insert(
-                              maybe_hoisted_consumer_id.value(),
-                              consumer_tv->domain(),
-                              ref_td,
-                              ref_indexing.indexMap(),
-                              loops,
-                              index)
-                          .first;
-
-  return common_index;
 }
 
 // Version of hoisting without using reference tensor,
@@ -1322,56 +1251,6 @@ std::unordered_map<IterDomain*, IterDomain*> invertOneToOneMap(
         kv.second->toString());
   }
   return inverted;
-}
-
-Val* hoistProducerIndex(
-    IterDomain* producer_root_id,
-    const TensorView* producer_tv,
-    const IndexCompute& producer_indexing,
-    const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& p2c_map,
-    TensorDomain* ref_td,
-    const IndexCompute& ref_indexing,
-    const std::vector<kir::ForLoop*>& loops,
-    Val* index) {
-  auto maybe_indexed_producer_id = getMaybeIndexedIdToHoist(
-      producer_root_id, producer_tv, producer_indexing, index);
-
-  if (!maybe_indexed_producer_id.has_value()) {
-    return index;
-  }
-
-  auto indexed_consumer_id_it = p2c_map.find(maybe_indexed_producer_id.value());
-
-  // There can be no corresponding consumer ID. For example, consider:
-  //   consumer: [b1, i2, i3]
-  //   producer: [i2, i3].
-  // Suppose the consumer is transformed as:
-  //   consumer: [(b1*i2)*i3]
-  // Then the producer would be transformed when indexed:
-  //   producer: [i2*i3]
-  // Assuming i2 and i3 are contiguous, the producer indexing is done
-  // with the mreged i2*i3 domain, but there's no domain in the
-  // cosumer that maps with the producer indexed domain.
-  // It seems non-trivial to support patterns like this. Skip for now.
-  if (indexed_consumer_id_it == p2c_map.end()) {
-    return index;
-  }
-
-  IterDomain* indexed_consumer_id = indexed_consumer_id_it->second;
-
-  auto common_index = GpuLower::current()
-                          ->commonIndexMap()
-                          .insert(
-                              indexed_consumer_id,
-                              consumer_tv->domain(),
-                              ref_td,
-                              ref_indexing.indexMap(),
-                              loops,
-                              index)
-                          .first;
-
-  return common_index;
 }
 
 Val* hoistProducerIndex(
@@ -2343,19 +2222,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
   return contig_id_infos;
 }
 
-IterDomain* getMappedReferenceDomain(
-    IterDomain* id,
-    const ReferenceTensor& reference) {
-  // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-  auto it = reference.concrete_to_id.find(concrete_id);
-  if (it == reference.concrete_to_id.end()) {
-    return nullptr;
-  }
-  return it->second;
-}
-
 std::vector<PredicateDomainInfo> getNonDivisibleConsumerDomainsToPredicate(
     TensorView* consumer_tv) {
   const auto& non_divisible_split_info =
@@ -2387,10 +2253,11 @@ bool needsPadding(TensorView* tv) {
 }
 
 // Get an additional offset of a stop index when building a predicate
-// for unswitch. Initial stop indices generated at getPredicateReferenceIndexing
-// do not take halo into account, and the adjustment for halo is done as an
-// additional offset to the final index value so that unswitch predicates can be
-// compared with each other by just looking at the additional offsets.
+// for unswitch. Initial stop indices generated at
+// getPredicateIndexingFromIdGraph do not take halo into account, and the
+// adjustment for halo is done as an additional offset to the final index value
+// so that unswitch predicates can be compared with each other by just looking
+// at the additional offsets.
 //
 // consumer_root_id: the domain for which a stop predicate is being built.
 int getUnswitchStopOffset(
@@ -2614,200 +2481,6 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
   return {start_limit, stop_limit};
 }
 
-// Return an IndexCompute for a predicate reference tensor. Two different
-// maps are used when generating predicates for unswitched expressions
-// as start and stop conditions need to use different loop-to-index
-// mappings.
-auto getPredicateReferenceIndexing(
-    const std::vector<kir::ForLoop*>& loops,
-    const ReferenceTensor& reference,
-    kir::ForLoop* unswitch_or_vec_loop,
-    IterDomain* double_buffer_axis,
-    bool start) {
-  auto reference_domain = reference.domain;
-
-  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
-
-  std::transform(
-      loops.begin(),
-      loops.end(),
-      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
-      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
-
-  // If unswitch don't directly use indices from for loop, use zero
-  // and for loop extent minus 1
-  if (unswitch_or_vec_loop != nullptr) {
-    // Vectorized predicates are different from unswitch. Unswitch predicates
-    // all loops within the unswitch (the outer most unswitch) are generated
-    // with loop->extent-1 as the index. With vectorized predicates, only the
-    // vectorized loop should be like this.
-
-    bool vectorized_pred =
-        unswitch_or_vec_loop->iter_domain()->getParallelType() ==
-        ParallelType::Vectorize;
-
-    TORCH_INTERNAL_ASSERT(
-        loops.size() <= reference_domain->nDims(),
-        "Invalid reference generated.");
-
-    bool within_unswitch = false;
-
-    for (const auto loop_i : c10::irange(loops.size())) {
-      auto loop = loops[loop_i];
-      auto loop_id = loop->iter_domain();
-      auto loop_pt = loop_id->getParallelType();
-      auto ref_id = reference_domain->axis(loop_i);
-
-      if (loop == unswitch_or_vec_loop) {
-        within_unswitch = true;
-      }
-
-      if (within_unswitch) {
-        // Rely on the reference to check broadcasting. The for loop could be
-        // broadcasted on a constant value from an unroll split. Since reference
-        // may convert this to an iter domain, that for loop could be valid to
-        // generate predication from.
-
-        // Note that loop->stop() is not used below. Instead,
-        // loop->iter_domain()->extent() is used, which is uniform
-        // across the mapped domains irrespective of halo. Predicates are
-        // compared with each to pick the most restrictive ones. The
-        // comparison is done by only using the offset, which is the
-        // term added to the index. So, the index term must be the
-        // same among all predicates, otherwise the comparison would
-        // be invalid. The effect by halo is added to the offset
-        // term. See getUnswitchStopOffset.
-
-        if (ref_id->isBroadcast()) {
-          // Ignore indexing into broadcasted dimensions.
-          continue;
-        } else if (loop_id->isThread()) {
-          // When parallelized, if the loop stop is the same as the
-          // extent of the associated IterDomain, i.e., no extra
-          // iterations for halo, predicating with the threading index
-          // is sufficient for both the start and stop
-          // predicates. That isn't the case if the loop has halo, and
-          // in the case either the minimum and maximum values of the
-          // iteration domain needs to be used.
-          //
-          // Note: Better performance was obtained if using
-          // threadIdx in unswitch predicates was avoided. More
-          // specifically, in the Hdiff stencil example, instead of
-          // predicating with threadIdx.x for both the start and stop
-          // predicates, using zero and (blockDim.x - 1) for the start
-          // and stop predicates, respectively, resulted in less
-          // register pressure. The alternative codegen can be done by
-          // adding this to the first if condition:
-          // loop_id->isBlockDim(). This would not be a concern if the
-          // else part could be omitted, so canOmitElseClause should
-          // be used as well.
-          if (loop->stop() == loop_id->extent()) {
-            loop_to_ind_map[loop] = loop->start();
-          } else if (start) {
-            loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-          } else {
-            // Note that the parallel dimension is used rather than
-            // loop-stop(). See the above comment.
-            loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-                GpuLower::current()->parallelDimensionMap().get(loop_pt),
-                GpuLower::current()->kernel()->zeroVal());
-          }
-        } else if (start) {
-          loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-        } else {
-          // Similar to the above, loop_id()->extent() is
-          // used here instead of loop->stop(). See the above comment.
-          loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-              loop_id->extent(), GpuLower::current()->kernel()->oneVal());
-        }
-      }
-
-      // If a vectorized predicate, bail after the vectorized loop was found.
-      // Don't continue unswitching loops.
-      if (vectorized_pred && within_unswitch) {
-        break;
-      }
-    }
-  }
-
-  for (const auto loop : loops) {
-    auto& idx = loop_to_ind_map.at(loop);
-    // If the loop is trivial, the loop index can only be the loop
-    // start value.
-    if (idx == loop->index() && loop->isTrivial()) {
-      idx = loop->start();
-    }
-  }
-
-  if (double_buffer_axis != nullptr) {
-    auto db_loop = GpuLower::current()->doubleBufferInfo().getDoubleBufferLoop(
-        double_buffer_axis, loops, true);
-    if (db_loop != nullptr) {
-      auto loop_to_ind_map_it = loop_to_ind_map.find(db_loop);
-      TORCH_INTERNAL_ASSERT(loop_to_ind_map_it != loop_to_ind_map.end());
-      auto cur_index = loop_to_ind_map_it->second;
-      // if cur_index is not the same as the index of db_loop, it must
-      // be true that that index has been modified to support
-      // unswitch. In that case, it is not necessary to move ahead the
-      // index for double buffering.
-      if (cur_index == db_loop->index()) {
-        loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
-            cur_index, GpuLower::current()->kernel()->oneVal());
-      }
-    }
-  }
-
-  // Add magic zero to a loop pretty far inside in indexing
-  IterDomain* magic_zero_loop = nullptr;
-  std::unordered_map<IterDomain*, Val*> ref_id_to_ind_map;
-  // Due to rfactor/initialization reference_domain may be bigger than loop nest
-  // structure
-  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (const auto loop_i : c10::irange(loops.size())) {
-    auto loop = loops[loop_i];
-    auto ind = loop_to_ind_map[loops[loop_i]];
-    auto ref_axis = reference_domain->axis(loop_i);
-
-    if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
-      magic_zero_loop = ref_axis;
-    }
-
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loop];
-  }
-
-  if (ref_id_to_ind_map.count(magic_zero_loop)) {
-    auto& ind = ref_id_to_ind_map[magic_zero_loop];
-    if (!ind->isConstScalar()) {
-      ind = SimplifyingIrBuilder::addExpr(
-          ind, GpuLower::current()->kernel()->magicZeroVal());
-    }
-  }
-
-  std::unordered_map<IterDomain*, IterDomain*> ref_self_map;
-  auto all_vals = DependencyCheck::getAllValsBetween(
-      {reference_domain->getRootDomain().begin(),
-       reference_domain->getRootDomain().end()},
-      {reference_domain->domain().begin(), reference_domain->domain().end()});
-  auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
-  std::for_each(all_ids.begin(), all_ids.end(), [&ref_self_map](auto id) {
-    ref_self_map.insert({id, id});
-  });
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, ref_self_map);
-
-  // Index into the reference tensor
-  auto index_compute = getReferenceIndexing(
-      loops,
-      reference_domain,
-      ref_id_to_ind_map,
-      {},
-      {},
-      reference_halo_extent_map);
-
-  return index_compute;
-}
-
 // Get the offsets for the start and stop predicates. The offsets
 // are to be added to the index.
 std::pair<Val*, Val*> getStartAndStopOffsets(
@@ -2856,7 +2529,7 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
 
     // If generating a predicate for unswitch, adjust the stop offset to
     // accommodate the addition of halo to the loop stop. See the
-    // comment in getPredicateReferenceIndexing as well.
+    // comment in getPredicateIndexingFromIdGraph as well.
     if (unswitch) {
       TORCH_INTERNAL_ASSERT(
           !padding_predicate, "Unswitch should not use the padding predicate");

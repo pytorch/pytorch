@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index_compute.h>
@@ -1131,6 +1130,139 @@ std::unordered_set<IterDomain*> LoopIndexing::getAllExactConcreteIdSet() const {
         ir_utils::caMapExactConcreteId);
   }
   return all_id_set;
+}
+
+namespace {
+
+//! Returns true if id is mapped together with any id in
+//!  the vector ids by permissive compute at map.
+bool isPermissivelyMappedWithAny(IterDomain* id, const std::vector<Val*>& ids) {
+  return std::any_of(ids.begin(), ids.end(), [&](Val* val) {
+    return val->isA<IterDomain>() &&
+        GpuLower::current()->caMap()->areMapped(
+            id, val->as<IterDomain>(), IdMappingMode::PERMISSIVE);
+  });
+}
+
+class LoopIndexingPreferredPathCompute : public IterVisitor {
+ public:
+  static std::unordered_set<IterDomain*> compute(
+      const TensorView* original_tv,
+      const LoopIndexing& loop_indexing,
+      bool use_replay_map,
+      const std::unordered_map<IterDomain*, IterDomain*>& p2c_map) {
+    LoopIndexingPreferredPathCompute compute;
+
+    auto all_concrete_ids = loop_indexing.getAllExactConcreteIdSet();
+
+    // Annotate all ids
+    auto all_original_ids = DependencyCheck::getAllValsBetween(
+        {original_tv->getMaybeRFactorDomain().begin(),
+         original_tv->getMaybeRFactorDomain().end()},
+        {original_tv->domain()->domain().begin(),
+         original_tv->domain()->domain().end()});
+
+    for (auto original_id :
+         ir_utils::filterByType<IterDomain>(all_original_ids)) {
+      auto mapped_id = original_id;
+      if (use_replay_map) {
+        auto c_id_it = p2c_map.find(original_id);
+        if (c_id_it == p2c_map.end()) {
+          continue;
+        }
+        mapped_id = c_id_it->second;
+      }
+      auto concrete_original_id = ir_utils::caMapExactConcreteId(mapped_id);
+      if (all_concrete_ids.count(concrete_original_id)) {
+        if (original_id->isBroadcast() || original_id->isReduction() ||
+            original_id->isStride()) {
+          continue;
+        }
+        compute.preferred_path_.insert(concrete_original_id);
+      }
+    }
+
+    for (auto expr : loop_indexing.getForwardExprList()) {
+      compute.handle(expr);
+    }
+
+    return compute.preferred_path_;
+  }
+
+ private:
+  void handle(Expr* e) override {
+    // If an input ID is marked, propagate the marking to outputs of the
+    // expression
+    auto all_iter_inputs = ir_utils::filterByType<IterDomain>(e->inputs());
+    if (std::any_of(
+            all_iter_inputs.begin(),
+            all_iter_inputs.end(),
+            [&](IterDomain* inp_id) {
+              return this->preferred_path_.find(ir_utils::caMapExactConcreteId(
+                         inp_id)) != this->preferred_path_.end();
+            })) {
+      auto all_iter_outputs = ir_utils::filterByType<IterDomain>(e->outputs());
+
+      std::transform(
+          all_iter_outputs.begin(),
+          all_iter_outputs.end(),
+          std::inserter(preferred_path_, preferred_path_.end()),
+          ir_utils::caMapExactConcreteId);
+    }
+  }
+
+  std::unordered_set<IterDomain*> preferred_path_;
+};
+
+} // namespace
+
+// External interface for preferred path propagation.
+std::unordered_set<IterDomain*> buildLoopIndexingPreferredPath(
+    const TensorView* original_tv,
+    const LoopIndexing& loop_indexing,
+    bool use_replay_map,
+    std::unordered_map<IterDomain*, IterDomain*> p2c_map) {
+  return LoopIndexingPreferredPathCompute::compute(
+      original_tv, loop_indexing, use_replay_map, p2c_map);
+}
+
+// Get an rfactor IterDomain that is mapped with an IterDomain. If
+// multiple such IDs exist, select one whose input IDs are mapped with
+// the consumer IDs. This is to ensure the path from the leaf
+// IterDomains to the root matches with the consumer tensor.
+IterDomain* getRfactorIDToTraverse(
+    IterDomain* id,
+    const std::vector<Val*>& consumer_all_ids) {
+  const auto& rfactor_ids =
+      GpuLower::current()->caMap()->getViewRfactorDomainsOfIdGroup(
+          id, IdMappingMode::PERMISSIVE);
+
+  if (rfactor_ids.empty()) {
+    return nullptr;
+  }
+
+  for (auto rfactor_id : rfactor_ids) {
+    auto def = rfactor_id->definition();
+    if (def == nullptr) {
+      continue;
+    }
+
+    auto rfactor_id_inputs = ir_utils::filterByType<IterDomain>(def->inputs());
+    if (std::all_of(
+            rfactor_id_inputs.begin(),
+            rfactor_id_inputs.end(),
+            [&](IterDomain* rfactor_id_input) {
+              return isPermissivelyMappedWithAny(
+                  rfactor_id_input, consumer_all_ids);
+            })) {
+      return rfactor_id;
+    }
+  }
+
+  // No mapped ID found, which means the consumer is a post-view
+  // tensor. In that case, it shouldn't matter which view path to
+  // traverse, so just return the first one.
+  return rfactor_ids.at(0);
 }
 
 } // namespace cuda
