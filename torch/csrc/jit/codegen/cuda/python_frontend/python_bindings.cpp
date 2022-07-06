@@ -607,7 +607,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](TensorView* input,
          std::vector<int>& output_shape,
          std::vector<int>& broadcast_dims) -> TensorView* {
-        const auto input_ndims = input->domain()->noReductions().size();
+        const auto& iter_domains = input->domain()->noReductions();
+        const auto input_ndims = iter_domains.size();
         TORCH_CHECK(
             output_shape.size() >= input_ndims,
             "The new shape is expected to be greater-then-or-equal to the input",
@@ -619,7 +620,9 @@ void initNvFuserPythonBindings(PyObject* module) {
             input_ndims,
             broadcast_dims.size());
 
+        // default all dimensions to be broadcasted
         std::vector<bool> is_broadcast_dim(output_shape.size(), true);
+        std::vector<bool> is_expand_dim(output_shape.size(), true);
         for (const auto idx : c10::irange(broadcast_dims.size())) {
           if (idx > 0) {
             TORCH_CHECK(
@@ -630,9 +633,30 @@ void initNvFuserPythonBindings(PyObject* module) {
               broadcast_dims[idx] < static_cast<int>(output_shape.size()),
               "Invalid broadcast_dims value.");
           is_broadcast_dim.at(broadcast_dims[idx]) = false;
+          // Note: when we expand a broadcasted dimension, we need to expand it
+          // to a concrete size, hence the need for `is_expand_dim` flag and the
+          // expand operation following the broadcast.
+          is_expand_dim.at(broadcast_dims[idx]) =
+              iter_domains[idx]->isBroadcast();
         }
 
-        return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+        std::vector<torch::jit::fuser::cuda::Val*> output_shape_on_bcast(
+            output_shape.size(), nullptr);
+        for (const auto idx : c10::irange(output_shape.size())) {
+          if (is_expand_dim[idx]) {
+            // TODO: this would be tricky to handle on dynamic shapes, we'll
+            // need to pass-in a symbol instead somehow.
+            output_shape_on_bcast[idx] =
+                IrBuilder::create<Int>(output_shape[idx]);
+          } else {
+            output_shape_on_bcast[idx] = IrBuilder::create<Int>(-1);
+          }
+        }
+
+        auto bcasted_input =
+            torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+        return torch::jit::fuser::cuda::expand(
+            bcasted_input, output_shape_on_bcast);
       },
       py::return_value_policy::reference);
 
