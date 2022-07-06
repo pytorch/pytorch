@@ -38,7 +38,6 @@ ALLOW_LIST = [
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
     ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
-    ("aten::kl_div_backward", datetime.date(2022, 9, 1)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -99,6 +98,8 @@ ALLOW_LIST = [
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
     ("c10d::broadcast", datetime.date(2022, 6, 25)),
+    ("aten::.*functional", datetime.date(2022, 8, 1)),
+    ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
