@@ -4,7 +4,7 @@ from torch.utils._pytree import tree_map, tree_flatten
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._mode_utils import no_dispatch
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from typing import Union, Callable
 from torch._ops import OpOverload
 from torch.overrides import TorchFunctionMode
@@ -83,8 +83,8 @@ def _is_tensor_constructor(func: OpOverload):
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
-# structure. Like `MetaConverter`, it will keep alive all
-# tensors that are converted to FakeTensors.
+# structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
+# hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
     tensor_memo: weakref.WeakValueDictionary
     meta_converter: MetaConverter
@@ -97,11 +97,28 @@ class FakeTensorConverter(object):
         self.meta_converter = MetaConverter()
 
     def _get_memo(self, t):
-        if t in self.tensor_memo:
-            out = self.tensor_memo[t]
+        if WeakTensorRefKey(t) in self.tensor_memo:
+            out = self.tensor_memo[WeakTensorRefKey(t)]
             out._fix_weakref()
             return out
         return None
+
+    def set_tensor_memo(self, t, v):
+        th = WeakTensorRefKey(t)
+
+        # hold a weak ref to self, otherwise it will be kept alive
+        # by the del_ten closure
+        self_weak_ref = weakref.ref(self)
+
+        def del_ten():
+            self_ref = self_weak_ref()
+            if self_ref is None:
+                return
+            # on shutdown, th may not be in memo
+            self_ref.tensor_memo.pop(th, None)
+
+        weakref.finalize(t, del_ten)
+        self.tensor_memo[th] = v
 
     def from_real_tensor(self, fake_mode, t):
         maybe_memo = self._get_memo(t)
@@ -119,7 +136,7 @@ class FakeTensorConverter(object):
             out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        self.tensor_memo[t] = out
+        self.set_tensor_memo(t, out)
         return out
 
     def from_meta_and_device(self, fake_mode, t, device):
@@ -127,7 +144,7 @@ class FakeTensorConverter(object):
         if maybe_memo is not None:
             return maybe_memo
         out = FakeTensor(fake_mode, t, device)
-        self.tensor_memo[t] = out
+        self.set_tensor_memo(t, out)
         return out
 
     def __call__(self, fake_mode, t, device=None):
@@ -273,7 +290,7 @@ class FakeTensor(torch.Tensor):
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
-        assert elem.device.type == "meta"
+        assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
         assert device.type != "meta"
         self.fake_device = device
@@ -408,6 +425,8 @@ class FakeTensorMode(TorchDispatchMode):
         # within python refs, we always return the real device by defining
         # the device property
         self.in_kernel_invocation = False
+
+        super().__init__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

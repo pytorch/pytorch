@@ -143,7 +143,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     """
     # Force metaclass to generate constructor at the base of the hierarchy
     def __init__(self):
-        self.ancestors: Set[TorchDispatchMode]
+        self.ancestors: Set[TorchDispatchMode] = set()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
