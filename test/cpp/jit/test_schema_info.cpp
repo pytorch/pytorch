@@ -4,7 +4,6 @@
 
 namespace torch {
 namespace utils {
-namespace {
 TEST(FunctionSchemaIsMutableTest, Basic) {
   c10::FunctionSchema schema =
       torch::jit::getOperatorForLiteral(
@@ -88,6 +87,5 @@ TEST(FunctionSchemaAreAliasingTest, Wildcard) {
   ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
   ASSERT_FALSE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, false));
 }
-} // namespace
 } // namespace utils
 } // namespace torch
