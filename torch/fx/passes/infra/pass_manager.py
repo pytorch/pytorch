@@ -47,8 +47,6 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
-    return wrapped_fn
-
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
 ) -> None:
@@ -75,9 +73,6 @@ def topological_sort_passes(
         A sorted list of callables and a boolean of if a circular dependency
         existed
     """
-
-    if len(constraints) == 0:
-        return passes, False
 
     # Construct a graph
     graph: Dict[Callable, Set[Callable]] = {}
@@ -110,7 +105,7 @@ def topological_sort_passes(
 
         res.append(p)
 
-    for p in passes:
+    for p in passes[::-1]:
         if not visited[p]:
             topological_sort_util(graph, p)
 

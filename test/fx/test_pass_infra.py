@@ -132,7 +132,7 @@ class TestPassManager(TestCase):
         #     5 -> 0 <- 4
         #     |         |
         #     2 -> 3 -> 1
-        # Which has a possible topological order of: [5, 4, 2, 3, 1, 0]
+        # Which has a possible topological order of: [4, 5, 0, 2, 3, 1]
         passes = [pass0, pass1, pass2, pass3, pass4, pass5]
         constraints = [
             this_before_that_pass_constraint(passes[5], passes[0]),
@@ -143,7 +143,8 @@ class TestPassManager(TestCase):
             this_before_that_pass_constraint(passes[3], passes[1]),
         ]
         sorted = topological_sort_passes(passes, constraints)
-        self.assertEqual(sorted, ([pass5, pass4, pass2, pass3, pass1, pass0], False))
+        print(sorted)
+        self.assertEqual(sorted, ([pass4, pass5, pass0, pass2, pass3, pass1], False))
 
         # Circular dependency should result in the circular_dep flag being set
         passes = [pass0, pass1]
