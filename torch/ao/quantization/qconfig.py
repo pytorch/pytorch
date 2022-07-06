@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 import torch
 import torch.nn as nn
@@ -38,8 +38,10 @@ from .observer import (
     weight_observer_range_neg_127_to_127,
     per_channel_weight_observer_range_neg_127_to_127,
     default_reuse_input_observer,
+    ObserverBase,
 )
 import warnings
+import copy
 
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -416,12 +418,28 @@ def add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
+ObserverConstructor = Union[_PartialWrapper, ObserverBase]
+
+def _observer_equals(obs1: ObserverConstructor, obs2: ObserverConstructor):
+    if isinstance(obs1, _PartialWrapper) and isinstance(obs2, _PartialWrapper):
+        return _partial_wrapper_equals(obs1, obs2)
+    return obs1 == obs2
+
 def _partial_wrapper_equals(obs1: _PartialWrapper, obs2: _PartialWrapper):
     """
     Return whether the two partial wrappers are equal,
     """
     # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
-    return obs1.p.func == obs2.p.func and obs1.p.args == obs2.p.args and obs1.p.keywords == obs2.p.keywords
+    obs1_keywords = copy.copy(obs1.p.keywords)
+    obs2_keywords = copy.copy(obs2.p.keywords)
+    keywords_equal = True
+    # compare observer with _partial_wrapper_equals as well since direct compare would fail
+    if "observer" in obs1_keywords and "observer" in obs2_keywords:
+        keywords_equal = keywords_equal and _observer_equals(obs1_keywords["observer"], obs2_keywords["observer"])
+        obs1_keywords.pop("observer")
+        obs2_keywords.pop("observer")
+    keywords_equal = keywords_equal and obs1_keywords == obs2_keywords
+    return obs1.p.func == obs2.p.func and obs1.p.args == obs2.p.args and keywords_equal
 
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     """
@@ -439,6 +457,7 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
                 activation_same = _partial_wrapper_equals(q1.activation, q2.activation)
             else:
                 activation_same = q1.activation == q2.activation
+
             if(isinstance(q1.weight, _PartialWrapper)):
                 weight_same = _partial_wrapper_equals(q1.weight, q2.weight)
             else:
