@@ -14,3 +14,4 @@ dependencies:
       - scipy
       - av
       - networkx
+      - ninja

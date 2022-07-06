@@ -16,3 +16,4 @@ dependencies:
       - av
       - networkx
       - expecttest
+      - ninja
