@@ -202,7 +202,7 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const {
-    return (*dispatch_fn_)(this, op, stack, type);
+    return (*dispatch_fn_)(this, op, stack);
   }
 
   __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
