@@ -74,13 +74,8 @@ class CudaGraphModule(Module):
             self.graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(self.graph):
                 self.static_outputs = self.gm(*self.static_inputs)
-            # TODO: I didn't see a synchronize but maybe there is one.  This
-            # didn't fix.
-            # torch.cuda.current_stream().wait_stream(torch.cuda.graph.default_capture_stream)
-            # TODO: IDK something awful happens during record, file a bug on
-            # this
-            for dst, src in zip(self.static_inputs, args):
-                dst.copy_(src)
+            # NB: recording doesn't actually run the operations, so
+            # now we immediately replay the graph to serve up the result
             self.graph.replay()
             for i in self.mutated_inputs:
                 args[i].copy_(self.static_inputs[i])
@@ -256,6 +251,7 @@ class TestDynamoCudaGraphs(TestCase):
                 loss = model(x, y).sum()
                 loss.backward()
 
+    @patch('torchdynamo.config.verify_correctness', True)
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
@@ -269,7 +265,7 @@ class TestDynamoCudaGraphs(TestCase):
                     y_orig = y.clone()
                     loss = model(x, y).sum()
                     self.assertEqual(y, y_orig + 3)
-                    #loss.backward()
+                    loss.backward()
 
 
 if __name__ == "__main__":
