@@ -72,7 +72,7 @@ from .flatten_params_wrapper import (
 )
 from .wrap import (
     HandleInitMode,
-    ParamExecOrderWrapPolicy,
+    ParamExecOrderPolicy,
     ParamExecOrderState,
     _or_policy,
     _recursive_wrap,
@@ -671,7 +671,7 @@ class FullyShardedDataParallel(nn.Module):
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
         self.auto_wrap_policy = auto_wrap_policy
-        self._use_param_exec_order_policy = isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy)
+        self._use_param_exec_order_policy = isinstance(auto_wrap_policy, ParamExecOrderPolicy)
         if auto_wrap_policy is not None and not self._use_param_exec_order_policy:
             self._check_wrapped(
                 module,
@@ -679,7 +679,7 @@ class FullyShardedDataParallel(nn.Module):
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
             if mixed_precision is not None and _contains_batchnorm(module):
-                # TODO (linjianma): do we also need to consider this for ParamExecOrderWrapPolicy?
+                # TODO (linjianma): do we also need to consider this for ParamExecOrderPolicy?
                 _override_batchnorm_mixed_precision(module)
                 policy_to_use = functools.partial(
                     _or_policy,
@@ -856,11 +856,11 @@ class FullyShardedDataParallel(nn.Module):
             handle_init_mode = auto_wrap_policy.handle_init_mode
             # TODO (linjianma): introduce module level group_policy
             self._register_param_handles_from_root_module(module, handle_init_mode)
-            # self.flatparam_handle_dict maps param to handle, it will be used to
+            # self.flat_param_to_handle maps param to handle, it will be used to
             # get handle execution ordering.
-            self.flatparam_handle_dict: Dict[FlatParameter, FlatParamHandle] = dict()
+            self.flat_param_to_handle: Dict[FlatParameter, FlatParamHandle] = dict()
             for handle in self._handles:
-                self.flatparam_handle_dict[handle.flat_param] = handle
+                self.flat_param_to_handle[handle.flat_param] = handle
         else:
             self._fsdp_wrapped_module = FlattenParamsWrapper(module, params)
             self.params: List[FlatParameter] = []
@@ -3042,7 +3042,7 @@ class FullyShardedDataParallel(nn.Module):
             ):
                 # In self._handles_exec_order, the handles are ordered based on
                 # the execution order in the backward pass in the first iteration.
-                self._handles_exec_order.append(self.flatparam_handle_dict[param])
+                self._handles_exec_order.append(self.flat_param_to_handle[param])
 
             if param.grad is None:
                 return

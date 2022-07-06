@@ -309,16 +309,16 @@ class ParamExecOrderState(Enum):
 
 
 @dataclass
-class ParamExecOrderWrapPolicy:
+class ParamExecOrderPolicy:
     """
     This is the class used for the wrapping policy that wraps parameters and performs
     the communication scheduling based on the parameter execution order in the forward pass
     (also called non-recursive wrapping policy).
 
     The policy contains multiple ``FlatParamHandle``. Each ``FlatParamHandle`` is a bucket that contains original parameters
-    that will be executed together, and the ``FlatParamHandle`` transfers these parameters into one ``FlattenParameter``.
+    that will be executed together, and the ``FlatParamHandle`` transfers these parameters into one ``FlatParameter``.
     In both forward and the backward passes, the sharded parameters in each ``FlatParamHandle`` will be gathered
-    just before these parameters are used in the passes. These parameters will then be reshaded once they have been used.
+    just before these parameters are used in the passes. These parameters will then be resharded once they have been used.
 
     Args:
         handle_init_mode (HandleInitMode):

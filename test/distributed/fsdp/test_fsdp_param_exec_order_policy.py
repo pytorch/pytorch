@@ -14,7 +14,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
     StateDictType,
 )
-from torch.distributed.fsdp.wrap import HandleInitMode, ParamExecOrderWrapPolicy, ParamExecOrderState
+from torch.distributed.fsdp.wrap import HandleInitMode, ParamExecOrderPolicy, ParamExecOrderState
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -83,7 +83,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         group = dist.distributed_c10d._get_default_group()
 
         fsdp_model = FSDP(
-            copy.deepcopy(model), group, auto_wrap_policy=ParamExecOrderWrapPolicy(handle_init_mode),
+            copy.deepcopy(model), group, auto_wrap_policy=ParamExecOrderPolicy(handle_init_mode),
         )
         fsdp_optim = optim_class(fsdp_model.parameters(), lr=1e-3)
         ddp_model = DDP(model, device_ids=[self.rank], process_group=group)
@@ -255,7 +255,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
     def test_fsdp_flatten_params_exec_order(self, iters: int):
         model = CNN().cuda()
         group = dist.distributed_c10d._get_default_group()
-        fsdp_model = FSDP(model, group, auto_wrap_policy=ParamExecOrderWrapPolicy(HandleInitMode.MODULE_LEVEL))
+        fsdp_model = FSDP(model, group, auto_wrap_policy=ParamExecOrderPolicy(HandleInitMode.MODULE_LEVEL))
         self.assertTrue(fsdp_model._use_param_exec_order_policy)
         self.assertTrue(fsdp_model._param_exec_order_state, ParamExecOrderState.UNINITIALIZED)
         params_list = copy.deepcopy(list(fsdp_model.parameters()))
