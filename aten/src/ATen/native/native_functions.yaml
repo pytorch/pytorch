@@ -660,7 +660,6 @@
   structured: True
   dispatch:
     CPU, CUDA: argmin_out
-    MPS: argmin_out_mps
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
