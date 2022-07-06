@@ -20181,6 +20181,18 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.isposinf",
+        torch_opinfo_name="isposinf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isneginf",
+        torch_opinfo_name="isneginf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
         torch_opinfo_name="isnan",
         supports_out=True,
