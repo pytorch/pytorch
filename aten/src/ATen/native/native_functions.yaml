@@ -660,6 +660,7 @@
   structured: True
   dispatch:
     CPU, CUDA: argmin_out
+    MPS: argmin_out_mps
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
@@ -905,7 +906,7 @@
   dispatch:
     CPU, CUDA: bernoulli_
     MPS: bernoulli_mps_
-  autogen: bernoulli.Tensor_functional, bernoulli.Tensor_out
+  autogen: bernoulli.Tensor, bernoulli.Tensor_out
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1902,7 +1903,7 @@
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
-  autogen: embedding_renorm.functional, embedding_renorm.out
+  autogen: embedding_renorm, embedding_renorm.out
 
 - func: embedding_sparse_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
 
@@ -1970,6 +1971,17 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
+- func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: empty_symint_cpu
+    CUDA: empty_symint_cuda
+    MPS: empty_symint_mps
+    Meta: empty_symint_meta
+    MkldnnCPU: empty_symint_mkldnn
+    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
+    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2016,7 +2028,7 @@
     MPS: resize_mps_
     QuantizedCPU: quantized_resize_cpu_
     SparseCsrCPU, SparseCsrCUDA: resize_sparse_csr_
-  autogen: resize.functional, resize.out
+  autogen: resize, resize.out
 
 # This is a utility function to enable users to resize out tensor while registering kernels for out variants.
 # Eventually, we can consider exposing `resize_output` as a public API to ship it with python op registration
@@ -2026,7 +2038,7 @@
   variants: function
   dispatch:
     Meta: _resize_output_
-  autogen: _resize_output.functional, _resize_output.out
+  autogen: _resize_output, _resize_output.out
 
 - func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   category_override: factory
@@ -2550,7 +2562,7 @@
   dispatch:
     CPU, CUDA: _index_put_impl_
     QuantizedCPU: _index_put_impl_quantized_cpu_
-  autogen: _index_put_impl.functional, _index_put_impl.out
+  autogen: _index_put_impl, _index_put_impl.out
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
@@ -2667,13 +2679,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -2962,11 +2967,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: xlogy_out
-
-- func: logdet(Tensor self) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: logdet
 
 - func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -4353,11 +4353,6 @@
   dispatch:
     CompositeExplicitAutograd: as_strided_scatter
 
-- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: slogdet
-
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
@@ -4644,6 +4639,7 @@
   dispatch:
     CPU, CUDA: std
     MPS: std_mps
+    QuantizedCPU: std_quantized_cpu
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -4674,6 +4670,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
+    QuantizedCPU: std_out_quantized_cpu
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5281,6 +5278,11 @@
     SparseCPU: log_softmax_backward_sparse_cpu
     SparseCUDA: log_softmax_backward_sparse_cuda
 
+- func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
+  python_module: sparse
+  dispatch:
+    CPU: spdiags
+
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -5390,7 +5392,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: resize_as_
-  autogen: resize_as.functional, resize_as.out
+  autogen: resize_as, resize_as.out
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
@@ -5398,7 +5400,7 @@
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
-  autogen: resize_as_sparse.functional, resize_as_sparse.out
+  autogen: resize_as_sparse, resize_as_sparse.out
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5410,7 +5412,7 @@
     SparseCPU, SparseCUDA: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
-  autogen: zero.functional, zero.out
+  autogen: zero, zero.out
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5711,14 +5713,14 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_
-  autogen: sparse_resize.functional, sparse_resize.out
+  autogen: sparse_resize, sparse_resize.out
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_and_clear_
-  autogen: sparse_resize_and_clear.functional, sparse_resize_and_clear.out
+  autogen: sparse_resize_and_clear, sparse_resize_and_clear.out
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
@@ -5824,7 +5826,7 @@
     SparseCPU, SparseCUDA: _coalesced_sparse_
   device_check: NoCheck
   device_guard: False
-  autogen: _coalesced.functional, _coalesced.out
+  autogen: _coalesced, _coalesced.out
 
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
@@ -5884,7 +5886,7 @@
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
-  autogen: copy_sparse_to_sparse.functional, copy_sparse_to_sparse.out
+  autogen: copy_sparse_to_sparse, copy_sparse_to_sparse.out
 
 - func: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -6093,7 +6095,7 @@
   dispatch:
     CPU: fused_moving_avg_obs_fake_quant_cpu
     CUDA: fused_moving_avg_obs_fake_quant_cuda
-  autogen: _fused_moving_avg_obs_fq_helper.functional, _fused_moving_avg_obs_fq_helper.out
+  autogen: _fused_moving_avg_obs_fq_helper_functional, _fused_moving_avg_obs_fq_helper.out
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   variants: function
@@ -6287,7 +6289,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, Meta, MPS: set_
-  autogen: set.source_Storage_functional, set.source_Storage_out
+  autogen: set.source_Storage, set.source_Storage_out
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
@@ -6298,7 +6300,7 @@
     CUDA: set_storage_cuda_
     MPS: set_storage_mps_
     QuantizedCPU, QuantizedCUDA: set_storage_quantized_
-  autogen: set.source_Storage_storage_offset_functional, set.source_Storage_storage_offset_out
+  autogen: set.source_Storage_storage_offset, set.source_Storage_storage_offset_out
 
 - func: set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
@@ -6311,7 +6313,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, Meta, MPS: set_tensor_
-  autogen: set.source_Tensor_functional, set.source_Tensor_out
+  autogen: set.source_Tensor, set.source_Tensor_out
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
@@ -6320,7 +6322,7 @@
     CUDA: set_cuda_
     Meta: set_meta_
     MPS: set_mps_
-  autogen: set.functional, set.out
+  autogen: set, set.out
 
 - func: lift(Tensor self) -> Tensor
   variants: method
@@ -6953,7 +6955,7 @@
     CPU, CUDA: random_
     Meta: random_meta_
     MPS: random_mps_
-  autogen: random.from_functional, random.from_out
+  autogen: random.from, random.from_out
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6962,7 +6964,7 @@
     CPU, CUDA: random_
     Meta: random_meta_
     MPS: random_mps_
-  autogen: random.to_functional, random.to_out
+  autogen: random.to, random.to_out
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6970,7 +6972,7 @@
   dispatch:
     CPU, CUDA: random_
     Meta: random_meta_
-  autogen: random.functional, random.out
+  autogen: random, random.out
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -6979,21 +6981,21 @@
     CPU, CUDA: uniform_
     MPS: uniform_mps_
     Meta: uniform_meta_
-  autogen: uniform.functional, uniform.out
+  autogen: uniform, uniform.out
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: cauchy_
-  autogen: cauchy.functional, cauchy.out
+  autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
-  autogen: log_normal.functional, log_normal.out
+  autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7001,7 +7003,7 @@
   dispatch:
     CPU, CUDA: exponential_
     MPS: exponential_mps_
-  autogen: exponential.functional, exponential.out
+  autogen: exponential, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7010,7 +7012,7 @@
     CPU, CUDA: geometric_
 
 # wrappers for TH functions
-  autogen: geometric.functional, geometric.out
+  autogen: geometric, geometric.out
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8395,7 +8397,15 @@
     MPS: normal_mps_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
-  autogen: normal.functional, normal.out
+  autogen: normal.out
+
+# Only used by the functionalization pass.
+# Normally, the codegen would be able to generate a normal() NativeFunction,
+# but we can't due to overload ambiguity with normal.Tensor_float.
+- func: normal_functional(Tensor self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: normal_functional
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8446,13 +8456,13 @@
   variants: function
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
-  autogen: _amp_foreach_non_finite_check_and_unscale.functional, _amp_foreach_non_finite_check_and_unscale.out
+  autogen: _amp_foreach_non_finite_check_and_unscale, _amp_foreach_non_finite_check_and_unscale.out
 
 - func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda_
-  autogen: _amp_update_scale.functional, _amp_update_scale.out
+  autogen: _amp_update_scale, _amp_update_scale.out
 
 #- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   #dispatch:
@@ -8467,7 +8477,7 @@
     #CUDA: cat_out_cuda
     #QuantizedCPU: cat_out_quantized_cpu
 
-- func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+- func: _foreach_add.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8480,9 +8490,9 @@
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow_
     CUDA: foreach_tensor_add_scalar_kernel_cuda_
-  autogen: _foreach_add.Scalar_functional, _foreach_add.Scalar_out
+  autogen: _foreach_add.Scalar_out
 
-- func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+- func: _foreach_sub.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8495,9 +8505,9 @@
   dispatch:
     CPU: foreach_tensor_sub_scalar_kernel_slow_
     CUDA: foreach_tensor_sub_scalar_kernel_cuda_
-  autogen: _foreach_sub.Scalar_functional, _foreach_sub.Scalar_out
+  autogen: _foreach_sub.Scalar_out
 
-- func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+- func: _foreach_mul.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8510,9 +8520,9 @@
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow_
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
-  autogen: _foreach_mul.Scalar_functional, _foreach_mul.Scalar_out
+  autogen: _foreach_mul.Scalar_out
 
-- func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+- func: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8525,9 +8535,9 @@
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
     CUDA: foreach_tensor_div_scalar_kernel_cuda_
-  autogen: _foreach_div.Scalar_functional, _foreach_div.Scalar_out
+  autogen: _foreach_div.Scalar_out
 
-- func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+- func: _foreach_add.List(Tensor[] self, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8540,9 +8550,9 @@
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow_
     CUDA: foreach_tensor_add_list_kernel_cuda_
-  autogen: _foreach_add.List_functional, _foreach_add.List_out
+  autogen: _foreach_add.List_out
 
-- func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+- func: _foreach_sub.List(Tensor[] self, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8555,9 +8565,9 @@
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow_
     CUDA: foreach_tensor_sub_list_kernel_cuda_
-  autogen: _foreach_sub.List_functional, _foreach_sub.List_out
+  autogen: _foreach_sub.List_out
 
-- func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_mul.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8570,9 +8580,9 @@
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow_
     CUDA: foreach_tensor_mul_list_kernel_cuda_
-  autogen: _foreach_mul.List_functional, _foreach_mul.List_out
+  autogen: _foreach_mul.List_out
 
-- func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8585,9 +8595,9 @@
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow_
     CUDA: foreach_tensor_div_list_kernel_cuda_
-  autogen: _foreach_div.List_functional, _foreach_div.List_out
+  autogen: _foreach_div.List_out
 
-- func: _foreach_add.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_add.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8600,9 +8610,9 @@
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow_
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
-  autogen: _foreach_add.ScalarList_functional, _foreach_add.ScalarList_out
+  autogen: _foreach_add.ScalarList_out
 
-- func: _foreach_sub.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_sub.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8615,9 +8625,9 @@
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow_
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
-  autogen: _foreach_sub.ScalarList_functional, _foreach_sub.ScalarList_out
+  autogen: _foreach_sub.ScalarList_out
 
-- func: _foreach_div.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_div.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8630,9 +8640,9 @@
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
-  autogen: _foreach_div.ScalarList_functional, _foreach_div.ScalarList_out
+  autogen: _foreach_div.ScalarList_out
 
-- func: _foreach_mul.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+- func: _foreach_mul.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8645,9 +8655,9 @@
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
-  autogen: _foreach_mul.ScalarList_functional, _foreach_mul.ScalarList_out
+  autogen: _foreach_mul.ScalarList_out
 
-- func: _foreach_exp(Tensor[] tensors) -> Tensor[]
+- func: _foreach_exp(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8660,7 +8670,7 @@
   dispatch:
     CPU: foreach_tensor_zero_slow_
     CUDA: foreach_tensor_zero_cuda_
-  autogen: _foreach_zero.functional, _foreach_zero.out
+  autogen: _foreach_zero, _foreach_zero.out
 
 - func: _foreach_exp_(Tensor(a!)[] self) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -8668,9 +8678,9 @@
   dispatch:
     CPU: foreach_tensor_exp_slow_
     CUDA: foreach_tensor_exp_cuda_
-  autogen: _foreach_exp.functional, _foreach_exp.out
+  autogen: _foreach_exp.out
 
-- func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
+- func: _foreach_sqrt(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8683,9 +8693,9 @@
   dispatch:
     CPU: foreach_tensor_sqrt_slow_
     CUDA: foreach_tensor_sqrt_cuda_
-  autogen: _foreach_sqrt.functional, _foreach_sqrt.out
+  autogen: _foreach_sqrt.out
 
-- func: _foreach_abs(Tensor[] tensors) -> Tensor[]
+- func: _foreach_abs(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8698,9 +8708,9 @@
   dispatch:
     CPU: foreach_tensor_abs_slow_
     CUDA: foreach_tensor_abs_cuda_
-  autogen: _foreach_abs.functional, _foreach_abs.out
+  autogen: _foreach_abs.out
 
-- func: _foreach_acos(Tensor[] tensors) -> Tensor[]
+- func: _foreach_acos(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8713,9 +8723,9 @@
   dispatch:
     CPU: foreach_tensor_acos_slow_
     CUDA: foreach_tensor_acos_cuda_
-  autogen: _foreach_acos.functional, _foreach_acos.out
+  autogen: _foreach_acos.out
 
-- func: _foreach_asin(Tensor[] tensors) -> Tensor[]
+- func: _foreach_asin(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8728,9 +8738,9 @@
   dispatch:
     CPU: foreach_tensor_asin_slow_
     CUDA: foreach_tensor_asin_cuda_
-  autogen: _foreach_asin.functional, _foreach_asin.out
+  autogen: _foreach_asin.out
 
-- func: _foreach_atan(Tensor[] tensors) -> Tensor[]
+- func: _foreach_atan(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8743,9 +8753,9 @@
   dispatch:
     CPU: foreach_tensor_atan_slow_
     CUDA: foreach_tensor_atan_cuda_
-  autogen: _foreach_atan.functional, _foreach_atan.out
+  autogen: _foreach_atan.out
 
-- func: _foreach_ceil(Tensor[] tensors) -> Tensor[]
+- func: _foreach_ceil(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8758,9 +8768,9 @@
   dispatch:
     CPU: foreach_tensor_ceil_slow_
     CUDA: foreach_tensor_ceil_cuda_
-  autogen: _foreach_ceil.functional, _foreach_ceil.out
+  autogen: _foreach_ceil.out
 
-- func: _foreach_cos(Tensor[] tensors) -> Tensor[]
+- func: _foreach_cos(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8773,9 +8783,9 @@
   dispatch:
     CPU: foreach_tensor_cos_slow_
     CUDA: foreach_tensor_cos_cuda_
-  autogen: _foreach_cos.functional, _foreach_cos.out
+  autogen: _foreach_cos.out
 
-- func: _foreach_cosh(Tensor[] tensors) -> Tensor[]
+- func: _foreach_cosh(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8788,9 +8798,9 @@
   dispatch:
     CPU: foreach_tensor_cosh_slow_
     CUDA: foreach_tensor_cosh_cuda_
-  autogen: _foreach_cosh.functional, _foreach_cosh.out
+  autogen: _foreach_cosh.out
 
-- func: _foreach_erf(Tensor[] tensors) -> Tensor[]
+- func: _foreach_erf(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8803,9 +8813,9 @@
   dispatch:
     CPU: foreach_tensor_erf_slow_
     CUDA: foreach_tensor_erf_cuda_
-  autogen: _foreach_erf.functional, _foreach_erf.out
+  autogen: _foreach_erf.out
 
-- func: _foreach_erfc(Tensor[] tensors) -> Tensor[]
+- func: _foreach_erfc(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8818,9 +8828,9 @@
   dispatch:
     CPU: foreach_tensor_erfc_slow_
     CUDA: foreach_tensor_erfc_cuda_
-  autogen: _foreach_erfc.functional, _foreach_erfc.out
+  autogen: _foreach_erfc.out
 
-- func: _foreach_expm1(Tensor[] tensors) -> Tensor[]
+- func: _foreach_expm1(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8833,9 +8843,9 @@
   dispatch:
     CPU: foreach_tensor_expm1_slow_
     CUDA: foreach_tensor_expm1_cuda_
-  autogen: _foreach_expm1.functional, _foreach_expm1.out
+  autogen: _foreach_expm1.out
 
-- func: _foreach_floor(Tensor[] tensors) -> Tensor[]
+- func: _foreach_floor(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8848,9 +8858,9 @@
   dispatch:
     CPU: foreach_tensor_floor_slow_
     CUDA: foreach_tensor_floor_cuda_
-  autogen: _foreach_floor.functional, _foreach_floor.out
+  autogen: _foreach_floor.out
 
-- func: _foreach_log(Tensor[] tensors) -> Tensor[]
+- func: _foreach_log(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8863,9 +8873,9 @@
   dispatch:
     CPU: foreach_tensor_log_slow_
     CUDA: foreach_tensor_log_cuda_
-  autogen: _foreach_log.functional, _foreach_log.out
+  autogen: _foreach_log.out
 
-- func: _foreach_log10(Tensor[] tensors) -> Tensor[]
+- func: _foreach_log10(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8878,9 +8888,9 @@
   dispatch:
     CPU: foreach_tensor_log10_slow_
     CUDA: foreach_tensor_log10_cuda_
-  autogen: _foreach_log10.functional, _foreach_log10.out
+  autogen: _foreach_log10.out
 
-- func: _foreach_log1p(Tensor[] tensors) -> Tensor[]
+- func: _foreach_log1p(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8893,9 +8903,9 @@
   dispatch:
     CPU: foreach_tensor_log1p_slow_
     CUDA: foreach_tensor_log1p_cuda_
-  autogen: _foreach_log1p.functional, _foreach_log1p.out
+  autogen: _foreach_log1p.out
 
-- func: _foreach_log2(Tensor[] tensors) -> Tensor[]
+- func: _foreach_log2(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8908,9 +8918,9 @@
   dispatch:
     CPU: foreach_tensor_log2_slow_
     CUDA: foreach_tensor_log2_cuda_
-  autogen: _foreach_log2.functional, _foreach_log2.out
+  autogen: _foreach_log2.out
 
-- func: _foreach_neg(Tensor[] tensors) -> Tensor[]
+- func: _foreach_neg(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8923,9 +8933,9 @@
   dispatch:
     CPU: foreach_tensor_neg_slow_
     CUDA: foreach_tensor_neg_cuda_
-  autogen: _foreach_neg.functional, _foreach_neg.out
+  autogen: _foreach_neg.out
 
-- func: _foreach_tan(Tensor[] tensors) -> Tensor[]
+- func: _foreach_tan(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8938,9 +8948,9 @@
   dispatch:
     CPU: foreach_tensor_tan_slow_
     CUDA: foreach_tensor_tan_cuda_
-  autogen: _foreach_tan.functional, _foreach_tan.out
+  autogen: _foreach_tan.out
 
-- func: _foreach_tanh(Tensor[] tensors) -> Tensor[]
+- func: _foreach_tanh(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8953,9 +8963,9 @@
   dispatch:
     CPU: foreach_tensor_tanh_slow_
     CUDA: foreach_tensor_tanh_cuda_
-  autogen: _foreach_tanh.functional, _foreach_tanh.out
+  autogen: _foreach_tanh.out
 
-- func: _foreach_sin(Tensor[] tensors) -> Tensor[]
+- func: _foreach_sin(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8968,9 +8978,9 @@
   dispatch:
     CPU: foreach_tensor_sin_slow_
     CUDA: foreach_tensor_sin_cuda_
-  autogen: _foreach_sin.functional, _foreach_sin.out
+  autogen: _foreach_sin.out
 
-- func: _foreach_sinh(Tensor[] tensors) -> Tensor[]
+- func: _foreach_sinh(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8983,9 +8993,9 @@
   dispatch:
     CPU: foreach_tensor_sinh_slow_
     CUDA: foreach_tensor_sinh_cuda_
-  autogen: _foreach_sinh.functional, _foreach_sinh.out
+  autogen: _foreach_sinh.out
 
-- func: _foreach_round(Tensor[] tensors) -> Tensor[]
+- func: _foreach_round(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -8998,9 +9008,9 @@
   dispatch:
     CPU: foreach_tensor_round_slow_
     CUDA: foreach_tensor_round_cuda_
-  autogen: _foreach_round.functional, _foreach_round.out
+  autogen: _foreach_round.out
 
-- func: _foreach_lgamma(Tensor[] tensors) -> Tensor[]
+- func: _foreach_lgamma(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9013,9 +9023,9 @@
   dispatch:
     CPU: foreach_tensor_lgamma_slow_
     CUDA: foreach_tensor_lgamma_cuda_
-  autogen: _foreach_lgamma.functional, _foreach_lgamma.out
+  autogen: _foreach_lgamma.out
 
-- func: _foreach_frac(Tensor[] tensors) -> Tensor[]
+- func: _foreach_frac(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9028,9 +9038,9 @@
   dispatch:
     CPU: foreach_tensor_frac_slow_
     CUDA: foreach_tensor_frac_cuda_
-  autogen: _foreach_frac.functional, _foreach_frac.out
+  autogen: _foreach_frac.out
 
-- func: _foreach_reciprocal(Tensor[] tensors) -> Tensor[]
+- func: _foreach_reciprocal(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9043,9 +9053,9 @@
   dispatch:
     CPU: foreach_tensor_reciprocal_slow_
     CUDA: foreach_tensor_reciprocal_cuda_
-  autogen: _foreach_reciprocal.functional, _foreach_reciprocal.out
+  autogen: _foreach_reciprocal.out
 
-- func: _foreach_sigmoid(Tensor[] tensors) -> Tensor[]
+- func: _foreach_sigmoid(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9058,9 +9068,9 @@
   dispatch:
     CPU: foreach_tensor_sigmoid_slow_
     CUDA: foreach_tensor_sigmoid_cuda_
-  autogen: _foreach_sigmoid.functional, _foreach_sigmoid.out
+  autogen: _foreach_sigmoid.out
 
-- func: _foreach_trunc(Tensor[] tensors) -> Tensor[]
+- func: _foreach_trunc(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9073,7 +9083,7 @@
   dispatch:
     CPU: foreach_tensor_trunc_slow_
     CUDA: foreach_tensor_trunc_cuda_
-  autogen: _foreach_trunc.functional, _foreach_trunc.out
+  autogen: _foreach_trunc.out
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -9081,7 +9091,7 @@
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow_
     CUDA: foreach_tensor_addcdiv_scalar_cuda_
-  autogen: _foreach_addcdiv.Scalar_functional, _foreach_addcdiv.Scalar_out
+  autogen: _foreach_addcdiv.Scalar_out
 
 - func: _foreach_addcmul_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -9089,7 +9099,7 @@
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow_
     CUDA: foreach_tensor_addcmul_scalar_cuda_
-  autogen: _foreach_addcmul.Scalar_functional, _foreach_addcmul.Scalar_out
+  autogen: _foreach_addcmul.Scalar_out
 
 - func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -9097,7 +9107,7 @@
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda_
-  autogen: _foreach_addcdiv.ScalarList_functional, _foreach_addcdiv.ScalarList_out
+  autogen: _foreach_addcdiv.ScalarList_out
 
 - func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -9105,51 +9115,51 @@
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow_
     CUDA: foreach_tensor_addcmul_scalarlist_cuda_
-  autogen: _foreach_addcmul.ScalarList_functional, _foreach_addcmul.ScalarList_out
+  autogen: _foreach_addcmul.ScalarList_out
 
-- func: _foreach_addcdiv.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+- func: _foreach_addcdiv.Scalar(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow
     CUDA: foreach_tensor_addcdiv_scalar_cuda
 
-- func: _foreach_addcmul.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+- func: _foreach_addcmul.Scalar(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow
     CUDA: foreach_tensor_addcmul_scalar_cuda
 
-- func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
+- func: _foreach_addcdiv.ScalarList(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda
 
-- func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
+- func: _foreach_addcmul.ScalarList(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
     CUDA: foreach_tensor_addcmul_scalarlist_cuda
 
-- func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_maximum.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_maximum_slow
     CUDA: foreach_tensor_maximum_cuda
 
-- func: _foreach_minimum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_minimum.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
 
-- func: _foreach_norm.Scalar(Tensor[] tensors, Scalar ord=2) -> Tensor[]
+- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -9396,16 +9406,19 @@
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_out
+    MPS: huber_loss_out_mps
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss
+    MPS: huber_loss_mps
 
 - func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_backward_out
+    MPS: huber_loss_backward_out_mps
 
 - func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   python_module: nn
@@ -9469,6 +9482,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9480,12 +9494,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
@@ -9698,6 +9714,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
+    MPS: softplus_backward_out_mps
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
@@ -11592,16 +11609,28 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
 
-- func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_slogdet
+- func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_slogdet.sign
 
-- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
-  python_module: linalg
+- func: _linalg_slogdet.sign(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots) -> (Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_slogdet_out
+    CPU, CUDA: _linalg_slogdet_out
+
+- func: linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet)
+  python_module: linalg
+
+- func: linalg_slogdet.out(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  python_module: linalg
+
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  variants: function, method
+
+- func: slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  variants: function
+
+- func: logdet(Tensor self) -> Tensor
+  variants: function, method
 
 - func: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
@@ -11658,7 +11687,7 @@
   dispatch:
     CPU: _linalg_inv_out_helper_cpu
     CUDA: _linalg_inv_out_helper_cuda
-  autogen: _linalg_inv_out_helper.functional, _linalg_inv_out_helper.out
+  autogen: _linalg_inv_out_helper, _linalg_inv_out_helper.out
 
 - func: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   python_module: linalg
@@ -11820,13 +11849,19 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
-  structured_delegate: _linalg_solve.result
+- func: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
+  structured_delegate: _linalg_solve_ex.result
 
-- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+- func: _linalg_solve_ex.result(Tensor A, Tensor B, *, bool left=True, bool check_errors=False, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots, Tensor(d!) info) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots, Tensor(d!) info)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_solve_out
+    CPU, CUDA: _linalg_solve_ex_out
+
+- func: linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor info)
+  python_module: linalg
+
+- func: linalg_solve_ex.out(Tensor A, Tensor B, *, bool left=True, bool check_errors=False, Tensor(a!) result, Tensor(b!) info) -> (Tensor(a!) result, Tensor(b!) info)
+  python_module: linalg
 
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
@@ -13025,3 +13060,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar

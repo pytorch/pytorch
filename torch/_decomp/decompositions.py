@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper_multi
+from torch._prims.wrappers import out_wrapper
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1287,7 +1287,7 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
 
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
-@out_wrapper_multi("output", "buffer")
+@out_wrapper("output", "buffer")
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
@@ -1329,21 +1329,3 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
         self = self.abs()
 
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
-
-
-@register_decomposition(torch.ops.aten.kl_div_backward)
-@pw_cast_for_opmath
-def kl_div_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-    log_target: bool = False,
-) -> Tensor:
-    if not log_target:
-        grad_input = torch.where(target > 0, -target * grad_output, 0)
-    else:
-        grad_input = -target.exp() * grad_output
-    if reduction == Reduction.MEAN.value:
-        return grad_input / self.numel()
-    return grad_input
