@@ -125,6 +125,7 @@ def _patched_create_proxy(
     """
     proxy = create_proxy(kind, target, args, kwargs, name, type_expr, proxy_factory_fn)
 
+    module = execution_info.current_module
     if kind in ["call_function", "call_method"]:
         if args is not None:
             named_params: List[Tuple[str, torch.nn.Parameter]] = []
@@ -136,17 +137,14 @@ def _patched_create_proxy(
                         execution_info.param_exec_order.append(param)
                         execution_info._traced_param_set.add(param)
             if named_params:
-                execution_info.module_execution_info_dict[
-                    execution_info.current_module
-                ].append((execution_info.current_module, named_params))
+                execution_info.module_execution_info_dict[module].append((module, named_params))
     elif kind == "call_module":
-        module = execution_info.current_module
-        named_params_list = list(module.named_parameters())
-        if named_params_list:
+        named_params = list(module.named_parameters())
+        if named_params:
             execution_info.module_execution_info_dict[module].append(
-                (module, named_params_list)
+                (module, named_params)
             )
-        for (_, p) in named_params_list:
+        for (_, p) in named_params:
             if p not in execution_info._traced_param_set:
                 execution_info.param_exec_order.append(p)
                 execution_info._traced_param_set.add(p)
@@ -182,19 +180,19 @@ def _patched_call_module(
             ``kwargs`` of the module callsite.
     """
     execution_info.module_forward_order.append(module)
-    named_params_list = list(module.named_parameters())
-    if named_params_list:
+    named_params = list(module.named_parameters())
+    if named_params:
         execution_info.module_execution_info_dict[execution_info.current_module].append(
             (module, list(module.named_parameters()))
         )
     # Stores away current_module for restoration later
-    old_current_module = execution_info.current_module
+    prev_current_module = execution_info.current_module
     execution_info.current_module = module
     # Note that if the forward of module is called multiple times, this will record
     # the execution info of the last forward pass.
     execution_info.module_execution_info_dict[module] = []
     output = call_module(module, forward, args, kwargs)
-    execution_info.current_module = old_current_module
+    execution_info.current_module = prev_current_module
     return output
 
 
