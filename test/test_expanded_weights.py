@@ -262,7 +262,7 @@ class TestExpandedWeightFunctional(TestCase):
         model = model(10).to(device)
         targets = torch.randint(0, 10, (batch_size,), device=device)
         criterion = CrossEntropyLoss(reduction='sum')  # use a loss that doesn't average across the batch to test in a for loop
-        result = call_for_per_sample_grads(model, batch_size, loss_reduction="sum")(input)
+        result = call_for_per_sample_grads(model, loss_reduction="sum")(input)
         loss = criterion(result, targets)
         loss.backward()
         result = []
@@ -366,7 +366,7 @@ class TestExpandedWeightModule(TestCase):
             input.requires_grad_()
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager
-            actual_res = call_for_per_sample_grads(module, batch_size, loss_reduction="sum")(input).sum()
+            actual_res = call_for_per_sample_grads(module, loss_reduction="sum")(input).sum()
             actual_res.backward()
             actual_grads = []
             for param in module.parameters():
@@ -408,7 +408,7 @@ class TestExpandedWeightModule(TestCase):
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager, calling .backward() twice
             test_module = TestModule(module)
-            actual_res = call_for_per_sample_grads(test_module, batch_size, loss_reduction="sum")(input).sum()
+            actual_res = call_for_per_sample_grads(test_module, loss_reduction="sum")(input).sum()
             actual_res.backward()
             actual_grads = []
             for param in module.parameters():
@@ -437,17 +437,26 @@ class TestExpandedWeightModule(TestCase):
         module = nn.Linear(10, 10)
         input = torch.randn(64, 10)
         with self.assertRaisesRegex(RuntimeError, r"Module passed must be nn.Module"):
-            call_for_per_sample_grads("fail", 64, loss_reduction="sum")(input)
-        with self.assertRaisesRegex(RuntimeError, r"Batch size passed must be an integer"):
-            call_for_per_sample_grads(module, 6.4, loss_reduction="sum")(input)
+            call_for_per_sample_grads("fail")(input)
+        with self.assertRaisesRegex(RuntimeError, r"Batch size passed must be None or an integer"):
+            call_for_per_sample_grads(module, 6.4)(input)
         with self.assertRaisesRegex(RuntimeError, r"Batch size must be positive"):
-            call_for_per_sample_grads(module, -64, loss_reduction="sum")(input)
+            call_for_per_sample_grads(module, -64)(input)
         with self.assertRaisesRegex(RuntimeError, r"incorrect for multiple calls"):
-            loss = call_for_per_sample_grads(module, 64, loss_reduction="sum")(input).sum()
+            loss = call_for_per_sample_grads(module)(input).sum()
             loss.backward()  # populate grad_sample fields
-            call_for_per_sample_grads(module, 64, loss_reduction="sum")(input)
+            call_for_per_sample_grads(module)(input)
+
+        module = nn.Linear(10, 10)  # reset to not have grad_sample fields
         with self.assertRaisesRegex(RuntimeError, r"Expected loss_reduction argument to be sum or mean"):
-            call_for_per_sample_grads(module, -64, loss_reduction="")(input)
+            call_for_per_sample_grads(module, loss_reduction="")(input)
+
+        with self.assertRaisesRegex(RuntimeError, "found at least one input with batch size 4 and one with batch size 5"):
+            input1 = torch.randn(4, 10)
+            input2 = torch.randn(5, 10)
+
+            # NB: this would still fail if run because we pass too many inputs. This is just for ease of testing
+            call_for_per_sample_grads(module)(input1, input2)
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
