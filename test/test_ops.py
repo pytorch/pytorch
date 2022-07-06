@@ -1571,8 +1571,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
-        # not sure
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
+        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
     }
 
