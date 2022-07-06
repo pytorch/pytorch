@@ -298,9 +298,7 @@ def _inject_new_class(module: Module) -> None:
         },
     )
 
-    #print(id(module), 'from', id(module.__class__), 'to', id(param_cls))
     module.__class__ = param_cls
-    #print(id(module), 'now has', id(module.__class__))
 
 
 def _inject_property(module: Module, tensor_name: str) -> None:
@@ -351,7 +349,6 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
-    #print("injecting property for attribute", tensor_name, "into class", id(module.__class__))
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
 
 def register_parametrization(
@@ -536,7 +533,6 @@ def register_parametrization(
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
-        #print("getting original value of param", tensor_name, "from module", id(module), "with __class__", id(module.__class__))
         original = getattr(module, tensor_name)
         # We create this early to check for possible errors
         parametrizations = ParametrizationList([parametrization], original, unsafe=unsafe)
@@ -545,12 +541,10 @@ def register_parametrization(
         # If this is the first parametrization registered on the module,
         # we prepare the module to inject the property
         if not is_parametrized(module):
-            #print("First parametrization of module", id(module), "injecting new class")
             # Change the class
             _inject_new_class(module)
             # Inject a ``ModuleDict`` into the instance under module.parametrizations
             module.parametrizations = ModuleDict()
-        #print("Injecting to module", id(module), "with params list", id(module.parametrizations))
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
