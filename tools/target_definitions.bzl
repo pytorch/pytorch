@@ -8,6 +8,7 @@ load("@fbsource//tools/build_defs:glob_defs.bzl", "glob")
 load(
     "//caffe2:build_variables.bzl",
     "glob_libtorch_python_sources",
+    "jit_core_headers",
     "libtorch_cuda_sources",
     "libtorch_nvfuser_generated_headers",
     "libtorch_nvfuser_runtime_sources",
@@ -268,7 +269,7 @@ def add_torch_libs():
     )
 
     # (original_paths, hipified_paths)
-    libtorch_hip_headers_filter = torch_cpp_headers + [h for h in common_headers if any([h.startswith(d) for d in [
+    libtorch_hip_headers_filter = torch_cpp_headers + jit_core_headers + [h for h in common_headers if any([h.startswith(d) for d in [
         # headers in the following directories are added to libtorch_hip_headers_filter
         # so that they are not hipified.
         "torch/csrc/deploy/",
