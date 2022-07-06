@@ -347,7 +347,7 @@ def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
     produces the observed node or None if we can't extract a self contained
     graph without free variables(inputs of the forward function).
     '''
-    if node.op == "placeholder":
+    if isinstance(node, Node) and node.op == "placeholder":
         return None
     nodes = [node]
     frontier = [node]
