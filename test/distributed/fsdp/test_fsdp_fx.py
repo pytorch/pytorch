@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import Any
+
 import torch
 from torch.distributed.fsdp._symbolic_trace import _init_execution_info, _patch_tracer
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -24,14 +26,15 @@ class Model(torch.nn.Module):
         )
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: Any, flag: bool):
         z = self.relu(self.layer0(x))
         z = self.relu(self.layer2(z))
         z = z @ self.weight1
-        z = self.relu(self.layer1(z))
-        z = z @ self.weight2
-        # used to test the case where a module is called more than once
-        z = self.relu(self.layer0(x))
+        if flag:
+            z = self.relu(self.layer1(z))
+            z = z @ self.weight2
+            # used to test the case where a module is called more than once
+            z = self.relu(self.layer0(x))
         return z
 
 
@@ -45,7 +48,8 @@ class TestSymbolicTracing(FSDPTest):
         with _patch_tracer(
             tracer=tracer, root_module=model, execution_info=execution_info
         ):
-            tracer.trace(model)
+            concrete_args = {"flag": True}
+            tracer.trace(model, concrete_args)
         # the member functions of tracer should not be changed
         self.assertEqual(original_call_module, tracer.call_module)
         self.assertEqual(original_create_proxy, tracer.create_proxy)

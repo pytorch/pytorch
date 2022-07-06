@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import Any
+
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._symbolic_trace import TracingConfig
@@ -26,12 +28,13 @@ class Model(torch.nn.Module):
         )
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: Any, flag: bool = True):
         # `layer0` -> `layer2` -> `layer1`
         # the forward execution order is NOT consistent with the model definition order.
         z = self.relu(self.layer0(x))
         z = self.relu(self.layer2(z))
-        z = self.relu(self.layer1(z))
+        if flag:
+            z = self.relu(self.layer1(z))
         return z
 
     def get_input(self, device: torch.device):
@@ -104,7 +107,7 @@ class TestFSDPExecOrder(FSDPTest):
         should always set as False.
         """
         wrap_policy = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy, tracing_config=TracingConfig()
+            init_policy=always_wrap_policy, tracing_config=TracingConfig(concrete_args={"flag": False})
         )
         fsdp_model = Model.wrap(
             sharding_strategy,
@@ -116,7 +119,7 @@ class TestFSDPExecOrder(FSDPTest):
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
         self.assertEqual(
             fsdp_model._fsdp_params_exec_order,
-            [params_list[0], params_list[2], params_list[3], params_list[1]],
+            [params_list[0], params_list[2], params_list[3]],
         )
         self.assertTrue(fsdp_model._use_param_exec_order_policy())
         self.assertTrue(not fsdp_model._is_param_exec_order_prep_stage())
