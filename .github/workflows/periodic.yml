@@ -44,7 +44,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.2" },
         ]}
 
   linux-focal-rocm5_3-py3_8-slow-test:
@@ -67,8 +67,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
 
   linux-focal-rocm5_3-py3_8-distributed-test:
