@@ -1,8 +1,10 @@
 import functools
 import torch
-from typing import Iterator
+from typing import Iterator, TypeVar
 from dataclasses import dataclass
 from contextlib import contextmanager
+
+T = TypeVar('T')
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -51,7 +53,7 @@ class _ModeInfo:
 # shared version of enable_torch_function/enable_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
-def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[T]:
     if not (
         mode is None or
         isinstance(mode, mode_info.mode_class) or
@@ -61,7 +63,7 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
                          f'or None as an argument got {type(mode)} instead')
     old = mode_info.get_mode()
     if old is mode:
-        yield mode
+        yield mode  # type: ignore[misc]
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
@@ -86,7 +88,7 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         )
     mode_info.set_mode(mode)
     try:
-        yield mode
+        yield mode  # type: ignore[misc]
     finally:
         mode_info.set_mode(old)
 
