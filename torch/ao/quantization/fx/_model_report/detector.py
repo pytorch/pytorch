@@ -1131,7 +1131,6 @@ class OutlierDetector(DetectorBase):
 
         Takes advantage of the ModelReport Observer which records the relavent percentile information
 
-        # TODO Add suggestion to see if it is stationary or non using that detector, and if static, issue dynamic hard to tell
         Args:
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
