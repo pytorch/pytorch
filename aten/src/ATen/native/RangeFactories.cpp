@@ -143,7 +143,6 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  bool args_all_int = start.isIntegral(true) && end.isIntegral(true) && step.isIntegral(true);
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -166,7 +165,7 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (std::is_same<scalar_t, int64_t>::value && args_all_int) {
+    if (std::is_same<scalar_t, int64_t>::value) {
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {

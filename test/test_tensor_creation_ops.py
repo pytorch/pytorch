@@ -2578,11 +2578,6 @@ class TestTensorCreation(TestCase):
         r = torch.arange(0, 100 * w, w, device=device)
         self.assertEqual(r.numel(), 100)
 
-        r1 = torch.arange(-1.5, 1.5, dtype=torch.int32, device=device)
-        self.assertEqual(r1.numel(), 3)
-        r2 = torch.arange(-1.5, 1.5, dtype=torch.int64, device=device)
-        self.assertEqual(r1, r2, exact_dtype=False, atol=0, rtol=0)
-
         # Test Rounding Errors
         line = torch.zeros(size=(1, 49), device=device)
         self.assertWarnsRegex(UserWarning, 'The out tensor will be resized',
