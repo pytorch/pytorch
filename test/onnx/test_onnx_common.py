@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import random
-import unittest
 from typing import Any, Mapping, Type
 
 import numpy as np
@@ -12,6 +11,7 @@ import onnxruntime
 
 import torch
 from torch.onnx import _constants, verification
+from torch.testing._internal import common_utils
 
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
@@ -56,7 +56,7 @@ def set_rng_seed(seed):
     np.random.seed(seed)
 
 
-class _TestONNXRuntime(unittest.TestCase):
+class _TestONNXRuntime(common_utils.TestCase):
     opset_version = _constants.onnx_default_opset
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
