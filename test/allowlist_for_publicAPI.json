@@ -160,21 +160,6 @@
     "sorted_patterns_dict",
     "get_quantize_handler_cls"
   ],
-  "torch.ao.quantization.observer": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
-    "partial"
-  ],
   "torch.ao.quantization.qconfig": [
     "Any",
     "FakeQuantize",
@@ -1285,6 +1270,7 @@
     "qr",
     "slogdet",
     "solve",
+    "solve_ex",
     "solve_triangular",
     "svd",
     "svdvals",
@@ -2195,6 +2181,7 @@
     "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
+    "_linalg_solve_ex",
     "_log_softmax",
     "_log_softmax_backward_data",
     "_logcumsumexp",
