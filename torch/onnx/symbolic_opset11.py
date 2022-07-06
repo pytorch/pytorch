@@ -38,6 +38,8 @@ __all__ = [
     "im2col",
     "index_fill",
     "index",
+    "index_copy",
+    "index_put",
     "insert",
     "linalg_det",
     "linalg_vector_norm",
