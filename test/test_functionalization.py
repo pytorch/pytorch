@@ -1,7 +1,7 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs, log_input
 from torch.utils._pytree import tree_map
 
@@ -340,6 +340,7 @@ $2 = torch._ops.aten.add.Tensor($1, 1)
 $3 = torch._ops.aten.mul.Tensor($2, 2)
 $4 = torch._ops.aten.div.Tensor($3, 1)""")
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_metadata_change(self):
         def f(x):
             # ops like ge_() are allowed to change the dtype of the input.
