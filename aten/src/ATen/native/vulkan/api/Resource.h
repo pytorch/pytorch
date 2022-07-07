@@ -14,6 +14,8 @@ namespace api {
 
 typedef uint8_t MemoryAccessFlags;
 
+VkFormat vk_format(const caffe2::TypeMeta dtype);
+
 enum MemoryAccessType : MemoryAccessFlags {
   NONE = 0u << 0u,
   READ = 1u << 0u,

@@ -1905,7 +1905,11 @@ def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kw
     for shape in cases:
         yield SampleInput(make_arg(shape))
 
-def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_prelu(op_info, device, dtype, requires_grad, **kwargs):
+    op_kwargs = op_info.sample_kwargs(device, dtype, None)[0]
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad,
+                                               op_kwargs=op_kwargs)
+
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = (
@@ -1924,9 +1928,44 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
             channel_size = shape[1]
             yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
     weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
+
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
+def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_prelu(op, device, dtype, requires_grad, **kwargs)
+    yield from reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs)
+
+def sample_kwargs_prelu_scalar_weight(device, dtype, input):
+    weight = torch.rand(tuple(), device=device, dtype=dtype)
+    # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
+    if dtype == torch.bfloat16:
+        weight_cpu = weight.to(dtype=torch.float32, device="cpu")
+    else:
+        weight_cpu = weight.cpu()
+    np_weight = weight_cpu.numpy()
+    return ({'weight': weight}, {'weight': np_weight})
+
+def error_inputs_prelu(op, device):
+    # Weight has numel != 1, but self.ndim is zero-dim tensor
+    inp = make_tensor(tuple(), device=device, dtype=torch.float32)
+    weight = make_tensor((2,), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
+                     error_regex="Not allow zero-dim input tensor.")
+
+    # Weight has numel != 1, but numel does not match channel size
+    inp = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
+    weight = make_tensor((9,), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
+                     error_regex="Mismatch of parameter numbers and input channel size.")
+
+    # Weight is neither a scalar nor 1-D tensor
+    inp = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
+    weight = make_tensor((2, 4), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
+                     error_regex="prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = 2")
+
+    # src and index tensors must have the same # of dimensions
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -12539,8 +12578,6 @@ op_db: List[OpInfo] = [
                # we skip gradient checks for this suite as they are tested in
                # variant_test_name='grad_oriented'
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
                # The values for attribute 'shape' do not match
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
@@ -12567,10 +12604,6 @@ op_db: List[OpInfo] = [
                # tests do not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            active_if=(not TEST_WITH_ROCM)),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
@@ -13465,6 +13498,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # JIT test also tries to compute double backward, which fails
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Extremal value issue on aten::native_layer_norm, which returns 'nan' for mean on 'inf' inputs
+               # possibly because of the welford implementation.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
@@ -13729,10 +13765,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # Ref: https://github.com/pytorch/pytorch/issues/78077
-               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
-                            'test_expanded_weight_per_sample_grad',
-                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -13767,10 +13799,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # Ref: https://github.com/pytorch/pytorch/issues/78077
-               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
-                            'test_expanded_weight_per_sample_grad',
-                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -14409,7 +14437,7 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
     ),
-    OpInfo(
+    UnaryUfuncInfo(
         'nn.functional.prelu',
         aten_backward_name='prelu_backward',
         ref=lambda x, weight:
@@ -14423,7 +14451,11 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_inputs_func=sample_inputs_nn_functional_prelu,
+        # test_reference_numerics only tests the case when the weight tensor is a scalar
+        sample_kwargs=sample_kwargs_prelu_scalar_weight,
+        error_inputs_func=error_inputs_prelu,
+        sample_inputs_func=sample_inputs_prelu,
+        reference_inputs_func=reference_inputs_prelu,
         decorators=[
             # FIXME: second derivative is implemented but seems to be incorrect
             # https://github.com/pytorch/pytorch/issues/68760
@@ -16466,12 +16498,6 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
-           skips=(
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           )
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -19327,7 +19353,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
         decorators=(
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         )
     ),
@@ -19466,12 +19493,22 @@ op_db: List[OpInfo] = [
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
+        backward_dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
+        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
+        check_batched_grad=False,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        skips=(
+            # See https://github.com/pytorch/pytorch/issues/65466
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
+        ),
     ),
     OpInfo(
         "diagflat",
@@ -20181,6 +20218,18 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.isposinf",
+        torch_opinfo_name="isposinf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isneginf",
+        torch_opinfo_name="isneginf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
         torch_opinfo_name="isnan",
         supports_out=True,
@@ -20395,6 +20444,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.prelu",
+        torch_opinfo_name="nn.functional.prelu",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
