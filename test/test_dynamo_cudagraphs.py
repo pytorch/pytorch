@@ -147,6 +147,7 @@ class ProxyTensorInterpreter(torch.fx.Interpreter):
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
+        self.new_module.register_buffer(target, self.module.get_buffer(target))
         return ProxyTensor(
             out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
         )
@@ -285,6 +286,41 @@ class TestDynamoCudaGraphs(TestCase):
                     y_orig = y.clone()
                     loss = model(x, y).sum()
                     self.assertEqual(y, y_orig + 3)
+                    loss.backward()
+
+    def test_constant_proxy_tensor(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f():
+            val = torch.tensor(float('inf'))
+            return torch.full((100, 100), val)
+
+        make_fx(f)()
+
+    def test_constant_proxy_tensor_mut(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f():
+            val = torch.tensor(float(1))
+            val.add_(2)
+            return torch.full((100, 100), val)
+
+        make_fx(f)()
+
+    @patch("torchdynamo.config.verify_correctness", True)
+    def test_mutate_constant(self):
+        def model(x, y):
+            c = torch.tensor(1)
+            c.add_(2)
+            return x * y * 0 + c
+
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
+            for i in range(5):
+                with self.subTest(i):
+                    x = torch.randn(1, device="cuda", requires_grad=True)
+                    y = torch.randn(1, device="cuda")
+                    loss = model(x, y).sum()
+                    self.assertEqual(loss, torch.tensor(3.0, device="cuda"))
                     loss.backward()
 
 

@@ -448,18 +448,6 @@ class FakeTensorMode(TorchDispatchMode):
             # TODO: apply as no_dispatch decorator
             converter = self.fake_tensor_converter
 
-            # this is generated from torch.tensor(), which does not use the
-            # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            # we need to handle before error checking
-            if func == torch.ops.aten.lift.default:
-                assert (
-                    len(kwargs) == 0
-                    and len(args) == 1
-                    and type(args[0]) is torch.Tensor
-                )
-                with no_dispatch():
-                    return converter(self, args[0])
-
             def wrap(e, device=None):
                 if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                     return converter(self, e, device)
@@ -487,6 +475,18 @@ class FakeTensorMode(TorchDispatchMode):
 
             if subclass_seen:
                 return NotImplemented
+
+            # this is generated from torch.tensor(), which does not use the
+            # dispatcher, to allow wrapper subclasses to wrap the new tensor
+            # we need to handle before error checking
+            if func in [torch.ops.aten.lift_fresh.default, torch.ops.aten.lift_fresh_copy.default]:
+                assert (
+                    len(kwargs) == 0
+                    and len(args) == 1
+                    and type(args[0]) is torch.Tensor
+                ), f"{args} {kwargs}"
+                with no_dispatch():
+                    return converter(self, args[0])
 
             if conversion_made:
                 raise Exception(
