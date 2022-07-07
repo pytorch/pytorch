@@ -19,6 +19,8 @@ def inplace_wrapper(fn: Callable) -> Callable:
     Returns:
         wrapped_fn (Callable[Module, PassResult])
     """
+    if fn is None:
+        return None
 
     @wraps(fn)
     def wrapped_fn(gm):
@@ -39,6 +41,8 @@ def pass_result_wrapper(fn: Callable) -> Callable:
     Returns:
         wrapped_fn (Callable[Module, PassResult])
     """
+    if fn is None:
+        return None
 
     @wraps(fn)
     def wrapped_fn(gm):
