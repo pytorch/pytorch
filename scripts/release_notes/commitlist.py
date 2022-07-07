@@ -29,6 +29,12 @@ class Commit:
     category: str
     topic: str
     title: str
+    author: str
+
+    # This is not a list so that it is easier to put in a spreadsheet
+    accepter_1: str
+    accepter_2: str
+    accepter_3: str
 
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
@@ -74,12 +80,19 @@ class CommitList:
         return False
 
     @staticmethod
-    def categorize(commit_hash, title):
+    def gen_commit(commit_hash):
         features = get_features(commit_hash, return_dict=True)
+        category, topic = CommitList.categorize(features)
+        a1, a2, a3 = (features["accepters"] + ("", "", ""))[:3]
+        return Commit(commit_hash, category, topic, features["title"], features["author"], a1, a2, a3)
+
+    @staticmethod
+    def categorize(features):
         title = features['title']
         labels = features['labels']
         category = 'Uncategorized'
         topic = 'Untopiced'
+
 
         # We ask contributors to label their PR's appropriately
         # when they're first landed.
@@ -93,15 +106,15 @@ class CommitList:
                 topic = label.split('topic: ', 1)[1]
                 already_topiced = True
         if already_categorized and already_topiced:
-            return Commit(commit_hash, category, topic, title)
+            return category, topic
 
         # update this to check if each file starts with caffe2
         if 'caffe2' in title:
-            return Commit(commit_hash, 'caffe2', topic, title)
+            return 'caffe2', topic
         if '[codemod]' in title.lower():
-            return Commit(commit_hash, 'skip', topic, title)
+            return 'skip', topic
         if 'Reverted' in labels:
-            return Commit(commit_hash, 'skip', topic, title)
+            return 'skip', topic
         if 'bc_breaking' in labels:
             topic = 'bc-breaking'
         if 'module: deprecation' in labels:
@@ -178,7 +191,7 @@ class CommitList:
                 category = 'python_frontend'
 
 
-        return Commit(commit_hash, category, topic, title)
+        return category, topic
 
     @staticmethod
     def get_commits_between(base_version, new_version):
@@ -194,7 +207,7 @@ class CommitList:
 
         log_lines = commits.split('\n')
         hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
-        return [CommitList.categorize(commit_hash, title) for commit_hash, title in zip(hashes, titles)]
+        return [CommitList.gen_commit(commit_hash) for commit_hash in hashes]
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
