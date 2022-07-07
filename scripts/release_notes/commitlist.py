@@ -2,9 +2,10 @@ import argparse
 from common import run, topics, get_features
 from collections import defaultdict
 import os
+from pathlib import Path
 import csv
 import pprint
-from common import CommitDataCache
+from common import get_commit_data_cache, features_to_dict
 import re
 import dataclasses
 from typing import List
@@ -68,6 +69,7 @@ class CommitList:
     def write_to_disk(self):
         path = self.path
         rows = self.commits
+        os.makedirs(Path(path).parent, exist_ok=True)
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
             for commit in rows:
@@ -81,7 +83,8 @@ class CommitList:
 
     @staticmethod
     def gen_commit(commit_hash):
-        features = get_features(commit_hash, return_dict=True)
+        feature_item = get_commit_data_cache().get(commit_hash)
+        features = features_to_dict(feature_item)
         category, topic = CommitList.categorize(features)
         a1, a2, a3 = (features["accepters"] + ("", "", ""))[:3]
         return Commit(commit_hash, category, topic, features["title"], features["author"], a1, a2, a3)
@@ -253,7 +256,7 @@ def to_markdown(commit_list, category):
             return commit.title
         return match.group(1)
 
-    cdc = CommitDataCache()
+    cdc = get_commit_data_cache()
     lines = [f'\n## {category}\n']
     for topic in topics:
         lines.append(f'### {topic}\n')

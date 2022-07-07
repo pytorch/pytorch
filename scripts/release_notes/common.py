@@ -1,5 +1,5 @@
 from collections import namedtuple
-from os.path import expanduser
+from pathlib import Path
 import locale
 import subprocess
 import re
@@ -132,7 +132,7 @@ def parse_pr_number(body, commit_hash, title):
 
 def get_ghstack_token():
     pattern = 'github_oauth = (.*)'
-    with open(expanduser('~/.ghstackrc'), 'r+') as f:
+    with open(Path('~/.ghstackrc').expanduser(), 'r+') as f:
         config = f.read()
     matches = re.findall(pattern, config)
     if len(matches) == 0:
@@ -190,7 +190,7 @@ def github_data(pr_number):
     return labels, author, accepters
 
 
-def get_features(commit_hash, return_dict=False):
+def get_features(commit_hash):
     title, body, files_changed = (
         commit_title(commit_hash),
         commit_body(commit_hash),
@@ -202,16 +202,25 @@ def get_features(commit_hash, return_dict=False):
     if pr_number is not None:
         labels, author, accepters = github_data(pr_number)
     result = Features(title, body, pr_number, files_changed, labels, author, accepters)
-    if return_dict:
-        return features_to_dict(result)
     return result
 
-class CommitDataCache:
-    def __init__(self, path='results/data.json'):
+
+_commit_data_cache = None
+
+def get_commit_data_cache(path='results/data.json'):
+    global _commit_data_cache
+    if _commit_data_cache is None:
+        _commit_data_cache = _CommitDataCache(path)
+    return _commit_data_cache
+
+class _CommitDataCache:
+    def __init__(self, path):
         self.path = path
         self.data = {}
         if os.path.exists(path):
             self.data = self.read_from_disk()
+        else:
+            os.makedirs(Path(path).parent, exist_ok=True)
 
     def get(self, commit):
         if commit not in self.data.keys():
