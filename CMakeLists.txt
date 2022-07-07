@@ -461,10 +461,6 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
-if(LINUX)
-  string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
-endif()
-
 if(MSVC)
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   foreach(flag_var
@@ -817,6 +813,8 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
