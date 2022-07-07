@@ -21,7 +21,9 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/execution_graph_observer.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -275,6 +277,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             "parent", [](const Result& r) { return r.parent_.lock(); })
         .def_readonly("children", &Result::children_)
         .def_readonly("start_time_ns", &Result::start_time_ns_)
+        .def_readonly("start_tid", &Result::start_tid_)
         .def_property_readonly("correlation_id", &Result::correlationID)
         .def_property_readonly("end_time_ns", &Result::endTimeNS)
         .def_property_readonly("duration_time_ns", [](const Result& r) {
