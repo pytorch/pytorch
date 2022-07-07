@@ -241,6 +241,10 @@
     "QuantType",
     "wrap_cpp_module"
   ],
+  "torch.ao.sparsity": [
+    "get_dynamic_sparse_quantized_mapping",
+    "get_static_sparse_quantized_mapping"
+  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",
@@ -676,6 +680,11 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
+  "torch.distributed.pipeline": [
+    "is_recomputing",
+    "WithDevice",
+    "NoChunk"
+  ],
   "torch.distributed.pipeline.sync.checkpoint": [
     "Checkpoint",
     "Checkpointing",
@@ -1045,6 +1054,9 @@
   "torch.fx.proxy": [
     "assert_fn"
   ],
+  "torch.hub": [
+    "tqdm"
+  ],
   "torch.jit": [
     "Attribute",
     "Final",
@@ -1210,6 +1222,16 @@
     "tensorsolve",
     "vander",
     "vector_norm"
+  ],
+  "torch.monitor": [
+    "Aggregation",
+    "Event",
+    "EventHandlerHandle",
+    "Stat",
+    "data_value_t",
+    "log_event",
+    "register_event_handler",
+    "unregister_event_handler"
   ],
   "torch.multiprocessing": [
     "Array",
@@ -1604,6 +1626,11 @@
     "enable_fake_quant",
     "enable_observer"
   ],
+  "torch.quantization.fx": [
+    "convert",
+    "fuse",
+    "prepare"
+  ],
   "torch.quantization.fuse_modules": [
     "fuse_conv_bn",
     "fuse_conv_bn_relu",
@@ -1942,11 +1969,17 @@
     "Any",
     "OrderedDict"
   ],
+  "torch.utils.model_dump": [
+    "main"
+  ],
   "torch.utils.show_pickle": [
     "Any",
     "BinaryIO",
     "IO",
     "Union"
+  ],
+  "torch.utils.tensorboard": [
+    "RecordWriter"
   ],
   "torch": [
     "BFloat16Storage",
