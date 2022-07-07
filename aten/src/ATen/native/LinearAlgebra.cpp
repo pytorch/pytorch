@@ -1326,14 +1326,15 @@ static void addmm_impl_cpu_(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
+        using opmath_t = at::opmath_type<scalar_t>;
         at::native::cpublas::gemm(
             transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
-            alpha.to<scalar_t>(),
+            alpha.to<opmath_t>(),
             a.data_ptr<scalar_t>(), lda,
             b.data_ptr<scalar_t>(), ldb,
-            beta.to<scalar_t>(),
+            beta.to<opmath_t>(),
             c.data_ptr<scalar_t>(), ldc);
       });
 
