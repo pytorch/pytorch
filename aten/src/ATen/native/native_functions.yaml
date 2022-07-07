@@ -660,6 +660,7 @@
   structured: True
   dispatch:
     CPU, CUDA: argmin_out
+    MPS: argmin_out_mps
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
@@ -2678,6 +2679,13 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: kl_div
+
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  dispatch:
+    CPU: kl_div_backward_cpu
+    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -9405,16 +9413,19 @@
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_out
+    MPS: huber_loss_out_mps
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss
+    MPS: huber_loss_mps
 
 - func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_backward_out
+    MPS: huber_loss_backward_out_mps
 
 - func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   python_module: nn
@@ -13056,9 +13067,3 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
-
-# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
-# within test/test_python_dispatch.py
-- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
-  dispatch:
-    CPU: foobar

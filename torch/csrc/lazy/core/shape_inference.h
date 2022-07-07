@@ -43,13 +43,14 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_grid_sampler_2d(const at
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_grid_sampler_2d_backward(const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners, ::std::array<bool,2> output_mask);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_index_select(const at::Tensor & self, int64_t dim, const at::Tensor & index);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_inverse(const at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_kl_div_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, bool log_target);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & buffer);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_forward(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_logdet(const at::Tensor & self);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_and(at::Tensor & self, const at::Tensor & other);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor & self);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_or(at::Tensor & self, const at::Tensor & other);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_xor(at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_and(const at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_not(const at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_or(const at::Tensor & self, const at::Tensor & other);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logical_xor(const at::Tensor & self, const at::Tensor & other);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_masked_fill(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_max(const at::Tensor & self);
