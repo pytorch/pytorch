@@ -67,6 +67,12 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const int64_t debug_handle,
       const std::string& event_name,
       const std::string& backend_name);
+  void recordBackendMemoryEvent(
+      void* ptr,
+      int64_t alloc_size,
+      int64_t total_allocated,
+      int64_t total_reserved,
+      c10::Device device);
 
   ~KinetoEdgeCPUProfiler();
 
@@ -88,11 +94,20 @@ TORCH_API KinetoEdgeCPUProfiler* getCurrentEdgeProfiler();
     mobile::getCurrentEdgeProfiler()->recordBackendEvent(                    \
         start_time_us, end_time_us, debug_handle, event_name, backend_name); \
   }
+
+#define RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER(              \
+    ptr, alloc_size, total_allocated, total_reserved, device)      \
+  if (mobile::getCurrentEdgeProfiler()) {                          \
+    mobile::getCurrentEdgeProfiler()->recordBackendMemoryEvent(    \
+        ptr, alloc_size, total_allocated, total_reserved, device); \
+  }
 #else
 
 #define RECORD_BACKEND_EVENT_TO_EDGE_PROFILER( \
     start_time_us, end_time_us, debug_handle, event_name, backend_name)
 
+#define RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER( \
+    ptr, alloc_size, total_allocated, total_reserved, device)
 #endif
 } // namespace mobile
 } // namespace jit
