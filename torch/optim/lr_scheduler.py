@@ -957,14 +957,17 @@ class ReduceLROnPlateau(object):
             self.cooldown_counter -= 1
             self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
 
+        reduced = False
         if self.num_bad_epochs > self.patience:
-            self._reduce_lr(epoch)
+            reduced = self._reduce_lr(epoch)
             self.cooldown_counter = self.cooldown
             self.num_bad_epochs = 0
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+        return reduced           
 
     def _reduce_lr(self, epoch):
+        reduced = False
         for i, param_group in enumerate(self.optimizer.param_groups):
             old_lr = float(param_group['lr'])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
@@ -975,6 +978,8 @@ class ReduceLROnPlateau(object):
                                  "%.5d") % epoch
                     print('Epoch {}: reducing learning rate'
                           ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
+                reduced = True
+        return reduced
 
     @property
     def in_cooldown(self):
