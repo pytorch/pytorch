@@ -10,14 +10,14 @@ with FusionDefinition(fusion) as fd :
     t1 = fd.ops.abs(t0)
     fd.add_output(t1)
 
-# fusion.print_ir()
+fusion.print_ir()
 
 # Execute Fusion
 input1 = ones(5, device='cuda')
 
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape
-#for _ in range(5) :
-#    outputs = fusion.execute([input1])
+for _ in range(5) :
+    outputs = fusion.execute([input1])
 
-#print(outputs[0])
+print(outputs[0])

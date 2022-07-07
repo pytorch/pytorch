@@ -73,6 +73,11 @@ void initNvFuserPythonBindings(PyObject* module) {
              void* exc_type,
              void* exc_value,
              void* traceback) { 
+               self.fusion_state.resize(self.recording_state.size(), nullptr);
+               for (auto& record : self.recording) {
+                 auto functor = record.get();
+                 (*functor)(self);
+               }
                self.exit();
           })
       .def(

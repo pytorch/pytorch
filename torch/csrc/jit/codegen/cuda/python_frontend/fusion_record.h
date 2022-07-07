@@ -29,7 +29,7 @@ struct InputTensorRecord : RecordFunctor {
                   .dtype(dtype)
                   .build();
     
-    fd.fusion_state[outputs[0]] = tv;
+    fd.fusion_state.at(outputs.at(0)) = tv;
     fd.addInput(tv);
   }
 
@@ -44,7 +44,7 @@ struct OutputRecord : RecordFunctor {
     RecordFunctor(std::move(_args), {}) {}
 
   void operator()(FusionDefinition &fd) final {
-    auto input = fd.fusion_state[args[0]];
+    auto input = fd.fusion_state.at(args.at(0));
 
     // With C++17, this statement should be "if constexpr" 
     if (std::is_same<OutputType, NvfTensorView>::value) {
@@ -77,9 +77,9 @@ struct UnaryOpRecord : RecordFunctor {
     fusion_op_(fusion_op) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto input = fd.fusion_state[args[0]];
+    auto input = fd.fusion_state.at(args.at(0));
     auto output = unary_op_func<ArgType>(fusion_op_, input);
-    fd.fusion_state[outputs[0]] = output;
+    fd.fusion_state.at(outputs.at(0)) = output;
   }
 
  private:
