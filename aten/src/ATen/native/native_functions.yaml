@@ -3879,6 +3879,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: reshape
+    NestedTensorCPU, NestedTensorCUDA: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4833,6 +4836,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
+    NestedTensorCPU, NestedTensorCUDA: transpose_nested
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
@@ -4852,6 +4856,7 @@
   tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: transpose_
+    NestedTensorCPU, NestedTensorCUDA: transpose_nested_
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_check: NoCheck

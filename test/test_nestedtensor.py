@@ -18,6 +18,24 @@ def _iter_constructors():
     # yield as_nested_tensor
     yield nested_tensor
 
+# Helper functions for testing discontinuous memory
+# can be replaced once to_padded_tensor supports discontinuous memory
+def discontinuity_to_padded_tensor(input, shape=None):
+    if shape is None:
+        # for now to_padded_tensor gives the correct sizes
+        # but wrong entries when the buffer memory is discontinuous
+        continuous_to_padded_tensor = input.to_padded_tensor(0.0)
+        shape = continuous_to_padded_tensor.shape
+    tensors = input.unbind()
+    assert len(tensors) > 0
+    result = tensors[0].new_zeros(shape)
+    for itensor in range(len(tensors)):
+        tensor = tensors[itensor]
+        view = result[itensor]
+        for idim in range(tensor.dim()):
+            view = view.narrow(idim, 0, tensor.size(idim))
+        view.copy_(tensor)
+    return result
 
 class TestNestedTensor(TestCase):
     @torch.inference_mode()
@@ -65,6 +83,27 @@ class TestNestedTensor(TestCase):
         self._test_unbind_case(
             torch.tensor([]), torch.tensor([]),
         )
+
+    @torch.inference_mode()
+    def test_unbind_discontinuous(self):
+        nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))])
+        pt = nt.to_padded_tensor(0.0)
+        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
+        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
+        #                                      (2, 5)
+        #                                      (2, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        tensors_from_ntmh = ntmh.unbind()
+        for i in range(4):
+            self.assertEqual(tensors_from_ntmh[i], ptmh[i, :2, :])
+        for i in range(4, 8):
+            self.assertEqual(tensors_from_ntmh[i], ptmh[i, :, :])
 
     @torch.inference_mode()
     def test_unbind_dim(self):
@@ -361,6 +400,20 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
+    # actually, this tests discontinuity_to_padded_tensor
+    # since to_padded_tensor does not support discontinuous buffer yet
+    @dtypes(torch.float, torch.float16, torch.double)
+    @torch.inference_mode()
+    def test_to_padded_tensor_discontinuous(self, device, dtype):
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(0.0)
+        nt_mh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        pt_mh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        pt_mh_from_nt_mh = discontinuity_to_padded_tensor(nt_mh)
+        self.assertEqual(pt_mh, pt_mh_from_nt_mh)
+
     @skipMeta
     def test_device_checks(self, device):
         nt = torch.nested_tensor([], device=device)
@@ -398,6 +451,29 @@ class TestNestedTensorDeviceType(TestCase):
         nt[1, 1, :].fill_(200.0)
         answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
         self.assertEqual(nt[1, 1, :], answer)
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    @torch.inference_mode()
+    def test_nested_tensor_indexing_discontinuous(self, device, dtype):
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(0.0)
+        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
+        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
+        #                                      (2, 5)
+        #                                      (2, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        for i in range(4):
+            self.assertEqual(ntmh[i], ptmh[i, :2, :])
+        for i in range(4, 8):
+            self.assertEqual(ntmh[i], ptmh[i, :, :])
 
     # Helper functions for testing elementwise ops
     def random_nt(self, device, dtype, num_tensors, max_dims, min_dims=None):
@@ -619,8 +695,16 @@ class TestNestedTensorDeviceType(TestCase):
         ntensors = 4
         nt = self.random_nt(device, dtype, ntensors, (4, 4))
         # error case: softmax across nested dimension
-        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, 0))
-        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, -3))
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot apply softmax across nested dimension 0",
+            lambda: torch.nn.functional.softmax(nt, 0)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot apply softmax across nested dimension 0",
+            lambda: torch.nn.functional.softmax(nt, -3)
+        )
         # error case: dimension out of range
         self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, 3))
         self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, -4))
@@ -642,6 +726,30 @@ class TestNestedTensorDeviceType(TestCase):
         nt1 = torch.nested_tensor([torch.tensor(0.0), torch.tensor(1.0)])
         self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt1, 0))
         self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt1, 1))
+
+    @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
+    def test_softmax_discontinuous(self, device, dtype):
+        ''' create discontinuous input '''
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(float("-inf"))
+        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
+        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
+        #                                      (2, 5)
+        #                                      (2, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        ''' perform test computation '''
+        actual = discontinuity_to_padded_tensor(torch.nn.functional.softmax(ntmh, -1))
+        expect = torch.nn.functional.softmax(ptmh, -1).nan_to_num_(0.0)
+        self.assertEqual(actual, expect)
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
@@ -681,9 +789,41 @@ class TestNestedTensorDeviceType(TestCase):
         # normal nested tensor
         nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 7))])
         nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))])
-        actual = nt0.bmm(nt1)
+        actual = nt0.bmm(nt1).to_padded_tensor(0.0)
         expect = nt0.to_padded_tensor(0.0).bmm(nt1.to_padded_tensor(0.0))
-        self.assertEqual(actual.to_padded_tensor(0.0), expect)
+        self.assertEqual(actual, expect)
+
+    # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
+    def test_bmm_discontinuous(self, device, dtype):
+        ''' create discontinuous input '''
+        q0 = torch.randn((2, 20), device=device, dtype=dtype)
+        q1 = torch.randn((3, 20), device=device, dtype=dtype)
+        q = torch.nested_tensor([q0, q1])
+        qpt = q.to_padded_tensor(0.0)
+        k0 = torch.randn((6, 20), device=device, dtype=dtype)
+        k1 = torch.randn((7, 20), device=device, dtype=dtype)
+        k = torch.nested_tensor([k0, k1])
+        kpt = k.to_padded_tensor(0.0)
+        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
+        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
+        #                                      (2, 5)
+        #                                      (2, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        # for k, 2 -> 6 and 3 -> 7
+        qmh = q.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        kmh = k.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        qptmh = qpt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        kptmh = kpt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        ''' perform test computation '''
+        actual = qmh.bmm(kmh.transpose(-1, -2)).to_padded_tensor(0.0)
+        expect = qptmh.bmm(kptmh.transpose(-1, -2))
+        self.assertEqual(actual, expect)
 
     @dtypes(torch.float, torch.double)
     def test_linear(self, device, dtype):
@@ -729,6 +869,124 @@ class TestNestedTensorDeviceType(TestCase):
         msg = r"Linear does not support nested weight when input is a nested tensor."
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.functional.F.linear(nt, nt_weight, bias)
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    @torch.inference_mode()
+    def test_transpose(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # error case: transpose nested dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Nested tensor dimension 0 cannot be transposed",
+            lambda: nt.transpose(0, 1)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Nested tensor dimension 0 cannot be transposed",
+            lambda: nt.transpose(1, -3)
+        )
+        # error case: dimension out of range
+        self.assertRaises(IndexError, lambda: nt.transpose(1, 3))
+        self.assertRaises(IndexError, lambda: nt.transpose(-4, -1))
+        # normal case
+        ntT = nt.transpose(-1, -2)
+        ptT_from_ntT = discontinuity_to_padded_tensor(ntT)
+        pt = nt.to_padded_tensor(0.0)
+        ptT = pt.transpose(-1, -2)
+        self.assertEqual(ptT, ptT_from_ntT)
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    @torch.inference_mode()
+    def test_reshape(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # error case: empty shape
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[\]' is invalid for a nested tensor",
+            lambda: nt.reshape(())
+        )
+        # error case: empty nested tensor
+        nt_empty = torch.nested_tensor([])
+        self.assertRaisesRegex(
+            RuntimeError,
+            "empty nested tensor cannot be reshaped",
+            lambda: nt_empty.reshape(-1)
+        )
+        # error case: invalid proposed shape for underlying tensors
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for input of size [0-9]+",
+            lambda: nt.reshape(4, 2, 3)
+        )
+        # error case: no dimension available for collapsing with the implicit batch dimension
+        nt_scalar = torch.nested_tensor([torch.tensor(1.0), torch.tensor(2.0)])
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' requests collapsing "
+            r"the implicit batch dimension with the next dimension, "
+            r"but there is no more dimension",
+            lambda: nt_scalar.reshape(8, -1)
+        )
+        # error case: cannot collapse a ragged dimension with the implicit batch dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"only a regular dimension can be collapsed with the implicit batch dimension",
+            lambda: nt.reshape(8, -1)
+        )
+        # error case: invalid collapsed size
+        nt_vector = torch.nested_tensor([torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])])
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
+            r"if implicit batch size < proposed_shape\[0\], then "
+            r"implicit batch size \* next size == proposed_shape\[0\] must hold",
+            lambda: nt_vector.reshape(8)
+        )
+        # error case: no proposed dimension for splitting the implicit batch dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
+            r"if implicit batch size > proposed_shape\[0\], then "
+            r"implicit batch size == proposed_shape\[0\] \* proposed_shape\[1\] must hold",
+            lambda: nt.reshape(2)
+        )
+        # error case: proposed splitting does not multiply to the implicit batch size
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
+            r"if implicit batch size > proposed_shape\[0\], then "
+            r"implicit batch size == proposed_shape\[0\] \* proposed_shape\[1\] must hold",
+            lambda: nt.reshape(2, 3, -1)
+        )
+        # error case: cannot split a new dimension from the implicit batch dimension
+        #             because the underlying tensors cannot be stacked
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"cannot stack underlying tensors because they have different sizes",
+            lambda: nt.reshape(2, 2, -1, -1)
+        )
+        # TODO: for now there seems to be no way to trigger
+        #       "cannot stack underlying tensors" error
+        #       from different strides or uneven offsets
+        #       will have to test those error messages later
+        # normal case
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(0.0)
+        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
+        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
+        #                                      (2, 5)
+        #                                      (2, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        #                                      (3, 5)
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        self.assertEqual(discontinuity_to_padded_tensor(ntmh), ptmh)
+
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
         self.assertEqual(nt1.dtype, nt2.dtype)
