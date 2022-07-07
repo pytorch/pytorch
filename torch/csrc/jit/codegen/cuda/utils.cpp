@@ -123,6 +123,8 @@ auto parseDisableOptions() {
       } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
+        TORCH_WARN(
+            "fmad is disabled for nvrtc, which could negatively affect performance. Try removing `fma` from env variable PYTORCH_NVFUSER_DISABLE for optimal performance.");
         options_map[DisableOption::Fma] = true;
       } else if (token == "index_hoist") {
         options_map[DisableOption::IndexHoist] = true;
