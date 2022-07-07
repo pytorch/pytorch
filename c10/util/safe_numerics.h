@@ -10,7 +10,15 @@
 #ifdef _MSC_VER
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
 #include <c10/util/llvmMathExtras.h>
+#if !defined(_M_ARM64)
 #include <intrin.h>
+#else
+inline uint64_t _addcarry_u64(const uint64_t carry, const uint64_t a, const uint64_t b, uint64_t* sum)
+{
+    *sum = a + b + carry;
+    return a > UINT32_MAX - b;
+}
+#endif
 #else
 #define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
