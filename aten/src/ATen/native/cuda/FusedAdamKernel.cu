@@ -83,7 +83,7 @@ struct FusedAdamMathFunctor {
                 const opmath_t bias_correction1 = 1 - ::pow(beta1, *step_count);
                 const opmath_t bias_correction2 = 1 - ::pow(beta2, *step_count);
 
-                opmath_t step_size = lr / bias_correction1;
+                const opmath_t step_size = lr / bias_correction1;
                 const opmath_t step_size_neg = -step_size;
                 const opmath_t denom = ::sqrt((amsgrad ? max_exp_avg_sq : exp_avg_sq)) / (::sqrt(bias_correction2) * step_size_neg + eps / step_size_neg);
                 step_size *= exp_avg / denom;
