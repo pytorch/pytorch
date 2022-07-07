@@ -13450,9 +13450,6 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Scalars failed to compare as equal!
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_variant_consistency_eager'),
-               # RuntimeError: This operator is not Composite Compliant
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_forward_ad'),
                # Not close
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_complex_half_reference_testing'),
@@ -13498,6 +13495,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # JIT test also tries to compute double backward, which fails
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Extremal value issue on aten::native_layer_norm, which returns 'nan' for mean on 'inf' inputs
+               # possibly because of the welford implementation.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
@@ -19350,7 +19350,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
         decorators=(
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         )
     ),
