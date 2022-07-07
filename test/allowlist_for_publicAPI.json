@@ -71,6 +71,15 @@
     "Union",
     "get_combined_dict"
   ],
+  "torch.ao.quantization.backend_config.utils": [
+    "Any",
+    "Dict",
+    "Callable",
+    "List",
+    "Union",
+    "Tuple",
+    "Pattern"
+  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
@@ -314,6 +323,14 @@
     "Tuple",
     "Union",
     "classproperty"
+  ],
+  "torch.cuda.comm": [
+    "broadcast",
+    "broadcast_coalesced",
+    "reduce_add",
+    "reduce_add_coalesced",
+    "scatter",
+    "gather"
   ],
   "torch.cuda.amp.autocast_mode": [
     "Any"
@@ -1270,6 +1287,7 @@
     "qr",
     "slogdet",
     "solve",
+    "solve_ex",
     "solve_triangular",
     "svd",
     "svdvals",
@@ -2180,6 +2198,7 @@
     "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
+    "_linalg_solve_ex",
     "_log_softmax",
     "_log_softmax_backward_data",
     "_logcumsumexp",

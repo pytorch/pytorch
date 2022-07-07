@@ -5,6 +5,7 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -14,10 +15,10 @@ namespace ops {
 namespace {
 
 using namespace api::utils;
+using namespace at::native::vulkan::ops;
 
 vTensor pack_weights_2d_reverse(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     const Tensor& weight,
     bool reversed) {
   /* Source */
@@ -47,37 +48,40 @@ vTensor pack_weights_2d_reverse(
       weight.options(),
   };
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_weight_payload = v_weight_future.wait();
+  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-  float* const dst_weight_ptr = v_weight_payload.get();
-  memset(dst_weight_ptr, 0, v_weight.nbytes());
+    float* dst_weight_ptr = mapping.template data<float>();
 
-  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
-    /* Source */
-    const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+    memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-    /* Destination */
-    const int64_t dst_oh = src_oc / 4;
-    const int64_t dst_c = src_oc % 4;
+    for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
+      /* Source */
+      const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
-    float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+      /* Destination */
+      const int64_t dst_oh = src_oc / 4;
+      const int64_t dst_c = src_oc % 4;
 
-    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
-      for (const auto src_ih : c10::irange(src_kh_sz)) {
-        const int64_t dst_h = reversed ? (src_kh_sz - 1 - src_ih) : src_ih;
-        for (const auto src_iw : c10::irange(src_kw_sz)) {
-          const int64_t dst_w = reversed ? (src_kw_sz - 1 - src_iw) : src_iw;
-          const int64_t dst_w_offset = dst_w * stack_depth;
-          memcpy(
-              dst_weight_c_ptr + (dst_oh * src_kh_sz + dst_h) * dst_kw_sz + src_ic + dst_w_offset,
-              src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
-              sizeof(float));
+      float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+
+      for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
+        for (const auto src_ih : c10::irange(src_kh_sz)) {
+          const int64_t dst_h = reversed ? (src_kh_sz - 1 - src_ih) : src_ih;
+          for (const auto src_iw : c10::irange(src_kw_sz)) {
+            const int64_t dst_w = reversed ? (src_kw_sz - 1 - src_iw) : src_iw;
+            const int64_t dst_w_offset = dst_w * stack_depth;
+            memcpy(
+                dst_weight_c_ptr + (dst_oh * src_kh_sz + dst_h) * dst_kw_sz + src_ic + dst_w_offset,
+                src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+                sizeof(float));
+          }
         }
       }
     }
   }
+  utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
 
   return v_weight;
 }
@@ -88,13 +92,11 @@ vTensor pack_weights(const Tensor& weight_arg) {
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = at::permute(weight_arg, {1, 0, 2, 3}).contiguous();
 
   return pack_weights_2d_reverse(
       context,
-      command_buffer,
       weight,
       true);
 }
@@ -107,7 +109,6 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::TransposedFilter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -121,30 +122,33 @@ vTensor pack_biases(
     weight.options(),
   };
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_bias_payload = v_bias_future.wait();
+  api::StagingBuffer staging(context, v_bias.buffer_bytes());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-  if (bias) {
-    const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
-    float* const dst_bias_ptr = v_bias_payload.get();
+    float* dst_bias_ptr = mapping.template data<float>();
 
-    memset(dst_bias_ptr, 0, v_bias.nbytes());
-    for (const auto i : c10::irange(src_w)) {
-      const int64_t c = i % 4;
-      const int64_t x = i / 4;
-      dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
+    if (bias) {
+      const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
+
+      memset(dst_bias_ptr, 0, v_bias.nbytes());
+      for (const auto i : c10::irange(src_w)) {
+        const int64_t c = i % 4;
+        const int64_t x = i / 4;
+        dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
+      }
+    }
+    else {
+      memset(
+          dst_bias_ptr,
+          // 2's complement integers and IEEE-754 floating point numbers both
+          // have identical bit representations for 0, so can use memset which
+          // only accepts uint8_t parameter.
+          0,
+          v_bias.nbytes());
     }
   }
-  else {
-    memset(
-        v_bias_payload.get(),
-        // 2's complement integers and IEEE-754 floating point numbers both
-        // have identical bit representations for 0, so can use memset which
-        // only accepts uint8_t parameter.
-        0,
-        v_bias.nbytes());
-  }
+  utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
 
   return v_bias;
 }
@@ -324,7 +328,7 @@ VulkanOpContext conv2d_transpose_context_create(
 }
 
 void conv2d_transpose_sliding_window(
-    const api::Shader::Descriptor& shader,
+    const api::ShaderSource& shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& packed_v_weight,
@@ -336,96 +340,89 @@ void conv2d_transpose_sliding_window(
     const float packed_output_min,
     const float packed_output_max,
     const IntArrayRef unpacked_filter) {
-  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_v_weight.has_image());
-  TORCH_CHECK(valid, "Not Implemented!")
-
   api::Context* const context = api::context();
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_transpose_clamp_run (conv2d_transpose_sliding_window)");
 
-    const struct Block final {
-      uvec3 extents;
-      int32_t ic4;
-      ivec4 kernel;
-      ivec2 ikernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilate;
-      vec2 clamp;
-      ivec4 src_filter;
-    } block {
-      v_output.extents(),
-      safe_downcast<int32_t>(packed_filter[Layout::Filter::input]), /* this is aligned up */
-      {
-        safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
-      },
-      {
-        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
-      },
-      {
-        packed_output_min,
-        packed_output_max,
-      },
-    };
+  const struct Block final {
+    uvec3 extents;
+    int32_t ic4;
+    ivec4 kernel;
+    ivec2 ikernel;
+    ivec2 stride;
+    ivec2 padding;
+    ivec2 dilate;
+    vec2 clamp;
+    ivec4 src_filter;
+  } block {
+    v_output.extents(),
+    safe_downcast<int32_t>(packed_filter[Layout::Filter::input]), /* this is aligned up */
+    {
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+    },
+    {
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
+    },
+    {
+      packed_output_min,
+      packed_output_max,
+    },
+  };
 
-    uvec3 global_size = v_output.extents();
+  uvec3 global_size = v_output.extents();
 
-    context->dispatch(
-        command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        shader,
-        global_size,
-        adaptive_work_group_size(global_size),
-        // Write-only access bypasses synchronization but inserts appropriate
-        // barriers if necessary.
-        v_output.image(
-            command_buffer,
-            vTensor::Stage::Compute,
-            vTensor::Access::Write),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        v_input.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        packed_v_weight.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        packed_v_bias.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        // Object lifetime is managed by the resource pool.
-        // It is OK not to keep track of the handle.
-        context->resource().pool.uniform(block).object);
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      shader,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      adaptive_work_group_size(global_size),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      packed_v_weight.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      packed_v_bias.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 }
 
 Tensor conv2d_transpose_context_run(

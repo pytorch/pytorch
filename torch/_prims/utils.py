@@ -9,8 +9,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
-# nvFuser imports are conditional on CUDA being available
-if torch.cuda.is_available():
+# nvFuser imports are conditional on being compiled with CUDA
+if hasattr(torch._C, "_nvfuser"):
     from torch._C._nvfuser import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
@@ -23,12 +23,17 @@ if torch.cuda.is_available():
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
         torch.bool: DataType.Bool,
+        # Python scalars
+        complex: DataType.ComplexDouble,
+        float: DataType.Double,
+        int: DataType.Int,
+        bool: DataType.Bool,
     }
 else:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
-def getnvFuserDtype(dtype: torch.dtype):
+def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
     """
     Translates from torch.dtype to nvFuser's DataType enum
     """
@@ -39,6 +44,7 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
+NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
