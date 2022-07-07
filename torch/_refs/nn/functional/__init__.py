@@ -20,7 +20,7 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = [
     "celu",
@@ -36,6 +36,7 @@ __all__ = [
     "softplus",
     "softshrink",
     "tanhshrink",
+    "threshold",
 ]
 
 Tensor = torch.Tensor
@@ -222,7 +223,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(torch.ops.aten.softplus)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -258,7 +259,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
-@out_wrapper
+@out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # hardshrink(x) = x if x > lambd
@@ -267,7 +268,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return refs.where(abs(a) > abs(lambd), a, 0)
 
 
-@out_wrapper
+@out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # softshrink(x) = x - lambd if x > lambd
@@ -357,6 +358,27 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     return refs.sub(a, refs.tanh(a))
 
 
+@register_decomposition(torch.ops.aten.threshold)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def threshold(
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: Union[bool, int, float],
+    inplace: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.threshold
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    return torch.where(a <= threshold, value, a)
+
+
 @register_decomposition(torch.ops.aten.hardtanh)
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -389,7 +411,7 @@ def hardtanh(
 
 
 @register_decomposition(torch.ops.aten.gelu)
-@out_wrapper
+@out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
