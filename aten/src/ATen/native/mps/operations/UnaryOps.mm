@@ -15,7 +15,7 @@ typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 
 void unary_op(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
 {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "Operation '", op_name, "()' doesn not support input type 'int64' in MPS backend");
+  TORCH_CHECK_TYPE(self.scalar_type() != ScalarType::Long, "Operation '", op_name, "()' does not support input type 'int64' in MPS backend.");
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
@@ -39,9 +39,7 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
           MPSGraphTensor* castTensor = newCachedGraph->inputTensor;
           // Integer input must be cast to float if output is float
           if (isIntegralType(self.scalar_type()) && isFloatingType(output.scalar_type())) {
-             castTensor = [mpsGraph castTensor:newCachedGraph->inputTensor
-                                        toType:getMPSScalarType(output.scalar_type())
-                                          name:@"castIntegerInput"];
+            castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor, output.scalar_type());
           }
           newCachedGraph->outputTensor = unaryBlock(mpsGraph, castTensor);
         }
@@ -127,6 +125,13 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
+
+Tensor& logical_not_out_mps(const Tensor& self, Tensor& output)
+{
+  auto bool_self = self.to(ScalarType::Bool);
+  mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor){ return [mpsGraph notWithTensor:inputTensor name:nil];});
+  return output;
+}
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
 {

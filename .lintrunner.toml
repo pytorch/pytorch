@@ -16,6 +16,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
+    'tools/test/test_selective_build.py',
 ]
 command = [
     'python3',
@@ -44,14 +45,10 @@ include_patterns = [
     'aten/src/ATen/*.h',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'torch/csrc/jit/**/*.h',
-    'torch/csrc/jit/**/*.cpp',
-    'torch/csrc/deploy/**/*.h',
-    'torch/csrc/deploy/**/*.cpp',
-    'test/cpp/jit/**/*.h',
-    'test/cpp/jit/**/*.cpp',
-    'test/cpp/tensorexpr/**/*.h',
-    'test/cpp/tensorexpr/**/*.cpp',
+    'torch/csrc/**/*.h',
+    'torch/csrc/**/*.cpp',
+    'test/cpp/**/*.h',
+    'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
     'c10/util/strong_type.h',
@@ -149,6 +146,10 @@ include_patterns = [
 exclude_patterns = [
     # (linbinyu) copied from internal repo
     'tools/code_analyzer/gen_operators_yaml.py',
+    'tools/gen_vulkan_spv.py',
+    'tools/test/gen_operators_yaml_test.py',
+    'tools/test/gen_oplist_test.py',
+    'tools/test/test_selective_build.py',
 ]
 command = [
     'python3',
@@ -338,6 +339,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
+    # @lint-ignore TXT2
     '--pattern=	',
     '--linter-name=TABS',
     '--error-name=saw some tabs',
@@ -566,7 +568,11 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_prims/**/*.py',
     'torch/_meta_registrations.py',
+    'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
+]
+exclude_patterns = [
+    'tools/gen_vulkan_spv.py',
 ]
 command = [
     'python3',
@@ -582,3 +588,68 @@ init_command = [
     'black==22.3.0',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'CALL_ONCE'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+exclude_patterns = [
+    'c10/util/CallOnce.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=std::call_once',
+    '--linter-name=CALL_ONCE',
+    '--error-name=invalid call_once',
+    '--replace-pattern=s/std::call_once/c10::call_once/',
+    """--error-description=\
+        Use of std::call_once is forbidden and should be replaced with c10::call_once\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'ONCE_FLAG'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=std::once_flag',
+    '--linter-name=ONCE_FLAG',
+    '--error-name=invalid once_flag',
+    '--replace-pattern=s/std::once_flag/c10::once_flag/',
+    """--error-description=\
+        Use of std::once_flag is forbidden and should be replaced with c10::once_flag\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'WORKFLOWSYNC'
+include_patterns = [
+    '.github/workflows/pull.yml',
+    '.github/workflows/trunk.yml',
+    '.github/workflows/periodic.yml',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/workflow_consistency_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0',
+]

@@ -1,9 +1,13 @@
-import os
 import fnmatch
+import inspect
+import os
 import warnings
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional
+
+from functools import partial
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -16,13 +20,48 @@ __all__ = [
 ]
 
 
-def _check_lambda_fn(fn):
-    # Partial object has no attribute '__name__', but can be pickled
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+def _is_local_fn(fn):
+    # Functions or Methods
+    if hasattr(fn, "__code__"):
+        return fn.__code__.co_flags & inspect.CO_NESTED
+    # Callable Objects
+    else:
+        if hasattr(fn, "__qualname__"):
+            return "<locals>" in fn.__qualname__
+        fn_type = type(fn)
+        if hasattr(fn_type, "__qualname__"):
+            return "<locals>" in fn_type.__qualname__
+    return False
+
+
+def _check_unpickable_fn(fn: Callable):
+    """
+    Checks function is pickable or not. If it is a lambda or local function, a UserWarning
+    will be raised. If it's not a callable function, a TypeError will be raised.
+    """
+    if not callable(fn):
+        raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
+
+    # Extract function from partial object
+    # Nested partial function is automatically expanded as a single partial object
+    if isinstance(fn, partial):
+        fn = fn.func
+
+    # Local function
+    if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
-            "Lambda function is not supported for pickle, please use "
+            "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
         )
+        return
+
+    # Lambda function
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+        warnings.warn(
+            "Lambda function is not supported by pickle, please use "
+            "regular python function or functools.partial instead."
+        )
+        return
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -107,15 +146,15 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
 _iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
                                                       {"old_class_name": "FSSpecFileOpener",
-                                                       "deprecation_version": "1.12",
-                                                       "removal_version": "1.14",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
                                                        "old_functional_name": "open_file_by_fsspec",
                                                        "new_functional_name": "open_files_by_fsspec",
                                                        "deprecate_functional_name_only": True},
                                                       "open_file_by_iopath":
                                                       {"old_class_name": "IoPathFileOpener",
-                                                       "deprecation_version": "1.12",
-                                                       "removal_version": "1.14",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
                                                        "old_functional_name": "open_file_by_iopath",
                                                        "new_functional_name": "open_files_by_iopath",
                                                        "deprecate_functional_name_only": True}}
@@ -179,12 +218,67 @@ class StreamWrapper:
     DataPipe operation like `FileOpener`. StreamWrapper would guarantee
     the wrapped file handler is closed when it's out of scope.
     '''
-    def __init__(self, file_obj):
+    session_streams: Dict[Any, int] = {}
+    debug_unclosed_streams: bool = False
+
+    def __init__(self, file_obj, parent_stream=None, name=None):
         self.file_obj = file_obj
+        self.child_counter = 0
+        self.parent_stream = parent_stream
+        self.close_on_last_child = False
+        self.name = name
+        self.closed = False
+        if parent_stream is not None:
+            if not isinstance(parent_stream, StreamWrapper):
+                raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
+            parent_stream.child_counter += 1
+            self.parent_stream = parent_stream
+        if StreamWrapper.debug_unclosed_streams:
+            StreamWrapper.session_streams[self] = 1
+
+    @classmethod
+    def close_streams(cls, v, depth=0):
+        '''
+        Traverse structure and attempts to close all found StreamWrappers on best effort basis.
+        '''
+        if depth > 10:
+            return
+        if isinstance(v, StreamWrapper):
+            v.close()
+        else:
+            # Traverve only simple structures
+            if isinstance(v, dict):
+                for kk, vv in v.items():
+                    cls.close_streams(vv, depth=depth + 1)
+            elif isinstance(v, list) or isinstance(v, tuple):
+                for vv in v:
+                    cls.close_streams(vv, depth=depth + 1)
 
     def __getattr__(self, name):
         file_obj = self.__dict__['file_obj']
         return getattr(file_obj, name)
+
+    def close(self, *args, **kwargs):
+        if StreamWrapper.debug_unclosed_streams:
+            del StreamWrapper.session_streams[self]
+        if self.parent_stream is not None:
+            self.parent_stream.child_counter -= 1
+            if not self.parent_stream.child_counter and self.parent_stream.close_on_last_child:
+                self.parent_stream.close()
+        try:
+            self.file_obj.close(*args, **kwargs)
+        except AttributeError:
+            pass
+        self.closed = True
+
+    def autoclose(self):
+        '''
+            Close steam if there is no children, or make it to be automatically closed as soon as
+            all child streams are closed.
+        '''
+        if self.child_counter == 0:
+            self.close()
+        self.close_on_last_child = True
 
     def __dir__(self):
         attrs = list(self.__dict__.keys()) + list(StreamWrapper.__dict__.keys())
@@ -192,10 +286,8 @@ class StreamWrapper:
         return list(set(list(attrs)))
 
     def __del__(self):
-        try:
-            self.file_obj.close()
-        except AttributeError:
-            pass
+        if not self.closed:
+            self.close()
 
     def __iter__(self):
         for line in self.file_obj:
@@ -205,7 +297,10 @@ class StreamWrapper:
         return next(self.file_obj)
 
     def __repr__(self):
-        return f"StreamWrapper<{self.file_obj!r}>"
+        if self.name is None:
+            return f"StreamWrapper<{self.file_obj!r}>"
+        else:
+            return f"StreamWrapper<{self.name},{self.file_obj!r}>"
 
     def __getstate__(self):
         return self.file_obj

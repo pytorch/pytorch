@@ -11,6 +11,13 @@ on:
         required: true
         type: string
         description: JSON description of what test configs to run.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
@@ -19,10 +26,6 @@ on:
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
         required: true
         description: secret acess key for test stats upload
-
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
@@ -41,13 +44,12 @@ jobs:
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-      COMPACT_JOB_NAME: ${{ inputs.build-environment }}
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -80,13 +82,18 @@ jobs:
         id: test
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          export PR_BODY="${PR_BODY//[$'\n\r']}"
+
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        uses: ./.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -104,11 +111,12 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}

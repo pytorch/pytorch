@@ -605,6 +605,19 @@ class TestJit(JitTestCase):
         # a_copy is modified
         torch.testing.assert_close(orig_res, a_copy)
 
+    def test_repeat_interleave_script(self):
+        def fn(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+            output = input.repeat_interleave(repeats)
+            return output
+        fn_scripted = torch.jit.script(fn)
+
+        input = torch.tensor([5, 7], dtype=torch.int64)
+        repeats = torch.tensor([3, 6], dtype=torch.int64)
+
+        output = fn(input, repeats)
+        output_scripted = fn_scripted(input, repeats)
+        self.assertEqual(output_scripted, output)
+
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
@@ -11752,7 +11765,17 @@ dedent """
 
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
-        def fn_enumerate_start_index(x):
+        def fn_enumerate_start_arg(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, v) in enumerate(x, 1):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn_enumerate_start_arg, ([1, 2, 3, 4, 5],))
+
+        def fn_enumerate_start_kwarg(x):
             # type: (List[int]) -> int
             sum = 0
             for (i, v) in enumerate(x, start=1):
@@ -11760,7 +11783,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_enumerate_start_kwarg, ([1, 2, 3, 4, 5],))
 
         def fn_nested_enumerate(x):
             # type: (List[int]) -> int
@@ -11770,7 +11793,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_nested_enumerate, ([1, 2, 3, 4, 5],))
 
         with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
             @torch.jit.script
@@ -16094,6 +16117,16 @@ dedent """
 
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
+
+    def test_index_with_tuple(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return x[(1,)]
+
+        self.checkModule(MyModule(), (torch.ones(2, 3),))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

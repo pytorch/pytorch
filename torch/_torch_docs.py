@@ -8992,7 +8992,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False) -> LongTensor
+argsort(input, dim=-1, descending=False, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -9000,10 +9000,15 @@ order by value.
 This is the second value returned by :meth:`torch.sort`.  See its documentation
 for the exact semantics of this method.
 
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements. If ``False``, the relative order of values
+which compare equal is not guaranteed. ``True`` is slower.
+
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+    stable (bool, optional): controls the relative order of equivalent elements
 
 Example::
 
@@ -11142,15 +11147,19 @@ logdet(input) -> Tensor
 
 Calculates log determinant of a square matrix or batches of square matrices.
 
-.. note::
-    Result is ``-inf`` if :attr:`input` has zero log determinant, and is ``nan`` if
-    :attr:`input` has negative determinant.
+It returns ``-inf`` if the input has a determinant of zero, and ``NaN`` if it has
+a negative determinant.
 
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
+
+.. seealso::
+
+        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more

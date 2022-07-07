@@ -230,7 +230,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, const c10::List<c10::optional<at::Tensor>>& orig, bool check_range) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -613,7 +613,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_add", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::ComplexHalf, result.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
       int selfAddDim = selfInfo.collapseDims(dim);
@@ -714,7 +714,7 @@ void index_reduce_func_cuda_impl(
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   if (!include_self) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
       scalar_t init_val;
@@ -786,7 +786,7 @@ void index_reduce_func_cuda_impl(
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_reduce", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_reduce", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
       int selfReduceDim = selfInfo.collapseDims(dim);
@@ -838,7 +838,7 @@ void index_reduce_func_cuda_impl(
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_reduce", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_reduce", [&] {
       cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
       int selfReduceDim = selfInfo.collapseDims(dim);
@@ -886,7 +886,11 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     counts.index_add_(dim, index, at::ones_like(source));
     counts.masked_fill_(counts == 0, 1);
-    result.div_(counts);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
+    } else {
+      result.div_(counts, "floor");
+    }
   } else if (reduce == "amax") {
     index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MAXIMUM, reduce_maximum, result);
   } else if (reduce == "amin") {
@@ -1164,7 +1168,8 @@ Tensor& index_select_out_cuda(
       index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf,
         at::ScalarType::Half,
         at::ScalarType::Bool,
         at::ScalarType::BFloat16,
@@ -1216,7 +1221,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
   TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
     "expected mask dtype to be Bool but got ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
