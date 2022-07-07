@@ -1984,13 +1984,14 @@ def conj(input: TensorLikeType) -> TensorLikeType:
     return prims.conj(input)
 
 
+# This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
-    if len(pad) % 2 != 0:
-        raise RuntimeError(
-            f"Length of pad must be even but instead it equals {len(pad)}"
-        )
+    check(
+        len(pad) % 2 == 0,
+        lambda: f"Length of pad must be even but instead it equals {len(pad)}",
+    )
 
     input_sizes = input.shape
     l_inp = len(input_sizes)
@@ -1998,56 +1999,74 @@ def constant_pad_nd(
     l_pad = len(pad) // 2
     l_diff = l_inp - l_pad
 
-    if l_inp < l_pad:
-        raise RuntimeError(
-            "Length of pad should be no more than twice the number of "
-            f"dimensions of the input. Pad length is {len(pad)} while the input has ",
-            f"{l_inp} dimensions.",
-        )
+    check(
+        l_inp >= l_pad,
+        lambda: "Length of pad should be no more than twice the number of "
+        f"dimensions of the input. Pad length is {len(pad)} while the input has "
+        f"{l_inp} dimensions.",
+    )
 
     c_input = input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
         if pad[pad_idx] < 0:
-            c_input = narrow(c_input, i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
 
         if pad[pad_idx + 1] < 0:
-            c_input = narrow(c_input, i, 0, c_input.shape[i] + pad[pad_idx + 1])
+            c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
     # if none of the pads are positive we can just return the result
     if builtins.all(p <= 0 for p in pad):
-        return prims.clone(c_input)
+        return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
 
     for i in range(l_pad):
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
-        if new_dim <= 0:
-            raise RuntimeError(
-                f"The input size {input_sizes[l_diff + i]}, plus negative padding ",
-                f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
-                f"which is invalid. Check dimension {l_diff + i} of your input.",
-            )
+        check(
+            new_dim > 0,
+            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
+            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+            f"which is invalid. Check dimension {l_diff + i} of your input.",
+        )
         new_shape.append(new_dim)
 
-    options = dict(
-        dtype=input.dtype, device=input.device, requires_grad=input.requires_grad
-    )
-    if value == 0:
-        output = zeros(new_shape, **options)
+    memory_format = utils.suggest_memory_format(input)
+    if memory_format == torch.contiguous_format:
+        output = torch.empty(
+            new_shape,
+            dtype=input.dtype,
+            device=input.device,
+            requires_grad=input.requires_grad,
+        )
+    elif memory_format in (torch.channels_last, torch.channels_last_3d):
+        strides = utils.make_channels_last_strides_for(new_shape)
+        output = torch.empty_strided(
+            new_shape,
+            strides,
+            dtype=input.dtype,
+            device=input.device,
+            requires_grad=input.requires_grad,
+        )
     else:
-        output = full(new_shape, value, **options)
+        raise RuntimeError(f"Unhandled memory format {memory_format}")
+
+    # NOTE: _refs.fill is out-of-place
+    if value == 0:
+        output = fill(output, False)
+    else:
+        output = fill(output, value)
 
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
         if pad[pad_idx] > 0:
-            c_output = narrow(
-                c_output, i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+            c_output = c_output.narrow(
+                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
         if pad[pad_idx + 1] > 0:
-            c_output = narrow(c_output, i, 0, c_output.shape[i] - pad[pad_idx + 1])
+            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)
     return output

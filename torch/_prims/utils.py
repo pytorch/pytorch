@@ -59,6 +59,7 @@ torch_function_passthrough = {
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -1204,3 +1205,57 @@ def check(
     """
     if not b:
         raise exc_type(s())
+
+
+def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
+    ndim = len(shape)
+    if ndim == 4:
+        dim_order = [1, 3, 2, 0]
+    elif ndim == 5:
+        dim_order = [1, 4, 3, 2, 0]
+    else:
+        raise RuntimeError(
+            f"no channels last format strides exist in {ndim} dimensions"
+        )
+
+    strides = [0] * ndim
+    cur_stride = 1
+    for d in dim_order:
+        strides[d] = cur_stride
+        cur_stride *= shape[d]
+    return strides
+
+
+def are_strides_like_channels_last(
+    shape: Sequence[int], strides: Sequence[int]
+) -> bool:
+    ndim = len(shape)
+
+    if ndim == 4:
+        # Check for channels_last_2d
+        dim_order = [1, 3, 2, 0]
+    elif ndim == 5:
+        # Check for channels_last_3d
+        dim_order = [1, 4, 3, 2, 0]
+    else:
+        return False
+
+    expected = 1
+    for d in dim_order:
+        if shape[d] != 1 and strides[d] != expected:
+            return False
+        expected *= shape[d]
+    return True
+
+
+def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    if x.layout != torch.strided:
+        return torch.contiguous_format
+
+    if is_contiguous(x):
+        return torch.contiguous_format
+
+    if are_strides_like_channels_last(x.shape, x.stride()):
+        return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
+
+    return torch.contiguous_format
