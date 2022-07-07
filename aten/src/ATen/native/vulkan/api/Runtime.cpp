@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Runtime.h>
-#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -7,7 +6,6 @@ namespace vulkan {
 namespace api {
 
 namespace {
-
 
 void find_requested_layers_and_extensions(
     std::vector<const char*>& enabled_layers,
@@ -107,10 +105,9 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
   return instance;
 }
 
-std::vector<Adapter> create_adapters(const VkInstance instance,
-                                        const uint32_t num_queues) {
+std::vector<Runtime::DeviceMapping> create_physical_devices(const VkInstance instance) {
   if (VK_NULL_HANDLE == instance) {
-    return std::vector<Adapter>();
+    return std::vector<Runtime::DeviceMapping>();
   }
 
   uint32_t device_count = 0;
@@ -119,13 +116,13 @@ std::vector<Adapter> create_adapters(const VkInstance instance,
   std::vector<VkPhysicalDevice> devices(device_count);
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
 
-  std::vector<Adapter> adapters;
-  adapters.reserve(device_count);
+  std::vector<Runtime::DeviceMapping> device_mappings;
+  device_mappings.reserve(device_count);
   for (const VkPhysicalDevice physical_device : devices) {
-    adapters.emplace_back(physical_device, num_queues);
+    device_mappings.emplace_back(PhysicalDevice(physical_device), -1);
   }
 
-  return adapters;
+  return device_mappings;
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
@@ -200,21 +197,21 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 // Adapter selection methods
 //
 
-uint32_t select_first(const std::vector<Adapter>& adapters) {
-  if (adapters.size() == 0) {
-    TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
-    return adapters.size() + 1; // return out of range to signal invalidity
+uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
+  if (devices.size() == 0) {
+    TORCH_WARN("Pytorch Vulkan Runtime: no device devices are available for selection!");
+    return devices.size() + 1; // return out of range to signal invalidity
   }
 
   // Select the first adapter that has compute capability
-  for (const uint32_t i : c10::irange(adapters.size())) {
-    if (adapters[i].num_compute_queues() > 0) {
+  for (const uint32_t i : c10::irange(devices.size())) {
+    if (devices[i].first.num_compute_queues > 0) {
       return i;
     }
   }
 
-  TORCH_WARN("Pytorch Vulkan Runtime: no device adapters support compute!");
-  return adapters.size() + 1;
+  TORCH_WARN("Pytorch Vulkan Runtime: no device devices support compute!");
+  return devices.size() + 1;
 }
 
 //
@@ -277,15 +274,20 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 } // namespace
 
 Runtime::Runtime(const RuntimeConfiguration config)
-  : instance_(create_instance(config)),
-    adapters_(create_adapters(instance_, config.numRequestedQueues)),
-    default_adapter_i_{},
-    debug_report_callback_(create_debug_report_callback(instance_, config)) {
+  : config_(config),
+    instance_(create_instance(config_)),
+    device_mappings_(create_physical_devices(instance_)),
+    adapters_{},
+    default_adapter_i_(UINT32_MAX),
+    debug_report_callback_(create_debug_report_callback(instance_, config_)) {
+  // List of adapters will never exceed the number of physical devices
+  adapters_.reserve(device_mappings_.size());
+
   if (config.initDefaultDevice) {
     try {
       switch(config.defaultSelector) {
         case AdapterSelector::First:
-          default_adapter_i_ = init_adapter(select_first);
+          default_adapter_i_ = create_adapter(select_first);
       }
     }
     catch (const std::exception& e) {
@@ -331,7 +333,8 @@ Runtime::~Runtime() {
 }
 
 Runtime::Runtime(Runtime&& other) noexcept
-  : instance_(other.instance_),
+  : config_(other.config_),
+    instance_(other.instance_),
     adapters_(std::move(other.adapters_)),
     default_adapter_i_(other.default_adapter_i_),
     debug_report_callback_(other.debug_report_callback_) {
@@ -339,21 +342,31 @@ Runtime::Runtime(Runtime&& other) noexcept
   other.debug_report_callback_ = {};
 }
 
-uint32_t Runtime::init_adapter(const Selector& selector) {
+uint32_t Runtime::create_adapter(const Selector& selector) {
   TORCH_CHECK(
-      adapters_.size() > 0,
+      device_mappings_.size() > 0,
       "Pytorch Vulkan Runtime: Could not initialize adapter because no "
       "devices were found by the Vulkan instance.");
 
-  uint32_t i = selector(adapters_);
+  uint32_t physical_device_i = selector(device_mappings_);
   TORCH_CHECK(
-      i < adapters_.size(),
+      physical_device_i < device_mappings_.size(),
       "Pytorch Vulkan Runtime: no suitable device adapter was selected! "
       "Device could not be initialized");
 
-  adapters_[i].init_device();
+  Runtime::DeviceMapping& device_mapping = device_mappings_[physical_device_i];
+  // If an Adapter has already been created, return that
+  int32_t adapter_i = device_mapping.second;
+  if (adapter_i >= 0) {
+    return adapter_i;
+  }
+  // Otherwise, create an adapter for the selected physical device
+  adapter_i = utils::safe_downcast<uint32_t>(adapters_.size());
+  adapters_.emplace_back(
+      new Adapter(instance_, device_mapping.first, config_.numRequestedQueues));
+  device_mapping.second = adapter_i;
 
-  return i;
+  return adapter_i;
 }
 
 Runtime* runtime() {

@@ -570,6 +570,7 @@ include_patterns = [
     'torch/_meta_registrations.py',
     'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
@@ -632,4 +633,24 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'WORKFLOWSYNC'
+include_patterns = [
+    '.github/workflows/pull.yml',
+    '.github/workflows/trunk.yml',
+    '.github/workflows/periodic.yml',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/workflow_consistency_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0',
 ]

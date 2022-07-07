@@ -1,24 +1,27 @@
+# Owner(s): ["module: cuda graphs"]
+
 import torch
-import contextlib
-import dataclasses
-import inspect
 from unittest.mock import patch
 from collections import defaultdict
 from typing import Set
 from torch.fx import GraphModule
 from torch.nn import Module
 from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._subclasses import FakeTensorMode
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.fx.experimental.proxy_tensor import make_fx, ProxyTensor, wrap_output, ProxyTorchDispatchMode
+from torch.fx.experimental.proxy_tensor import (
+    ProxyTensor,
+    wrap_output,
+)
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
 )
+
 try:
     import torchdynamo
+
     TEST_DYNAMO = True
 except ImportError:
     TEST_DYNAMO = False
@@ -26,7 +29,7 @@ except ImportError:
 TEST_CUDA = torch.cuda.is_available()
 
 if not TEST_CUDA or not TEST_DYNAMO:
-    print('CUDA or dynamo not available, skipping tests', file=sys.stderr)
+    print("CUDA or dynamo not available, skipping tests", file=sys.stderr)
     TestCase = object  # noqa: F811
 
 
@@ -92,6 +95,7 @@ class CudaGraphModule(Module):
             self.warmed_up = True
             return r
 
+
 class FindInputMutations(torch.fx.Interpreter):
     def __init__(self, gm):
         super().__init__(gm)
@@ -127,6 +131,7 @@ class FindInputMutations(torch.fx.Interpreter):
         super().run(*args)
         return self.mutated_inputs
 
+
 class ProxyTensorInterpreter(torch.fx.Interpreter):
     def __init__(self, module: torch.fx.GraphModule, **kwargs):
         super().__init__(module, **kwargs)
@@ -136,11 +141,15 @@ class ProxyTensorInterpreter(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer))
+        return ProxyTensor(
+            out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer)
+        )
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
-        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer))
+        return ProxyTensor(
+            out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
+        )
 
     # call_function, call_method, call_module get traced automatically by the ProxyTensors.
     # NB: methods and modules will get inlined if you don't override explicitly
@@ -150,14 +159,18 @@ class ProxyTensorInterpreter(torch.fx.Interpreter):
 
         def unwrap(e):
             return e.proxy.node if isinstance(e, ProxyTensor) else e
+
         self.new_graph.output(tree_map(unwrap, out))
         return out
+
 
 def unwrap_elem(e):
     return e.elem if isinstance(e, ProxyTensor) else e
 
+
 def unwrap_proxy_node(e):
     return e.proxy.node if isinstance(e, ProxyTensor) else e
+
 
 class ApplyCudaGraphs(ProxyTensorInterpreter):
     # All module calls are assumed to be fusion groups, since
@@ -172,33 +185,38 @@ class ApplyCudaGraphs(ProxyTensorInterpreter):
         mutated_inputs = FindInputMutations(submod)(*map(unwrap_elem, args))
         # smh the module didn't get transferred wut
         self.new_module.add_submodule(target, CudaGraphModule(submod, mutated_inputs))
-        return wrap_output(out, torch.fx.Proxy(self.new_graph.call_module(target, tree_map(unwrap_proxy_node, args), tree_map(unwrap_proxy_node, kwargs)), self.tracer))
+        return wrap_output(
+            out,
+            torch.fx.Proxy(
+                self.new_graph.call_module(
+                    target,
+                    tree_map(unwrap_proxy_node, args),
+                    tree_map(unwrap_proxy_node, kwargs),
+                ),
+                self.tracer,
+            ),
+        )
+
 
 def cudagraphs(model, inputs):
     model = partition_cudagraphs(model, inputs)
 
     # Your interpreter
     t = ApplyCudaGraphs(model)
-    with FakeTensorMode.push() as mode, ProxyTorchDispatchMode.push(t.tracer, trace_factory=False) as proxy_mode:
-        t.proxy_mode = proxy_mode
+    with FakeTensorMode.push() as mode:
         t.run(*map(mode.from_tensor, inputs))
     model = t.new_module
     model.recompile()
 
     return model
 
-def aot_autograd_cudagraphs(model, inputs):
-    from functorch.compile import default_decompositions
-    from functorch.compile import min_cut_rematerialization_partition
-    from functorch.compile import ts_compile
 
+def aot_autograd_cudagraphs(model, inputs):
     kwargs = {
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
-        # "partition_fn": min_cut_rematerialization_partition,
         "hasher_type": "StaticShapeHasher",
-        "decompositions": default_decompositions,
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
@@ -214,19 +232,19 @@ def aot_autograd_cudagraphs(model, inputs):
 
 
 class TestDynamoCudaGraphs(TestCase):
-    @patch('torchdynamo.config.verify_correctness', True)
+    @patch("torchdynamo.config.verify_correctness", True)
     def test_basic(self):
         def model(x, y):
             return (x + y) * y
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda', requires_grad=True)
-                y = torch.randn(3, device='cuda')
+                x = torch.randn(3, device="cuda", requires_grad=True)
+                y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch('torchdynamo.config.verify_correctness', True)
+    @patch("torchdynamo.config.verify_correctness", True)
     def test_dtoh(self):
         def model(x, y):
             a = x + y
@@ -235,12 +253,12 @@ class TestDynamoCudaGraphs(TestCase):
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda', requires_grad=True)
-                y = torch.randn(3, device='cuda')
+                x = torch.randn(3, device="cuda", requires_grad=True)
+                y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch('torchdynamo.config.verify_correctness', True)
+    @patch("torchdynamo.config.verify_correctness", True)
     def test_htod(self):
         def model(x, y):
             a = x + y
@@ -248,12 +266,12 @@ class TestDynamoCudaGraphs(TestCase):
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda', requires_grad=True)
-                y = torch.randn((), device='cpu')
+                x = torch.randn(3, device="cuda", requires_grad=True)
+                y = torch.randn((), device="cpu")
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch('torchdynamo.config.verify_correctness', True)
+    @patch("torchdynamo.config.verify_correctness", True)
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
@@ -262,8 +280,8 @@ class TestDynamoCudaGraphs(TestCase):
         with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
                 with self.subTest(i):
-                    x = torch.randn(3, device='cuda', requires_grad=True)
-                    y = torch.randn(3, device='cuda')
+                    x = torch.randn(3, device="cuda", requires_grad=True)
+                    y = torch.randn(3, device="cuda")
                     y_orig = y.clone()
                     loss = model(x, y).sum()
                     self.assertEqual(y, y_orig + 3)

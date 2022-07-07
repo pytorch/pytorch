@@ -36,7 +36,7 @@ _device_not_kwarg_ops = (
     aten.to.device,
     aten.to.prim_Device,
     aten._pin_memory.default,
-    aten._resize_output.functional,
+    aten._resize_output.default,
     aten._resize_output.out,
 )
 
@@ -470,15 +470,23 @@ class FakeTensorMode(TorchDispatchMode):
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
+            subclass_seen = False
 
             def check_non_fake_tensor(x):
-                nonlocal conversion_made
+                nonlocal conversion_made, subclass_seen
                 conversion_made = conversion_made or (
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                )
+                subclass_seen = subclass_seen or (
+                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                    and type(x) is not torch.Tensor
                 )
 
             tree_map(check_non_fake_tensor, args)
             tree_map(check_non_fake_tensor, kwargs)
+
+            if subclass_seen:
+                return NotImplemented
 
             if conversion_made:
                 raise Exception(

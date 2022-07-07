@@ -9,7 +9,7 @@ from torch.utils._pytree import tree_map
 class CudaGraphsSupport(OperatorSupport):
     # TODO: why is submodules passed here
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        if not node.op in CALLABLE_NODE_OPS:
+        if node.op not in CALLABLE_NODE_OPS:
             return False
 
         found_not_cuda = False

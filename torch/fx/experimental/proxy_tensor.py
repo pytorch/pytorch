@@ -212,23 +212,20 @@ def wrap_key(f, inps):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, trace_factory=True):
+    def __init__(self, tracer):
         self.tracer = tracer
-        self.trace_factory = trace_factory
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
-        elif self.trace_factory:
+        else:
             proxy_res = self.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
 
             inner_res = func_overload(*args, **kwargs)
 
             return wrap_output(inner_res, proxy_res)
-        else:
-            return func_overload(*args, **kwargs)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
