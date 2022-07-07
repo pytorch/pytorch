@@ -7,7 +7,9 @@ import torch
 import itertools
 import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
+import sys
+sys.path.insert(0, '/fsx/users/amandaliu/pytorch/torch/ao/quantization/experimental')
+from apot_utils import float_to_apot, apot_to_float
 
 # TODO: Consider adding NonUniformQuantizationObserverBase class
 # when more than one non-uniform method is implemented

@@ -1,6 +1,8 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
+import sys
+sys.path.insert(0, '/fsx/users/amandaliu/pytorch/torch/ao/quantization/experimental')
+from apot_utils import float_to_apot, apot_to_float
 
 # class to store APoT quantizer and
 # implement quantize and dequantize
