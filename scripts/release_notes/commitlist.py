@@ -6,6 +6,8 @@ import csv
 import pprint
 from common import CommitDataCache
 import re
+import dataclasses
+from typing import List
 
 
 """
@@ -21,28 +23,19 @@ Update the existing commitlist to commit bfcb687b9c.
     python commitlist.py --update_to bfcb687b9c
 
 """
-
+@dataclasses.dataclass(frozen=True)
 class Commit:
-    def __init__(self, commit_hash, category, topic, title):
-        self.commit_hash = commit_hash
-        self.category = category
-        self.topic = topic
-        self.title = title
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        return self.commit_hash == other.commit_hash and \
-            self.category == other.category and \
-            self.topic == other.topic and \
-            self.title == other.title
+    commit_hash: str
+    category: str
+    topic: str
+    title: str
 
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
-    def __init__(self, path, commits):
+    def __init__(self, path: str, commits: List[Commit]):
         self.path = path
         self.commits = commits
 
@@ -59,12 +52,12 @@ class CommitList:
         return CommitList(path, commits)
 
     @staticmethod
-    def read_from_disk(path):
+    def read_from_disk(path) -> List[Commit]:
         with open(path) as csvfile:
             reader = csv.reader(csvfile)
             rows = list(row for row in reader)
         assert all(len(row) >= 4 for row in rows)
-        return [Commit(*row[:4]) for row in rows]
+        return [Commit(*row) for row in rows]
 
     def write_to_disk(self):
         path = self.path
@@ -72,7 +65,7 @@ class CommitList:
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
             for commit in rows:
-                writer.writerow([commit.commit_hash, commit.category, commit.topic, commit.title])
+                writer.writerow(dataclasses.astuple(commit))
 
     def keywordInFile(file, keywords):
         for key in keywords:
