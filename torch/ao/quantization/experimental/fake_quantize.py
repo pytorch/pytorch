@@ -1,8 +1,10 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
+import sys
+sys.path.insert(0, '/fsx/users/amandaliu/pytorch/torch/ao/quantization/experimental')
+from observer import APoTObserver
+from quantizer import quantize_APoT, dequantize_APoT
 
 class APoTFakeQuantize(FakeQuantizeBase):
     alpha: Tensor
@@ -10,9 +12,17 @@ class APoTFakeQuantize(FakeQuantizeBase):
     quantization_levels: Tensor
     level_indices: Tensor
 
-    def __init__(self, **observer_kwargs):
+    def __init__(self, observer=APoTObserver, **observer_kwargs):
         super().__init__()
-        self.activation_post_process = APoTObserver(**observer_kwargs)
+        self.activation_post_process = observer(**observer_kwargs)
+        dtype = observer_kwargs.get("dtype", torch.quint8)
+        if hasattr(observer, "p"):
+            # In case observer is _PartialWrapper, dtype can be stored in
+            # observer.p.keywords["dtype"]
+            dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
+                "dtype", dtype
+        )
+        self.dtype = self.activation_post_process.dtype
 
     def calculate_qparams(self, signed: bool):  # type: ignore[override]
         return self.activation_post_process.calculate_qparams(signed=signed)
