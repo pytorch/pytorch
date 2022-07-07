@@ -12540,8 +12540,6 @@ op_db: List[OpInfo] = [
                # we skip gradient checks for this suite as they are tested in
                # variant_test_name='grad_oriented'
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
                # The values for attribute 'shape' do not match
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
@@ -12568,10 +12566,6 @@ op_db: List[OpInfo] = [
                # tests do not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            active_if=(not TEST_WITH_ROCM)),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
@@ -13730,10 +13724,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # Ref: https://github.com/pytorch/pytorch/issues/78077
-               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
-                            'test_expanded_weight_per_sample_grad',
-                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -13768,10 +13758,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # Ref: https://github.com/pytorch/pytorch/issues/78077
-               DecorateInfo(unittest.expectedFailure, 'TestExpandedWeightFunctional',
-                            'test_expanded_weight_per_sample_grad',
-                            dtypes=(torch.float64,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -16467,12 +16453,6 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
-           skips=(
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           )
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -19467,12 +19447,22 @@ op_db: List[OpInfo] = [
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
+        backward_dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
+        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
+        check_batched_grad=False,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        skips=(
+            # See https://github.com/pytorch/pytorch/issues/65466
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
+        ),
     ),
     OpInfo(
         "diagflat",
@@ -20713,16 +20703,11 @@ python_ref_db = [
         "_refs.pow",
         torch_opinfo_name="pow",
         skips=(
-            # For the complex32:
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
-            #
-            # For the int32:
-            # RuntimeError: entry_it != disjointSetMap().end() INTERNAL ASSERT FAILED
-            # at "/var/lib/jenkins/workspace/torch/csrc/jit/codegen/cuda/disjoint_set.h":218
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.int32),
+                dtypes=(torch.complex32,),
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
