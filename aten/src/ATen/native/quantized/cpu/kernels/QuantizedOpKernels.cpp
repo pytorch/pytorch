@@ -5,9 +5,11 @@
 #include <ATen/native/TopKImpl.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/cpu/IndexKernelUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
+#include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
@@ -56,6 +58,7 @@ Tensor qcat_nhwc_kernel(
   std::vector<double> scales;
   std::vector<int64_t> zero_pts;
   std::vector<void*> data_ptrs;
+  std::vector<bool> is_fast_path;
 
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
@@ -87,6 +90,9 @@ Tensor qcat_nhwc_kernel(
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
+    is_fast_path.push_back(
+        qx.q_scale() == scale &&
+        qx.q_zero_point() == zero_point);
   }
 
   const int64_t N = qx0.size(0);
@@ -121,6 +127,11 @@ Tensor qcat_nhwc_kernel(
           scalar_t::underlying* iptr =
               reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
+
+          if (is_fast_path[tidx] && !ReLUFused) {
+            std::memcpy(optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
+            continue;
+          }
 
           constexpr int64_t VLEN = Vec::size();
           int64_t c = 0;
@@ -2716,6 +2727,123 @@ void quantized_normalize_kernel(
   });
 }
 
+void qmean_inner_dim_kernel(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  // 'opt_dtype' should be none or equal to that of input
+  ScalarType dtype = self.scalar_type();
+  auto in_dims = self.sizes().vec();
+  auto out_dims = in_dims;
+  size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
+  int64_t M = 1; // Num of groups
+  int64_t N = 1; // Num of elements to take average of in each group
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+    M *= in_dims[i];
+  }
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+    auto idx = out_dims.size() - 1 - i;
+    N *= out_dims[idx];
+    out_dims[idx] = 1;
+  }
+  if (!keepdim) {
+    out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
+  }
+  result = at::_empty_affine_quantized(
+      out_dims,
+      at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
+      self.q_scale(),
+      self.q_zero_point(),
+      c10::nullopt);
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
+    scalar_t* X_data = self.data_ptr<scalar_t>();
+    scalar_t* Y_data = result.data_ptr<scalar_t>();
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i;
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
+        auto x_sum = hsum(X_ptr_underlying, N);
+        float y_float = static_cast<float>(x_sum) / N;
+        *Y_ptr_underlying = std::nearbyint(y_float);
+      }
+    });
+  });
+}
+
+void qstd_inner_dim_kernel(
+    const Tensor& self,
+    OptionalIntArrayRef dim,
+    optional<int64_t> unbiased,
+    bool keepdim,
+    Tensor& result) {
+  ScalarType dtype = self.scalar_type();
+  auto in_dims = self.sizes().vec();
+  auto out_dims = in_dims;
+  size_t num_dims_to_squeeze = dim.has_value() && !dim.value().empty() ?
+                               dim.value().size() :
+                               self.dim();
+  int64_t M = 1; // Num of groups
+  int64_t N = 1; // Num of elements to take std of in each group
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+    M *= in_dims[i];
+  }
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+    auto idx = out_dims.size() - 1 - i;
+    N *= out_dims[idx];
+    out_dims[idx] = 1;
+  }
+  if (!keepdim) {
+    out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
+  }
+  int64_t den = N; // Denominator when computing mean and deviation
+  if (unbiased.has_value() && unbiased.value() == 1) {
+    den -= 1;
+  }
+  auto x_scale = self.q_scale();
+  auto x_zp = self.q_zero_point();
+  result = at::_empty_affine_quantized(
+      out_dims,
+      at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
+      x_scale,
+      x_zp,
+      c10::nullopt);
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
+    scalar_t* X_data = self.data_ptr<scalar_t>();
+    scalar_t* Y_data = result.data_ptr<scalar_t>();
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i;
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
+        auto x_sum_shifted = hsum(X_ptr_underlying, N);
+        auto x_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        // Use double for intermediate variables to avoid accuracy issue
+        // Mean with zero point
+        double x_mean_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / N;
+        double x_mean_unbiased_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / den;
+        // variance / x_scale^2
+        double x_var_div_scale_x_sq =
+            std::max(static_cast<double>(x_sum_sq_shifted) / den -
+                2 * x_mean_shifted_div_scale_x * x_mean_unbiased_shifted_div_scale_x +
+                x_mean_shifted_div_scale_x * x_mean_shifted_div_scale_x * N / den, (double)0.0);
+        double y_float = std::sqrt(x_var_div_scale_x_sq) * x_scale;
+        *Y_ptr_underlying = at::native::quantize_val<scalar_t>(
+                            x_scale, x_zp, y_float)
+                            .val_;
+      }
+    });
+  });
+}
+
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
@@ -3597,10 +3725,55 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
         rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
       }
   });
-
 }
 
-} // namespace
+// This function expects quantized_val input to already be quantized
+template <typename scalar_t, typename mask_t>
+void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, scalar_t quantized_val) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    char* mask = data[1];
+    for (const auto i : c10::irange(n)) {
+      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        *(scalar_t*)(dst + strides[0] * i) = quantized_val;
+      }
+    }
+  };
+  iter.for_each(loop);
+}
+
+void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  AT_DISPATCH_QINT_TYPES(iter.dtype(), "masked_fill", [&] {
+    float float_val = value.to<float>();
+    auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
+    auto mask_dtype = iter.input_dtype(0);
+    if (mask_dtype == ScalarType::Bool) {
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, quantized_val);
+    } else {
+      cpu_masked_fill_kernel_quantized_cpu<scalar_t, unsigned char>(iter, quantized_val);
+    }
+  });
+}
+
+// currently, we do not support accumulate=True for quantized tensors. We throw an exception in _index_put_impl_quantized_cpu_
+void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+  // NOTE: duplicate indices are only supported if accumulate is true.
+  AT_DISPATCH_QINT_TYPES(iter.dtype(), "index_put", [&] {
+    // See Note [Enabling Deterministic Operations]
+    // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+    // must enable serial execution if deterministic algorithms are enabled.
+    const bool is_deterministic = at::globalContext().deterministicAlgorithms();
+    at::native::cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [scale, zero_point](char* dst, char* src, int64_t offset) {
+      *(scalar_t*)(dst + offset) = quantize_val<scalar_t>(scale, zero_point, *(float*)src);
+    }, /*serial_execution=*/is_deterministic);
+  });
+}
+} // anonymous namespace
 
 // Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
 // is used, only one fails. But if the failing test is skipped, another one fails.
@@ -3651,6 +3824,10 @@ REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
 REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
+REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
+REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
+REGISTER_NO_AVX512_DISPATCH(qmean_inner_dim_stub);
+REGISTER_NO_AVX512_DISPATCH(qstd_inner_dim_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3715,6 +3892,14 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_stub,
     &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
+REGISTER_DISPATCH(
+    masked_fill_kernel_quantized_stub,
+    &masked_fill_kernel_quantized_cpu);
+REGISTER_DISPATCH(
+    index_put_kernel_quantized_stub,
+    &index_put_kernel_quantized_cpu);
+REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel);
+REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel);
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native

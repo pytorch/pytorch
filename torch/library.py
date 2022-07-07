@@ -11,6 +11,9 @@ __all__ = ['Library', 'impl', 'define']
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
 
+# prim is reserved by TorchScript interpreter
+_reserved_namespaces = ['prim']
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -28,6 +31,10 @@ class Library:
     def __init__(self, ns, kind, dispatch_key=""):
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
+
+        if ns in _reserved_namespaces and kind == "DEF":
+            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
+
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
@@ -63,6 +70,24 @@ class Library:
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
 
+
+        if dispatch_key == "Meta":
+            dispatcher_op_name = name
+            if '::' not in dispatcher_op_name:
+                dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
+            # get a string containing the names of every dispatch key that the operator has a registration for.
+            dispatch_key_registration = torch._C._dispatch_dump(dispatcher_op_name)
+            # Internally, we shouldn't be registering meta kernels for any operators that
+            # have CompositeImplicitAutograd kernels.
+            # Instead, we should be letting those decompositions run, and writing meta kernels
+            # only for the base operators.
+            if 'CompositeImplicitAutograd' in dispatch_key_registration:
+                raise RuntimeError(
+                    f"We should not register a meta kernel directly to the operator '{name}',"
+                    " because it has a CompositeImplicitAutograd kernel in core."
+                    " Instead we should let the operator decompose, and ensure that we have meta kernels"
+                    " for the base ops that it decomposes into.")
+
         self.m.impl(name, dispatch_key, fn)
         _impls.add(key)
         self._op_impls.add(key)
@@ -82,9 +107,12 @@ class Library:
         return self.m.define(schema, alias_analysis)
 
     def __del__(self):
-        for key in self._op_impls:
-            _impls.remove(key)
-        del self.m
+        # _op_impls might not have been initialized if an error was thrown in __init__
+        _op_impls_ = getattr(self, '_op_impls', None)
+        if _op_impls_:
+            for key in self._op_impls:
+                _impls.remove(key)
+            del self.m
 
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API

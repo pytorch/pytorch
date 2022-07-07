@@ -62,7 +62,9 @@ class TestModels(TestCase):
     keep_initializers_as_inputs = False
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
-        with torch.onnx.select_model_mode_for_export(model, None):
+        with torch.onnx.select_model_mode_for_export(
+            model, torch.onnx.TrainingMode.EVAL
+        ):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
             verify(
@@ -152,6 +154,9 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
+    @unittest.skip(
+        "This test has been flaky on trunk and PRs. See https://github.com/pytorch/pytorch/issues/79540"
+    )
     @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))

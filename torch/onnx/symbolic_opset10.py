@@ -6,8 +6,7 @@ from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
@@ -327,7 +326,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

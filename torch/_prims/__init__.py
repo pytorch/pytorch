@@ -45,7 +45,9 @@ __all__ = [
     "acos",
     "acosh",
     "asin",
+    "asinh",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bessel_i0",
@@ -64,14 +66,15 @@ __all__ = [
     "exp2",
     "fill",
     "floor",
+    "imag",
     "isfinite",
-    "is_infinite",
     "lgamma",
     "log",
     "log1p",
     "log2",
     "log10",
     "neg",
+    "real",
     "reciprocal",
     "round",
     "sign",
@@ -81,6 +84,7 @@ __all__ = [
     "sqrt",
     "tan",
     "tanh",
+    "trunc",
     #
     # Elementwise binary prims
     #
@@ -95,6 +99,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "gcd",
     "ge",
     "gt",
     "igamma",
@@ -107,6 +112,7 @@ __all__ = [
     "ne",
     "nextafter",
     "pow",
+    "remainder",
     "rsqrt",
     "shift_left",
     "shift_right_arithmetic",
@@ -165,6 +171,7 @@ __all__ = [
     # Tensor Creation Prims
     #
     "empty_strided",
+    "scalar_tensor",
     #
     # Randomness Prims
     #
@@ -180,6 +187,7 @@ _nvfuser_unary_ops = {
     "acos",
     "asin",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bitwise_not",
@@ -412,6 +420,9 @@ def _elementwise_meta(
         elif isinstance(arg, Number):
             scalar_type = type(arg)
 
+    if dtype is None and scalar_type is not None:
+        dtype = utils.type_to_dtype(scalar_type)
+
     # Acquires the device (if it exists) or number
     device = None
     number = None
@@ -445,6 +456,13 @@ def _elementwise_meta(
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
     return TensorMeta(number)
+
+
+def _complex_only_elementwise_meta(*args, **kwargs):
+    utils.check(
+        utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
+    )
+    return _elementwise_meta(*args, **kwargs)
 
 
 def _make_elementwise_unary_prim(
@@ -517,10 +535,25 @@ asin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+asinh = _make_elementwise_unary_prim(
+    "asinh",
+    impl_aten=torch.asinh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
     impl_nvfuser=_atan_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+atanh = _make_elementwise_unary_prim(
+    "atanh",
+    impl_aten=torch.atanh,
+    impl_nvfuser=_atanh_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -682,17 +715,21 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+imag = _make_prim(
+    schema="imag(Tensor self) -> Tensor",
+    meta=partial(
+        _complex_only_elementwise_meta,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    ),
+    return_type=RETURN_TYPE.VIEW,
+    impl_aten=torch.imag,
+    doc="",
+)
+
 isfinite = _make_elementwise_unary_prim(
     "isfinite",
     impl_aten=torch.isfinite,
     impl_nvfuser=_isfinite_nvfuser,  # type: ignore[name-defined]
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-)
-
-is_infinite = _make_elementwise_unary_prim(
-    "is_infinite",
-    impl_aten=torch.isinf,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -735,6 +772,17 @@ log10 = _make_elementwise_unary_prim(
     impl_nvfuser=_log10_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+real = _make_prim(
+    schema="real(Tensor self) -> Tensor",
+    meta=partial(
+        _complex_only_elementwise_meta,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    ),
+    return_type=RETURN_TYPE.VIEW,
+    impl_aten=torch.real,
+    doc="",
 )
 
 reciprocal = _make_elementwise_unary_prim(
@@ -819,6 +867,19 @@ tanh = _make_elementwise_unary_prim(
     "tanh",
     impl_aten=torch.tanh,
     impl_nvfuser=_tanh_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+def _trunc_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.Ops.trunc(a)  # type: ignore[attr-defined]
+
+
+trunc = _make_elementwise_unary_prim(
+    "trunc",
+    impl_aten=torch.trunc,
+    impl_nvfuser=_trunc_nvfuser,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -919,6 +980,15 @@ fmod = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+gcd = _make_elementwise_binary_prim(
+    "gcd",
+    impl_aten=torch.gcd,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
@@ -966,25 +1036,14 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-def _wrap_scalar(a: NumberType, *, dtype: torch.dtype = None) -> torch.Tensor:
-    """
-    Wraps a Number into a Tensor of corresponding dtype.
-
-    Note: this should not generally be used, but some torch functions don't
-    accept scalars, so it's necessary for their prims to do so.
-    """
-    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
-    return torch.tensor(a, dtype=dtype)
-
-
 # Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = _wrap_scalar(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = _wrap_scalar(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
 
     return torch.maximum(a, b)  # type: ignore[arg-type]
 
@@ -1001,9 +1060,9 @@ def _minimum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = _wrap_scalar(b, dtype=a.dtype)
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(b, TensorLike) and isinstance(a, Number):
-        a = _wrap_scalar(a, dtype=b.dtype)
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
 
     return torch.minimum(a, b)  # type: ignore[arg-type]
 
@@ -1045,6 +1104,20 @@ pow = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+
+
+remainder = _make_elementwise_binary_prim(
+    "remainder",
+    impl_aten=torch.remainder,
+    impl_nvfuser=_remainder_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 
 shift_left = _make_elementwise_binary_prim(
     "shift_left",
@@ -2098,7 +2171,7 @@ copy_to = _make_prim(
 
 
 def _resize_meta(a: TensorLikeType, shape: ShapeType):
-    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
+    return a.resize_(shape)
 
 
 def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
@@ -2179,12 +2252,13 @@ def _make_reduction_prim(name: str, impl_aten, doc, impl_nvfuser=None):
     )
 
 
-def _make_var_reduction_prim(name: str, impl_aten, doc):
+def _make_var_reduction_prim(name: str, impl_aten, doc, impl_nvfuser):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
+        impl_nvfuser=impl_nvfuser,
         return_type=RETURN_TYPE.NEW,
         doc=doc,
     )
@@ -2194,10 +2268,9 @@ def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
     dims: DimsSequenceType,
-    *,
-    output_dtype: Optional[torch.dtype] = None,
 ):
     keep_dims = False
+    output_dtype = torch._C._nvfuser.DataType.Null
     return fd.Ops.sum(a, dims, keep_dims, output_dtype)
 
 
@@ -2230,21 +2303,54 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
+
+def _var_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+    *,
+    correction: int,
+):
+    keep_dims = False
+    return fd.Ops.var(a, dims, correction, keep_dims)
+
+
+def _amax_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.max(a, dims, keep_dims)
+
+
+def _amin_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.min(a, dims, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
+    impl_nvfuser=_var_nvfuser,
     doc=_var_doc,
 )
 
 amax = _make_reduction_prim(
     name="amax",
     impl_aten=torch.amax,
+    impl_nvfuser=_amax_nvfuser,
     doc=_amax_doc,
 )
 
 amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
+    impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
 
@@ -2382,6 +2488,45 @@ full_like = _make_prim(
     impl_aten=_full_like_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_full_like_doc,
+)
+
+
+def _scalar_tensor_meta(
+    scalar: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> TensorLikeType:
+    shape: ShapeType = []
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(scalar, shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _scalar_tensor_aten(
+    scalar: NumberType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    if isinstance(scalar, complex) and (
+        dtype is None or not utils.is_complex_dtype(dtype)
+    ):
+        raise TypeError("Complex scalar requires complex tensor dtype.")
+    # Note that Mypy thinks torch.scalar can't accept a complex scalar
+    return torch.scalar_tensor(scalar, dtype=dtype, device=device)  # type: ignore[arg-type]
+
+
+_scalar_tensor_doc = """
+    Wraps a Number into a Tensor with the specified dtype and device.
+"""
+
+# TODO: add layout and pin_memory support
+scalar_tensor = _make_prim(
+    schema="scalar_tensor(Scalar s, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+    meta=_scalar_tensor_meta,
+    impl_aten=_scalar_tensor_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_scalar_tensor_doc,
 )
 
 #
