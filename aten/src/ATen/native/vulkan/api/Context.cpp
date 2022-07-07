@@ -86,8 +86,13 @@ void Context::submit_texture_copy(
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
     const VkFence fence_handle) {
-  // Serialize recording to the shared command buffer
-  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
+  // Serialize recording to the shared command buffer. Do not initialize with a
+  // mutex just yet, since in some cases it will be externally managed.
+  std::unique_lock<std::mutex> cmd_lock;
+  // Refer to comments in submit_compute_job for explanation.
+  if (fence_handle == VK_NULL_HANDLE) {
+    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
+  }
 
   set_cmd();
 
@@ -101,11 +106,6 @@ void Context::submit_texture_copy(
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
   }
-
-  // Refer to comments in submit_compute_job for explanation
-  if (fence_handle != VK_NULL_HANDLE) {
-    cmd_lock.release();
-  }
 }
 
 void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
@@ -118,13 +118,6 @@ void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
 }
 
 void Context::flush() {
-  // Refer to comments in submit_compute_job. When this function is called, the
-  // previous call to submit_compute_job did not unlock cmd_mutex_ before returning.
-  // Therefore, we use std::adopt_lock when constructing the unique_lock as we
-  // assume the calling thread already has ownership of cmd_mutex_. The unique_lock
-  // will then unlock the mutex in its destructor.
-  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_, std::adopt_lock);
-
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();

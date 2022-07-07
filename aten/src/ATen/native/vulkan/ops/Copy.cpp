@@ -55,11 +55,23 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
 
   api::VulkanFence fence = context->fences().get_fence();
 
-  utils::pack_vtensor_to_staging(
-      src, staging.buffer(), fence.get_submit_handle());
+  {
+    // Refer to comment in submit_compute_job. When syncing with the GPU, the
+    // context must not allow other threads to record dispatches into it between
+    // between calling vkQueueSubmit and flushing the context. Therefore,
+    // cmd_mutex_ must be manually managed by the calling thread.
+    std::unique_lock<std::mutex> context_lock(context->dispatch_lock());
 
-  fence.wait();
+    utils::pack_vtensor_to_staging(
+        src, staging.buffer(), fence.get_submit_handle());
 
+    fence.wait();
+
+    context->flush();
+    // cmd_mutex_ will be released when exiting this scope.
+  }
+
+  // Copy data from buffer back to CPU tensor.
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::READ);
     mapping.invalidate();
@@ -72,7 +84,6 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
         std::min(src.nbytes(), dst.nbytes()));
   }
 
-  context->flush();
   context->fences().return_fence(fence);
 }
 
