@@ -1246,7 +1246,6 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
         return torch.contiguous_format
 
     if are_strides_like_channels_last(x.shape, x.stride()):
-        return (torch.channels_last if x.ndim == 4
-                else torch.channels_last_3d)
+        return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
