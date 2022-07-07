@@ -536,6 +536,7 @@ class TestCommon(TestCase):
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
