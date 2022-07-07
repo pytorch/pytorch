@@ -556,7 +556,6 @@ class TestDataFramesPipes(TestCase):
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         actual = list(df_numbers)
-        # self.assertFalse(actual)
         self.assertEquals([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
 
     @skipIfNoDataFrames
