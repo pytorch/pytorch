@@ -411,9 +411,10 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   }
 }
 
-TORCH_META_FUNC(_linalg_solve)(const Tensor& A,
-                               const Tensor& B,
-                               bool left) {
+TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
+                                  const Tensor& B,
+                                  bool left,
+                                  bool check_errors) {
   // dtype
   at::native::checkFloatingOrComplex(A, "linalg.solve");
   TORCH_CHECK(A.scalar_type() == B.scalar_type(),
@@ -446,8 +447,11 @@ TORCH_META_FUNC(_linalg_solve)(const Tensor& A,
   auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
   set_output_strided(1, shape, LU_strides, A.options(), {});
 
-  // Pivots
+  // pivots
   set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
+
+  // info
+  set_output_contiguous(3, shape.slice(0, ndim - 2), A.options().dtype(kInt));
 }
 
 TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_errors) {
@@ -1912,22 +1916,25 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Auxiliary function that returns the LU decomposition to use it in the backward
-TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
-                                   const Tensor& B,
-                                   bool left,
-                                   const Tensor& result,
-                                   const Tensor& LU,
-                                   const Tensor& pivots) {
+TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
+                                      const Tensor& B,
+                                      bool left,
+                                      bool check_errors,
+                                      const Tensor& result,
+                                      const Tensor& LU,
+                                      const Tensor& pivots,
+                                      const Tensor& info) {
   // Possible optimization: Compute the LU factorization of A^T if A is contiguous
   // Then we solve A^T X = B with adjoint=True
   // This saves a copy as A doesn't need to be copied into an F-contig matrix in lu_factor
   const bool use_A_T = A.is_contiguous() && !A.is_complex();
-  auto info = at::empty({0}, A.options().dtype(kInt));
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
                               use_A_T ? A.mT() : A);
-  at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
+  if (check_errors) {
+    at::_linalg_check_errors(info, "torch.linalg.solve_ex", A.dim() == 2);
+  }
 
   // [numpy-compat] Handle vectors on the rhs
   const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
@@ -1936,22 +1943,45 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
   at::linalg_lu_solve_out(result_, LU, pivots, B_, left, /*adjoint*/use_A_T);
 }
 
+std::tuple<Tensor&, Tensor&> linalg_solve_ex_out(const Tensor& A,
+                                                 const Tensor& B,
+                                                 bool left,
+                                                 bool check_errors,
+                                                 Tensor& result,
+                                                 Tensor& info) {
+  auto LU = B.new_empty({0});
+  auto pivots = B.new_empty({0}, kInt);
+  at::_linalg_solve_ex_out(result, LU, pivots, info, A, B, left, check_errors);
+  return std::tie(result, info);
+}
+
+// We implement linalg_solve_ex as a composite function of _linalg_solve
+std::tuple<Tensor, Tensor> linalg_solve_ex(const Tensor& A,
+                                           const Tensor& B,
+                                           bool left,
+                                           bool check_errors) {
+  Tensor result, LU, pivots, info;
+  std::tie(result, LU, pivots, info) = at::_linalg_solve_ex(A, B, left, check_errors);
+  return std::make_tuple(std::move(result), std::move(info));
+}
+
 Tensor& linalg_solve_out(const Tensor& A,
                          const Tensor& B,
                          bool left,
                          Tensor& result) {
-
-  auto LU = at::empty({0}, A.options());
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::_linalg_solve_out(result, LU, pivots, A, B, left);
+  auto info = B.new_empty({0}, kInt);
+  at::linalg_solve_ex_out(result, info, A, B, left);
+  at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
   return result;
 }
 
-// We implement linalg_solve as a composite function of _linalg_solve
 Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
-  return std::get<0>(at::_linalg_solve(A, B, left));
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_solve_ex(A, B, left);
+  at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
