@@ -9,8 +9,7 @@ category_csv = "results/category_data.csv"
 commitlist_csv = "results/commitlist.csv"
 
 with open(category_csv, "r") as category_data:
-    # TODO: remove the temporary rows hack once updated stuff is committed
-    reader = csv.DictReader(category_data, commitlist.commit_fields[:4])
+    reader = csv.DictReader(category_data, commitlist.commit_fields)
     rows = list(reader)
     category_map = {row["commit_hash"]: row["category"] for row in rows}
 
