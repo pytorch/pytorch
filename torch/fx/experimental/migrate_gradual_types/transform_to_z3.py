@@ -289,6 +289,12 @@ try:
         # since the function returns a list of one element, we get the first element
         # we are only interested in the RHS in this case because the LHS just stores
         # the result
+
+        # we make sure the constraint is of the form:
+        # c = b where b is a boolean expression
+        # and we consider b (constraint.rhs) for transformation
+        assert isinstance(condition_constraint.lhs, BVar)
+        assert is_bool_expr(condition_constraint.rhs)
         condition_constraint_rhs = condition_constraint.rhs
 
         # transform the condition constraint
@@ -299,8 +305,6 @@ try:
         transformed_condition_constraint, counter = transform_to_z3(condition_constraint_rhs, counter, dimension_dict)
 
         negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
-        # print(transformed_condition_constraint)
-        # print(negation_of_constraint)
 
         return z3.And([transformed, transformed_condition_constraint]), \
             z3.And([transformed, negation_transformed_condition_constraint])
