@@ -733,26 +733,29 @@ static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THCPModule_setBenchmarkLimitCuDNN(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(THPUtils_checkLong(arg), "set_benchmark_limit_cudnn expects an int, "
-          "but got %s", THPUtils_typename(arg));
+PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "set_benchmark_limit_cudnn expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
   auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
 #if defined(USE_ROCM)
-  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
 #else
-  TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
 #endif
 #endif
   Py_RETURN_NONE;
 }
 
-PyObject *THCPModule_benchmarkLimitCuDNN(PyObject *_unused, PyObject *noargs)
-{
+PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
