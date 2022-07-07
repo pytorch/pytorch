@@ -197,6 +197,7 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "instance_norm",
     "narrow",
     "native_batch_norm",
     "native_layer_norm",
@@ -2138,6 +2139,61 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError("Input must be >= 1-d.")
 
     return flip(a, (0,))
+
+
+def _repeat_if_defined(a: Optional[Tensor], sizes: int):
+    if a is not None:
+        return a.repeat(sizes)
+    return a
+
+
+@register_decomposition(torch.ops.aten.instance_norm)
+def instance_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    use_input_stats: bool,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: bool,
+) -> Tensor:
+    batch_size = input.shape[0]
+    num_channels = input.shape[1]
+    instance_norm_channels = batch_size * num_channels
+    shape = [1, instance_norm_channels] + [
+        input.shape[dim] for dim in range(2, input.ndim)
+    ]
+
+    repeated_weight = _repeat_if_defined(weight, batch_size)
+    repeated_bias = _repeat_if_defined(bias, batch_size)
+    repeated_running_mean = _repeat_if_defined(running_mean, batch_size)
+    repeated_running_var = _repeat_if_defined(running_var, batch_size)
+
+    input_reshaped = torch.reshape(input, shape)
+    # TODO support cudnn_batch_norm
+    output, save_mean, save_rstd = torch.native_batch_norm(
+        input_reshaped,
+        repeated_weight,
+        repeated_bias,
+        repeated_running_mean,
+        repeated_running_var,
+        use_input_stats,
+        momentum,
+        eps,
+    )
+
+    if running_mean is not None:
+        running_mean_square = repeated_running_mean.view([batch_size, num_channels])
+        new_running_mean = running_mean_square.mean(dim=0, keepdim=False)
+        running_mean.copy_(new_running_mean)
+
+    if running_var is not None:
+        running_var_square = repeated_running_var.view([batch_size, num_channels])
+        new_running_var = running_var_square.mean(dim=0, keepdim=False)
+        running_var.copy_(new_running_var)
+    return output.view(input.shape)
 
 
 # CompositeImplicitAutograd - don't register decomp

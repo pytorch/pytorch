@@ -20452,6 +20452,11 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
+        "_refs.nn.functional.instance_norm",
+        torch_opinfo_name="nn.functional.instance_norm",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
         skips=(
