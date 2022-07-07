@@ -1,11 +1,11 @@
 import warnings
 
 from collections import deque
-from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -148,13 +148,10 @@ class _ForkerIterDataPipe(IterDataPipe):
            all(p == self.end_ptr for p in self.child_pointers):
             self._datapipe_iterator = None
 
-    def is_instance_started(self, instance_id: int) -> bool:
-        return self.child_pointers[instance_id] != 0
-
     def is_every_instance_exhausted(self) -> bool:
         return all(self.end_ptr == ptr for ptr in self.child_pointers)
 
-    def reset(self):
+    def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
         self.child_pointers = [0] * self.num_instances
@@ -195,32 +192,73 @@ class _ChildDataPipe(IterDataPipe):
     Iterable Datapipe that is a child of a main DataPipe. The instance of this class
     will pass its instance_id to get the next value from its main DataPipe.
 
+    Note:
+        ChildDataPipe, like all other IterDataPipe, follows the single iterator per IterDataPipe constraint.
+        Since ChildDataPipes share a common buffer, when an iterator is created for one of the ChildDataPipes,
+        the previous iterators  for all ChildDataPipes must be invalidated, with the exception when a ChildDataPipe
+        hasn't had an iterator created from it since the last invalidation. See the example below.
+
+    Singler Iterator per IteraDataPipe Invalidation Example:
+        >>> source_dp = IterableWrapper(range(10))
+        >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
+        >>> it1, it2 = iter(cdp1), iter(cdp2)
+        >>> it3 = iter(cdp1)
+        The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
+        >>> it4 = iter(cdp2)
+        The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
+        the last invalidation.
+
     Args:
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
         instance_id: integer identifier of this instance
     """
-    def __init__(self, main_datapipe, instance_id: int):
-        required_attrs = ["get_next_element_by_instance", "is_instance_started", "is_every_instance_exhausted", "reset"]
+    _is_child_datapipe: bool = True
+
+    def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
+        required_attrs = ["get_next_element_by_instance", "is_every_instance_exhausted", "reset"]
         required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
         if any(not callable(op) for op in required_ops):
             raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
-        self.main_datapipe = main_datapipe
+        self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
     def __iter__(self):
-        if self.main_datapipe.is_instance_started(self.instance_id):  # Only reset if the DataPipe started to read
-            if not self.main_datapipe.is_every_instance_exhausted():
-                warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
-                              "the buffer and each child DataPipe will read from the start again.", UserWarning)
-            self.main_datapipe.reset()
-        # We want to separate the code for reset and yield, so that 'reset' exeutes before __next__ is called
-        return self.get_generator_by_instance(self.instance_id)
+        # Note that the logic behind setting iterator ID and `reset` are handled within `hook_iterator`
+        # We want to separate the code for reset and yield, so that 'reset' executes before __next__ is called
+        return self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
     def __len__(self):
         return len(self.main_datapipe)
 
-    def get_generator_by_instance(self, instance_id: int):
-        yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
+    # This method is called by `hook_iterator` in `_typing.py`.
+    def _set_main_datapipe_valid_iterator_id(self) -> int:
+        r"""
+        Update the valid iterator ID for both this DataPipe object and `main_datapipe`.
+        `main_datapipe.reset()` is called when the ID is incremented to a new generation.
+        """
+        # 1. First time any child iterator is created
+        if self.main_datapipe._valid_iterator_id is None:
+            self.main_datapipe._valid_iterator_id = 0  # type: ignore[attr-defined]
+        # 2. This instance was already in the same generation as `main_datapipe`,
+        #    we need to increment the ID further by 1
+        elif self.main_datapipe._valid_iterator_id == self._valid_iterator_id:  # type: ignore[has-type]
+            self.main_datapipe._valid_iterator_id += 1  # type: ignore[attr-defined]
+            # Whenever a new generation of iterator is created, the `main_datapipe` must reset
+            if not self.main_datapipe.is_every_instance_exhausted():
+                warnings.warn("Some child DataPipes are not exhausted when __iter__ is called. We are resetting "
+                              "the buffer and each child DataPipe will read from the start again.", UserWarning)
+            self.main_datapipe.reset()
+        # 3. Otherwise, the iterator is behind the others, so it will just need to catch up by setting
+        #    the instance's iterator to match that of `main_datapipe`
+        self._valid_iterator_id = self.main_datapipe._valid_iterator_id
+        return self._valid_iterator_id
+
+    # This method is called by `hook_iterator` in `_typing.py`.
+    def _check_valid_iterator_id(self, iterator_id) -> bool:
+        r"""
+        Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`.
+        """
+        return iterator_id == self._valid_iterator_id and iterator_id == self.main_datapipe._valid_iterator_id
 
 
 @functional_datapipe('demux')
@@ -262,7 +300,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        _check_lambda_fn(classifier_fn)
+        _check_unpickable_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -292,7 +330,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             )
         self.current_buffer_usage = 0
         self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
-        self.instance_started: List[bool] = [False] * num_instances
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
@@ -308,6 +345,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
+                StreamWrapper.close_streams(value)
                 continue
             if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
@@ -324,7 +362,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
         stop = False
-        self.instance_started[instance_id] = True
         while not stop:
             if self.child_buffers[instance_id]:
                 self.current_buffer_usage -= 1
@@ -337,17 +374,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
                     self.main_datapipe_exhausted = True
                     self._datapipe_iterator = None
 
-    def is_instance_started(self, instance_id: int) -> bool:
-        return self.instance_started[instance_id]
-
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
-    def reset(self):
-        self._datapipe_iterator = iter(self.main_datapipe)
+    def reset(self) -> None:
+        self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
-        self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
 
     def __getstate__(self):
@@ -374,7 +407,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
-        self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
 
     def __del__(self):
@@ -387,32 +419,35 @@ class MultiplexerIterDataPipe(IterDataPipe):
     r"""
     Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
     one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
-    and so on. It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
+    and so on. It ends when the shortest input DataPipe is exhausted.
 
     Args:
-        datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+        datapipes: Iterable DataPipes that will take turn to yield their elements, until the shortest DataPipe is exhausted
 
     Example:
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.mux(dp2, dp3))
-        [0, 10, 20, 1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24]
+        [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
         self.length: Optional[int] = None
+        self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        finished: Set[int] = set()
-        while len(finished) < len(iterators):
-            for i in range(len(iterators)):
-                if i not in finished:
-                    try:
-                        value = next(iterators[i])
-                        yield value
-                    except StopIteration:
-                        finished.add(i)
+        while len(iterators):
+            for it in iterators:
+                try:
+                    value = next(it)
+                    self.buffer.append(value)
+                except StopIteration:
+                    self.buffer.clear()
+                    return
+            for value in self.buffer:
+                yield value
+            self.buffer.clear()
 
     def __len__(self):
         if self.length is not None:
@@ -420,10 +455,33 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)
+            self.length = min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
             self.length = -1
         return len(self)
+
+    def reset(self) -> None:
+        self.buffer = []
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.datapipes,
+            self.length,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipes,
+            self.length,
+        ) = state
+        self.buffer = []
+
+    def __del__(self):
+        self.buffer.clear()
 
 
 @functional_datapipe('zip')
@@ -453,8 +511,18 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
-        for data in zip(*self.datapipes):
-            yield data
+        iterators = [iter(datapipe) for datapipe in self.datapipes]
+        try:
+            for data in zip(*iterators):
+                yield data
+        finally:
+            unused = []
+            for iterator in iterators:
+                unused += list(iterator)
+
+            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+            for item in unused:
+                StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:

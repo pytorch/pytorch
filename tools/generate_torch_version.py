@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import subprocess
 from pathlib import Path
 from setuptools import distutils  # type: ignore[import]
@@ -7,6 +8,7 @@ from typing import Optional, Union
 
 
 UNKNOWN = "Unknown"
+RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
@@ -22,13 +24,17 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
 
 def get_tag(pytorch_root: Union[str, Path]) -> str:
     try:
-        return (
+        tag = (
             subprocess.check_output(
                 ["git", "describe", "--tags", "--exact"], cwd=pytorch_root
             )
             .decode("ascii")
             .strip()
         )
+        if RELEASE_PATTERN.match(tag):
+            return tag
+        else:
+            return UNKNOWN
     except Exception:
         return UNKNOWN
 

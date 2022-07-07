@@ -39,8 +39,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
-from jit.test_onnx_export import TestONNXExport  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -56,6 +55,7 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -71,13 +71,13 @@ from jit.test_aten_pow import TestAtenPow  # noqa: F401
 from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
-from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
+from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -604,6 +604,19 @@ class TestJit(JitTestCase):
         # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_close(orig_res, a_copy)
+
+    def test_repeat_interleave_script(self):
+        def fn(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+            output = input.repeat_interleave(repeats)
+            return output
+        fn_scripted = torch.jit.script(fn)
+
+        input = torch.tensor([5, 7], dtype=torch.int64)
+        repeats = torch.tensor([3, 6], dtype=torch.int64)
+
+        output = fn(input, repeats)
+        output_scripted = fn_scripted(input, repeats)
+        self.assertEqual(output_scripted, output)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -1687,6 +1700,23 @@ graph(%Ra, %Rb):
         self.assertTrue(torch.equal(torch.ones(2, 2), t_node.t("a")))
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
+
+    def test_permute_inputs_binding(self):
+        @torch.jit.script
+        def foo(i, j, k):
+            pass
+
+        g = foo.graph
+
+        idxs = []
+        for i, inp in enumerate(g.inputs()):
+            inp.setDebugName(f"inp{i}")
+            idxs.append(i)
+
+        permuted_idxs = list(np.random.permutation(idxs))
+        g.permuteInputs(permuted_idxs)
+        for i, inp in enumerate(g.inputs()):
+            self.assertEqual(f"inp{permuted_idxs[i]}", inp.debugName())
 
     @unittest.skipIf(IS_MACOS, "Failing on MacOS only")
     def test_python_ir_utils(self):
@@ -7074,19 +7104,6 @@ a")
         self.checkScript(div_int_nofuture, ())
         self.checkScript(div_float_nofuture, ())
 
-    def test_floor_div(self):
-        @torch.jit.script
-        def foo(a, b):
-            # type: (int, int) -> int
-            return a // b
-        for i in range(-8, 8):
-            for j in range(-8, 8):
-                if j != 0:
-                    self.assertEqual(foo(i, j), i // j)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-                        foo(i, j)
-
     # Testing bitwise shorthand aug assignment
     def test_bool_augassign_bitwise_or(self):
         def func(a: bool, b: bool) -> bool:
@@ -9145,20 +9162,8 @@ dedent """
         inps2 = (stft(*inps), inps[1])
         self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
-        def lu(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.lu(x)
-
-        self.checkScript(lu, (torch.randn(2, 3, 3),))
-
-        def lu_infos(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
-            return torch.lu(x, get_infos=True)
-
-        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
-
         def lu_unpack(x):
-            A_LU, pivots = torch.lu(x)
+            A_LU, pivots = torch.linalg.lu_factor(x)
             return torch.lu_unpack(A_LU, pivots)
 
         for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
@@ -11760,7 +11765,17 @@ dedent """
 
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
-        def fn_enumerate_start_index(x):
+        def fn_enumerate_start_arg(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, v) in enumerate(x, 1):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn_enumerate_start_arg, ([1, 2, 3, 4, 5],))
+
+        def fn_enumerate_start_kwarg(x):
             # type: (List[int]) -> int
             sum = 0
             for (i, v) in enumerate(x, start=1):
@@ -11768,7 +11783,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_enumerate_start_kwarg, ([1, 2, 3, 4, 5],))
 
         def fn_nested_enumerate(x):
             # type: (List[int]) -> int
@@ -11778,7 +11793,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_nested_enumerate, ([1, 2, 3, 4, 5],))
 
         with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
             @torch.jit.script
@@ -12498,6 +12513,16 @@ dedent """
         for a, b in zip(eager_out, script_out):
             check_equal_and_dtype(a, b)
 
+    def test_floor_div(self):
+        @torch.jit.script
+        def foo(a, b):
+            # type: (int, int) -> int
+            return a // b
+        for i in range(-8, 8):
+            for j in range(-8, 8):
+                if j != 0:
+                    self.assertEqual(foo(i, j), i // j)
+
     def test_floordiv(self):
         funcs_template = dedent('''
         def fn():
@@ -12516,8 +12541,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
-                    self.assertEqual(f_script(), f())
+                self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -16094,6 +16118,16 @@ dedent """
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
 
+    def test_index_with_tuple(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return x[(1,)]
+
+        self.checkModule(MyModule(), (torch.ones(2, 3),))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
@@ -16179,50 +16213,6 @@ class TestJitGeneratedModule(JitTestCase):
 
 class TestJitGeneratedFunctional(JitTestCase):
     pass
-
-class TestJitAutocast(JitTestCase):
-    def setUp(self):
-        super(TestJitAutocast, self).setUp()
-        self.models = [MnistNet()]
-        self.inputs = [torch.randn(5, 1, 28, 28, device='cpu')]
-
-    def tearDown(self):
-        super(TestJitAutocast, self).tearDown()
-
-    def test_generate_autocast_jit_trace_model(self):
-        def test_generate_autocast_jit_trace_model(model, x):
-            model.eval()
-            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
-                traced_model = torch.jit.trace(model, x)
-        for i in range(self.models.__len__()):
-            test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
-
-    def test_nchw_autocast_jit_trace_model(self):
-        def test_nchw_autocast_jit_trace_model(model, x):
-            model.eval()
-            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
-                traced_model = torch.jit.trace(model, x)
-            with torch.cpu.amp.autocast(), torch.no_grad():
-                y = traced_model(x.clone())
-                y2 = model(x.clone())
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
-        for i in range(self.models.__len__()):
-            test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
-
-    def test_nhwc_autocast_jit_trace_model(self):
-        def test_nhwc_autocast_jit_trace_model(model, x):
-            model.eval()
-            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
-                traced_model = torch.jit.trace(model, x.to(memory_format=torch.channels_last))
-            with torch.cpu.amp.autocast(), torch.no_grad():
-                y = traced_model(x.clone().to(memory_format=torch.channels_last))
-                y2 = model(x.clone().to(memory_format=torch.channels_last))
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
-        for i in range(self.models.__len__()):
-            if self.inputs[i].size().__len__() == 5:
-                # NHWC 3D case not support yet
-                continue
-            test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
@@ -16425,9 +16415,6 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
     import jit.test_module_interface
-    suite = unittest.findTestCases(test_jit_py3)
-    unittest.TextTestRunner().run(suite)
     suite = unittest.findTestCases(jit.test_module_interface)
     unittest.TextTestRunner().run(suite)

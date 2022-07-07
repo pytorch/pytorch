@@ -1,6 +1,8 @@
 import functools
+import torch
 from typing import Iterator
 from dataclasses import dataclass
+from contextlib import contextmanager
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -8,28 +10,15 @@ from dataclasses import dataclass
 # Specifically, it has the helper functions for enable_ and push_X_mode and the
 # ModeInfo class, which is extended by each where they are different
 
-
-# a helper class for the error message in the _wrap_init function. This can't be shared with ModeInfo because
-# that causes a circular dependency. It also must has only strings attributes to avoid circular dependencies
-@dataclass
-class MetaInitErrorInfo:
-    mode_name: str
-    mode_class_name: str  # name of the mode class that extends the meta class here
-
-
 # used by both TorchFunctionMode and TorchDispatchMode, this will wrap the init
 # function to require an "inner" kwarg
-def _wrap_init(f, meta_init_error_info):
+def _wrap_init(f):
     undef = object()
 
     @functools.wraps(f)
     def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is undef:
-            raise TypeError(
-                f"missing inner keyword argument; instead of constructing a {meta_init_error_info.mode_class_name} "
-                f"directly, pass the constructor to push_{meta_init_error_info.mode_name}_mode"
-            )
-        self.inner = inner
+        if inner is not undef:
+            self.inner = inner
         return f(self, *args, **kwargs)
     return wrapped
 
@@ -102,6 +91,19 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         mode_info.set_mode(old)
 
 
+def _restore_mode(mode, mode_info: _ModeInfo):
+    if not hasattr(mode, "ancestors"):
+        raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
+    old = mode_info.get_mode()
+    if old is not None and old not in mode.ancestors:
+        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
+    mode_info.set_mode(mode)
+    try:
+        yield mode
+    finally:
+        mode_info.set_mode(old)
+
+
 # shared version of push_torch_function/push_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
@@ -125,8 +127,48 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
             f'The callable passed to push_{mode_info.mode_name}_mode'
             f'must return a {mode_info.mode_class_name()}'
         )
+    if old is not None:
+        mode.ancestors = old.ancestors.union({old})  # type: ignore[attr-defined]
+    else:
+        mode.ancestors = set()  # type: ignore[attr-defined]
     mode_info.set_mode(mode)
     try:
         yield mode
     finally:
         mode_info.set_mode(old)
+
+
+# To help with non-lexical scoping, it will error if all the modes are from different scopes or haven't been used
+def find_outermost_mode(modes):
+    outermost = None
+    for mode in modes:
+        if mode is not None:
+            if not hasattr(mode, "ancestors"):
+                raise RuntimeError(f"{mode}, doesn't have ancestors set so the ordering with other modes is unclear")
+            if outermost is None:
+                outermost = mode
+            elif mode not in outermost.ancestors and outermost not in mode.ancestors:
+                raise RuntimeError(f"modes {mode} and {outermost} are not compatible because they "
+                                   "don't come from the same scope")
+            elif outermost in mode.ancestors:
+                outermost = mode
+    return outermost
+
+
+# returns if all are the same mode
+def all_same_mode(modes):
+    return all(tuple(mode == modes[0] for mode in modes))
+
+# returns if all modes are from the current scope, ``cur_mode``
+def all_same_mode_scope(modes, cur_mode):
+    if not hasattr(cur_mode, "ancestors"):
+        return False
+    return all(tuple(mode == cur_mode or mode in cur_mode.ancestors for mode in modes))
+
+@contextmanager
+def no_dispatch():
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard

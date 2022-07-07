@@ -380,6 +380,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNonNativeIr.h"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
@@ -400,6 +401,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -444,6 +446,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -461,6 +464,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_enum_tag.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -547,8 +551,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.mm
       )
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+      include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
       list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
     endif()
   endif()
@@ -563,7 +571,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
     # See https://github.com/pytorch/pytorch/issues/38856
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -667,10 +675,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  endif()
-
-  if(USE_MLCOMPUTE)
-    include(../mlc/mlc_build.cmake)
   endif()
 
   if(BUILD_ONEDNN_GRAPH)
@@ -985,8 +989,17 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
-        ${CUDA_cusolver_LIBRARY}
     )
+    if($ENV{ATEN_STATIC_CUDA})
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+      )
+    else()
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_cusolver_LIBRARY}
+      )
+    endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
@@ -1122,7 +1135,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
@@ -1784,7 +1797,7 @@ if(BUILD_TEST)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
         # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
-          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
           target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
           if(USE_FBGEMM)
@@ -2010,6 +2023,9 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
+  if(CAFFE2_USE_MKLDNN)
+      target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
+  endif()
   if(WIN32)
     target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)

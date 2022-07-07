@@ -1,13 +1,18 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <c10/util/Optional.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TransposeType.h>
 
 // Forward declare TI
 namespace at {
+class Tensor;
 struct TensorIterator;
+
+namespace native {
+enum class TransposeType;
+}
+
 }
 
 namespace at { namespace native {
@@ -275,22 +280,15 @@ DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using unpack_pivots_fn = void(*)(
   TensorIterator& iter,
-  const int64_t dim_size
-);
+  const int64_t dim_size);
 DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
 using lu_solve_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
-    const Tensor& /*pivots*/);
-DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
-
-using lu_solve_trans_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
+    const Tensor& /*LU*/,
     const Tensor& /*pivots*/,
+    const Tensor& /*B*/,
     TransposeType /*trans*/);
-DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
 using ldl_factor_fn = void (*)(
     const Tensor& /*LD*/,
@@ -304,6 +302,7 @@ using svd_fn = void (*)(
     const Tensor& /*A*/,
     const bool /*full_matrices*/,
     const bool /*compute_uv*/,
+    const c10::optional<c10::string_view>& /*driver*/,
     const Tensor& /*U*/,
     const Tensor& /*S*/,
     const Tensor& /*Vh*/,

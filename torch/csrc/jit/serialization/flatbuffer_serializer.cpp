@@ -2,10 +2,12 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Exception.h>
 #include <caffe2/serialize/versions.h>
 #include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -353,6 +355,23 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   flatbuffers::Offset<flatbuffers::Vector<
       flatbuffers::Offset<mobile::serialization::StorageData>>>
       storage_data_offset = 0;
+  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
+
+  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
+  std::vector<uint32_t> jit_constants_indexes;
+  jit_constants_indexes.reserve(jit_constants.size());
+  const uint32_t mobile_ivalue_size = ivalue_offsets_.size();
+  for (const auto& ival : jit_constants) {
+    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
+  }
+  const uint32_t operator_version =
+      static_cast<uint32_t>(module.min_operator_version());
+  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
+  if (bytecode_version < kMinVersion) {
+    bytecode_version = kMinVersion;
+  }
+
+  // NOTE: saving of storage has to be the last thing to do.
   if (include_tensor_data_in_flatbuffer) {
     std::vector<flatbuffers::Offset<mobile::serialization::StorageData>>
         storage_data;
@@ -380,21 +399,6 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     storage_data_offset = fbb.CreateVector(storage_data);
   }
 
-  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
-
-  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
-  std::vector<uint32_t> jit_constants_indexes;
-  jit_constants_indexes.reserve(jit_constants.size());
-  for (const auto& ival : jit_constants) {
-    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
-  }
-  const uint32_t operator_version =
-      static_cast<uint32_t>(module.min_operator_version());
-  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
-  if (bytecode_version < kMinVersion) {
-    bytecode_version = kMinVersion;
-  }
-
   auto mod = CreateModule(
       fbb,
       /*bytecode_version=*/bytecode_version,
@@ -407,7 +411,8 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(obj_types_offset_),
       jit_source_offset,
       fbb.CreateVector(jit_constants_indexes),
-      operator_version);
+      operator_version,
+      mobile_ivalue_size);
   FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
@@ -772,6 +777,24 @@ flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
       jit_sources,
       jit_constants);
 }
+
+static void save_mobile_module_to_func(
+    const mobile::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  auto buffer = save_mobile_module_to_bytes(module);
+  writer_func(buffer.data(), buffer.size());
+}
+
+bool register_flatbuffer_serializer() {
+  _save_mobile_module_to = save_mobile_module_to_func;
+  return true;
+}
+
+// iOS builds are often build with -Wglobal-constructor to minimize
+// startup time. So let them call register manually if needed.
+#if !defined(__APPLE__)
+const bool kFlatbufferSerializerRegistered = register_flatbuffer_serializer();
+#endif
 
 } // namespace jit
 } // namespace torch

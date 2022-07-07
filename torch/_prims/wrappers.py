@@ -1,5 +1,4 @@
 import torch
-import torch._prims as prims
 from torch._prims.utils import (
     Number,
     NumberType,
@@ -10,7 +9,7 @@ from torch._prims.utils import (
 import torch._prims.utils as utils
 from torch.utils._pytree import tree_flatten
 
-from typing import Callable, Sequence, Union
+from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
 from functools import wraps, reduce
 import operator
@@ -23,6 +22,8 @@ def _maybe_convert_to_dtype(
 ) -> Union[TensorLikeType, NumberType, Sequence]:
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
+            # NOTE: this is incorrect on the CPU
+            # See https://github.com/pytorch/pytorch/issues/77553
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
@@ -98,14 +99,13 @@ class elementwise_type_promotion_wrapper(object):
             )
 
             flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
-
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
             )
 
             promoted_args = {
-                x: _maybe_convert_to_dtype(bound.arguments[x], dtype=compute_dtype)
+                x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments.keys()
             }
@@ -142,7 +142,9 @@ def _maybe_resize_out(out: TensorLikeType, shape):
     return out
 
 
-def _safe_copy_out(*, copy_from: TensorLikeType, copy_to: TensorLikeType):
+def _safe_copy_out(
+    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+):
     # Checks same device
     if copy_from.device != copy_to.device:
         msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
@@ -151,44 +153,120 @@ def _safe_copy_out(*, copy_from: TensorLikeType, copy_to: TensorLikeType):
         raise RuntimeError(msg)
 
     # Checks safe cast
-    if not utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype):
-        msg = "Attempting to cast from {0} to out tensor with dtype {1}, but this can't be cast because it is not safe!".format(
-            copy_from.dtype, copy_to.dtype
+    if exact_dtype:
+        utils.check(
+            copy_from.dtype == copy_to.dtype,
+            lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
+            "but got {copy_to.dtype} instead",
         )
-        raise RuntimeError(msg)
+    else:
+        utils.check(
+            utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype),
+            lambda: f"Attempting to cast from {copy_from.dtype} to out tensor with dtype {copy_to.dtype}, "
+            "but this can't be cast because it is not safe!",
+        )
 
     return prims.copy_to(copy_to, copy_from)
 
 
-# FIXME: only supports single tensor out
-def out_wrapper(fn: Callable) -> Callable:
-    """
-    Adds the out parameter to a Python reference.
+def out_wrapper(*out_names: str, exact_dtype: bool = False):
+    is_tensor = len(out_names) == 0
+    assert is_tensor or len(out_names) >= 2
 
-    Note that this currently only supports operations that return a single tensor.
+    def _out_wrapper(fn: Callable) -> Callable:
+        """
+        Adds the out parameter to a Python reference.
+        """
+        out_type = (
+            TensorLikeType
+            if is_tensor
+            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+        )
+        return_type = (
+            TensorLikeType
+            if is_tensor
+            else NamedTuple(
+                f"return_types_{fn.__name__}", [(o, TensorLikeType) for o in out_names]
+            )
+        )
+
+        @wraps(fn)
+        def _fn(*args, out=None, **kwargs):
+            result = fn(*args, **kwargs)
+            assert (
+                isinstance(result, TensorLike)
+                and is_tensor
+                or isinstance(result, Tuple)  # type: ignore[arg-type]
+                and len(result) == len(out_names)
+            )
+            if out is not None:
+                assert type(out) == type(result)
+                if is_tensor:
+                    assert isinstance(out, TensorLike)
+                    # These two operations are done in-place
+                    _maybe_resize_out(out, result.shape)
+                    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                else:
+                    assert isinstance(out, Tuple)  # type: ignore[arg-type]
+                    utils.check(
+                        len(out) == len(result),
+                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
+                        TypeError,
+                    )
+                    for r, o in zip(result, out):
+                        # These two operations are done in-place
+                        _maybe_resize_out(o, r.shape)
+                        _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+            else:
+                out = result
+            # mypy does not see through  the definition of out_type given that it's in a different scope
+            return out if is_tensor else return_type(*out)  # type: ignore[operator]
+
+        sig = inspect.signature(fn)
+        out_param = inspect.Parameter(
+            "out",
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=out_type,
+        )
+        # Mark that the function now returns a tuple
+        assert sig.return_annotation in (sig.empty, out_type)
+        params = chain(sig.parameters.values(), (out_param,))
+        _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            parameters=params, return_annotation=return_type  # type: ignore[arg-type]
+        )
+        _fn.__annotations__ = fn.__annotations__
+        _fn.__annotations__["out"] = out_type
+        _fn.__annotations__["return"] = return_type
+        return _fn
+
+    return _out_wrapper
+
+
+# TODO: when tracing this will add torch tensors and not TensorMeta objects
+# to the trace -- we should fix this by adding a tracing context and NumberMeta classes
+# TODO: this wrapper is currently untested
+def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
     """
+    Allows unary operators that accept tensors to work with Python numbers.
+    """
+    sig = inspect.signature(fn)
 
     @wraps(fn)
-    def _fn(*args, out=None, **kwargs):
-        result = fn(*args, **kwargs)
-        if out is not None:
-            assert isinstance(out, TensorLike)
-            out = _maybe_resize_out(out, result.shape)
-            return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-            return out
-        return result
+    def _fn(*args, **kwargs):
+        if len(args) > 0 and isinstance(args[0], Number):
+            dtype = utils.type_to_dtype(type(args[0]))
+            args_ = list(args)
+            args_[0] = torch.tensor(args[0], dtype=dtype)
+            result = fn(*args_, **kwargs)
+            assert isinstance(result, torch.Tensor)
+            return result.item()
 
-    sig = inspect.signature(fn)
-    out_param = inspect.Parameter(
-        "out",
-        kind=inspect.Parameter.KEYWORD_ONLY,
-        default=None,
-        annotation=TensorLikeType,
-    )
-    params = chain(sig.parameters.values(), (out_param,))
-    _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-        parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
-    )
-    _fn.__annotations__ = fn.__annotations__
-    _fn.__annotations__["out"] = TensorLikeType
+        return fn(*args, **kwargs)
+
+    _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
+
+
+# avoid mypy import cycle
+import torch._prims as prims

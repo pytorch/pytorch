@@ -418,6 +418,8 @@ Tensor class reference
     Tensor.index_fill
     Tensor.index_put_
     Tensor.index_put
+    Tensor.index_reduce_
+    Tensor.index_reduce
     Tensor.index_select
     Tensor.indices
     Tensor.inner

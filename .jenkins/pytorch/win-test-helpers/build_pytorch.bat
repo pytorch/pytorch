@@ -10,7 +10,8 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: able to see what our cl.exe commands are (since you can actually
 :: just copy-paste them into a local Windows setup to just rebuild a
 :: single file.)
-set CMAKE_VERBOSE_MAKEFILE=1
+:: log sizes are too long, but leaving this here incase someone wants to use it locally
+:: set CMAKE_VERBOSE_MAKEFILE=1
 
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
@@ -141,7 +142,7 @@ python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torchgen %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
     if errorlevel 1 exit /b
     if not errorlevel 0 exit /b
 
@@ -153,7 +154,5 @@ python setup.py install --cmake && sccache --show-stats && (
   )
 )
 
-sccache --show-stats > stats.txt
-python -m tools.stats.upload_sccache_stats stats.txt
+sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server
-rm stats.txt

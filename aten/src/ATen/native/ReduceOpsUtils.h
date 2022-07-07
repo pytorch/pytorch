@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -199,7 +200,9 @@ static C10_UNUSED TensorIterator make_reduction(
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 = (
     self.is_cuda() && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
-  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
+                   : self.is_complex() ? c10::toComplexType(out_dtype)
+                                       : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 
@@ -323,7 +326,7 @@ static void resize_reduction(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);
 }
@@ -337,8 +340,8 @@ static void resize_reduction_with_indices(
   DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
-  meta.set_output(0, shape, self.options().dtype(out_dtype));
-  meta.set_output(1, shape, self.options().dtype(kLong));
+  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(1, shape, {}, self.options().dtype(kLong));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(0), self, dims_, keepdim);
   namedinference::propagate_names_for_reduction(
