@@ -13814,6 +13814,9 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           # While computing batched gradients, got: vmap: Calling Tensor.as_strided is not supported unless the batch
+           # dims being vmapped over are at the front of the tensor
+           check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            decorators=[
                DecorateInfo(
@@ -15497,6 +15500,9 @@ op_db: List[OpInfo] = [
                     ),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+                    # While computing batched gradients, got: vmap: Calling Tensor.as_strided is not supported unless the batch
+                    # dims being vmapped over are at the front of the tensor
+                    check_batched_forward_grad=False,
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::mul', 'aten::reciprocal'],),
     BinaryUfuncInfo('__rmul__',
