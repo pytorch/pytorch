@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from .conv_utils import conv_backward, conv_args_and_kwargs
+from .conv_utils import conv_backward, conv_args_and_kwargs, conv_picker
 from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import forward_helper
 
@@ -17,6 +17,10 @@ class ConvPerSampleGrad(torch.autograd.Function):
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
         output = forward_helper(conv_fn, expanded_args, expanded_kwargs)
         input, weight = expanded_args
+        batched_dim_size = conv_picker(conv_fn, 3, 4, 5)
+        if input.dim() != batched_dim_size:
+            raise RuntimeError(f"Expanded Weights only support convolution with batched input, got {conv_fn} with an"
+                               f"unbatched input of dim {input.dim()}, expected input of dim {batched_dim_size}")
 
         ctx.conv_fn = conv_fn
 
