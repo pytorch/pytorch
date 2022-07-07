@@ -154,16 +154,19 @@ __all__ = [
 # list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
-def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
-    """ Move all keyword arguments to positional args, except for `to`
+def _move_all_kwargs_to_args_with_exceptions(model: GraphModule) -> GraphModule:
+    """ Move all keyword arguments to positional args for linear
+    We can enable this for more ops if we have a more robust normalization
+    utility
     """
+    op_and_target = set([
+        ("call_method", "flatten"),
+        ("call_method", "to"),
+    ])
     for n in model.graph.nodes:
-        # skip moving kwargs to args for `to` since it has some overloads
-        # and removing keywords might cause errors
-        if n.op == "call_method" and n.target == "to":
-            continue
-        n.args = tuple(get_all_args_as_positional_args(n))
-        n.kwargs = {}
+        if (n.op, n.target) not in op_and_target:
+            n.args = tuple(get_all_args_as_positional_args(n))
+            n.kwargs = {}
     return model
 
 def _cleanup_args(model: GraphModule) -> GraphModule:
@@ -224,7 +227,7 @@ def _normalize_args_for_model(
         setattr(retraced_model, attr_name, preserved_attributes[attr_name])
     model = retraced_model
 
-    model = _move_all_kwargs_to_args(model)
+    model = _move_all_kwargs_to_args_with_exceptions(model)
     model = _cleanup_args(model)
     return model, tracer.node_name_to_scope
 
@@ -1593,7 +1596,7 @@ def prepare(
     # print("before normalization:", model)
     # model, _ = _normalize_args_for_model(model, prepare_custom_config, is_standalone_module)
     model = NormalizeArgs(model).transform()
-    model = _move_all_kwargs_to_args(model)
+    model = _move_all_kwargs_to_args_with_exceptions(model)
     model = _cleanup_args(model)
     # print("after normalization:", model)
 
