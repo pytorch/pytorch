@@ -169,6 +169,7 @@ class AutocastTestLists(object):
             ("renorm", mat0_fp16 + (2, 0, 1.0)),
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
+            ("logsumexp", mat0_fp16 + (1,)),
         ]
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
@@ -309,29 +310,21 @@ class AutocastCPUTestLists(object):
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+            ("conv_tbc", (torch.randn((10, 7, 3), device=dev, dtype=torch.float32),
+                          torch.randn((5, 3, 5), device=dev, dtype=torch.float32),
+                          torch.randn(5, device=dev, dtype=torch.float32),
+                          0)),
         ]
         self.torch_fp32 = [
             ("conv_transpose1d", conv_args_bf16[0]),
             ("conv_transpose2d", conv_args_bf16[1]),
             ("conv_transpose3d", conv_args_bf16[2]),
-            ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
-                                           "running_var": torch.rand((n), dtype=torch.float32), "training": False,
-                                           "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
-            ("instance_norm", dummy_bf16[1], {"weight": None, "bias": None, "running_mean": None,
-                                              "running_var": None, "use_input_stats": True,
-                                              "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
         ]
         self.nn_bf16 = [
             ("linear", mat0_fp32 + mat1_fp32, {}),
         ]
         self.nn_fp32 = [
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
-            ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
-            ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
-            ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
-            ("upsample_linear1d", dummy_bf16[2], {"output_size": (n), "align_corners": False}),
-            ("upsample_bilinear2d", dummy_bf16[3], {"output_size": (n, n), "align_corners": False}),
-            ("upsample_trilinear3d", dummy_bf16[4], {"output_size": (n, n, n), "align_corners": False}),
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
                                      (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
             ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),

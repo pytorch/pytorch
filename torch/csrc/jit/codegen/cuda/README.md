@@ -1,36 +1,5 @@
 # NVFuser - A Fusion Code Generator for NVIDIA GPUs
-_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor_
-
-## Enabling NVFuser
-_NVFuser is not currently the default fuser for NVIDIA GPUs._
-
-**Fusions will only show up during the ~3rd iteration of execution, the exact number depends on profiling executor's optimization phases**
-
-### Enable by Context Manager
-
-```
-jit_model = torch.jit.script(model)
-
-with torch.jit.fuser("fuser2") :
-    for _ in range(5) :
-        outputs = jit_model(inputs)
-```
-
-### Enable by Specific Functions
-
-1. Disable cpu/gpu fusion for native/nnc fuser
-```
-torch._C._jit_override_can_fuse_on_cpu(False)
-torch._C._jit_override_can_fuse_on_gpu(False)
-```
-2. Disable nnc fuser
-```
-torch._C._jit_set_texpr_fuser_enabled(False)
-```
-3. Enable nvfuser
-```
-torch._C._jit_set_nvfuser_enabled(True)
-```
+_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor. NVFuser is the default fuser for NVIDIA GPUs._
 
 ## Simple knobs to change fusion behavior
 
@@ -164,7 +133,7 @@ Running the same script above, in the log, you should be looking for two graphs 
     return (%o.7)
 ```
 
-### General ideals of debug no-fusion
+### General ideas of debug no-fusion
 
 Currently there we have a few consumers that utilizes nvfuser via lowering computations to TorchScript and executing that through a ProfilingExecutor.
 
@@ -179,7 +148,7 @@ Without going into too much details about how the integration is done, a few not
 3. If your scripted model has inputs requiring gradient, fusion is only happening for graphs inside `prim::DifferentiableGraph`.
     There are many reasons why your graph is not autodiff-able. Take a look at `/torch/csrc/jit/runtime/symbolic_scripts.cpp`, which lists all autodiff-able ops (note that this is a different list from autograd-supported ops). There's also a threshold where tiny autodiff graph are inlined/reverted, which could be disabled via `torch._C._debug_set_autodiff_subgraph_inlining(False)`.
 
-### General ideals of debug nvfuser mal-functioning
+### General ideas of debug nvfuser mal-functioning
 
 Assuming we have ProfilingExecutor things worked out properly, that is, you see a region that's supposed to be fused but did not ended up in a fused kernel, here's ways to dig deeper:
 
@@ -196,14 +165,14 @@ Assuming we have ProfilingExecutor things worked out properly, that is, you see 
 3. Disabling FALLBACK path:
     If you see a warning where a FALLBACK path has been taken while executing your model with nvfuser enabled, it's indicating that either codegen or fusion pass has failed unexpectedly. This is likely to cause regression on model performance, even though it's still functionally correct. We recommend to disable FALLBACK path, so error would be reported properly to open an informative issue.
 
-    `PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python your_script.py &> log`
+    `PYTORCH_NVFUSER_DISABLE=fallback python your_script.py &> log`
 
 4. Pin point kernel/fusion pattern that's causing error:
     With a larger model that includes multiple fusion patterns, it could be tricky to figure out which exact fusion is causing FALLBACK and build up a minimal python repro.
     One quick thing to try is to run the example with a few knobs turned on:
 
     ```
-    PYTORCH_NVFUSER_DISABLE_FALLBACK=1 \
+    PYTORCH_NVFUSER_DISABLE=fallback \
     PYTORCH_JIT_LOG_LEVEL=">partition:graph_fuser:>>kernel_cache" \
     python your_script.py &> log
     ```
@@ -224,8 +193,24 @@ There're a few debug dump that could be turned on via environment variables. Loo
 
 1. There's regression after turning on nvfuser.
 
-First thing is to check that you have fusion kernel running properly. Try to run your model with fallback disabled to see if you hit any errors that caused fallback via `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`.
+First thing is to check that you have fusion kernel running properly. Try to run your model with fallback disabled to see if you hit any errors that caused fallback via `export PYTORCH_NVFUSER_DISABLE=fallback`.
+
+If turning on NVFuser produces unexpected outputs, set the `PYTORCH_NVFUSER_DISABLE` environment variable to disable some of the optional features, e.g.:
+- `fma`: disable using FMA instructions
+- `index_hoist`: disble optimization to hoist comon index expressions
+- `predicate_elimination`: disble optimization to eliminate redundant predicates
+- `unroll_with_rng`: disable unrolling when RNG is used
+
+For example, `export PYTORCH_NVFUSER_DISABLE=fma,index_hoist` would disable FMA and index hoisting.
 
 2. I didn't see any speedup with nvfuser.
 
 Check if there is fusion in your script model. Run your script with `PYTORCH_JIT_LOG_LEVEL="graph_fuser"`, you should see some log dump of before/after graph regarding fusion pass. If nothing shows up in the log, that means something in TorchScript is not right and fusion pass are not executed. Check [General ideals of debug no-fusion] for more details.
+
+3. I ran into codegen issues with nvfuser, how do I disable nvfuser?
+
+There are three ways to disable nvfuser. Listed below with descending priorities:
+
+- Force using NNC instead of nvfuser for GPU fusion with env variable `export PYTORCH_JIT_USE_NNC_NOT_NVFUSER=1`.
+- Disabling nvfuser with torch API `torch._C._jit_set_nvfuser_enabled(False)`.
+- Disable nvfuser with env variable `export PYTORCH_JIT_ENABLE_NVFUSER=0`.

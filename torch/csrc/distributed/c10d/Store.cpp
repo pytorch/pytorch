@@ -9,7 +9,7 @@ constexpr std::chrono::milliseconds Store::kNoTimeout;
 Store::~Store() {}
 
 const std::chrono::milliseconds& Store::getTimeout() const noexcept {
-    return timeout_;
+  return timeout_;
 }
 
 // Set timeout function

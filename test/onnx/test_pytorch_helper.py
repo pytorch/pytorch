@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 from pytorch_helper import PyTorchModule
-from test_pytorch_common import skipIfNoLapack
+from test_pytorch_common import skipIfNoLapack, run_tests, TestCase
 
 import torch.nn.init as init
 import torch.onnx
@@ -14,13 +14,13 @@ from caffe2.python.model_helper import ModelHelper
 from torch import nn
 
 
-class TestCaffe2Backend(unittest.TestCase):
+class TestCaffe2Backend(TestCase):
     @skipIfNoLapack
     @unittest.skip("test broken because Lapack was always missing.")
     def test_helper(self):
         class SuperResolutionNet(nn.Module):
             def __init__(self, upscale_factor, inplace=False):
-                super(SuperResolutionNet, self).__init__()
+                super().__init__()
 
                 self.relu = nn.ReLU(inplace=inplace)
                 self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
@@ -67,4 +67,4 @@ class TestCaffe2Backend(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

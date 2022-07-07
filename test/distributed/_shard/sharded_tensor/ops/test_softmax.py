@@ -28,30 +28,30 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestShardedSoftmax(ShardedTensorTestBase):
 
-    def _test_sharded_softmax(self, dim):
+    def _test_sharded_softmax(self, softmax_dim, sharding_dim):
         torch.manual_seed(0)
         local_tensor = torch.rand(10, 10, device=self.rank)
-        local_softmax = torch.nn.functional.softmax(local_tensor, dim)
+        local_softmax = torch.nn.functional.softmax(local_tensor, softmax_dim)
 
-        spec = ChunkShardingSpec(dim=0, placements=[f'rank:{idx}/cuda:{idx}' for idx in range(self.world_size)])
+        spec = ChunkShardingSpec(dim=sharding_dim, placements=[f'rank:{idx}/cuda:{idx}' for idx in range(self.world_size)])
         st = _shard_tensor(local_tensor, spec)
-        sharded_softmax = torch.nn.functional.softmax(st, dim)
+        sharded_softmax = torch.nn.functional.softmax(st, softmax_dim)
 
-        self.assertEqual(local_softmax.chunk(self.world_size)[self.rank], sharded_softmax.local_tensor())
+        self.assertEqual(local_softmax.chunk(self.world_size, dim=sharding_dim)[self.rank], sharded_softmax.local_tensor())
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_softmax_basic(self):
-        self._test_sharded_softmax(0)
-        self._test_sharded_softmax(-2)
+        self._test_sharded_softmax(0, 1)
+        self._test_sharded_softmax(-2, 1)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_softmax_on_sharding_dim(self):
-        self._test_sharded_softmax(1)
-        self._test_sharded_softmax(-1)
+        self._test_sharded_softmax(1, 1)
+        self._test_sharded_softmax(-1, 1)
 
 if __name__ == "__main__":
     run_tests()

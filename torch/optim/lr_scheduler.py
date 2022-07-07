@@ -9,6 +9,9 @@ from bisect import bisect_right
 
 from .optimizer import Optimizer
 
+__all__ = ['LambdaLR', 'MultiplicativeLR', 'StepLR', 'MultiStepLR', 'ConstantLR', 'LinearLR',
+           'ExponentialLR', 'SequentialLR', 'CosineAnnealingLR', 'ChainedScheduler', 'ReduceLROnPlateau',
+           'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR']
 
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
@@ -70,10 +73,14 @@ class _LRScheduler(object):
             return wrapper
 
         self.optimizer.step = with_counter(self.optimizer.step)
-        self.optimizer._step_count = 0
-        self._step_count = 0
         self.verbose = verbose
 
+        self._initial_step()
+
+    def _initial_step(self):
+        """Initialize step counts and performs a step"""
+        self.optimizer._step_count = 0
+        self._step_count = 0
         self.step()
 
     def state_dict(self):
@@ -635,16 +642,31 @@ class SequentialLR(_LRScheduler):
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
+
+        # Reset learning rates back to initial values
+        for group in self.optimizer.param_groups:
+            group["lr"] = group["initial_lr"]
+
+        # "Undo" the step performed by other schedulers
+        for scheduler in self._schedulers:
+            scheduler.last_epoch -= 1
+
+        # Perform the initial step for only the first scheduler
+        self._schedulers[0]._initial_step()
+
         self._last_lr = schedulers[0].get_last_lr()
+
 
     def step(self):
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
+        scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            self._schedulers[idx].step(0)
+            scheduler.step(0)
         else:
-            self._schedulers[idx].step()
-        self._last_lr = self._schedulers[idx].get_last_lr()
+            scheduler.step()
+
+        self._last_lr = scheduler.get_last_lr()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -753,7 +775,7 @@ class CosineAnnealingLR(_LRScheduler):
 
 class ChainedScheduler(_LRScheduler):
     """Chains list of learning rate schedulers. It takes a list of chainable learning
-    rate schedulers and performs consecutive step() functions belong to them by just
+    rate schedulers and performs consecutive step() functions belonging to them by just
     one call.
 
     Args:

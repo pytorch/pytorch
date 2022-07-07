@@ -42,6 +42,10 @@ from .function_fusion import (
     get_seen_q_op_info_of_end_of_fusion,
 )
 
+from ..qconfig_mapping import (
+    QConfigMapping,
+)
+
 from torch.ao.quantization.utils import (
     activation_is_int32_quantized,
 )
@@ -77,14 +81,14 @@ class AutoQuantizationState(torch.nn.Module):
 
     def __init__(
         self,
-        qconfig_dict: Dict[str, Any],
+        qconfig_mapping: QConfigMapping,
         fqn: str,
         input_dtypes: Any = None,
         output_dtypes: Any = None,
     ):
         super().__init__()
         self.idx = 0
-        self.qconfig_dict = qconfig_dict
+        self.qconfig_mapping = qconfig_mapping
         self.fqn = fqn
         # this is a ModuleDict in order to properly register observers
         # to be within the module hierarchy.
@@ -814,7 +818,7 @@ class AutoQuantizationState(torch.nn.Module):
         if self.idx not in self.idx_to_seen_q_op_infos:
             op_type_is_module = isinstance(op, torch.nn.Module)
             op_type = type(op) if op_type_is_module else op  # type: ignore[assignment]
-            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op_type)
+            qconfig = get_cur_qconfig(self.qconfig_mapping, fqn, op_type)
             # TODO(future PR): use API flag instead of qconfig for is_reference
             is_reference_op_at_inference = \
                 qconfig is not None and activation_is_int32_quantized(qconfig)
@@ -850,7 +854,7 @@ class AutoQuantizationState(torch.nn.Module):
             func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
             if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
                 qconfig = get_cur_qconfig(
-                    self.qconfig_dict, seen_q_op_info.fqn,
+                    self.qconfig_mapping, seen_q_op_info.fqn,
                     seen_q_op_info.type)
                 if qconfig is None:
                     dtype_to_use = torch.float
@@ -910,7 +914,7 @@ class AutoQuantizationState(torch.nn.Module):
                     continue
 
                 qconfig = get_cur_qconfig(
-                    self.qconfig_dict, seen_q_op_info.fqn, seen_q_op_info.type)
+                    self.qconfig_mapping, seen_q_op_info.fqn, seen_q_op_info.type)
                 if qconfig is None:
                     # If qconfig is None, we do not need any input observers
                     continue
@@ -948,7 +952,7 @@ class AutoQuantizationState(torch.nn.Module):
         if func_output_obs_type == FuncOutputObsType.NEW_OBS:
             # TODO(future PR): check qconfig is None
             qconfig = get_cur_qconfig(
-                self.qconfig_dict, seen_q_op_info.fqn, seen_q_op_info.type)
+                self.qconfig_mapping, seen_q_op_info.fqn, seen_q_op_info.type)
             assert qconfig is not None
             self.tensor_id_to_observer[str(output_tensor_id)] = \
                 qconfig.activation()

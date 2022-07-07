@@ -306,6 +306,20 @@ CONV_FUNCTIONAL_OPS: Set[Callable] = {
     F.conv3d,
 }
 
+QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+    operator.add: torch.ops.quantized.add,
+    torch.add: torch.ops.quantized.add,
+    operator.mul: torch.ops.quantized.mul,
+    torch.mul: torch.ops.quantized.mul,
+    torch.matmul: torch.ops.quantized.matmul,
+}
+QBIN_RELU_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+    operator.add: torch.ops.quantized.add_relu,
+    torch.add: torch.ops.quantized.add_relu,
+    operator.mul: torch.ops.quantized.mul_relu,
+    torch.mul: torch.ops.quantized.mul_relu,
+}
+
 def fold_weight(
     quantized: QuantizedGraphModule,
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -758,19 +772,6 @@ def _lower_dynamic_weighted_ref_functional(
 def _lower_quantized_binary_op(
         model: QuantizedGraphModule,
         qconfig_map: Dict[str, QConfigAny]):
-    qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
-        operator.add: torch.ops.quantized.add,
-        torch.add: torch.ops.quantized.add,
-        operator.mul: torch.ops.quantized.mul,
-        torch.mul: torch.ops.quantized.mul,
-        torch.matmul: torch.ops.quantized.matmul,
-    }
-    qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
-        operator.add: torch.ops.quantized.add_relu,
-        torch.add: torch.ops.quantized.add_relu,
-        operator.mul: torch.ops.quantized.mul_relu,
-        torch.mul: torch.ops.quantized.mul_relu,
-    }
     binary_ops_to_lower: List[Callable] = [operator.add, torch.add, operator.mul, torch.mul, torch.matmul]
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
@@ -796,8 +797,8 @@ def _lower_quantized_binary_op(
         assert(num_dq_nodes > 0)
 
         # Step 2: Swap binary op to quantized binary op
-        assert bop_node.target in qbin_op_mapping
-        binop_to_qbinop = qbin_op_mapping if relu_node is None else qbin_relu_op_mapping
+        assert bop_node.target in QBIN_OP_MAPPING
+        binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
         # prepare the args for quantized bianry op
         # (x, y)

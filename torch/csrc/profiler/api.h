@@ -29,19 +29,14 @@ enum class C10_API_ENUM ProfilerState {
   NUM_PROFILER_STATES, // must be the last one
 };
 
-enum class C10_API_ENUM ActiveProfilerType {
-  NONE = 0,
-  LEGACY,
-  KINETO,
-  NVTX
-};
+enum class C10_API_ENUM ActiveProfilerType { NONE = 0, LEGACY, KINETO, NVTX };
 
 struct TORCH_API ExperimentalConfig {
   explicit ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
       bool profiler_measure_per_kernel = false)
-    : profiler_metrics(std::move(profiler_metrics)),
-      profiler_measure_per_kernel(profiler_measure_per_kernel) {}
+      : profiler_metrics(std::move(profiler_metrics)),
+        profiler_measure_per_kernel(profiler_measure_per_kernel) {}
   ~ExperimentalConfig() = default;
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel = false;
@@ -168,10 +163,10 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 using torch::profiler::impl::ActivityType;
-using torch::profiler::impl::ProfilerConfig;
-using torch::profiler::impl::ProfilerState;
-using torch::profiler::impl::profilerEnabled;
 using torch::profiler::impl::getProfilerConfig;
+using torch::profiler::impl::ProfilerConfig;
+using torch::profiler::impl::profilerEnabled;
+using torch::profiler::impl::ProfilerState;
 } // namespace profiler
 } // namespace autograd
 } // namespace torch

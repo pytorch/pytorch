@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
@@ -97,7 +98,8 @@ auto shift(
     at::Tensor tensor,
     const std::vector<int>& offsets,
     std::vector<int> padding = {}) {
-  TORCH_INTERNAL_ASSERT(tensor.ndimension() == offsets.size());
+  TORCH_INTERNAL_ASSERT(
+      tensor.ndimension() == static_cast<int64_t>(offsets.size()));
   if (padding.empty()) {
     padding = offsets;
     for (auto& p : padding) {
@@ -144,12 +146,12 @@ auto gather(
     const std::vector<std::vector<int>>& pad_width,
     std::vector<int> strides = {}) {
   TORCH_CHECK(
-      tensor.ndimension() == window_shape.size(),
+      tensor.ndimension() == static_cast<int64_t>(window_shape.size()),
       "Invalid window shape: ",
       window_shape,
       ". Size of the window shape is different from the tensor dimension.");
   TORCH_CHECK(
-      tensor.ndimension() == pad_width.size(),
+      tensor.ndimension() == static_cast<int64_t>(pad_width.size()),
       "Invalid pad width: ",
       pad_width,
       ". Size of the pad width is different from the tensor dimension.");
@@ -157,7 +159,7 @@ auto gather(
     strides = std::vector<int>(tensor.ndimension(), 1);
   } else {
     TORCH_CHECK(
-        tensor.ndimension() == strides.size(),
+        tensor.ndimension() == static_cast<int64_t>(strides.size()),
         "Invalid strides: ",
         strides,
         ". Size of strides is different from the tensor dimension.");
@@ -407,6 +409,7 @@ TEST_F(NVFuserTest, FusionShiftLeftOfCA_CUDA) {
 
   // Lowering should trigger an assertion failure as a shifted axis is
   // found inside an allocation position.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -619,7 +622,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencil_CUDA) {
   // This seems fine but not verified yet
   // tv_out->axis(-1)->parallelize(ParallelType::Unswitch);
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 1);
 
@@ -690,7 +693,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencil_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -775,7 +778,7 @@ TEST_F(NVFuserTest, FusionShift9ptStencil_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -908,7 +911,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencilParallel_CUDA) {
   tv_out->split(0, smem_block_factor);
   // tv_out->axis(-1)->parallelize(ParallelType::Unswitch);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 1);
 
@@ -968,7 +971,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel_CUDA) {
 
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -1337,7 +1340,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel1DThreadBlock_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   // Merge the inner-most two axes and create
   // a 1D thread block of split_factor1*split_factor2 threads
@@ -1628,7 +1631,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilChain_CUDA) {
 
   fusion.addOutput(tv_out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   std::vector<int> split_factor({16, 16});
 
@@ -2460,7 +2463,7 @@ TEST_F(NVFuserTest, FusionMaxPooling_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Tiling the spatial domain
   const int tile_x = 32;
@@ -2709,9 +2712,9 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -2768,9 +2771,9 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -2868,9 +2871,9 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -2945,7 +2948,7 @@ TEST_F(NVFuserTest, FusionConv2D_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3037,7 +3040,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3131,7 +3134,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPaddingStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3254,7 +3257,7 @@ TEST_F(NVFuserTest, FusionConv2DChain_CUDA) {
 
   ////////////////////////////////////
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3345,7 +3348,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3447,7 +3450,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3541,7 +3544,7 @@ TEST_F(NVFuserTest, FusionConv4x5Pad1x2_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3634,7 +3637,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1Stride4_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3719,7 +3722,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   auto inp_tile = gather(inp, {1, 1, 3, 3}, {{0, 0}, {0, 0}, {1, 1}, {1, 1}});
   // inp_tile: [N, C, H, W, 1, 1, 3, 3]
 
-  auto inp_col = transpose(inp_tile, {{1, 3}, {2, 1}, {3, 2}});
+  auto inp_col = permute(inp_tile, {0, 2, 3, 1, 4, 5, 6, 7});
   // inp_col: [N, H, W, C, 1, 1, 3, 3]
 
   fusion.addOutput(inp_col);
@@ -3727,7 +3730,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   ////////////////////////////////////
 
   // Cache the input tensor
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -4078,6 +4081,7 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingRfactor_CUDA) {
   tv3->split(-1, 8);
   tv3->reorder({{1, 2}});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv3->rFactor({-2}));
 }
 
@@ -4233,6 +4237,7 @@ TEST_F(NVFuserTest, FusionPartialSplit2_CUDA) {
   tv1->computeAt(tv4, 1);
 
   // Validation should throw an error due to tv5 and tv6.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -4331,7 +4336,7 @@ TEST_F(NVFuserTest, FusionPartialSplit4_CUDA) {
 
   fusion.addOutput(tv_out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   std::vector<int> split_factor({16, 16});
 
@@ -4578,7 +4583,7 @@ TEST_F(NVFuserTest, FusionGatherUnswitch1_CUDA) {
   auto tv4 = gather(tv0, {5}, {{2, 2}});
   fusion.addOutput(tv4);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv0_cache->setMemoryType(MemoryType::Shared);
 
   tv4->split(0, 32);
@@ -4646,7 +4651,7 @@ TEST_F(NVFuserTest, FusionGatherStrided1_CUDA) {
   // tensor.
   auto fuser_out = outputs[0];
   TORCH_CHECK(
-      fuser_out.ndimension() == tv0->nDims() * 2,
+      fuser_out.ndimension() == static_cast<int64_t>(tv0->nDims()) * 2,
       "Invalid dimensionality of output tensor: ",
       fuser_out.ndimension());
 
@@ -4928,6 +4933,7 @@ TEST_F(NVFuserTest, FusionGatherStrided7_CUDA) {
   tv4->split(0, 2);
 
   // Since tv3 has a different stride factor, this should fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv0->computeAt(tv4, 1));
 }
 
@@ -5014,6 +5020,7 @@ TEST_F(NVFuserTest, FusionGatherStridedChain_CUDA) {
   fusion.addOutput(out);
 
   // This should throw an error at HaloInfo::build.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(GpuLower gpulw(&fusion));
 }
 
@@ -5044,7 +5051,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Tiling the spatial domain
   const int tile_x = 32;
@@ -5124,7 +5131,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -5243,7 +5250,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleHalo2_CUDA) {
   const int by = 8;
   const int bx = 16;
 
-  auto tv5 = tv0->cache_after();
+  auto tv5 = tv0->cacheAfter();
 
   // [I, J]
   tv4->split(0, gy);
@@ -5300,7 +5307,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
 
   fusion.addOutput(out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0_cache->setMemoryType(MemoryType::Shared);
 

@@ -13,7 +13,7 @@ void FloatToBFloat16Quantized_ref(
     const float* const input,
     const size_t nrows,
     const size_t ncols,
-    uint16_t* const output){
+    uint16_t* const output) {
   for (const auto row : c10::irange(nrows)) {
     const float* input_row = input + row * ncols;
     uint16_t* output_row = output + row * ncols;
@@ -30,7 +30,7 @@ void BFloat16QuantizedToFloat_ref(
     const at::BFloat16* const input,
     const size_t nrows,
     const size_t ncols,
-    float* const output){
+    float* const output) {
   const int32_t output_columns = ncols;
 
   for (const auto row : c10::irange(nrows)) {
@@ -55,9 +55,8 @@ at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
   const int32_t nrows = input_sizes[0];
   const int32_t ncols = input_sizes[1];
   const int32_t output_columns = ncols;
-  auto output = at::empty(
-      {nrows, output_columns},
-      input.options().dtype(at::kHalf));
+  auto output =
+      at::empty({nrows, output_columns}, input.options().dtype(at::kHalf));
 
   FloatToBFloat16Quantized_ref(
       input.data_ptr<float>(),
@@ -90,15 +89,14 @@ at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
   return output;
 }
 
-
 TORCH_LIBRARY(quantization, m) {
-    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
-    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
+  m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
+  m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(quantization, CPU, m) {
-    m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
-    m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
+  m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
+  m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
 }
 
 } // namespace quantization

@@ -80,7 +80,18 @@ bool FoldFrozenConvBatchnorm(Block* b) {
       // implementation taken from torch/nn/utils/fusion.py
       Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        conv_b = at::zeros_like(bn_rm);
+        // If this is on GPU and bias is none and weight was half/bfloat, but
+        // bn_rm was float, then probably this was a case where autocasting
+        // casted inputs to conv. And since CUDA conv implementation requires
+        // all the inputs to have the same scalar dtype, we need to make this
+        // placeholder have the same type as conv_w.
+        at::ScalarType bias_dtype = bn_rm.scalar_type();
+        at::ScalarType weight_dtype = conv_w.scalar_type();
+        if ((weight_dtype == at::kHalf || weight_dtype == at::kBFloat16) &&
+            bias_dtype == at::kFloat) {
+          bias_dtype = weight_dtype;
+        }
+        conv_b = at::zeros_like(bn_rm, at::TensorOptions().dtype(bias_dtype));
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }

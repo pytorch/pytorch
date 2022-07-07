@@ -787,7 +787,7 @@ struct TORCH_API TensorType : public SharedType {
   static const TypeKind Kind = TypeKind::TensorType;
 
   static std::vector<int64_t> contiguousStridesOf(
-      at::IntArrayRef sizes,
+      at::IntArrayRef in_sizes,
       at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
     auto contiguous_fn = [](const at::IntArrayRef& sizes,
                             const std::vector<int64_t>& dim_order) {
@@ -804,18 +804,18 @@ struct TORCH_API TensorType : public SharedType {
       return strides;
     };
 
-    std::vector<int64_t> dim_order(sizes.size());
+    std::vector<int64_t> dim_order(in_sizes.size());
     if (memory_format == MemoryFormat::ChannelsLast) {
       dim_order = {1, 3, 2, 0};
     } else if (memory_format == MemoryFormat::ChannelsLast3d) {
       dim_order = {1, 4, 3, 2, 0};
     } else {
-      auto ndims = sizes.size();
+      auto ndims = in_sizes.size();
       for (size_t i = 0; i < ndims; i++) {
         dim_order[i] = ndims - i - 1; // Reverse
       }
     }
-    return contiguous_fn(sizes, dim_order);
+    return contiguous_fn(in_sizes, dim_order);
   }
 
  private:
@@ -2225,7 +2225,11 @@ struct InferredType {
   /* implicit */ InferredType(std::string reason)
       : type_(nullptr), reason_(std::move(reason)) {}
   TypePtr type() const {
-    TORCH_INTERNAL_ASSERT(type_);
+    TORCH_INTERNAL_ASSERT(
+        type_,
+        "Tried to get the type from an InferredType but the type is null. ",
+        "Reason: ",
+        reason_);
     return type_;
   }
   bool success() const {

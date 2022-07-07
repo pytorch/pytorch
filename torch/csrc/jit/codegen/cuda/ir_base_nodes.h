@@ -243,11 +243,23 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // Returns if all dependencies are constant scalars
   bool isConstScalar() const;
 
+  // Returns if all dependencies are constant integers
+  bool isConstInt() const;
+
   bool isAnInt() const {
     return isScalar() && dtype_ == DataType::Int;
   }
 
+  // If this Val is an integer with a direct constant value associated with it,
+  // will return the value of that constant integer. If this integer has
+  // defining expressions it will return a c10::nullopt. Those values should be
+  // infered using evaluateInt.
   c10::optional<int64_t> getInt() const;
+
+  // If this Val is a constant integer, and its history is comprised only of
+  // constant integers, will return the value of that constant integer. Cannot
+  // make constant as expression evaluator takes non-constant Vals.
+  int64_t evaluateInt();
 
   // Returns if no dependencies and is a constant scalar.
   virtual bool isConst() const {

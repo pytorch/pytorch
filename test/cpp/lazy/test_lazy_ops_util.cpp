@@ -1,20 +1,20 @@
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 
 #include <torch/csrc/lazy/backend/lowering_context.h>
-#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
 #include <iostream>
 #include <string>
-
 
 namespace torch {
 namespace lazy {
 namespace {
 
 bool IsLtcTensor(const at::Tensor& tensor) {
-  return dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
+  return dynamic_cast<torch::lazy::LTCTensorImpl*>(
+      tensor.unsafeGetTensorImpl());
 }
 
 std::unordered_set<std::string>* CreateIgnoredCounters() {
@@ -26,7 +26,7 @@ std::unordered_set<std::string>* CreateIgnoredCounters() {
   return icounters;
 }
 
-}  // namespace
+} // namespace
 
 const std::unordered_set<std::string>* GetIgnoredCounters() {
   static const std::unordered_set<std::string>* icounters =
@@ -39,8 +39,9 @@ at::Tensor ToCpuTensor(const at::Tensor& tensor) {
   return tensor.to(torch::kCPU);
 }
 
-torch::Tensor CopyToDevice(const torch::Tensor& tensor,
-                           const torch::Device& device) {
+torch::Tensor CopyToDevice(
+    const torch::Tensor& tensor,
+    const torch::Device& device) {
   return tensor.clone().to(device, /*non_blocking=*/false, /*copy=*/true);
 }
 
@@ -87,16 +88,19 @@ bool EqualValuesNoElementTypeCheck(at::Tensor tensor1, at::Tensor tensor2) {
 }
 
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn) {
-  // Currently TorchScript backend only supports one type of hardware per process,
-  // which is set by env. And the ordinal is always 0 given distributed training/
-  // multi-device is not supported yet.
+  // Currently TorchScript backend only supports one type of hardware per
+  // process, which is set by env. And the ordinal is always 0 given distributed
+  // training/ multi-device is not supported yet.
   auto device = torch::lazy::BackendDevice();
   torch::Device torch_device = torch::lazy::backendDeviceToAtenDevice(device);
   devfn(torch_device);
 }
 
-bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
-                 double atol) {
+bool CloseValues(
+    at::Tensor tensor1,
+    at::Tensor tensor2,
+    double rtol,
+    double atol) {
   tensor1 = ToCpuTensor(tensor1);
   tensor2 = ToCpuTensor(tensor2);
   if (torch::isnan(tensor1).any().item<bool>()) {
@@ -126,10 +130,13 @@ std::string GetTensorDotGraph(at::Tensor tensor) {
 }
 
 void TestBackward(
-    const std::vector<torch::Tensor>& inputs, const torch::Device& device,
+    const std::vector<torch::Tensor>& inputs,
+    const torch::Device& device,
     const std::function<torch::Tensor(const std::vector<torch::Tensor>&)>&
         testfn,
-    double rtol, double atol, int derivative_level) {
+    double rtol,
+    double atol,
+    int derivative_level) {
   std::vector<torch::Tensor> input_vars;
   std::vector<torch::Tensor> xinput_vars;
   std::vector<torch::Tensor> inputs_w_grad;
@@ -173,14 +180,20 @@ void TestBackward(
     }
     // Calculating higher order derivative requires create_graph=true
     bool create_graph = d != derivative_level;
-    outs = torch::autograd::grad({sum}, inputs_w_grad, /*grad_outputs=*/{},
-                                 /*retain_graph=*/c10::nullopt,
-                                 /*create_graph=*/create_graph,
-                                 /*allow_unused=*/true);
-    xouts = torch::autograd::grad({xsum}, xinputs_w_grad, /*grad_outputs=*/{},
-                                  /*retain_graph=*/c10::nullopt,
-                                  /*create_graph=*/create_graph,
-                                  /*allow_unused=*/true);
+    outs = torch::autograd::grad(
+        {sum},
+        inputs_w_grad,
+        /*grad_outputs=*/{},
+        /*retain_graph=*/c10::nullopt,
+        /*create_graph=*/create_graph,
+        /*allow_unused=*/true);
+    xouts = torch::autograd::grad(
+        {xsum},
+        xinputs_w_grad,
+        /*grad_outputs=*/{},
+        /*retain_graph=*/c10::nullopt,
+        /*create_graph=*/create_graph,
+        /*allow_unused=*/true);
     for (size_t i = 0; i < outs.size(); ++i) {
       ASSERT_EQ(outs[i].defined(), xouts[i].defined());
       if (outs[i].defined()) {
@@ -190,5 +203,5 @@ void TestBackward(
   }
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

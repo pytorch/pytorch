@@ -45,5 +45,9 @@ c10::Dict<std::string, at::Tensor> tensor_map_to_dict(
 
 } // namespace mobile
 
+extern void (*_save_mobile_module_to)(
+    const mobile::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func);
+
 } // namespace jit
 } // namespace torch

@@ -204,6 +204,17 @@ Tensor empty_sparse(
       size.size(), 0, size, dtype, layout, device, pin_memory);
 }
 
+/** Empty init **/
+Tensor empty_symint_sparse(
+    c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<MemoryFormat> optional_memory_format) {
+      return at::native::empty_sparse(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 /* Shape init */
 Tensor sparse_coo_tensor(IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -544,29 +555,6 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   return sparse._coalesced_(true);
 }
 
-SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
-  if (sparse_dim == 2) {
-    auto sizes = self.sizes();
-    Tensor crow_indices = self.crow_indices();
-    Tensor col_indices = self.col_indices();
-    Tensor values = self.values();
-    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
-    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
-  } else {
-    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
-    // TODO: implement coo.to_sparse(sparse_dim) and then use
-    // return self.to_sparse().to_sparse(sparse_dim);
-  }
-}
-
-SparseTensor sparse_csr_to_sparse(const Tensor& self) {
-  return sparse_csr_to_sparse(self, 2);
-}
-
 // NB: Dropped the resizeNd variants
 
 SparseTensor& copy_sparse_wrapper_(
@@ -655,8 +643,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, values.scalar_type(),
-                                         "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -669,7 +658,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
               blockSize,
-              1,
+              static_cast<scalar_t>(1),
               values_ptr + pos * blockSize,
               1,
               newValues_ptr + i * blockSize,
@@ -785,7 +774,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });

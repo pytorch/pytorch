@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import IO, Dict, List, Set, Tuple
+from typing import Dict, IO, List, Set, Tuple
 
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType

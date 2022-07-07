@@ -13,7 +13,8 @@
 #include <stdexcept>
 #include <utility>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
@@ -87,10 +88,10 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
   // double-backprop is disabled.
-  auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
+  auto res = (*fn)({grad_slice.clone(at::MemoryFormat::Contiguous)});
 
   variable_list grad_inputs(num_outputs());
-  for(const auto i : c10::irange(res.size())) {
+  for (const auto i : c10::irange(res.size())) {
     if (should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
@@ -112,4 +113,5 @@ void CopySlices::release_variables() {
   fn = nullptr;
 }
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

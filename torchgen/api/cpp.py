@@ -34,11 +34,12 @@ from torchgen.api.types import (
     tensorT,
     voidT,
     longT,
+    SymIntT,
+    symIntArrayRefT,
     BaseTypeToCppMapping,
     intArrayRefT,
     optionalIntArrayRefT,
     tensorOptionsT,
-    symIntArrayRefT,
 )
 from torchgen import local
 from torchgen.utils import assert_never
@@ -64,6 +65,8 @@ from typing import Optional, Sequence, Union, List, Set
 
 def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
+    if func.is_symint_fn():
+        name += "_symint"
     if func.is_out_fn():
         if faithful_name_for_out_overloads:
             name += "_outf"
@@ -151,6 +154,11 @@ def argumenttype_type(
                 return NamedCType(binds, VectorCType(BaseCType(longT)))
             else:
                 return NamedCType(binds, BaseCType(intArrayRefT))
+        if str(t.elem) == "SymInt":
+            if remove_non_owning_ref_types:
+                return NamedCType(binds, VectorCType(BaseCType(SymIntT)))
+            else:
+                return NamedCType(binds, BaseCType(symIntArrayRefT))
         elif str(t.elem) == "Tensor":
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == "Scalar":
@@ -201,7 +209,10 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        elem = returntype_type(t.elem, mutable=mutable)
+        assert (
+            not mutable
+        ), "Native functions should never return a mutable tensor list. They should return void."
+        elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
 
