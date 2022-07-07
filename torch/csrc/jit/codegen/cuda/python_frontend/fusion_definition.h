@@ -61,6 +61,11 @@ class FusionDefinition {
   }
 
   void exit() {
+    // Note: playing the records currently segfaults
+    //for (auto& record : recording) {
+    //  auto functor = record.get();
+    //  (*functor)(self);
+    //}
     FusionGuard::setCurFusion(prev_fusion_);
     prev_fusion_ = nullptr;
   }

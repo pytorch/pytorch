@@ -73,12 +73,8 @@ void initNvFuserPythonBindings(PyObject* module) {
              void* exc_type,
              void* exc_value,
              void* traceback) { 
-               /*for (auto& record : self.recording) {
-                 auto functor = record.get();
-                 (*functor)(self);
-               }*/
                self.exit();
-      })
+          })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) { 
