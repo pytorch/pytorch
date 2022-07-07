@@ -551,8 +551,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.mm
       )
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+      include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
       list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
     endif()
   endif()
@@ -1131,7 +1135,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE

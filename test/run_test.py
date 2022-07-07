@@ -100,8 +100,6 @@ TESTS = discover_tests(
         'test_static_runtime',
         'test_throughput_benchmark',
         'test_typing',
-        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
-        "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",
@@ -332,7 +330,7 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
-        executable = [sys.executable]
+        executable = [sys.executable, "-bb"]
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
@@ -544,6 +542,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),

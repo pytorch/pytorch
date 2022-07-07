@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVa
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -300,7 +300,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        _check_lambda_fn(classifier_fn)
+        _check_unpickable_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -345,6 +345,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             value = next(self._datapipe_iterator)
             classification = self.classifier_fn(value)
             if classification is None and self.drop_none:
+                StreamWrapper.close_streams(value)
                 continue
             if classification is None or classification >= self.num_instances or classification < 0:
                 raise ValueError(f"Output of the classification fn should be between 0 and {self.num_instances - 1}. " +
@@ -510,8 +511,18 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
-        for data in zip(*self.datapipes):
-            yield data
+        iterators = [iter(datapipe) for datapipe in self.datapipes]
+        try:
+            for data in zip(*iterators):
+                yield data
+        finally:
+            unused = []
+            for iterator in iterators:
+                unused += list(iterator)
+
+            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+            for item in unused:
+                StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:
