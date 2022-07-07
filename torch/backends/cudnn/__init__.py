@@ -45,8 +45,8 @@ if _cudnn is not None:
                                   f'can find the bundled cuDNN.')
 
                 if 'LD_LIBRARY_PATH' in os.environ:
-                    ld_library_path = os.environ.get('LD_LIBRARY_PATH')
-                    if 'cuda' in ld_library_path or 'cudnn' in ld_library_path:
+                    ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+                    if any(substring in ld_library_path for substring in ['cuda', 'cudnn']):
                         raise RuntimeError(f'{base_error_msg}'
                                            f'Looks like your LD_LIBRARY_PATH contains incompatible version of cudnn'
                                            f'Please either remove it from the path or install cudnn {compile_version}')
