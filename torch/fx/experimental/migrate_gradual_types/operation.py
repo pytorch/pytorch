@@ -9,7 +9,7 @@ op_imp = '=>'
 op_matching = '⊳'
 op_consistency = '~'
 op_precision = '⊑'
-op_leq = '≤'
+op_leq = '≤'  # NOT a boolean operation. TODO: rename
 op_lt = '<'
 op_gt = '>'
 op_mod = '%'
