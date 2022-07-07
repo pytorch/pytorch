@@ -20,6 +20,7 @@ from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
+__all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
 logger = get_logger()
 

@@ -151,8 +151,8 @@ class AnyModule {
   AnyValue any_forward(ArgumentTypes&&... arguments);
 
   /// Invokes `forward()` on the contained module with the given arguments, and
-  /// casts the returned `AnyValue` to the supplied `ReturnType` (which defaults to
-  /// `torch::Tensor`).
+  /// casts the returned `AnyValue` to the supplied `ReturnType` (which defaults
+  /// to `torch::Tensor`).
   template <typename ReturnType = torch::Tensor, typename... ArgumentTypes>
   ReturnType forward(ArgumentTypes&&... arguments);
 
@@ -186,9 +186,9 @@ class AnyModule {
   bool is_empty() const noexcept;
 
  private:
-  /// Creates a `unique_ptr<AnyModulePlaceholder>` pointing to a `AnyModuleHolder` of the correct
-  /// type. This method is used to deduce the arguments of the module's
-  /// `forward()` method.
+  /// Creates a `unique_ptr<AnyModulePlaceholder>` pointing to a
+  /// `AnyModuleHolder` of the correct type. This method is used to deduce the
+  /// arguments of the module's `forward()` method.
   template <
       typename ModuleType,
       typename Class,
@@ -340,7 +340,8 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
       !std::is_void<ReturnType>::value,
       "AnyModule cannot store modules that return void "
       "(you can return a dummy value).");
-  return torch::make_unique<AnyModuleHolder<decay_t<ModuleType>, ArgumentTypes...>>(
+  return torch::make_unique<
+      AnyModuleHolder<decay_t<ModuleType>, ArgumentTypes...>>(
       std::move(module));
 }
 
@@ -357,7 +358,8 @@ template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
 ModuleType& AnyModule::get_(
     ReturnType (ModuleType::*)(ArgumentTypes...)) const {
   if (typeid(ModuleType).hash_code() == type_info().hash_code()) {
-    return *static_cast<AnyModuleHolder<ModuleType, ArgumentTypes...>&>(*content_)
+    return *static_cast<AnyModuleHolder<ModuleType, ArgumentTypes...>&>(
+                *content_)
                 .module;
   }
   AT_ERROR(

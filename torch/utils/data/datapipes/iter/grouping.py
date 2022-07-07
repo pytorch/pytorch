@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 __all__ = [
@@ -215,11 +215,13 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        _check_lambda_fn(group_key_fn)
+        _check_unpickable_fn(group_key_fn)
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
-        self.buffer_size = buffer_size
+        self.max_buffer_size = buffer_size
+        self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
+        self.curr_buffer_size = 0
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
@@ -231,46 +233,78 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
 
-    def _remove_biggest_key(self, buffer_elements, buffer_size):
+    def _remove_biggest_key(self):
         biggest_key = None
         biggest_size = 0
         result_to_yield = None
-        for findkey in buffer_elements.keys():
-            if len(buffer_elements[findkey]) > biggest_size:
-                biggest_size = len(buffer_elements[findkey])
+        for findkey in self.buffer_elements.keys():
+            if len(self.buffer_elements[findkey]) > biggest_size:
+                biggest_size = len(self.buffer_elements[findkey])
                 biggest_key = findkey
 
         if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
-            raise RuntimeError('Failed to group items', str(buffer_elements[biggest_key]))
+            raise RuntimeError('Failed to group items', str(self.buffer_elements[biggest_key]))
 
         if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
-            result_to_yield = buffer_elements[biggest_key]
+            result_to_yield = self.buffer_elements[biggest_key]
 
-        new_buffer_size = buffer_size - biggest_size
-        del buffer_elements[biggest_key]
+        self.curr_buffer_size -= biggest_size
+        del self.buffer_elements[biggest_key]
 
-        return result_to_yield, new_buffer_size
+        return result_to_yield
 
     def __iter__(self):
-        buffer_elements: DefaultDict[Any, List] = defaultdict(list)
-        buffer_size = 0
         for x in self.datapipe:
             key = self.group_key_fn(x)
 
-            buffer_elements[key].append(x)
-            buffer_size += 1
+            self.buffer_elements[key].append(x)
+            self.curr_buffer_size += 1
 
-            if self.group_size is not None and self.group_size == len(buffer_elements[key]):
-                yield self.wrapper_class(buffer_elements[key])
-                buffer_size -= len(buffer_elements[key])
-                del buffer_elements[key]
+            if self.group_size is not None and self.group_size == len(self.buffer_elements[key]):
+                yield self.wrapper_class(self.buffer_elements[key])
+                self.curr_buffer_size -= len(self.buffer_elements[key])
+                del self.buffer_elements[key]
 
-            if buffer_size == self.buffer_size:
-                (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
+            if self.curr_buffer_size == self.max_buffer_size:
+                result_to_yield = self._remove_biggest_key()
                 if result_to_yield is not None:
                     yield self.wrapper_class(result_to_yield)
 
-        for key in tuple(buffer_elements.keys()):
-            res = buffer_elements.pop(key)
-            buffer_size -= len(res)
+        for key in tuple(self.buffer_elements.keys()):
+            res = self.buffer_elements.pop(key)
+            self.curr_buffer_size -= len(res)
             yield self.wrapper_class(res)
+
+    def reset(self) -> None:
+        self.curr_buffer_size = 0
+        self.buffer_elements = defaultdict(list)
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+        state = (
+            self.datapipe,
+            self.group_key_fn,
+            self.max_buffer_size,
+            self.group_size,
+            self.guaranteed_group_size,
+            self.drop_remaining,
+            self.wrapper_class,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipe,
+            self.group_key_fn,
+            self.max_buffer_size,
+            self.group_size,
+            self.guaranteed_group_size,
+            self.drop_remaining,
+            self.wrapper_class,
+        ) = state
+        self.curr_buffer_size = 0
+        self.buffer_elements = defaultdict(list)
+
+    def __del__(self):
+        self.buffer_elements.clear()

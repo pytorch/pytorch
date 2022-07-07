@@ -19,6 +19,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -86,32 +87,40 @@ if nccl_supports_bf16:
 # Buffer original dtype, which can differ from model params.
 _BUFFER_ORIG_DTYPE = torch.float64
 
-params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype"
+params = "mp_config,cpu_offload,backward_prefetch,forward_prefetch,full_precision_param_dtype,sharded_grad_scaler"
 cpu_offload_config = [
     CPUOffload(offload_params=True), CPUOffload(offload_params=False)
 ]
 backward_prefetch_config = [
     BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
 ]
+forward_prefetch_config = ["forward_prefetch", "no_forward_prefetch"]
 full_precision_param_dtype_config = [torch.float32, torch.float64]
+sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
+
 configs = list(product(
     mp_configs,
     cpu_offload_config,
     backward_prefetch_config,
+    forward_prefetch_config,
     full_precision_param_dtype_config,
+    sharded_grad_scaler,
 ))
 
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
     str(CPUOffload(offload_params=False)): "offload_false",
-    str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
-    str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
+    str(BackwardPrefetch.BACKWARD_PRE): "backward_prefetch_pre",
+    str(BackwardPrefetch.BACKWARD_POST): "backward_prefetch_post",
+    "forward_prefetch": "forward_prefetch",
+    "no_forward_prefetch": "no_forward_prefetch",
     str(default_mp): "mp_fp16",
     str(mp_only_reduce): "mp_only_reduce",
     str(mp_only_param_and_buf): "mp_only_param_and_buf",
     str(mp_no_mixed_precision): "mp_no_mp",
     str(torch.float32): "fp32",
     str(torch.float64): "fp64",
+    "enable_sharded_grad_scaler": "sharded_grad_scaler"
 }
 
 if nccl_supports_bf16:
@@ -294,8 +303,10 @@ class TestFSDPMixedPrecision(FSDPTest):
         mp_config,
         cpu_offload,
         backward_prefetch,
+        forward_prefetch,
         full_precision_param_dtype,
         sharding_strategy,
+        sharded_grad_scaler,
     ):
         torch.cuda.set_device(self.rank)
         fsdp_models = [
@@ -304,14 +315,16 @@ class TestFSDPMixedPrecision(FSDPTest):
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
-                backward_prefetch=backward_prefetch
+                backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
-                backward_prefetch=backward_prefetch
+                backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch
             ),
         ]
         for model in fsdp_models:
@@ -324,6 +337,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
+                scaler = ShardedGradScaler(enabled=sharded_grad_scaler)
                 optim = torch.optim.Adam(model.parameters())
 
                 for _ in range(3):
@@ -351,6 +365,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                             self._validate_no_mp_shard(model)
 
                     loss = act.sum()
+                    loss = scaler.scale(loss)
                     if mp_config.param_dtype is not None:
                         self.assertEqual(loss.dtype, mp_config.param_dtype)
                     else:
@@ -377,7 +392,10 @@ class TestFSDPMixedPrecision(FSDPTest):
                         if param.grad is not None:
                             self.assertEqual(param.grad.dtype, full_precision_param_dtype)
 
-                    optim.step()
+                    # Unscale the gradients and step
+                    scaler.step(optim)
+                    # Update the scale factor
+                    scaler.update()
 
                     # Summon full params should be in full precision
                     with model.summon_full_params(model):
@@ -439,8 +457,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -450,14 +470,19 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         mp_config,
         cpu_offload,
         backward_prefetch,
-        full_precision_param_dtype
+        forward_prefetch,
+        full_precision_param_dtype,
+        sharded_grad_scaler,
     ):
+        forward_prefetch = (forward_prefetch == "forward_prefetch")
         self._run_test_mixed_precision_e2e(
             mp_config,
             cpu_offload,
             backward_prefetch,
+            forward_prefetch,
             full_precision_param_dtype,
             ShardingStrategy.FULL_SHARD,
+            sharded_grad_scaler,
         )
 
     def _test_mixed_precision_embedding_table(self, mp_config):
@@ -546,7 +571,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # in original resnet model.
         fsdp_bn = 0
         for module in fsdp.fsdp_modules(fsdp):
-            wrapped_module = module.module.module
+            wrapped_module = module.module
             if isinstance(wrapped_module, _BatchNorm):
                 fsdp_bn += 1
 
@@ -628,8 +653,10 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            sharded_grad_scaler=False,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -639,8 +666,10 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.FULL_SHARD,
+            sharded_grad_scaler=False,
         )
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)

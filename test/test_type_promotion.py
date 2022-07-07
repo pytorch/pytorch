@@ -1,18 +1,22 @@
 # Owner(s): ["module: type promotion"]
 
-from functools import wraps
+from functools import (partial, wraps)
 import itertools
 import unittest
 
 import torch
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
+from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
 )
+from torch.testing._creation import (
+    float_to_corresponding_complex_type_map
+)
+
 
 import numpy as np
 
@@ -119,6 +123,87 @@ class TestTypePromotion(TestCase):
         # not a "wrapped number"
         other = torch.tensor(5.5, dtype=torch.double, device=device)
         self.assertEqual((a + other).dtype, torch.complex64)
+
+        def make_scalar_tensor(dtype):
+            return make_tensor((), dtype=dtype, device=device)
+
+        def make_1d_tensor(dtype):
+            return make_tensor((3,), dtype=dtype, device=device)
+
+        def complex_scalar_tensor_test(s, t):
+            # As per type promotion rules,
+            # Complex Scalar and Float Tensor -> Complex Tensor with Value type of Float Tensor
+            # Complex Scalar and Integral Tensor -> Complex Tensor with Value type of Complex Scalar
+
+            if t.dtype.is_floating_point:
+                # defaults to return complex64 (for bfloat16)
+                expected_dtype = float_to_corresponding_complex_type_map.get(t.dtype, torch.complex64)
+            else:  # integral tensor
+                if isinstance(s, torch.Tensor):
+                    expected_dtype = s.dtype
+                else:
+                    expected_dtype = float_to_corresponding_complex_type_map[torch.get_default_dtype()]
+            self.assertEqual((s * t).dtype, expected_dtype)
+            self.assertEqual((t * s).dtype, expected_dtype)
+            self.assertEqual(torch.result_type(s, t), expected_dtype)
+            self.assertEqual(torch.result_type(t, s), expected_dtype)
+
+        if torch.device(device).type != 'xla':
+            # chalf is not supported on XLA
+            s = make_scalar_tensor(dtype=torch.chalf)
+            # Same Value type
+            t = make_1d_tensor(dtype=torch.half)
+            # 0-D Tensor X 1-D Tensor
+            complex_scalar_tensor_test(s, t)
+            # Python Scalar X 1-D Tensor
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Higher Value Type
+            t = make_1d_tensor(dtype=torch.float)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Special Case
+            t = make_1d_tensor(dtype=torch.bfloat16)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Integral Tensor
+            t = make_1d_tensor(dtype=torch.long)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+        # CFloat Scalar
+        s = make_scalar_tensor(dtype=torch.cfloat)
+        # Lower Value type than CFloat
+        t = make_1d_tensor(dtype=torch.half)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Higher Value type than CFloat
+        t = make_1d_tensor(dtype=torch.double)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Integral Tensor
+        t = make_1d_tensor(dtype=torch.long)
+        # 0-D Tensor X 1-D Tensor
+        complex_scalar_tensor_test(s, t)
+        # Python Scalar X 1-D Tensor
+        complex_scalar_tensor_test(s.item(), t)
+
+        # CDouble Scalar
+        s = make_scalar_tensor(dtype=torch.cdouble)
+
+        # Lower Value type than CDouble
+        t = make_1d_tensor(dtype=torch.float)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Special Case
+        t = make_1d_tensor(dtype=torch.bfloat16)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
@@ -846,6 +931,53 @@ class TestTypePromotion(TestCase):
             torch.addcdiv(t, t, t, out=t)
         with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
             t.addcdiv_(t, t)
+
+    def _ternary_promotion_common(self, device, op1, op2):
+        make_arg = partial(make_tensor, device=device)
+
+        types = (
+            (torch.float64, torch.float64, torch.complex128),
+            (torch.long, torch.bfloat16, torch.float32),
+        )
+
+        for type1, type2, type3 in types:
+            arg1 = make_arg([5, 5], dtype=type1)
+            arg2 = make_arg([5, 5], dtype=type2)
+            arg3 = make_arg([1, 5], dtype=type3)
+
+            res1 = op1(arg1, arg2, arg3)
+            res2 = op2(arg1, arg2, arg3)
+
+            # res1 and res2 are not guaranteed to be the same.  They are the
+            # same when all the inputs are tensors with one or more dimensions.
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1.dtype, res2.dtype)
+
+    # Fails on XLA:
+    # https://github.com/pytorch/pytorch/pull/74234#issuecomment-1117169366
+    # https://github.com/pytorch/xla/issues/3551
+    @onlyNativeDeviceTypes
+    def test_addcdiv_promotion(self, device):
+        def op1(arg1, arg2, arg3):
+            return torch.addcdiv(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 / arg3
+
+        self._ternary_promotion_common(device, op1, op2)
+
+    # Fails on XLA:
+    # https://github.com/pytorch/pytorch/pull/74234#issuecomment-1117169366
+    # https://github.com/pytorch/xla/issues/3551
+    @onlyNativeDeviceTypes
+    def test_addcmul_promotion(self, device):
+        def op1(arg1, arg2, arg3):
+            return torch.addcmul(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 * arg3
+
+        self._ternary_promotion_common(device, op1, op2)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype

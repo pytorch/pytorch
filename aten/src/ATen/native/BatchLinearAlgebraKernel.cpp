@@ -1027,34 +1027,34 @@ void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& i
   For further details, please see the LAPACK documentation for GETRS.
 */
 template <typename scalar_t>
-void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu_solve on a CPU tensor requires compiling ",
+      "Calling linalg.lu_solve on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto lu_data = LU.data_ptr<scalar_t>();
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
-  auto b_stride = matrixStride(b);
-  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
+  auto b_stride = matrixStride(B);
+  auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
-  auto batch_size = batchCount(b);
+  auto batch_size = batchCount(B);
 
-  auto n = lu.size(-2);
-  auto nrhs = b.size(-1);
+  auto n = LU.size(-2);
+  auto nrhs = B.size(-1);
   auto leading_dimension = std::max<int64_t>(1, n);
 
   int info = 0;
 
-  // lu and pivots tensors can be broadcast to b
-  // here we construct a helper indexing tensor to linearly index into lu and pivots
-  IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
-  IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+  // lu and pivots tensors can be broadcast to B
+  // here we construct a helper indexing tensor to linearly index into LU and pivots
+  IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+  IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
   BroadcastLinearIndices lu_index(
-      batchCount(lu), lu_batch_shape, b_batch_shape);
+      batchCount(LU), lu_batch_shape, b_batch_shape);
 
   for (const auto i : c10::irange(batch_size)) {
     int64_t lu_index_i = lu_index(i);
@@ -1073,14 +1073,10 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
-    apply_lu_solve<scalar_t>(b, lu, pivots, trans);
+void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "linalg.lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(LU, pivots, B, trans);
   });
-}
-
-void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_kernel(b, lu, pivots, TransposeType::NoTranspose);
 }
 
 template <typename scalar_t>
@@ -1149,10 +1145,12 @@ static void apply_svd(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
+                const c10::optional<c10::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,
                 const Tensor& infos) {
+  TORCH_INTERNAL_ASSERT(!driver.has_value(), "svd_kernel: driver shouldn't have a value here. ");
   // Need to copy A as column major, as its contents will be destroyed in the LAPACK call.
   // FIXME It'd be more efficient, rather than cloning A, to copy it into `U` or `Vh` (depending on m > n
   // or m < n) and call jobz='O'
@@ -1162,6 +1160,9 @@ void svd_kernel(const Tensor& A,
 }
 
 void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
+  if (iter.numel() == 0) {
+    return;
+  }
   auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
     auto* perm_ptr = data[0];
     const auto* pivots_ptr = data[1];
@@ -1266,13 +1267,6 @@ REGISTER_AVX512_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_AVX2_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_VSX_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_ZVECTOR_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
-
-REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
-REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_ZVECTOR_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);

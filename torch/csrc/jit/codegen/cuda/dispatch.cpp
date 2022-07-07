@@ -52,6 +52,9 @@ void Val::dispatch(T handler, Val* val) {
           ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
+        case DataType::Int32:
+          // Dispatch to Int even with Int32 as we don't have Int32 IR
+          // node.
           ptr(handler)->handle(val->as<Int>());
           return;
         case DataType::ComplexDouble:
@@ -101,8 +104,14 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(handler)->handle(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
+      return;
+    case ExprType::LoadStoreOp:
+      ptr(handler)->handle(expr->as<LoadStoreOp>());
       return;
     case ExprType::MmaOp:
       ptr(handler)->handle(expr->as<MmaOp>());
@@ -120,14 +129,17 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
       return;
+    case ExprType::ExpandOp:
+      ptr(handler)->handle(expr->as<ExpandOp>());
+      return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
       return;
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
-    case ExprType::ViewDtypeOp:
-      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+    case ExprType::ViewAsScalar:
+      ptr(handler)->handle(expr->as<ViewAsScalar>());
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
@@ -141,6 +153,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(handler)->handle(expr->as<kir::GridSync>());
+      return;
+    case ExprType::CpAsyncWait:
+      ptr(handler)->handle(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -156,6 +171,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(handler)->handle(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(handler)->handle(expr->as<kir::GridBroadcast>());
@@ -193,6 +211,9 @@ void Val::constDispatch(T handler, const Val* val) {
           ptr(handler)->handle(val->as<Double>());
           return;
         case DataType::Int:
+        case DataType::Int32:
+          // Dispatch to Int even with Int32 as we don't have Int32 IR
+          // node.
           ptr(handler)->handle(val->as<Int>());
           return;
         case DataType::ComplexDouble:
@@ -242,8 +263,14 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(handler)->handle(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
+      return;
+    case ExprType::LoadStoreOp:
+      ptr(handler)->handle(expr->as<LoadStoreOp>());
       return;
     case ExprType::MmaOp:
       ptr(handler)->handle(expr->as<MmaOp>());
@@ -261,14 +288,17 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::TransposeOp:
       ptr(handler)->handle(expr->as<TransposeOp>());
       return;
+    case ExprType::ExpandOp:
+      ptr(handler)->handle(expr->as<ExpandOp>());
+      return;
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
       return;
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
-    case ExprType::ViewDtypeOp:
-      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+    case ExprType::ViewAsScalar:
+      ptr(handler)->handle(expr->as<ViewAsScalar>());
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
@@ -282,6 +312,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(handler)->handle(expr->as<kir::GridSync>());
+      return;
+    case ExprType::CpAsyncWait:
+      ptr(handler)->handle(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -297,6 +330,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(handler)->handle(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(handler)->handle(expr->as<kir::GridBroadcast>());
@@ -394,8 +430,14 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::ReductionOp:
       ptr(mutator)->mutate(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(mutator)->mutate(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
+      return;
+    case ExprType::LoadStoreOp:
+      ptr(mutator)->mutate(expr->as<LoadStoreOp>());
       return;
     case ExprType::MmaOp:
       ptr(mutator)->mutate(expr->as<MmaOp>());
@@ -413,14 +455,17 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::TransposeOp:
       ptr(mutator)->mutate(expr->as<TransposeOp>());
       return;
+    case ExprType::ExpandOp:
+      ptr(mutator)->mutate(expr->as<ExpandOp>());
+      return;
     case ExprType::ShiftOp:
       ptr(mutator)->mutate(expr->as<ShiftOp>());
       return;
     case ExprType::GatherOp:
       ptr(mutator)->mutate(expr->as<GatherOp>());
       return;
-    case ExprType::ViewDtypeOp:
-      ptr(mutator)->mutate(expr->as<ViewDtypeOp>());
+    case ExprType::ViewAsScalar:
+      ptr(mutator)->mutate(expr->as<ViewAsScalar>());
       return;
     case ExprType::ViewOp:
       ptr(mutator)->mutate(expr->as<ViewOp>());
@@ -434,6 +479,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridSync:
       ptr(mutator)->mutate(expr->as<kir::GridSync>());
+      return;
+    case ExprType::CpAsyncWait:
+      ptr(mutator)->mutate(expr->as<kir::CpAsyncWait>());
       return;
     case ExprType::InitMagicZero:
       ptr(mutator)->mutate(expr->as<kir::InitMagicZero>());
@@ -449,6 +497,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(mutator)->mutate(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(mutator)->mutate(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(mutator)->mutate(expr->as<kir::GridBroadcast>());
@@ -611,7 +662,13 @@ void OptOutConstDispatch::handle(const TernaryOp* stmt) {
 void OptOutConstDispatch::handle(const ReductionOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const GroupedReductionOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const LoadStoreOp* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const MmaOp* stmt) {
@@ -630,13 +687,16 @@ void OptOutConstDispatch::handle(const Merge* stmt) {
 void OptOutConstDispatch::handle(const TransposeOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ExpandOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ShiftOp* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const GatherOp* stmt) {
   unhandled(stmt);
 }
-void OptOutConstDispatch::handle(const ViewDtypeOp* stmt) {
+void OptOutConstDispatch::handle(const ViewAsScalar* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const ViewOp* stmt) {
@@ -652,6 +712,9 @@ void OptOutConstDispatch::handle(const kir::BlockSync* stmt) {
 void OptOutConstDispatch::handle(const kir::GridSync* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::CpAsyncWait* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const kir::InitMagicZero* stmt) {
   unhandled(stmt);
 }
@@ -665,6 +728,9 @@ void OptOutConstDispatch::handle(const kir::IfThenElse* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GroupedGridReduction* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
@@ -725,7 +791,13 @@ void OptOutDispatch::handle(TernaryOp* stmt) {
 void OptOutDispatch::handle(ReductionOp* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(GroupedReductionOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(WelfordOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(LoadStoreOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(MmaOp* stmt) {
@@ -744,13 +816,16 @@ void OptOutDispatch::handle(Merge* stmt) {
 void OptOutDispatch::handle(TransposeOp* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(ExpandOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(ShiftOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(GatherOp* stmt) {
   unhandled(stmt);
 }
-void OptOutDispatch::handle(ViewDtypeOp* stmt) {
+void OptOutDispatch::handle(ViewAsScalar* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ViewOp* stmt) {
@@ -766,6 +841,9 @@ void OptOutDispatch::handle(kir::BlockSync* stmt) {
 void OptOutDispatch::handle(kir::GridSync* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(kir::CpAsyncWait* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(kir::InitMagicZero* stmt) {
   unhandled(stmt);
 }
@@ -779,6 +857,9 @@ void OptOutDispatch::handle(kir::IfThenElse* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GroupedGridReduction* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridBroadcast* stmt) {

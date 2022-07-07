@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
+#include <torch/csrc/jit/codegen/cuda/grouped_reduction.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -113,7 +114,7 @@ void validateNoParallelBroadcastExist(kir::Kernel* kernel) {
 
 } // namespace
 
-TEST_F(NVFuserTest, FusionReduceAndBroadcast1_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -156,7 +157,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast1_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionReduceAndBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce2_CUDA) {
   const int nx = 99;
   const int tidx = 32;
 
@@ -207,7 +208,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast2_CUDA) {
 
 // Grid reduction with serial non-reduction axis. The global work
 // buffer is double buffered.
-TEST_F(NVFuserTest, FusionReduceAndBroadcast3_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce3_CUDA) {
   const int nx = 100;
   const int ny = 5000;
   const int tidx = 128;
@@ -254,7 +255,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast3_CUDA) {
 }
 
 // Indirect reduction and broadcast
-TEST_F(NVFuserTest, FusionReduceAndBroadcast4_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce4_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -299,7 +300,7 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast4_CUDA) {
 }
 
 // Unused block dimension in the kernel
-TEST_F(NVFuserTest, FusionReduceAndBroadcast5_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce5_CUDA) {
   const int nx = 999;
   const int tidx = 128;
   const int iter = 2;
@@ -360,7 +361,60 @@ TEST_F(NVFuserTest, FusionReduceAndBroadcast5_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t5}, {ref, t5}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionWelfordAndBroadcast1_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduce6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({99, 200});
+
+  const int vec = 4;
+  const int tidx = 32;
+  const int tidy = 8;
+  const int bdimx = ceilDiv(shape[1], vec * tidx);
+  const int bdimy = ceilDiv(shape[0], tidy);
+
+  if (bdimx * bdimy > deviceSMCount()) {
+    GTEST_SKIP() << "Not enough SMs to run this test";
+  }
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv0, tv3);
+  fusion.addOutput(tv4);
+
+  tv1->split(1, vec);
+  tv1->split(1, tidx);
+  tv1->split(0, tidy);
+  TransformPropagator::from(tv1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+  tv1->axis(2)->parallelize(ParallelType::BIDx);
+  tv1->axis(3)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+
+  tv1->axis(4)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t0_double = t0.to(at::kDouble);
+  auto ref = t0_double + t0_double.sum({0}).unsqueeze(0);
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGridAllreduceWelford1_CUDA) {
   const int nx = 999;
   const int tidx = 128;
 
@@ -408,7 +462,7 @@ TEST_F(NVFuserTest, FusionWelfordAndBroadcast1_CUDA) {
 
 // Grid welford reduction with serial non-reduction axis. The global
 // work buffer is double buffered.
-TEST_F(NVFuserTest, FusionWelfordAndBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionGridAllreduceWelford2_CUDA) {
   const int nx = 100;
   const int ny = 5000;
   const int tidx = 128;
@@ -507,15 +561,15 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   fusion.addOutput(tv17);
   fusion.addOutput(tv29);
 
-  auto tv0_cache = tv0->cache_after();
-  auto tv1_cache = tv1->cache_after();
-  auto tv2_cache = tv2->cache_after();
-  auto tv3_cache = tv3->cache_after();
-  auto tv4_cache = tv4->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+  auto tv2_cache = tv2->cacheAfter();
+  auto tv3_cache = tv3->cacheAfter();
+  auto tv4_cache = tv4->cacheAfter();
 
-  auto tv13_cache = tv13->cache_before();
-  auto tv17_cache = tv17->cache_before();
-  auto tv29_cache = tv29->cache_before();
+  auto tv13_cache = tv13->cacheBefore();
+  auto tv17_cache = tv17->cacheBefore();
+  auto tv29_cache = tv29->cacheBefore();
 
   tv0->split(1, NamedScalar::getParallelDim(ParallelType::BIDx), false);
   tv0->split(0, NamedScalar::getParallelDim(ParallelType::BIDy), false);
@@ -606,6 +660,985 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
       __FILE__,
       "",
       launch_params);
+}
+
+// Simple grouped reduction
+TEST_F(NVFuserTest, FusionGroupedReduction1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  groupReductions({tv1, tv2});
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grouping reductions with different ops
+TEST_F(NVFuserTest, FusionGroupedReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+
+  auto tv3 = add(tv0, IrBuilder::create<Double>(2));
+  auto tv4 = max(tv3, {1});
+
+  auto tv5 = add(tv2, tv4);
+  fusion.addOutput(tv5);
+
+  groupReductions({tv2, tv4});
+
+  tv2->split(1, 128);
+  TransformPropagator::from(tv2);
+
+  tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
+
+  // tv4 is automatically parallelized in the same way
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) + std::get<0>((t0 + 2).max(1));
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grouped reduction with different types
+TEST_F(NVFuserTest, FusionGroupedReduction3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+
+  auto tv2 = castOp(DataType::Double, tv0);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = castOp(DataType::Float, tv3);
+
+  auto tv5 = add(tv1, tv4);
+  fusion.addOutput(tv5);
+
+  groupReductions({tv1, tv3});
+  tv1->split(1, 128);
+  TransformPropagator::from(tv1);
+
+  tv0->computeAt(tv5, -1, ComputeAtMode::MostInlined);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1}) + t0.to(c10::kDouble).sum({1}).to(c10::kFloat);
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Testing validation
+TEST_F(NVFuserTest, FusionGroupedReduction4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = sum(tv1, {1});
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Invalid grouping as tv2 and tv3 are not guaranteed to have the
+  // same shape
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv2, tv3}));
+}
+
+// Testing validation
+TEST_F(NVFuserTest, FusionGroupedReduction5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 128);
+  tv2->split(1, 64);
+
+  // Invalid grouping as tv1 and tv2 don't have the same
+  // transformations
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv1, tv2}));
+}
+
+// Grouping 3 reductions
+TEST_F(NVFuserTest, FusionGroupedReduction6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+
+  auto tv3 = add(tv0, IrBuilder::create<Double>(2));
+  auto tv4 = sum(tv3, {1});
+
+  auto tv5 = add(tv0, IrBuilder::create<Double>(3));
+  auto tv6 = sum(tv5, {1});
+
+  auto tv7 = add(add(tv2, tv4), tv6);
+
+  fusion.addOutput(tv7);
+
+  groupReductions({tv2, tv4, tv6});
+
+  // There's no runtime grid reduction function that can take more
+  // than 2 inputs, yet.
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) + (t0 + 2).sum({1}) + (t0 + 3).sum({1});
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGroupedReduction7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv0, tv2);
+  auto tv4 = sum(tv3, {1});
+  fusion.addOutput(tv4);
+
+  // Invalid grouping as tv3 depends on tv1
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv1, tv4}));
+}
+
+// Grouping rfactor'ed reductions
+TEST_F(NVFuserTest, FusionGroupedReductionRfactor1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  const size_t gdimx = 10;
+  const size_t bdimx = 128;
+
+  tv1->split(0, gdimx, false);
+  tv1->split(1, bdimx);
+  auto tv1_rf = tv1->rFactor({1});
+
+  tv2->split(0, gdimx, false);
+  tv2->split(1, bdimx);
+  auto tv2_rf = tv2->rFactor({1});
+
+  groupReductions({tv1_rf, tv2_rf});
+  groupReductions({tv1, tv2});
+
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({12345});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({0}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Rfactoring grouped reductions
+TEST_F(NVFuserTest, FusionGroupedReductionRfactor2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  groupReductions({tv1, tv2});
+
+  const size_t gdimx = 10;
+  const size_t bdimx = 128;
+
+  tv1->split(0, gdimx, false);
+  tv1->split(1, bdimx);
+
+  // This should rfactor tv2 as well
+  auto rf_tvs = tv1->rFactor({1}, {tv1, tv2});
+  auto tv1_rf = rf_tvs.at(0);
+
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({12345});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({0}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Group reductions of tensors that have computeAt positions set
+TEST_F(NVFuserTest, FusionGroupedReductionAfterComputeAt_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = sum(tv1, {1});
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  const size_t bdimx = 128;
+
+  tv2->split(1, bdimx);
+  auto tv2_rf = tv2->rFactor({1});
+  tv2_rf->reorder({{1, 2}});
+
+  tv3->split(1, bdimx);
+  auto tv3_rf = tv3->rFactor({1});
+  tv3_rf->reorder({{1, 2}});
+
+  tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
+
+  groupReductions({tv2_rf, tv3_rf});
+  groupReductions({tv2, tv3});
+
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({3, 1234});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGroupAllreduce1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true});
+  auto tv3 = sum(tv0, {0});
+  auto tv4 = broadcast(tv3, {true});
+  auto tv5 = add(tv0, tv2);
+  auto tv6 = add(tv5, tv4);
+  fusion.addOutput(tv6);
+
+  groupReductions({tv1, tv3});
+
+  tv2->split(0, 128);
+  TransformPropagator::from(tv2);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t3 = t0.sum({0}).unsqueeze(-1);
+  auto ref = t0 + t3 + t3;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grid reductionso of different types
+TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+
+  auto tv3 = castOp(DataType::Double, tv0);
+  auto tv4 = sum(tv3, {1});
+  auto tv5 = broadcast(tv4, {false, true});
+  auto tv6 = castOp(DataType::Float, tv5);
+
+  auto tv7 = add(tv0, tv2);
+  auto tv8 = add(tv7, tv6);
+  fusion.addOutput(tv8);
+
+  const int tidx = 512;
+  groupReductions({tv1, tv4});
+  tv1->split(1, tidx);
+  TransformPropagator::from(tv1);
+
+  tv0->computeAt(tv8, -1, ComputeAtMode::MostInlined);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({10, 999});
+
+  if (shape.at(0) * ceilDiv(shape.at(1), tidx) > deviceSMCount()) {
+    GTEST_SKIP() << "Not enough SMs to run this test";
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t2 = t0.sum({1}).unsqueeze(-1);
+  auto t6 = t0.to(c10::kDouble).sum({1}).unsqueeze(-1).to(c10::kFloat);
+  auto ref = t0 + t2 + t6;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Persistent batchnorm backward with grouped allreduce
+TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
+  const std::vector<int64_t> shape({64, 1024, 14, 14});
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto input = makeContigTensor(4);
+  fusion.addInput(input);
+  auto grad_output = makeContigTensor(4);
+  fusion.addInput(grad_output);
+  auto weight = makeContigTensor(1);
+  fusion.addInput(weight);
+  auto save_mean = makeContigTensor(1);
+  fusion.addInput(save_mean);
+  auto save_invstd = makeContigTensor(1);
+  fusion.addInput(save_invstd);
+
+  const bool kTraining = true;
+  const bool channels_last = false;
+
+  const size_t kNumberOfDims =
+      TensorDomain::noReductions(input->getMaybeRFactorDomain()).size();
+  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
+
+  std::vector<int> reduction_axes;
+  std::vector<bool> broadcast_mask(kNumberOfDims, false);
+  Val* num_features = nullptr;
+  for (const auto axis : c10::irange(kNumberOfDims)) {
+    if (axis != c_axis) {
+      reduction_axes.push_back(axis);
+      broadcast_mask[axis] = true;
+      if (num_features == nullptr) {
+        num_features =
+            castOp(DataType::Double, input->domain()->domain()[axis]->extent());
+      } else {
+        num_features =
+            mul(num_features, input->domain()->domain()[axis]->extent());
+      }
+    }
+  }
+
+  auto mean = save_mean;
+  auto invstd = save_invstd;
+
+  mean = broadcast(mean, broadcast_mask);
+
+  auto norm = reciprocal(num_features);
+
+  auto grad_output_sum = sum(grad_output, reduction_axes);
+  auto dot_p = sum(mul(grad_output, sub(input, mean)), reduction_axes);
+
+  auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
+
+  auto proj_scale =
+      broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
+
+  TensorView* grad_scale = nullptr;
+
+  if (weight == nullptr) {
+    grad_scale =
+        mul(broadcast(invstd, broadcast_mask),
+            IrBuilder::create<Double>(input->container(), 1));
+  } else {
+    grad_scale = mul(
+        broadcast(invstd, broadcast_mask), broadcast(weight, broadcast_mask));
+  }
+
+  TensorView* grad_input = nullptr;
+  if (kTraining) {
+    auto proj = mul(sub(input, mean), proj_scale);
+    grad_input = mul(sub(sub(grad_output, proj), grad_mean), grad_scale);
+  } else {
+    grad_input = mul(grad_output, grad_scale);
+  }
+
+  fusion.addOutput(grad_input);
+
+  // Scheduling strategy
+  // 1. Cache inputs
+  // 2. Group the reductions (automatically fused with broadcasts)
+  // 3. Merge HW and vectorize with the outer parallelized by TIDx
+  // 4. Split N by TIDy with the outer parallelized by BIDx and
+  // inner by TIDy
+  // 5. Split C by BIDy and let the outer be the serial outermost loop
+
+  auto input_cache = input->cacheAfter();
+  auto grad_output_cache = grad_output->cacheAfter();
+  auto weight_cache = weight->cacheAfter();
+  auto save_mean_cache = save_mean->cacheAfter();
+  auto save_invstd_cache = save_invstd->cacheAfter();
+
+  // Group the two reductions
+  groupReductions({grad_output_sum, dot_p});
+
+  // Transform grad_input to: [C/bidy, N/tidy, tidy, bidy, HW/vec_width,
+  // vec_width]
+  const int tidy = 8;
+  const int bidy = 4;
+  const int bidx = ceilDiv(shape[0], (int64_t)tidy);
+  const int vec_width = 4;
+  TORCH_CHECK(
+      (shape[2] * shape[3]) % vec_width == 0,
+      "Invalid vector width: ",
+      vec_width);
+
+  grad_input->merge(-2, -1);
+  grad_input->split(-1, vec_width);
+
+  grad_input->split(0, tidy);
+  grad_input->split(2, bidy);
+  TORCH_CHECK(
+      grad_input->nDims() == 6,
+      "Unexpected number of dimensions: ",
+      grad_input->toString());
+
+  grad_input->reorder({{2, 0}, {0, 1}, {1, 2}});
+
+  grad_input->axis(1)->parallelize(ParallelType::BIDx);
+  grad_input->axis(2)->parallelize(ParallelType::TIDy);
+  grad_input->axis(3)->parallelize(ParallelType::BIDy);
+  grad_input->axis(4)->parallelize(ParallelType::TIDx);
+
+  TransformPropagator::from(grad_input);
+
+  auto rf_tensors = grad_output_sum->rFactor(
+      {-1}, std::vector<TensorView*>({grad_output_sum, dot_p}));
+
+  for (auto fusion_input :
+       ir_utils::filterByType<TensorView>(fusion.inputs())) {
+    fusion_input->computeAt(grad_input, 1);
+  }
+
+  // Parallelization
+  scheduler_utils::parallelizeAllLike(grad_input, ir_utils::allTvs(&fusion));
+  input_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  grad_output_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(shape, options);
+  auto at_grad_output = at::randn(shape, options);
+  auto at_weight = at::randn({shape[c_axis]}, options);
+  auto at_save_mean = at::randn({shape[c_axis]}, options);
+  auto at_save_invstd = at::randn({shape[c_axis]}, options);
+  std::vector<IValue> aten_inputs(
+      {at_input, at_grad_output, at_weight, at_save_mean, at_save_invstd});
+
+  GpuLower gpulw(&fusion);
+  validateNoParallelBroadcastExist(gpulw.kernel());
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+
+  if (bidx * bidy > deviceSMCount()) {
+    GTEST_SKIP() << "Not enough SMs to run this test";
+  }
+
+  auto outputs = fe.runFusion(aten_inputs);
+
+  std::vector<int64_t> at_reduction_axes;
+  std::copy(
+      reduction_axes.begin(),
+      reduction_axes.end(),
+      std::back_inserter(at_reduction_axes));
+
+  // MSVC bug on lambda non-capture of const integral type
+  // https://developercommunity.visualstudio.com/t/lambda-fails-to-implicitly-capture-constexpr-value/610504
+  auto at_bcast = [=](const auto& tensor) {
+    if (channels_last) {
+      tensor.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+    } else {
+      return tensor.unsqueeze(0).unsqueeze(-1).unsqueeze(-1);
+    }
+  };
+
+  auto at_mean = at_save_mean;
+  const auto& at_invstd = at_save_invstd;
+  at_mean = at_bcast(at_mean);
+  auto at_norm = 1.0f / static_cast<float>(shape[0] * shape[2] * shape[3]);
+
+  auto at_grad_output_sum = sum(at_grad_output, at_reduction_axes);
+  auto at_dot_p =
+      sum(mul(at_grad_output, sub(at_input, at_mean)), at_reduction_axes);
+
+  auto at_grad_mean = at_bcast(at_grad_output_sum * at_norm);
+
+  auto at_proj_scale = at_bcast((at_dot_p * at_norm) * (at_invstd * at_invstd));
+
+  at::Tensor at_grad_scale;
+
+  if (weight == nullptr) {
+    at_grad_scale = at_bcast(at_invstd);
+  } else {
+    at_grad_scale = at_bcast(at_invstd) * at_bcast(at_weight);
+  }
+
+  at::Tensor at_grad_input;
+  if (kTraining) {
+    auto at_proj = (at_input - at_mean) * at_proj_scale;
+    at_grad_input = (at_grad_output - at_proj - at_grad_mean) * at_grad_scale;
+  } else {
+    at_grad_input = at_grad_output * at_grad_scale;
+  }
+
+  testValidate(
+      fe.kernel(), outputs, aten_inputs, {at_grad_input}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGroupedReductionReEntrant1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {0});
+
+  auto tv3 = add(tv0, IrBuilder::create<Double>(2));
+  auto tv4 = sum(tv3, {0});
+
+  auto tv5 = add(tv2, tv4);
+  fusion.addOutput(tv5);
+
+  groupReductions({tv2, tv4});
+
+  auto tv0_cache = tv0->cacheAfter();
+
+  const int vec = 2;
+  const int tidx = 64;
+  const int tidy = 8;
+
+  tv2->split(1, vec);
+  tv2->split(1, tidx);
+
+  tv2->split(0, tidy);
+  TransformPropagator::from(tv2);
+
+  tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(1)->parallelize(ParallelType::TIDy);
+  tv2->axis(2)->parallelize(ParallelType::BIDx);
+  tv2->axis(3)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t0_double = t0.to(at::kDouble);
+  auto ref = (t0_double + 1).sum({0}) + (t0_double + 2).sum({0});
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Channels-last batch norm with vectorization. Relies on re-entrant
+// GroupedGridReduction
+TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> shape({64, 14, 14, 32});
+
+  auto tv0 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv1);
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv2);
+
+  std::vector<int> reduction_axes({0, 1, 2});
+  std::vector<bool> broadcast_mask({true, true, true, false});
+
+  auto tv3 = castOp(DataType::Float, tv0);
+  auto tv4 = castOp(DataType::Float, tv1);
+
+  auto tv5 = sum(tv3, reduction_axes);
+
+  auto tv6 = broadcast(tv2, broadcast_mask);
+  auto tv7 = sub(tv4, tv6);
+  auto tv8 = mul(tv3, tv7);
+  auto tv9 = sum(tv8, reduction_axes);
+
+  auto tv10 = castOp(DataType::Half, tv5);
+  auto tv11 = castOp(DataType::Half, tv9);
+
+  fusion.addOutput(tv10);
+  fusion.addOutput(tv11);
+
+  groupReductions({tv5, tv9});
+
+  // Applies the outer-reduction schedule
+  const int64_t num_channels = shape.back();
+  const int64_t vector = 2;
+  TORCH_CHECK(num_channels % vector == 0);
+  // Use at most 32 TIDx threads
+  const int64_t tidx = std::min<int64_t>(32l, num_channels / vector);
+  const auto bidx = ceilDiv(num_channels, tidx * vector);
+
+  const int64_t tidy = 8;
+  const auto bidy = ceilDiv(
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4, bidx);
+
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+
+  auto ref = tv5;
+
+  // Move the reduction domains inner positions
+  ref->reorder({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+
+  // Parallelizing the reduction domains
+  ref->merge(2, 3);
+  ref->merge(1, 2);
+  ref->split(1, tidy);
+  ref->split(1, bidy, false);
+
+  // Parallelizing the iteration domains
+  ref->split(0, vector);
+  ref->split(0, tidx);
+
+  // Move the vector axis to the innermost position
+  ref->reorder({{2, 5}, {3, 2}, {4, 3}, {5, 4}});
+  // Move the serial reduction to the right of the vector axis
+  ref->reorder({{3, 4}, {4, 3}});
+
+  TransformPropagator::from(ref);
+
+  auto rf_tvs = tv5->rFactor({-2}, {tv5, tv9});
+  auto tv5_rf = rf_tvs.at(0);
+  auto tv9_rf = rf_tvs.at(1);
+
+  tv0->computeAt(tv5_rf, -2, ComputeAtMode::BestEffort);
+  tv1->computeAt(tv9_rf, -2, ComputeAtMode::BestEffort);
+  tv3->computeAt(tv5_rf, -1, ComputeAtMode::BestEffort);
+  tv4->computeAt(tv9_rf, -1, ComputeAtMode::BestEffort);
+
+  ref = tv5_rf;
+
+  ref->axis(0)->parallelize(ParallelType::BIDx);
+  ref->axis(1)->parallelize(ParallelType::TIDx);
+  ref->axis(2)->parallelize(ParallelType::BIDy);
+  ref->axis(3)->parallelize(ParallelType::TIDy);
+  ref->axis(4)->parallelize(ParallelType::Serial);
+  ref->axis(5)->parallelize(ParallelType::Serial);
+
+  scheduler_utils::parallelizeAllLike(ref, ir_utils::allTvs(&fusion));
+
+  tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options_half = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options_half);
+  auto t1 = at::randn(shape, options_half);
+  auto t2 = at::randn({shape.back()}, options_float);
+  std::vector<IValue> aten_inputs({t0, t1, t2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t0_double = t0.to(at::kDouble);
+  auto t1_double = t1.to(at::kDouble);
+  auto t2_double = t2.to(at::kDouble);
+
+  std::vector<int64_t> at_reduction_axes(
+      {reduction_axes.begin(), reduction_axes.end()});
+  auto t5 = t0_double.sum(at_reduction_axes);
+  auto t8 = t0_double *
+      (t1_double - t2_double.unsqueeze(0).unsqueeze(0).unsqueeze(0));
+  auto t9 = t8.sum(at_reduction_axes);
+
+  testValidate(fe.kernel(), outputs, aten_inputs, {t5, t9}, __LINE__, __FILE__);
+}
+
+// Test the grouped grid allreduce with BN-like outer reductions
+TEST_F(
+    NVFuserTest,
+    FusionGroupedReductionPersistentChannelsLastBatchNormLike_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> shape({64, 14, 14, 32});
+
+  auto tv0 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(4, DataType::Half);
+  fusion.addInput(tv1);
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv2);
+
+  std::vector<int> reduction_axes({0, 1, 2});
+  std::vector<bool> broadcast_mask({true, true, true, false});
+
+  auto tv3 = castOp(DataType::Float, tv0);
+  auto tv4 = castOp(DataType::Float, tv1);
+
+  auto tv5 = sum(tv3, reduction_axes);
+
+  auto tv6 = broadcast(tv2, broadcast_mask);
+  auto tv7 = sub(tv4, tv6);
+  auto tv8 = mul(tv3, tv7);
+  auto tv9 = sum(tv8, reduction_axes);
+
+  auto tv10 = broadcast(tv5, broadcast_mask);
+  auto tv11 = add(tv3, tv10);
+
+  auto tv12 = broadcast(tv9, broadcast_mask);
+  auto tv13 = add(tv4, tv12);
+
+  auto tv14 = castOp(DataType::Half, tv11);
+  auto tv15 = castOp(DataType::Half, tv13);
+
+  fusion.addOutput(tv14);
+  fusion.addOutput(tv15);
+
+  groupReductions({tv5, tv9});
+
+  // Applies the outer-reduction schedule
+  const int64_t num_channels = shape.back();
+  const int64_t vector = 2;
+  TORCH_CHECK(num_channels % vector == 0);
+  // Use at most 32 TIDx threads
+  const int64_t tidx = std::min<int64_t>(32l, num_channels / vector);
+  const auto bidx = ceilDiv(num_channels, tidx * vector);
+
+  const int64_t tidy = 8;
+  const int64_t reduction_work_per_thread = 8;
+
+  auto tv0_cache = tv0->cacheAfter();
+  auto tv1_cache = tv1->cacheAfter();
+
+  auto ref = tv5;
+
+  // Move the reduction domains inner positions
+  ref->reorder({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+
+  // Parallelizing the reduction domains
+  ref->merge(2, 3);
+  ref->merge(1, 2);
+  ref->split(1, tidy);
+  ref->split(1, reduction_work_per_thread);
+
+  // Parallelizing the iteration domains
+  ref->split(0, vector);
+  ref->split(0, tidx);
+
+  // Move the vector axis to the innermost position
+  ref->reorder({{2, 5}, {3, 2}, {4, 3}, {5, 4}});
+  // Move the serial reduction to the right of the vector axis
+  ref->reorder({{3, 4}, {4, 3}});
+
+  TransformPropagator::from(ref);
+
+  auto rf_tvs = tv5->rFactor({-2}, {tv5, tv9});
+  auto tv5_rf = rf_tvs.at(0);
+  auto tv9_rf = rf_tvs.at(1);
+
+  tv0->computeAt(tv5_rf, -2, ComputeAtMode::BestEffort);
+  tv1->computeAt(tv9_rf, -2, ComputeAtMode::BestEffort);
+  tv3->computeAt(tv5_rf, -1, ComputeAtMode::BestEffort);
+  tv4->computeAt(tv9_rf, -1, ComputeAtMode::BestEffort);
+
+  ref = tv5_rf;
+
+  ref->axis(0)->parallelize(ParallelType::BIDx);
+  ref->axis(1)->parallelize(ParallelType::TIDx);
+  ref->axis(2)->parallelize(ParallelType::BIDy);
+  ref->axis(3)->parallelize(ParallelType::TIDy);
+  ref->axis(4)->parallelize(ParallelType::Serial);
+  ref->axis(5)->parallelize(ParallelType::Serial);
+
+  scheduler_utils::parallelizeAllLike(ref, ir_utils::allTvs(&fusion));
+
+  tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options_half = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options_half);
+  auto t1 = at::randn(shape, options_half);
+  auto t2 = at::randn({shape.back()}, options_float);
+  std::vector<IValue> aten_inputs({t0, t1, t2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t0_double = t0.to(at::kDouble);
+  auto t1_double = t1.to(at::kDouble);
+  auto t2_double = t2.to(at::kDouble);
+
+  std::vector<int64_t> at_reduction_axes(
+      {reduction_axes.begin(), reduction_axes.end()});
+  auto t5 = t0_double.sum(at_reduction_axes);
+  auto t8 = t0_double *
+      (t1_double - t2_double.unsqueeze(0).unsqueeze(0).unsqueeze(0));
+  auto t9 = t8.sum(at_reduction_axes);
+
+  auto t10 = t5.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto t11 = t0_double + t10;
+  auto t12 = t9.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto t13 = t1_double + t12;
+
+  testValidate(
+      fe.kernel(), outputs, aten_inputs, {t11, t13}, __LINE__, __FILE__);
 }
 
 } // namespace jit

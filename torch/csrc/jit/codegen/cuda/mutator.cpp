@@ -63,20 +63,13 @@ void OptOutMutator::mutate(IterDomain* id) {
       stop_offset->sameAs(id->stopOffset())) {
     return;
   }
-
-  Val* mutated_val = IrBuilder::create<IterDomain>(
-      id->container(),
-      start,
-      extent,
-      stop_offset,
-      id->getParallelType(),
-      id->getIterType(),
-      id->isRFactorProduct());
-  if (id->hasPaddingToMultipleOfWarp()) {
-    mutated_val->as<IterDomain>()->padToMultipleOfWarp(
-        id->getMaybeSizeAfterPadding());
-  }
-  registerMutation(id, mutated_val);
+  registerMutation(
+      id,
+      IterDomainBuilder(id)
+          .start(start)
+          .extent(extent)
+          .stop_offset(stop_offset)
+          .build());
 }
 
 void OptOutMutator::mutate(TensorDomain* td) {
@@ -184,7 +177,42 @@ void OptOutMutator::mutate(ReductionOp* rop) {
   auto rop_type = rop->getReductionOpType();
   container->removeExpr(rop);
   IrBuilder::create<ReductionOp>(
-      container, rop_type, init, out, in, rop->isFused());
+      container, rop_type, init, out, in, rop->isAllreduce());
+}
+
+void OptOutMutator::mutate(GroupedReductionOp* rop) {
+  bool is_same = true;
+
+  std::vector<Val*> outputs;
+  for (auto out : rop->outputs()) {
+    auto maybe_mutated = maybeMutated(out);
+    is_same = is_same && maybe_mutated->sameAs(out);
+    outputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> inputs;
+  for (auto in : rop->inputs()) {
+    auto maybe_mutated = maybeMutated(in);
+    is_same = is_same && maybe_mutated->sameAs(in);
+    inputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> init_vals;
+  for (auto init : rop->initVals()) {
+    auto maybe_mutated = maybeMutated(init);
+    is_same = is_same && maybe_mutated->sameAs(init);
+    init_vals.push_back(maybe_mutated);
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = rop->container();
+  const auto& rop_types = rop->getReductionOpTypes();
+  container->removeExpr(rop);
+  IrBuilder::create<GroupedReductionOp>(
+      container, rop_types, init_vals, outputs, inputs, rop->isAllreduce());
 }
 
 namespace {
@@ -234,7 +262,7 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       in_avg,
       in_var,
       in_N,
-      wop->isFused());
+      wop->isAllreduce());
 }
 
 void OptOutMutator::mutate(MmaOp* mma) {
@@ -253,6 +281,20 @@ void OptOutMutator::mutate(MmaOp* mma) {
   container->removeExpr(mma);
   C10_UNUSED auto new_mma =
       IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
+}
+
+void OptOutMutator::mutate(LoadStoreOp* ldst) {
+  Val* out = maybeMutated(ldst->out());
+  Val* in = maybeMutated(ldst->in());
+  auto op_type = ldst->opType();
+
+  if (out->sameAs(ldst->out()) && in->sameAs(ldst->in())) {
+    return;
+  }
+
+  auto container = ldst->container();
+  container->removeExpr(ldst);
+  IrBuilder::create<LoadStoreOp>(container, op_type, out, in);
 }
 
 void OptOutMutator::mutate(BroadcastOp* bop) {
@@ -281,6 +323,32 @@ void OptOutMutator::mutate(TransposeOp* top) {
   auto new2old = top->new2old();
   container->removeExpr(top);
   IrBuilder::create<TransposeOp>(container, out, in, new2old);
+}
+
+void OptOutMutator::mutate(ExpandOp* eop) {
+  bool is_same = true;
+
+  TensorView* out = maybeMutated(eop->out())->as<TensorView>();
+  is_same = is_same && out->sameAs(eop->out());
+  TensorView* in = maybeMutated(eop->in())->as<TensorView>();
+  is_same = is_same && in->sameAs(eop->in());
+
+  std::vector<Val*> expanded_extents;
+  expanded_extents.reserve(eop->expanded_extents().size());
+  for (auto expanded_extent : eop->expanded_extents()) {
+    expanded_extents.push_back(maybeMutated(expanded_extent));
+    if (!expanded_extents.back()->sameAs(expanded_extent)) {
+      is_same = false;
+    }
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = eop->container();
+  container->removeExpr(eop);
+  IrBuilder::create<ExpandOp>(container, out, in, expanded_extents);
 }
 
 void OptOutMutator::mutate(ShiftOp* sop) {
@@ -313,7 +381,7 @@ void OptOutMutator::mutate(GatherOp* op) {
   IrBuilder::create<GatherOp>(container, out, in, window_shape, pad_width);
 }
 
-void OptOutMutator::mutate(ViewDtypeOp* vop) {
+void OptOutMutator::mutate(ViewAsScalar* vop) {
   TensorView* out = maybeMutated(vop->out())->as<TensorView>();
   TensorView* in = maybeMutated(vop->in())->as<TensorView>();
 
@@ -323,7 +391,8 @@ void OptOutMutator::mutate(ViewDtypeOp* vop) {
 
   auto container = vop->container();
   container->removeExpr(vop);
-  IrBuilder::create<ViewDtypeOp>(container, out, in, vop->dtype());
+  IrBuilder::create<ViewAsScalar>(
+      container, out, in, vop->vector_id(), vop->index());
 }
 
 void OptOutMutator::mutate(ViewOp* vop) {
@@ -385,6 +454,9 @@ void OptOutMutator::mutate(kir::BlockSync*) {
 void OptOutMutator::mutate(kir::GridSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
+void OptOutMutator::mutate(kir::CpAsyncWait*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
 void OptOutMutator::mutate(kir::InitMagicZero*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
@@ -398,6 +470,9 @@ void OptOutMutator::mutate(kir::IfThenElse*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::GroupedGridReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridBroadcast*) {

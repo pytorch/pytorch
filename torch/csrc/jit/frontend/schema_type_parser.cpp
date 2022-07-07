@@ -169,7 +169,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     return c10::Device(at::kCPU);
   }
 
-  if (dev == "cuda") {
+  if (dev == "cuda" || dev == "hpu") {
     c10::DeviceIndex device_idx = -1;
     if (L.cur().kind == ':') {
       L.expect(':');
@@ -178,7 +178,11 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       std::string::size_type num_len;
       device_idx = c10::stoi(num, &num_len);
     }
-    return c10::Device(at::kCUDA, device_idx);
+    if (dev == "cuda") {
+      return c10::Device(at::kCUDA, device_idx);
+    } else {
+      return c10::Device(at::kHPU, device_idx);
+    }
   }
 
   throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
@@ -426,8 +430,8 @@ SchemaTypeParser::parseFakeAndRealType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      fake_value = c10::TypeFactory::create<c10::OptionalType>(fake_value);
-      real_value = c10::TypeFactory::create<c10::OptionalType>(real_value);
+      fake_value = c10::OptionalType::get(fake_value);
+      real_value = c10::OptionalType::get(real_value);
     } else {
       break;
     }

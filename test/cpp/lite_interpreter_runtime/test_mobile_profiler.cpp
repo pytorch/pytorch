@@ -1,4 +1,3 @@
-#include <fstream>
 #include <gtest/gtest.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
@@ -6,6 +5,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
+#include <fstream>
 
 #include <unordered_set>
 
@@ -21,9 +21,9 @@ bool checkMetaData(
     const std::string& metadata_val,
     std::ifstream& trace_file) {
   std::string line;
-  while (std::getline(trace_file, line) ) {
+  while (std::getline(trace_file, line)) {
     if (line.find(op_name) != std::string::npos) {
-      while (std::getline(trace_file, line) ) {
+      while (std::getline(trace_file, line)) {
         if (line.find(metadata_name) != std::string::npos) {
           return (line.find(metadata_val) != std::string::npos);
         }
@@ -61,13 +61,30 @@ TEST(MobileProfiler, ModuleHierarchy) {
   ASSERT_TRUE(trace_file.is_open());
   trace_file.seekg(0, std::ios_base::beg);
   const std::string metadata_name("Module Hierarchy");
-  ASSERT_TRUE(checkMetaData("aten::sub", metadata_name, "top(C)::<unknown>.A0(A)::forward.aten::sub", trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::sub",
+      metadata_name,
+      "top(C)::<unknown>.A0(A)::forward.aten::sub",
+      trace_file));
   trace_file.seekg(0, std::ios_base::beg);
-  ASSERT_TRUE(checkMetaData("aten::mul", metadata_name, "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method.aten::mul", trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::mul",
+      metadata_name,
+      "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method.aten::mul",
+      trace_file));
   trace_file.seekg(0, std::ios_base::beg);
-  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.aten::add", trace_file));
-  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(C)::<unknown>.SELF(C)::call_b.B0(B)::forward.aten::add", trace_file));
-  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(C)::<unknown>.aten::add", trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::add",
+      metadata_name,
+      "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.aten::add",
+      trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::add",
+      metadata_name,
+      "top(C)::<unknown>.SELF(C)::call_b.B0(B)::forward.aten::add",
+      trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::add", metadata_name, "top(C)::<unknown>.aten::add", trace_file));
 }
 
 TEST(MobileProfiler, Backend) {
@@ -97,10 +114,12 @@ TEST(MobileProfiler, Backend) {
   ASSERT_TRUE(trace_file.is_open());
   trace_file.seekg(0, std::ios_base::beg);
   std::string metadata_name("Module Hierarchy");
-  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "top(m)::<unknown>.aten::add", trace_file));
+  ASSERT_TRUE(checkMetaData(
+      "aten::add", metadata_name, "top(m)::<unknown>.aten::add", trace_file));
   trace_file.seekg(0, std::ios_base::beg);
   metadata_name = "Backend";
-  ASSERT_TRUE(checkMetaData("aten::add", metadata_name, "test_backend", trace_file));
+  ASSERT_TRUE(
+      checkMetaData("aten::add", metadata_name, "test_backend", trace_file));
 }
 
 } // namespace mobile

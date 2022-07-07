@@ -7865,6 +7865,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("cusparseZcsrgeam2", ("hipsparseZcsrgeam2", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseXcsrsort", ("hipsparseXcsrsort", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseXbsrsm2_zeroPivot", ("hipsparseXbsrsm2_zeroPivot", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseXbsrsv2_zeroPivot", ("hipsparseXbsrsv2_zeroPivot", CONV_MATH_FUNC, API_SPARSE)),
         (
             "cusparseXcoosort_bufferSizeExt",
             ("hipsparseXcoosort_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE),
@@ -8187,6 +8188,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("cuda::compat::", ("hip::compat::", API_C10)),
+        ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),

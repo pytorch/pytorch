@@ -4,13 +4,14 @@
 
 struct Node {};
 
-// If `torch::autograd::Note` is leaked into the root namespace, the following compile error would throw:
+// If `torch::autograd::Note` is leaked into the root namespace, the following
+// compile error would throw:
 // ```
 // void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node *node) {}
 //                                                            ^
 // error: reference to `Node` is ambiguous
 // ```
-void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node *node) {}
+void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node* node) {}
 
 TEST(NamespaceTests, NotLeakingSymbolsFromTorchAutogradNamespace) {
   // Checks that we are not leaking symbols from the

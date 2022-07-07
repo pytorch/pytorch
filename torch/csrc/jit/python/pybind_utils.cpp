@@ -6,10 +6,23 @@
 
 #include <ATen/ScalarOps.h>
 
+#include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 
 namespace torch {
 namespace jit {
+
+static thread_local bool allow_numbers_as_tensors = false;
+
+ToIValueAllowNumbersAsTensors::ToIValueAllowNumbersAsTensors(bool enable)
+    : old_(allow_numbers_as_tensors) {
+  allow_numbers_as_tensors = enable;
+}
+
+ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
+  allow_numbers_as_tensors = old_;
+}
 
 // This is a hack to remove instances deleted in C++ from the PyBind cache
 // C++->Python. We need this because otherwise we may get the old Python object
@@ -37,6 +50,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
+        if (!allow_numbers_as_tensors) {
+          throw py::cast_error(
+              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+        }
         at::Scalar scalar;
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
@@ -64,7 +81,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<c10::complex<double>>(c_obj);
     }
     case TypeKind::SymIntType:
-      return py::cast<int64_t>(obj);
+      return torch::is_symint_node(obj)
+          ? obj.cast<c10::SymbolicIntNode*>()->toSymInt()
+          : c10::SymInt{py::cast<int64_t>(obj)};
     case TypeKind::IntType:
     // NB: Typically, these switches are completely dead, because
     // Argument::type() will always report IntType for these types.
@@ -171,6 +190,17 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             }
             return repeated;
           }
+        case TypeKind::SymIntType: {
+          c10::List<c10::SymInt> symints;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            auto si = torch::is_symint_node(elm)
+                ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+                : c10::SymInt{py::cast<int64_t>(elm)};
+            symints.push_back(si);
+          }
+          return symints;
+        }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
             return IValue(py::cast<std::vector<double>>(obj));
@@ -354,12 +384,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
+    case TypeKind::QSchemeType: {
+      if (py::isinstance<py::int_>(obj)) {
+        return static_cast<at::QScheme>(py::cast<int64_t>(obj));
+      }
+      throw py::cast_error(
+          c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
+    }
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
-    case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:

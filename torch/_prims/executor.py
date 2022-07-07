@@ -1,17 +1,12 @@
 from typing import Callable
 
-import torch
-
 from torch.fx import GraphModule
-from torch._prims.utils import TensorMeta, getnvFuserDtype
-from torch._prims.context import PrimContext
-import torch.overrides
-
-if torch.cuda.is_available():
-    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._prims.context import TorchRefsMode
+from torch._prims.nvfuser_executor import nvfuser_execute
 
 
-def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
+def execute(gm: GraphModule, *args, executor: str = "aten"):
     """
     Prototype ATen executor.
 
@@ -19,50 +14,9 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
     """
 
     if executor == "aten":
-        gm = GraphModule({}, ctx.graph)
-        return gm.forward(*args, **kwargs)
+        return gm.forward(*args)
     elif executor == "nvfuser":
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Attempting to use nvFuser trace executor but CUDA is not available!"
-            )
-
-        # PROTOTYPE nvfuser executor
-        # Only accepts tensor inputs and single tensor outputs
-        # Does not handle kwargs
-        # Does not support reusing the same ctx to execute!
-        assert len(kwargs) == 0
-        # TODO: make this a proper trace -> trace transform that
-        # doesn't mutate the context
-        graph_fd = ctx.graph.placeholder("fd")
-        ctx.graph._root.append(graph_fd)
-
-        fusion = Fusion()
-        with FusionDefinition(fusion) as fd:
-            # Transforms graph to call nvfuser lowerings
-            nv_args = [fd]
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    x = fd.define_tensor(
-                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
-                    )
-                    fd.add_input(x)
-                    nv_args.append(x)
-                else:
-                    nv_args.append(x)
-
-            for x in ctx.graph.nodes:
-                if x.op == "call_function":
-                    x.target = x.target.impl_nvfuser
-                    x.args = (graph_fd,) + x.args
-
-            gm = GraphModule({}, ctx.graph)
-            out = gm.forward(*nv_args)
-            fd.add_output(out)
-
-            return fusion.execute(
-                tuple(arg for arg in args if isinstance(arg, torch.Tensor))
-            )[0]
+        return nvfuser_execute(gm, *args)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
@@ -79,8 +33,8 @@ def make_traced(fn: Callable):
 
     Only supports the torch operations defined in _torch_to_reference_map
     in context.py and operations with positional args. All args must
-    be tensors and the function must return a single tensor. In the
-    near future all these restrictions will be lifted.
+    be tensors.
+    In the near future all these restrictions will be lifted.
 
     Example usage:
 
@@ -96,18 +50,21 @@ def make_traced(fn: Callable):
     Executor may be either 'aten' or 'nvfuser'.
     """
 
-    def _traced(*args, executor="aten"):
-        ctx: PrimContext
-        with torch.overrides.push_torch_function_mode(PrimContext) as ctx:  # type: ignore[attr-defined, assignment]
-            placeholders = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    placeholders.append(ctx.placeholder(TensorMeta(arg)))
-                else:
-                    placeholders.append(ctx.placeholder(arg))
+    def _traced(*args, executor="aten", **kwargs):
+        # TODO: caching
+        nargs = len(args)
+        fn_kwargs = kwargs
+        flat_fn_kwargs = list(fn_kwargs.values())
+        all_args = list(args) + flat_fn_kwargs
 
-            result = fn(*placeholders)
-            ctx.output(result)
-        return execute(ctx, *args, executor=executor)
+        def wrapped(args):
+            fn_args = args[:nargs]
+            kwargs_keys = list(fn_kwargs.keys())
+            kwargs = dict(zip(kwargs_keys, args[nargs:]))
+            return fn(*fn_args, **kwargs)
+
+        with TorchRefsMode.push():
+            gm = make_fx(wrapped)(all_args)
+        return execute(gm, all_args, executor=executor)
 
     return _traced

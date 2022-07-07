@@ -1,6 +1,9 @@
 from .lazy_ir import GenLazyIR as GenLazyIR
 from .lazy_ir import GenLazyShapeInferenceDefinition as GenLazyShapeInferenceDefinition
 from .lazy_ir import GenLazyNativeFuncDefinition as GenLazyNativeFuncDefinition
+from .lazy_ir import (
+    generate_non_native_lazy_ir_nodes as generate_non_native_lazy_ir_nodes,
+)
 from .register_dispatch_key import (
     RegisterDispatchKey as RegisterDispatchKey,
     gen_registration_helpers as gen_registration_helpers,

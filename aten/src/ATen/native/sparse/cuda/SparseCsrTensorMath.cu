@@ -184,8 +184,8 @@ Tensor& add_out_dense_sparse_csr_cuda(
   auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
   auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBool, kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
       [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {

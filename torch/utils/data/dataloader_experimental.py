@@ -1,5 +1,3 @@
-
-import functools
 import time
 
 from typing import Any, List
@@ -59,12 +57,6 @@ class _ThreadingDataLoader2:
         for thread, req_queue, res_queue in self.threads:
             clean_me(thread, req_queue, res_queue)
 
-def _sharding_worker_init_fn(worker_init_fn, worker_id):
-    if worker_init_fn is not None:
-        worker_init_fn(worker_id)
-    torch.utils.data.backward_compatibility.worker_init_fn(
-        worker_id)
-
 class DataLoader2:
     def __new__(cls,
                 dataset,
@@ -101,9 +93,6 @@ class DataLoader2:
                     datapipe = datapipe.batch(batch_size, drop_last=drop_last)
                     if collate_fn is None:
                         collate_fn = torch.utils.data._utils.collate.default_collate
-            if parallelism_mode == 'mp' or num_workers == 0:
-                my_worker_init_fn = functools.partial(
-                    _sharding_worker_init_fn, worker_init_fn)
 
                 # Note: It is safe to pass shuffle=True to the old DataLoader, as shuffle does nothing
                 # for Iterable, but required to set Pipes correctly.
@@ -117,7 +106,7 @@ class DataLoader2:
                                          pin_memory=pin_memory,
                                          drop_last=False,  # Replaced by .batch DataPipe
                                          timeout=timeout,
-                                         worker_init_fn=my_worker_init_fn,
+                                         worker_init_fn=worker_init_fn,
                                          prefetch_factor=prefetch_factor,
                                          persistent_workers=persistent_workers)
             elif parallelism_mode == 'thread':

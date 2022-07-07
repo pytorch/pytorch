@@ -16,6 +16,7 @@ from test_pytorch_common import (
     TestCase,
     flatten,
     run_tests,
+    skipIfCaffe2,
     skipIfNoLapack,
 )
 
@@ -35,7 +36,6 @@ from torch.onnx.symbolic_helper import (
     _get_tensor_sizes,
     parse_args,
 )
-from torch.testing._internal.common_utils import skipIfCaffe2
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -69,7 +69,7 @@ class FuncModule(Module):
     def __init__(self, f, params=None):
         if params is None:
             params = ()
-        super(FuncModule, self).__init__()
+        super().__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
 
@@ -120,7 +120,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(args)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "input_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"input_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
                 outputs = m(*args)
@@ -129,7 +129,7 @@ class TestOperators(TestCase):
                 for index, var in enumerate(flatten(outputs)):
                     tensor = onnx.numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "output_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"output_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
 
@@ -847,6 +847,16 @@ class TestOperators(TestCase):
             opset_version=11,
         )
 
+    def test_scatter_add_opset16(self):
+        data = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[0, 0], [1, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.assertONNX(
+            lambda data, index: data.scatter_add(1, indices, values),
+            (data, (indices, values)),
+            opset_version=16,
+        )
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
@@ -921,12 +931,11 @@ class TestOperators(TestCase):
 
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
-            def forward(self, input, input2):
-                return input >> 1, input2 >> 2
+            def forward(self, input):
+                return input >> 1, input >> 2
 
-        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
-        input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
-        self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
+        input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
+        self.assertONNX(BitshiftModel(), input, opset_version=11)
 
     @skipIfCaffe2
     def test_layer_norm_aten(self):

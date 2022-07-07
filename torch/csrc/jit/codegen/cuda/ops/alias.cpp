@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/codegen/cuda/type_promotion.h>
@@ -58,25 +59,15 @@ TensorView* view(TensorView* x, DataType dtype) {
     return x;
   }
 
-  // TODO: support view(dtype) for dtypes of different size.
-  TORCH_INTERNAL_ASSERT(
-      dataTypeSize(x->getDataType().value()) == dataTypeSize(dtype),
-      "Currently, aten::view only supports viewing the data as a type with the same size.");
+  auto input_type = x->getDataType().value();
+  auto input_size = dataTypeSize(input_type);
+  auto newsize = dataTypeSize(dtype);
 
-  std::vector<IterDomain*> out_domain;
-  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
-  out_domain.reserve(inp_domain.size());
-  for (auto d : inp_domain) {
-    out_domain.push_back(d->clone());
+  if (input_size == newsize) {
+    return bitCastOp(dtype, x);
   }
-  auto out = IrBuilder::create<TensorView>(
-      x->container(),
-      IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
-      dtype);
-
-  IrBuilder::create<ViewDtypeOp>(x->container(), out, x, dtype);
-  return out;
+  // TODO: support view(dtype) for dtypes where input_size != newsize
+  TORCH_INTERNAL_ASSERT(false, "Unsupported reinterpret casting view");
 }
 
 TensorView* view(
@@ -105,8 +96,43 @@ TensorView* view(
       : view;
 }
 
+TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
+  if (start_dim < 0) {
+    start_dim += x->nDims();
+  }
+  if (end_dim < 0) {
+    end_dim += x->nDims();
+  }
+  TORCH_CHECK(
+      start_dim >= 0 && start_dim < x->nDims(),
+      "Invalid start_dim ",
+      start_dim);
+  TORCH_CHECK(
+      end_dim >= 0 && end_dim < x->nDims(), "Invalid end_dim ", end_dim);
+  TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
+
+  if (start_dim == end_dim) {
+    return x;
+  }
+
+  auto out = IrBuilder::create<TensorView>(
+      x->container(),
+      x->domain()->flatten(start_dim, end_dim),
+      x->getDataType().value());
+
+  IrBuilder::create<ViewOp>(out, x);
+  return out;
+}
+
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_INTERNAL_ASSERT(
+      ndims == sizes.size(),
+      "Invalid sizes for squeeze: ",
+      sizes,
+      ". Input tensor: ",
+      x->toString());
 
   std::vector<int> trivial_reduction_axes;
   for (const auto idx : c10::irange(sizes.size())) {
@@ -122,11 +148,27 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == sizes.size());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_INTERNAL_ASSERT(
+      ndims == sizes.size(),
+      "Invalid sizes for squeeze: ",
+      sizes,
+      ". Input tensor: ",
+      x->toString());
+
   if (dim < 0) {
-    dim = (int)(x->nDims()) + dim;
+    dim = ndims + dim;
   }
-  if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
+
+  TORCH_INTERNAL_ASSERT(
+      dim >= 0 && dim < ndims,
+      "Invalid position to squeeze: ",
+      dim,
+      ". Input tensor: ",
+      x->toString());
+
+  if (sizes[dim] == 1) {
     return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
@@ -134,14 +176,89 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
 }
 
 TensorView* unsqueeze(TensorView* x, int dim) {
-  if (dim < 0) {
-    dim = (int)(x->nDims()) + dim + 1;
-  }
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim <= x->nDims());
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
-  std::vector<bool> broadcast_axes(x->nDims() + 1, false);
+  if (dim < 0) {
+    dim = ndims + dim + 1;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      dim >= 0 && dim <= ndims,
+      "Invalid position to unsqueeze: ",
+      dim,
+      ". Input tensor: ",
+      x->toString());
+
+  std::vector<bool> broadcast_axes(ndims + 1, false);
   broadcast_axes[dim] = true;
   return broadcast(x, broadcast_axes);
+}
+
+TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
+  std::vector<IterDomain*> out_domain(inp_domain.size());
+
+  auto normalized_new2old =
+      ir_utils::normalizeNew2Old(new2old, inp_domain.size());
+
+  for (const auto i : c10::irange(out_domain.size())) {
+    auto in_id = inp_domain[new2old[i]];
+    out_domain[i] = in_id->cloneWithoutRFactor();
+  }
+
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      x->getDataType().value());
+  IrBuilder::create<TransposeOp>(out_tensor, x, normalized_new2old);
+  return out_tensor;
+}
+
+TensorView* transpose(TensorView* x, int64_t dim0, int64_t dim1) {
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  if (dim0 < 0) {
+    dim0 = ndims + dim0;
+  }
+
+  if (dim1 < 0) {
+    dim1 = ndims + dim1;
+  }
+
+  TORCH_CHECK(
+      dim0 >= 0 && dim0 <= ndims, "Invalid transpose dimension 0: ", dim0);
+
+  TORCH_CHECK(
+      dim1 >= 0 && dim1 <= ndims, "Invalid transpose dimension 1: ", dim1);
+
+  std::vector<int64_t> new2old(ndims);
+  for (const auto i : c10::irange(ndims)) {
+    if (i == dim0) {
+      new2old[i] = dim1;
+    } else if (i == dim1) {
+      new2old[i] = dim0;
+    } else {
+      new2old[i] = i;
+    }
+  }
+  return permute(x, new2old);
+}
+
+TensorView* transpose(TensorView* x) {
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_CHECK(
+      ndims <= 2,
+      "Expected a tensor with <= 2 dimensions, but it has ",
+      ndims,
+      "D.");
+
+  // short-circuit: return original tensorview if less than 2 dimensions
+  if (ndims < 2) {
+    return x;
+  }
+
+  return transpose(x, 0, 1);
 }
 
 } // namespace cuda

@@ -1,7 +1,13 @@
 #pragma once
 
-namespace torch { namespace utils {
+#include <c10/core/MemoryFormat.h>
+#include <torch/csrc/utils/pybind.h>
+
+namespace torch {
+namespace utils {
 
 void initializeMemoryFormats();
+py::object getTHPMemoryFormat(c10::MemoryFormat);
 
-}} // namespace torch::utils
+} // namespace utils
+} // namespace torch
