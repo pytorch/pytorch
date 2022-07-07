@@ -120,21 +120,11 @@ Tensor masked_softmax(
     c10::optional<Tensor> attn_mask,
     const Tensor& query) {
   if (query.is_nested() && !attn_mask) {
-    // TODO: maybe we could do better than generating a mask every time?
-
-    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
-    // TODO: CPU path does not support transformer mask yet.
     if (attn_scores.is_cpu()) {
-      attn_mask = attn_mask->view({-1, 1, 1, attn_scores.sizes()[3]});
-      // 1 means skip, 0 means keep.
-      // want:
-      // 0,0 -> 0
-      // 0,1 -> 1
-      // 1,1 -> 1
-      // so that's logical OR.
-      *attn_mask = *attn_mask | attn_mask->transpose(2, 3);
-      attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
+      NestedTensor_softmax_dropout(query, attn_scores);
+      return attn_scores;
     }
+    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
     attn_mask = attn_mask->to(query.device(), /*non-blocking=*/true);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {

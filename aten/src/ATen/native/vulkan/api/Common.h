@@ -7,13 +7,13 @@
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::Shader::Descriptor{ \
+  ::at::native::vulkan::api::ShaderSource{ \
     name##_glsl,                                 \
   }
 #else
 #include <ATen/native/vulkan/spv.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::Shader::Descriptor{ \
+  ::at::native::vulkan::api::ShaderSource{ \
     name##_spv,                                  \
     name##_spv_len,                              \
   }
@@ -72,7 +72,6 @@ struct Descriptor;
 struct Pipeline;
 struct Resource;
 class Runtime;
-struct Shader;
 
 struct GPU final {
   VkInstance instance;

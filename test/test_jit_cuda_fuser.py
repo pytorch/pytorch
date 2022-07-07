@@ -4844,7 +4844,7 @@ class TestCudaFuser(JitTestCase):
         self._run_helper(t2_jit, t2, x0, x1, x2, check_stride=True)
 
 
-class TestPassManagerCudaFuser(JitTestCase):
+class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
         if RUN_NVFUSER:
@@ -4913,6 +4913,14 @@ class TestPassManagerCudaFuser(JitTestCase):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
 
+    def test_can_be_enabled_nvfuser(self):
+        if TEST_WITH_ROCM:
+            expected = False
+        else:
+            expected = RUN_CUDA
+
+        self.assertEqual(expected, torch._C._jit_nvfuser_can_be_enabled())
+
 # See TestNNCOpInfoParent
 class TestCudaFuserOpInfoParent(JitCommonTestCase):
     pass
@@ -4938,6 +4946,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
@@ -4964,6 +4975,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
                                 torch.float64, torch.complex64, torch.complex128))
     def test_nvfuser_extremal_values(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         def _get_extremal_tensor(x, val, dtype):
