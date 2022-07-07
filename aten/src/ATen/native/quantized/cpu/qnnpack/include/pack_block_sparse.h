@@ -43,4 +43,14 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const uint32_t col_block_size,
     const uint8_t* zero_points);
 
+std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
+    const int32_t* col_indices,
+    const int32_t* row_values,
+    const int8_t* values,
+    const int64_t col_indices_size,
+    const int64_t row_values_size,
+    const int64_t values_size,
+    const int64_t row_block_size,
+    const int64_t col_block_size);
+
 } // namespace qnnpack
