@@ -66,12 +66,13 @@ if HAS_PYDOT:
             graph_module: torch.fx.GraphModule,
             name: str,
             ignore_getattr: bool = False,
+            ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
         ):
             self._name = name
             self._dot_graphs = {
                 name: self._to_dot(
-                    graph_module, name, ignore_getattr, skip_node_names_in_args
+                    graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args
                 )
             }
 
@@ -88,6 +89,7 @@ if HAS_PYDOT:
                     leaf_node,
                     f"{name}_{node.target}",
                     ignore_getattr,
+                    ignore_parameters_and_buffers,
                     skip_node_names_in_args,
                 )
 
@@ -259,10 +261,13 @@ if HAS_PYDOT:
             graph_module: torch.fx.GraphModule,
             name: str,
             ignore_getattr: bool,
+            ignore_parameters_and_buffers: bool,
             skip_node_names_in_args: bool,
         ) -> pydot.Dot:
             """
-            Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph
+            Actual interface to visualize a fx.Graph. Note that it takes in the GraphModule instead of the Graph.
+            If ignore_parameters_and_buffers is True, the parameters and buffers
+            created with the module will not be added as nodes and edges.
             """
             dot_graph = pydot.Dot(name, rankdir="TB")
 
@@ -297,7 +302,7 @@ if HAS_PYDOT:
                 if node.op == "call_module":
                     leaf_module = self._get_leaf_node(graph_module, node)
 
-                    if not isinstance(leaf_module, torch.fx.GraphModule):
+                    if not ignore_parameters_and_buffers and not isinstance(leaf_module, torch.fx.GraphModule):
                         get_module_params_or_buffers()
 
             for node in graph_module.graph.nodes:

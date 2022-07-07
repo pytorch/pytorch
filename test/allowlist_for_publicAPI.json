@@ -71,6 +71,15 @@
     "Union",
     "get_combined_dict"
   ],
+  "torch.ao.quantization.backend_config.utils": [
+    "Any",
+    "Dict",
+    "Callable",
+    "List",
+    "Union",
+    "Tuple",
+    "Pattern"
+  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
@@ -159,21 +168,6 @@
     "get_native_backend_config_dict",
     "sorted_patterns_dict",
     "get_quantize_handler_cls"
-  ],
-  "torch.ao.quantization.observer": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
-    "partial"
   ],
   "torch.ao.quantization.qconfig": [
     "Any",
@@ -329,6 +323,14 @@
     "Tuple",
     "Union",
     "classproperty"
+  ],
+  "torch.cuda.comm": [
+    "broadcast",
+    "broadcast_coalesced",
+    "reduce_add",
+    "reduce_add_coalesced",
+    "scatter",
+    "gather"
   ],
   "torch.cuda.amp.autocast_mode": [
     "Any"
@@ -536,6 +538,9 @@
     "List",
     "Template"
   ],
+  "torch.distributed.elastic.utils.data.elastic_distributed_sampler": [
+    "DistributedSampler"
+  ],
   "torch.distributed.elastic.utils.logging": [
     "Optional",
     "get_log_level"
@@ -543,6 +548,22 @@
   "torch.distributed.elastic.utils.store": [
     "List",
     "timedelta"
+  ],
+  "torch.distributed.fsdp.flatten_params_wrapper": [
+    "Any",
+    "Dict",
+    "Generator",
+    "Iterator",
+    "List",
+    "NamedTuple",
+    "Optional",
+    "ParamOffset",
+    "Sequence",
+    "SharedParamInfo",
+    "Tensor",
+    "Tuple",
+    "Union",
+    "accumulate"
   ],
   "torch.distributed.fsdp.utils": [
     "Any",
@@ -679,6 +700,19 @@
     "Context",
     "Copy",
     "Wait"
+  ],
+  "torch.distributed.pipeline.sync.dependency": [
+    "Fork",
+    "Join",
+    "fork",
+    "join"
+  ],
+  "torch.distributed.pipeline.sync.microbatch": [
+    "Batch",
+    "NoChunk",
+    "check",
+    "gather",
+    "scatter"
   ],
   "torch.distributed.pipeline.sync.phony": [
     "get_phony"
@@ -955,6 +989,22 @@
     "dataclass",
     "map_arg"
   ],
+  "torch.fx.graph_module": [
+    "Any",
+    "Dict",
+    "Graph",
+    "Importer",
+    "List",
+    "Optional",
+    "PackageExporter",
+    "PackageImporter",
+    "Path",
+    "PythonCode",
+    "Set",
+    "Type",
+    "Union",
+    "compatibility"
+  ],
   "torch.fx.immutable_collections": [
     "Any",
     "Context",
@@ -985,6 +1035,14 @@
   ],
   "torch.fx.proxy": [
     "assert_fn"
+  ],
+  "torch.hub": [
+    "HTTPError",
+    "Path",
+    "Request",
+    "tqdm",
+    "urlopen",
+    "urlparse"
   ],
   "torch.jit": [
     "Attribute",
@@ -1143,6 +1201,7 @@
     "qr",
     "slogdet",
     "solve",
+    "solve_ex",
     "solve_triangular",
     "svd",
     "svdvals",
@@ -1683,6 +1742,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k0",
     "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
@@ -2001,6 +2061,7 @@
     "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
+    "_linalg_solve_ex",
     "_log_softmax",
     "_log_softmax_backward_data",
     "_logcumsumexp",

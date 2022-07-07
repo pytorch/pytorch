@@ -17,7 +17,7 @@ from contextlib import contextmanager, nullcontext
 
 from torch.utils._python_dispatch import TorchDispatchMode
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -83,12 +83,10 @@ def proxy_call(func_overload, args, kwargs=None):
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
-
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
         args[0].proxy = proxy_res
         proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-
     inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
     # Needed to sync up metadata for in-place operators that modify metadata
     if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
@@ -120,6 +118,9 @@ class ProxyTensor(torch.Tensor):
             proxy.node.meta['tensor_meta'] = {}
         else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        # This detects situations where you accidentally put a ProxyTensor
+        # inside a ProxyTensor for the same trace; this is a layering violation
+        assert not (isinstance(elem, ProxyTensor) and elem.proxy.tracer is proxy.tracer)
         self.elem = elem
         self.proxy = proxy
 
@@ -214,6 +215,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
+        # We don't want to convert torch.tensor constants into tracing objects.
+        if func_overload == aten.lift.default:
+            return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
@@ -224,6 +228,38 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
             return wrap_output(inner_res, proxy_res)
 
+
+class DecompositionInterpreter(torch.fx.Interpreter):
+    def __init__(self, module: torch.fx.GraphModule, new_graph: torch.fx.Graph, decomposition_table=None, **kwargs):
+        super().__init__(module, **kwargs)
+        self.new_graph = new_graph
+        self.tracer = torch.fx.proxy.GraphAppendingTracer(self.new_graph)
+        self.decomposition_table = decomposition_table
+        if self.decomposition_table is None:
+            self.decomposition_table = {}
+
+    def placeholder(self, target, args, kwargs):
+        out = super().placeholder(target, args, kwargs)
+        # TODO handle case where the first character of target is '*'
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer))
+
+    def get_attr(self, target, args, kwargs):
+        out = super().get_attr(target, args, kwargs)
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer))
+
+    # call_function, call_method, call_module get traced automatically by the ProxyTensors.
+
+    def output(self, target, args, kwargs):
+        out = super().output(target, args, kwargs)
+
+        def unwrap(e):
+            return e.proxy.node if isinstance(e, ProxyTensor) else e
+        self.new_graph.output(pytree.tree_map(unwrap, out))
+        return out
+
+    def run(self, *args, **kwargs):
+        with decompose(self.decomposition_table):
+            return super().run(*args, **kwargs)
 
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
     if decomposition_table is None:

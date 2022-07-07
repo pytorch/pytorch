@@ -1,10 +1,12 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
+from itertools import product
+import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -14,6 +16,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+
+if TEST_SCIPY:
+    import scipy.special
 
 
 class TestPrims(TestCase):
@@ -106,6 +111,30 @@ class TestPrims(TestCase):
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
 
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float64, torch.long)
+    def test_cbrt_prim(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        batches = [(), (1,), (2,), (0, 1), (1, 1), (2, 2)]
+        shapes = [(), (0,), (1,), (5,)]
+
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+
+            # Tested here, as this OP is not currently exposed or tested in ATen
+            for b, s in product(batches, shapes):
+                x = make_arg(b + s)
+                y = prims.cbrt(x)
+
+                x_np = x.cpu().numpy()
+                y_np = scipy.special.cbrt(x_np)
+
+                self.assertEqual(y, y_np, exact_device=False)
+        finally:
+            torch.set_default_dtype(cur_default)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_impl_is_used(self, device):
@@ -124,6 +153,30 @@ class TestPrims(TestCase):
             len(ops_without_nvfuser_impl) == 0
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
             "while there exists nvfuser implementations for them.")
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_executor_cached_noncontiguous(self, device):
+        # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.sigmoid(a)
+
+        with TorchRefsMode.push():
+            gm = make_fx(func)(a)
+
+        # First run to create the cache
+        execute(gm, a, executor="nvfuser")
+
+        # a.mT is noncontiguous, but it shouldn't affect correctness
+        expected = execute(gm, a.mT, executor="aten")
+        actual = execute(gm, a.mT, executor="nvfuser")
+        self.assertEqual(expected, actual)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -149,9 +202,10 @@ class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
-    def test_pytree_output(self, device, dtype):
+    def test_pytree_input_output(self, device, dtype):
         @make_traced
-        def fn(a, b):
+        def fn(a, b_dict):
+            b = b_dict["b"]
             d = {}
             d["c"] = torch.add(a, b)
             return (d, torch.add(a, d["c"]))
@@ -159,9 +213,10 @@ class TestPrims(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
         a = make_arg((5, 5))
         b = make_arg((1, 5))
+        b_dict = {"b": b}
 
-        result_aten = fn(a, b, executor="aten")
-        result_nvfuser = fn(a, b, executor="nvfuser")
+        result_aten = fn(a, b_dict, executor="aten")
+        result_nvfuser = fn(a, b_dict, executor="nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
 
 
