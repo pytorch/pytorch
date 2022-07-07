@@ -547,6 +547,225 @@ TEST_F(VulkanAPITest, avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Act: Vulkan batchnorm only supports evaluation mode
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({3, 8, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: Vulkan batchnorm expects 4-dim input
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({3, 8, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: Vulkan batchnorm expects 4-dim input
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({2, 8, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: Vulkan batchnorm expects channel dim to be multiple of 4
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({4, 7, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: weight tensor contains incorrect number of elements
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({4, 8, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: bias tensor contains incorrect number of elements
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({4, 8, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: running mean tensor contains incorrect number of elements
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({4, 8, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: running var tensor contains incorrect number of elements
+  EXPECT_THROW({
+    at::batch_norm(
+      at::rand({4, 8, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      true,
+      0.1,
+      1e-05,
+      false);
+  }, ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, batch_norm_small) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({1, 4, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({4}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({4}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto running_mean_cpu = at::rand({4}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_mean_vulkan = running_mean_cpu.vulkan();
+
+  const auto running_var_cpu = at::rand({4}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_var_vulkan = running_var_cpu.vulkan();
+
+  const auto output_cpu = at::batch_norm(input_cpu, weight_cpu, bias_cpu, running_mean_cpu, running_var_cpu, false, 0.1, 1e-05, false);
+  const auto output_vulkan = at::batch_norm(input_vulkan, weight_vulkan, bias_vulkan, running_mean_vulkan, running_var_vulkan, false, 0.1, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, batch_norm_medium) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({3, 8, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({8}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({8}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto running_mean_cpu = at::rand({8}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_mean_vulkan = running_mean_cpu.vulkan();
+
+  const auto running_var_cpu = at::rand({8}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_var_vulkan = running_var_cpu.vulkan();
+
+  const auto output_cpu = at::batch_norm(input_cpu, weight_cpu, bias_cpu, running_mean_cpu, running_var_cpu, false, 0.1, 1e-05, false);
+  const auto output_vulkan = at::batch_norm(input_vulkan, weight_vulkan, bias_vulkan, running_mean_vulkan, running_var_vulkan, false, 0.1, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, batch_norm_large) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({79, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto running_mean_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_mean_vulkan = running_mean_cpu.vulkan();
+
+  const auto running_var_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto running_var_vulkan = running_var_cpu.vulkan();
+
+  const auto output_cpu = at::batch_norm(input_cpu, weight_cpu, bias_cpu, running_mean_cpu, running_var_cpu, false, 0.1, 1e-05, false);
+  const auto output_vulkan = at::batch_norm(input_vulkan, weight_vulkan, bias_vulkan, running_mean_vulkan, running_var_vulkan, false, 0.1, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, clamp) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1129,6 +1348,253 @@ TEST_F(VulkanAPITest, hardshrink_) {
     const auto check = checkHardShrink(out_cpu, out_vulkan, lambd_value);
     ASSERT_TRUE(check);
   }
+}
+
+TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Act: incorrect normalized shape
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {8, 5},
+      at::rand({8, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({8, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: normalized shape must be [C, H, W]
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {5, 7},
+      at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: incorrect weight dimensions
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {3, 5, 7},
+      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: incorrect bias dimensions
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {3, 5, 7},
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: batch dim must be 1
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({2, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {3, 5, 7},
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: input has too many dimensions
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({1, 2, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {3, 5, 7},
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+
+  // Act: input has too few dimensions
+  EXPECT_THROW({
+    at::layer_norm(
+      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      {3, 5},
+      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+      1e-05,
+      false);
+  }, ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, layer_norm_3d_small) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {1, 1, 1}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {1, 1, 1}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, layer_norm_3d_medium) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {3, 5, 7}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {3, 5, 7}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, layer_norm_3d_large) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {53, 139, 109}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {53, 139, 109}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, layer_norm_4d_small) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {1, 1, 1}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {1, 1, 1}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, layer_norm_4d_medium) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({1, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {3, 5, 7}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {3, 5, 7}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, layer_norm_4d_large) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand({1, 53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::layer_norm(input_cpu, {53, 139, 109}, weight_cpu, bias_cpu, 1e-05, false);
+  const auto output_vulkan = at::layer_norm(input_vulkan, {53, 139, 109}, weight_vulkan, bias_vulkan, 1e-05, false);
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
 }
 
 TEST_F(VulkanAPITest, leaky_relu) {

@@ -91,7 +91,7 @@ struct TraceWrapper {
 
 // Wraps libkineto::ActivityTraceInterface
 struct ActivityTraceWrapper {
-  explicit ActivityTraceWrapper(std::unique_ptr<interface_trace_t> trace);
+  explicit ActivityTraceWrapper(std::unique_ptr<interface_trace_t>&& trace);
   ActivityTraceWrapper() = default;
   ActivityTraceWrapper(ActivityTraceWrapper&&) = default;
   ActivityTraceWrapper(const ActivityTraceWrapper&) = delete;
