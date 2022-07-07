@@ -1022,12 +1022,12 @@ Arguments:
 
           .def(
               "allreduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  std::vector<at::Tensor>& xs,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                return ::c10d::ops::allreduce(pg, xs, opts);
+                return ::c10d::ops::allreduce(self, xs, opts);
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1035,13 +1035,13 @@ Arguments:
 
           .def(
               "allreduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& x,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                return ::c10d::ops::allreduce(pg, xs, opts);
+                return ::c10d::ops::allreduce(self, xs, opts);
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1049,10 +1049,10 @@ Arguments:
 
           .def(
               "allreduce_coalesced",
-              [](::c10d::ProcessGroup& pg,
+              [](::c10d::ProcessGroup& self,
                  std::vector<at::Tensor>& xs,
                  ::c10d::AllreduceCoalescedOptions opts) {
-                return pg.allreduce_coalesced(xs, opts);
+                return self.allreduce_coalesced(xs, opts);
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
@@ -1071,7 +1071,7 @@ Arguments:
 
           .def(
               "reduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& x,
                  int rootRank,
                  ::c10d::ReduceOp op) {
@@ -1079,7 +1079,7 @@ Arguments:
                 opts.reduceOp = op;
                 opts.rootRank = rootRank;
                 std::vector<at::Tensor> xs = {x};
-                return ::c10d::ops::reduce(pg, xs, opts);
+                return ::c10d::ops::reduce(self, xs, opts);
               },
               py::arg("tensor"),
               py::arg("root"),
@@ -1110,13 +1110,13 @@ Arguments:
 
           .def(
               "allgather",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  std::vector<at::Tensor>& output,
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
                 return ::c10d::ops::allgather(
-                    pg, outputs, inputs, ::c10d::AllgatherOptions());
+                    self, outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
@@ -1146,7 +1146,7 @@ Arguments:
 
           .def(
               "gather",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  std::vector<at::Tensor>& output,
                  at::Tensor& input,
                  int rootRank) {
@@ -1154,7 +1154,7 @@ Arguments:
                 opts.rootRank = rootRank;
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return ::c10d::ops::gather(pg, outputs, inputs, opts);
+                return ::c10d::ops::gather(self, outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
@@ -1177,7 +1177,7 @@ Arguments:
 
           .def(
               "scatter",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& output,
                  std::vector<at::Tensor>& input,
                  int rootRank) {
@@ -1185,7 +1185,7 @@ Arguments:
                 opts.rootRank = rootRank;
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 std::vector<at::Tensor> outputs = {output};
-                return ::c10d::ops::scatter(pg, outputs, inputs, opts);
+                return ::c10d::ops::scatter(self, outputs, inputs, opts);
               },
               py::arg("output_tensor"),
               py::arg("input_tensors"),
@@ -1208,7 +1208,7 @@ Arguments:
 
           .def(
               "reduce_scatter",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& output,
                  std::vector<at::Tensor>& input,
                  ::c10d::ReduceOp op) {
@@ -1216,7 +1216,7 @@ Arguments:
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
-                return ::c10d::ops::reduce_scatter(pg, outputs, inputs, opts);
+                return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
@@ -1243,12 +1243,12 @@ Arguments:
 
           .def(
               "alltoall_base",
-              [](::c10d::ProcessGroup& pg,
+              [](::c10d::ProcessGroup& self,
                  at::Tensor& output,
                  at::Tensor& input,
                  std::vector<int64_t> outputSplitSizes,
                  std::vector<int64_t> inputSplitSizes) {
-                return pg.alltoall_base(
+                return self.alltoall_base(
                     output,
                     input,
                     outputSplitSizes,
@@ -1277,11 +1277,11 @@ Arguments:
 
           .def(
               "alltoall",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  std::vector<at::Tensor>& output,
                  std::vector<at::Tensor>& input) {
                 return ::c10d::ops::alltoall(
-                    pg, output, input, ::c10d::AllToAllOptions());
+                    self, output, input, ::c10d::AllToAllOptions());
               },
               py::arg("output"),
               py::arg("input"),
@@ -1289,11 +1289,11 @@ Arguments:
 
           .def(
               "send",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  int64_t dstRank,
                  int64_t tag) {
-                return ::c10d::ops::send(process_group, tensors, dstRank, tag);
+                return ::c10d::ops::send(self, tensors, dstRank, tag);
               },
               py::arg("tensors"),
               py::arg("dstRank"),
@@ -1302,11 +1302,11 @@ Arguments:
 
           .def(
               "recv",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  int64_t srcRank,
                  int64_t tag) {
-                return ::c10d::ops::recv(process_group, tensors, srcRank, tag);
+                return ::c10d::ops::recv(self, tensors, srcRank, tag);
               },
               py::arg("tensors"),
               py::arg("srcRank"),
