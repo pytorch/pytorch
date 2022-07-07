@@ -116,12 +116,11 @@ def vector_norm(
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))
 
 
-# out_wrapper_multi is buggy (see the note in its definition), and so is the `linalg.svd` out behaviour
-@out_wrapper("U", "S", "Vh")
+@out_wrapper("U", "S", "Vh", exact_dtype=True)
 def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
     return prims.svd(A, full_matrices=full_matrices)
 
 
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def svdvals(A: TensorLikeType) -> Tensor:
     return svd(A, full_matrices=False)[1]
