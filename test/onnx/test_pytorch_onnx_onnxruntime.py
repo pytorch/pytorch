@@ -11766,12 +11766,12 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_cat(self):
-        class ConcatenationModel(torch.nn.Module):
+        class QuantizedConcatenationModel(torch.nn.Module):
             def forward(self, x):
-                return torch.cat((x, x), dim=1)
+                return torch.nn.quantized.QFunctional().cat((x, x), dim=1)
 
         q_input = torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8)
-        self.run_test(ConcatenationModel(), q_input)
+        self.run_test(QuantizedConcatenationModel(), q_input, verbose=True)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
