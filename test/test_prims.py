@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+import torch._refs as refs
 
 
 class TestPrims(TestCase):
@@ -209,6 +210,32 @@ $1 = torch._ops.prims.sin.default($0)""")
 
 
 instantiate_device_type_tests(TestPrims, globals())
+
+
+class TestRefs(TestCase):
+    @dtypes(torch.float32)
+    def test_constant_pad_nd_memory_format(self, device, dtype):
+        # Test memory format is preserved in unambiguous cases
+        for mf, ndim in (
+                (torch.channels_last, 4),
+                (torch.contiguous_format, 4),
+                (torch.channels_last_3d, 5),
+                (torch.contiguous_format, 5),
+        ):
+            a = torch.zeros([2] * ndim).to(memory_format=mf)
+            res = refs.constant_pad_nd(a, pad=[1] * (2 * ndim))
+            self.assertTrue(res.is_contiguous(memory_format=mf))
+
+        # Test that ambiguous cases default to contiguous
+        a = torch.empty_strided((2, 1, 2, 2), stride=(4, 1, 2, 1))
+        self.assertTrue(a.is_contiguous(memory_format=torch.channels_last))
+        res = refs.constant_pad_nd(a, pad=[1] * 8)
+        self.assertTrue(res.is_contiguous())
+        self.assertFalse(res.is_contiguous(memory_format=torch.channels_last))
+
+
+instantiate_device_type_tests(TestRefs, globals())
+
 
 if __name__ == "__main__":
     run_tests()
