@@ -176,11 +176,11 @@ class Adam(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        state['step'] = (
-                            torch.zeros((1,), dtype=torch.float, device=p.device)
-                            if self.defaults['capturable'] or self.defaults['fused']
-                            else torch.tensor(0.)
-                        )
+                        if self.defaults['capturable'] or self.defaults['fused']:
+                            step_device = p.device
+                        else:
+                            step_device = None
+                        state['step'] = torch.tensor(0, dtype=torch.float, device=step_device)
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
