@@ -70,7 +70,6 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   }
 
  private:
-
   inline int64_t block_dim() const noexcept {
     return (layout_ == kSparseBsr || layout_ == kSparseBsc ? 2 : 0);
   }
