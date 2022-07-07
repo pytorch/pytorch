@@ -498,6 +498,7 @@ test_forward_backward_compatibility() {
     echo "huh"
   else
     git reset --hard "${BASE_SHA}"
+    pip install -r "${REPO_DIR}/requirements.txt"
     python "${REPO_DIR}/setup.py" bdist_wheel --bdist-dir="${REPO_DIR}/base_bdist_tmp" --dist-dir="${REPO_DIR}/base_dist"
     python -mpip install "${REPO_DIR}/base_dist/*.whl"
     pip show torch
