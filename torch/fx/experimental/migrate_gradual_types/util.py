@@ -1,6 +1,6 @@
 from torch.fx.experimental.migrate_gradual_types.constraint import TVar, DVar, BinConstraintD, \
-    BVar  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_leq  # type: ignore[import]
+    BVar
+from torch.fx.experimental.migrate_gradual_types.operation import op_leq
 
 
 def gen_tvar(curr):
@@ -26,7 +26,7 @@ def gen_bvar(curr):
     """
     Generate a boolean variable
     :param curr: the current counter
-    :return: a dimension variable and an updated counter
+    :return: a boolean variable and an updated counter
     """
     curr += 1
     return BVar(curr), curr
