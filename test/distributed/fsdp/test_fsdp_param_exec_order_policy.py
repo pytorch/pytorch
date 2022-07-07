@@ -57,12 +57,14 @@ class CNN(nn.Module):
         self.fc1 = nn.Linear(16 * 5 * 5, 20)
         self.fc2 = nn.Linear(20, 20)
         self.fc3 = nn.Linear(20, 20)
+        self.root_weight = torch.nn.Parameter(torch.randn(20, 20))
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
+        x = x @ self.root_weight
         x = F.relu(self.fc3(x))
         x = self.fc2(x)
         return x
@@ -147,7 +149,7 @@ class TestFSDPExecOrderPolicy(FSDPTest):
             ]
             losses.append(iter_losses)
         for l1, l2 in losses:
-            torch.testing.assert_close(l1, l2)
+            torch.testing.assert_close(l1, l2, rtol=1e-4, atol=1e-4)
         self._check_fsdp_param_parity(fsdp_model, ref_model)
 
     def _strip_module_prefix(self, optim_state_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,6 +261,14 @@ class TestFSDPExecOrderPolicy(FSDPTest):
         self.assertTrue(fsdp_model._use_param_exec_order_policy)
         self.assertTrue(fsdp_model._param_exec_order_state, ParamExecOrderState.UNINITIALIZED)
         params_list = copy.deepcopy(list(fsdp_model.parameters()))
+        (
+            root_weight,
+            conv1_weight,
+            conv2_weight,
+            fc1_weight,
+            fc2_weight,
+            fc3_weight,
+        ) = params_list
         for _ in range(iters):
             inp_shape = CNN.get_inp_shape()
             input = torch.randn(inp_shape).to(self.rank)
@@ -266,14 +276,19 @@ class TestFSDPExecOrderPolicy(FSDPTest):
             loss = output.sum()
             loss.backward()
         params_exec_order_list = list(fsdp_model.parameters())
+        # Although the forward of root_weight is after conv1_weight, conv2_weight, fc1_weight,
+        # its gradient ready order is still the last (so the forward order recorded is the first),
+        # since for each ``FlatParameter``, its handle will always run ``_unflatten`` in ``_pre_forward``
+        # before the module forward.
         self.assertEqual(
             params_exec_order_list,
             [
-                params_list[0],
-                params_list[1],
-                params_list[2],
-                params_list[4],
-                params_list[3]
+                root_weight,
+                conv1_weight,
+                conv2_weight,
+                fc1_weight,
+                fc3_weight,
+                fc2_weight,
             ]
         )
         self.assertTrue(fsdp_model._param_exec_order_state, ParamExecOrderState.INITIALIZED)
