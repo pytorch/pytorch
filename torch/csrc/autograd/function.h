@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/exec_info.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -366,9 +367,25 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
-  bool should_compute_output(size_t output_edge_index) const {
+  bool should_build_output(size_t output_edge_index) const {
     TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
+  }
+
+  bool should_compute_output(size_t output_edge_index) const {
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    const auto& next = next_edges_[output_edge_index];
+    if (next.is_valid()) {
+      auto* exec_info_ = get_current_graph_task_exec_info();
+      if (exec_info_ && !exec_info_->empty()) {
+        auto it = exec_info_->find(next.function.get());
+        if (it == exec_info_->end() || !it->second.should_execute()) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   /// Returns true if any of the output edges in any of the ranges are active.

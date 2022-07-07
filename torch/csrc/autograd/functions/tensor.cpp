@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 
+#include <torch/csrc/autograd/exec_info.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -83,6 +84,15 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   } else {
     auto offset = view.storage_offset() - base.storage_offset();
     grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  }
+
+  auto* exec_info_ = get_current_graph_task_exec_info();
+  if (exec_info_ && !exec_info_->empty()) {
+    for (const auto& next : fn->next_edges()) {
+      if (next.is_valid()) {
+        (*exec_info_)[next.function.get()].needed_ = true;
+      }
+    }
   }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save

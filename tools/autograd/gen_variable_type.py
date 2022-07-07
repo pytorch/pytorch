@@ -939,7 +939,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 raise AssertionError()
 
-            return f"grad_fn->should_compute_output({edge_off})"
+            return f"grad_fn->should_build_output({edge_off})"
 
         setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
         for arg in args_with_derivatives:

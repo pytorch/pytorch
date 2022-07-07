@@ -368,6 +368,10 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
+std::unordered_map<Node*, ExecInfo>* get_current_graph_task_exec_info() {
+  return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
+}
+
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
 //
