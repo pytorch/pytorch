@@ -162,7 +162,7 @@ jobs:
         working-directory: builder
 
       - name: Set BUILD_SPLIT_CUDA
-        if: ${{ inputs.GPU_ARCH_TYPE }}' == 'cuda' && startsWith('${{ inputs.GPU_ARCH_VERSION }}', '11') }}
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && startsWith(inputs.GPU_ARCH_VERSION, '11') }}
         shell: bash
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
