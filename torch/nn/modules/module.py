@@ -1264,15 +1264,15 @@ class Module:
         """
         pass
 
-    def __getattr__(self, name: str) -> Union[Optional[Tensor], Optional['Module']]:
+    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if name in self._parameters:
-            return self._parameters[name]
+            return self._parameters[name] # type:ignore
         if name in self._buffers:
-            return self._buffers[name]
+            return self._buffers[name] # type:ignore
         if name in self._modules:
-            return self._modules[name]
+            return self._modules[name] # type:ignore
         if name in self._dynamic_attributes:
-            return self._dynamic_attributes[name]
+            return self._dynamic_attributes[name] # type:ignore
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
