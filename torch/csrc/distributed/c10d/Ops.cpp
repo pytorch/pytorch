@@ -440,17 +440,6 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
   const auto* preMulSumSupplement = reinterpret_cast<c10d::NCCLPreMulSumSupplement*>(opts.reduceOp.supplement_.get());
   const bool has_tensor = !preMulSumSupplement->tensor_factors.empty();
   if (has_tensor) {
-    const double double_factor{preMulSumSupplement->double_factor};
-    static auto op = c10::Dispatcher::singleton()
-                        .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_scalar_", "")
-                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
-                            at::TensorList,
-                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                            int64_t,
-                            double,
-                            int64_t)>();
-    return op.call(tensors, process_group, static_cast<int64_t>(opts.reduceOp), double_factor, opts.timeout.count());
-  } else {
     at::TensorList scale_factors{preMulSumSupplement->tensor_factors};
     static auto op = c10::Dispatcher::singleton()
                         .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_tensors_", "")
@@ -461,6 +450,17 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
                             at::TensorList,
                             int64_t)>();
     return op.call(tensors, process_group, static_cast<int64_t>(opts.reduceOp), scale_factors, opts.timeout.count());
+  } else {
+    const double double_factor{preMulSumSupplement->double_factor};
+    static auto op = c10::Dispatcher::singleton()
+                        .findSchemaOrThrow("c10d::nccl_premulsum_allreduce_with_scaling_scalar_", "")
+                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                            at::TensorList,
+                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                            int64_t,
+                            double,
+                            int64_t)>();
+    return op.call(tensors, process_group, static_cast<int64_t>(opts.reduceOp), double_factor, opts.timeout.count());
   }
 }
 // #endif
