@@ -1,12 +1,8 @@
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 import torchvision
-from torchvision import datasets
 import torchvision.transforms.transforms as transforms
 import os
-import time
 import sys
 import torch.quantization
 
@@ -28,8 +24,6 @@ Define helper functions
 
 # Specify random seed for repeatable results
 _ = torch.manual_seed(191009)
-
-from torchvision.models.resnet import resnet18
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -108,8 +102,18 @@ def prepare_data_loaders(data_path):
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-    dataset = torchvision.datasets.ImageNet(data_path, split="train", transform=transforms.Compose([transforms.RandomResizedCrop(224), transforms.RandomHorizontalFlip(), transforms.ToTensor(), normalize]))
-    dataset_test = torchvision.datasets.ImageNet(data_path, split="val", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize]))
+    dataset = torchvision.datasets.ImageNet(data_path,
+                                            split="train",
+                                            transform=transforms.Compose([transforms.RandomResizedCrop(224),
+                                                                          transforms.RandomHorizontalFlip(),
+                                                                          transforms.ToTensor(),
+                                                                          normalize]))
+    dataset_test = torchvision.datasets.ImageNet(data_path,
+                                                 split="val",
+                                                 transform=transforms.Compose([transforms.Resize(256),
+                                                                               transforms.CenterCrop(224),
+                                                                               transforms.ToTensor(),
+                                                                               normalize]))
 
     train_sampler = torch.utils.data.RandomSampler(dataset)
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
@@ -172,7 +176,7 @@ quantized_model1 = convert_fx(prepared_model1)  # convert the calibrated model t
 print("Size of quantized model #1: uniform activation, uniform weight")
 print_size_of_model(quantized_model1)
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)
-print("Model #1 Evaluation accuracy on test dataset: %2.2f, %2.2f" %(top1.avg, top5.avg))
+print("Model #1 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
 Prepare model with uniform activation, APoT weight
@@ -189,7 +193,7 @@ quantized_model2 = convert_fx(prepared_model2)  # convert the calibrated model t
 print("Size of quantized model #2: uniform activation, APoT weight")
 print_size_of_model(quantized_model2)
 top1, top5 = evaluate(quantized_model2, criterion, data_loader_test)
-print("Model #2 Evaluation accuracy on test dataset: %2.2f, %2.2f" %(top1.avg, top5.avg))
+print("Model #2 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 
 """
@@ -208,7 +212,7 @@ quantized_model3 = convert_fx(prepared_model3)  # convert the calibrated model t
 print("Size of quantized model #3: APoT activation and weight")
 print_size_of_model(quantized_model3)
 top1, top5 = evaluate(quantized_model3, criterion, data_loader_test)
-print("Model #3 Evaluation accuracy on test dataset: %2.2f, %2.2f" %(top1.avg, top5.avg))
+print("Model #3 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 
 from torchvision.models.quantization.resnet import resnet18
@@ -217,6 +221,6 @@ print("Size of eager mode quantized model")
 eager_quantized_model = torch.jit.script(eager_quantized_model)
 print_size_of_model(eager_quantized_model)
 top1, top5 = evaluate(eager_quantized_model, criterion, data_loader_test)
-print("Eager mode quantized model evaluation accuracy on test dataset: %2.2f, %2.2f" %(top1.avg, top5.avg))
+print("Eager mode quantized model evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 eager_mode_model_file = "resnet18_eager_mode_quantized.pth"
 torch.jit.save(eager_quantized_model, saved_model_dir + eager_mode_model_file)
