@@ -46,15 +46,16 @@ try:
                     transformed_rhs, counter = transform_to_z3(constraint.rhs, counter, dimension_dict)
                     transformed_lhs = z3.Bool(constraint.lhs.c)
                     return transformed_lhs == transformed_rhs, counter
-                    # print(transform_to_z3(constraint.rhs, counter, dimension_dict))
 
                 elif is_dim(constraint.lhs) and is_dim(constraint.rhs):
+                    # with dimension tranformations we consider the encoding
                     lhs, counter = transform_dimension(constraint.lhs, counter, dimension_dict)
                     rhs, counter = transform_dimension(constraint.rhs, counter, dimension_dict)
                     return lhs == rhs, counter
 
                 else:
-                    # otherwise, we consider algebraic expressions
+                    # then we have an algebraic expression which means that we disregard the
+                    # first element of the encoding
                     lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
                     rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
                     return lhs == rhs, counter
@@ -106,8 +107,6 @@ try:
                 raise NotImplementedError('operation not yet implemented')
 
         else:
-
-            # print(constraint)
 
             raise NotImplementedError('Operation not yet implemented')
 

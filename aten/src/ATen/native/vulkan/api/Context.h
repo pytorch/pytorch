@@ -141,6 +141,10 @@ class Context final {
 
   // GPU RPC
 
+  inline std::unique_lock<std::mutex> dispatch_lock() {
+    return std::unique_lock<std::mutex>(cmd_mutex_);
+  }
+
  private:
 
   inline void set_cmd() {
@@ -278,8 +282,18 @@ inline void Context::submit_compute_job(
     const utils::uvec3& local_work_group_size,
     const VkFence fence_handle,
     Arguments&&... arguments) {
-  // Serialize recording to the shared command buffer
-  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
+  // Serialize recording to the shared command buffer. Do not initialize with a
+  // mutex just yet, since in some cases it will be externally managed.
+  std::unique_lock<std::mutex> cmd_lock;
+  // If a fence was passed, then assume that the host intends to sync with
+  // the GPU, implying there will be imminent calls to fence.wait() and flush().
+  // We therefore assume the mutex is externally managed in this case, and the
+  // calling thread has already locked the mutex prior to calling the function,
+  // and will release the mutex manually after calling flush(). This will prevent
+  // more dispatches from being recorded until we have flushed the Context.
+  if (fence_handle == VK_NULL_HANDLE) {
+    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
+  }
 
   set_cmd();
 
@@ -306,14 +320,6 @@ inline void Context::submit_compute_job(
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
-  }
-
-  // If a fence was passed, then assume that the host intends to sync with
-  // the GPU, implying there will be imminent calls to fence.wait() and flush().
-  // We therefore release cmd_mutex_ without unlocking to prevent more dispatches
-  // from being recorded until we have flushed the Context.
-  if (fence_handle != VK_NULL_HANDLE) {
-    cmd_lock.release();
   }
 }
 
