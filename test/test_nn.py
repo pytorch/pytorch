@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS, \
-    slowTest
+    slowTest, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -565,6 +565,7 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
@@ -617,6 +618,7 @@ class TestNN(NNTestCase):
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_no_requires_grad(self):
         mod = nn.Linear(2, 3)
 
@@ -805,6 +807,7 @@ class TestNN(NNTestCase):
         with module.register_full_backward_hook(bw_hook):
             module(inp1, inp2).sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -822,6 +825,7 @@ class TestNN(NNTestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_forward_preforward_writable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1763,6 +1767,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -1871,6 +1876,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -4372,6 +4378,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
         self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4404,6 +4411,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
@@ -4530,6 +4538,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -6399,6 +6408,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
         import gc
@@ -6530,6 +6540,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, 'Missing key'):
             m.load_state_dict(m.state_dict())
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -9382,6 +9393,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(grad_output, grad_output_clone)
 
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
                                                  upscale_factor=None):
@@ -10014,6 +10026,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
             self.assertTrue(gradcheck(F.pdist, (inp,)))
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @unittest.expectedFailure
     def test_pdist_cpu_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, requires_grad=True)
@@ -16694,6 +16707,7 @@ torch.cuda.synchronize()
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
@@ -20153,6 +20167,7 @@ torch.cuda.synchronize()
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]
@@ -20839,6 +20854,7 @@ class TestModuleGlobalHooks(TestCase):
         nn.modules.module._global_forward_hooks = OrderedDict()
         nn.modules.module._global_forward_pre_hooks = OrderedDict()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_hooks(self):
         module = nn.Sigmoid
 
@@ -20959,6 +20975,7 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_forward_preforward_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -20980,6 +20997,7 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_preforward_hook_removable(self):
         """
         This test is to test when multiple pre-forward hook functions can be
@@ -21015,6 +21033,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
@@ -21050,6 +21069,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_global_and_local_hooks_order(self):
         module = nn.Sigmoid()
 
