@@ -479,6 +479,15 @@ def frac(x: TensorLikeType) -> TensorLikeType:
     return sub(x, trunc_x)
 
 
+# imag does not use _make_elementwise_unary_reference because it does not support out
+def imag(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    utils.check(
+        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    )
+    return prims.imag(a)
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -492,14 +501,30 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
-    # TODO Add complex tensor support to remove is_infinite prim
-    # if utils.is_complex_dtype(a):
-    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
-    # else:
-    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_infinite(a)
+    if utils.is_complex_dtype(a.dtype):
+        return logical_or(isinf(real(a)), isinf(imag(a)))
+    return logical_not(logical_or(isnan(a), isfinite(a)))
 
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isposinf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("inf"))
+    return zeros_like(a, dtype=torch.bool)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isneginf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("-inf"))
     return zeros_like(a, dtype=torch.bool)
 
 
@@ -630,6 +655,14 @@ def positive(a: TensorLikeType) -> TensorLikeType:
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
+    return a
+
+
+# real does not use _make_elementwise_unary_reference because it does not support out
+def real(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if utils.is_complex_dtype(a.dtype):
+        return prims.real(a)
     return a
 
 
@@ -1173,7 +1206,7 @@ def _logical_or(a: TensorLikeType, b: TensorLikeType):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
         b = b != 0
-    return a | b
+    return bitwise_or(a, b)
 
 
 logical_or = _make_elementwise_binary_reference(
