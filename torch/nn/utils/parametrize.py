@@ -7,6 +7,9 @@ import collections
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
 
+__all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
+           'type_before_parametrizations', 'transfer_parametrizations_and_params']
+
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 
