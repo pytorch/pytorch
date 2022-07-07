@@ -84,7 +84,8 @@ using at::Tensor;
 
 namespace {
 
-// Enforcing that the metadata between the primal and tangent are same has two goals:
+// Enforcing that the metadata between the primal and tangent are same has two
+// goals:
 // - When properties of the primal are checked in composite op's to determine
 //   control flow, the code path decided upon is also reasonable for the tangent
 // - Make sure that when the same as_strided is applied to both primal and
@@ -109,8 +110,8 @@ bool has_same_meta(const Variable& base, const Variable& other) {
   // Technically dim and size belong as part of (2), so we shouldn't really care
   // if a zero-numel tensor violates these. But since these properties
   // (unlike offset and strides) often determine control flow in composite ops
-  // it is useful to enforce that they match for primal and tangent here so nothing
-  // funny happens later (See goal 1).
+  // it is useful to enforce that they match for primal and tangent here so
+  // nothing funny happens later (See goal 1).
   if (base.dim() != other.dim()) {
     return false;
   }
