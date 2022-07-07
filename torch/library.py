@@ -46,7 +46,41 @@ class Library:
     def __repr__(self):
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
 
+    def define(self, schema, alias_analysis=""):
+        r'''Defines a new operator and its semantics in the ns namespace.
+
+        Args:
+            schema: function schema to define a new operator.
+            alias_analysis (optional): Indicates if the aliasing properties of the operator arguments can be
+                                       inferred from the schema (default behavior) or not ("CONSERVATIVE").
+        Returns:
+            name of the operator as inferred from the schema.
+
+        Example::
+            >>> my_lib = Library("foo", "DEF")
+            >>> my_lib.define("sum(Tensor self) -> Tensor")
+        '''
+        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
+        # AliasAnalysis type in C++
+        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
+            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
+        return self.m.define(schema, alias_analysis)
+
     def impl(self, op_name, fn, dispatch_key=''):
+        r'''impl registers the function implementation for an operator defined in the library.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            fn: function that's the operator implementation for the input dispatch key.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>> def div_cpu(self, other):
+            >>>    return self * (1 / other)
+            >>> my_lib.impl("div.Tensor", "CPU")
+        '''
         if not callable(fn):
             raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
         if dispatch_key == '':
@@ -91,20 +125,6 @@ class Library:
         self.m.impl(name, dispatch_key, fn)
         _impls.add(key)
         self._op_impls.add(key)
-
-    def define(self, schema, alias_analysis=""):
-        '''
-        Takes a schema to define a new operator.
-        Also, optionally takes `alias_analysis` argument to indicate if the aliasing properties of the arguments
-        can be inferred from the schema (default behavior) or not ("CONSERVATIVE").
-
-        Returns the name of the operator as inferred from the schema.
-        '''
-        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
-        # AliasAnalysis type in C++
-        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
-        return self.m.define(schema, alias_analysis)
 
     def __del__(self):
         # _op_impls might not have been initialized if an error was thrown in __init__
