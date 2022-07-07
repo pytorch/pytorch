@@ -3,7 +3,7 @@ from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraint
 from torch.fx.experimental.migrate_gradual_types.constraint import Prod, is_algebraic_expression, is_dim
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_eq, op_neq
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_eq, op_neq, op_gt, op_lt
 from torch.fx.experimental.migrate_gradual_types.operation import op_leq, op_sub, op_div, op_mul, op_mod
 from torch.fx.tensor_type import TensorType, Dyn
 
@@ -85,6 +85,15 @@ try:
                 # is dyn or not
                 assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
                 return lhs <= rhs, counter
+
+            elif constraint.op == op_gt:
+                assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                return lhs > rhs, counter
+
+            elif constraint.op == op_lt:
+                assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                return lhs < rhs, counter
+
             else:
                 raise NotImplementedError('operation not yet implemented')
 
