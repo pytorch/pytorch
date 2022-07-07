@@ -461,6 +461,10 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
+if(LINUX AND PACKAGE_TYPE STREQUAL "manywheel" )
+  string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
+endif()
+
 if(MSVC)
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   foreach(flag_var
