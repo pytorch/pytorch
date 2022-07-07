@@ -328,14 +328,15 @@ void weight_norm_backward_last_dim_kernel(
   auto grad_v_data = grad_v.data_ptr<scalar_t>();
   auto grad_g_data = grad_g.data_ptr<scalar_t>();
 
+  // the temp buffer will be used twice:
+  // 1. vertical reduction from [M, N] to [T, N]
+  // 2. store the intermediate data of `sum`, `a` and `b`,
+  //    so need to make sure it has at least 3 rows
+  //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({num_threads, N}, saved_norm.options()).zero_();
+  int K = std::max(3, num_threads);
+  Tensor buffer = at::empty({K, N}, saved_norm.options()).zero_();
   auto buffer_data = buffer.data_ptr<accscalar_t>();
-
-  // 1st row to store coefficient a and 2nd row to store coefficient b
-  Tensor a_b = at::empty({2, N}, saved_norm.options()).zero_();
-  auto a = a_b.data_ptr<accscalar_t>();
-  auto b = a + N;
 
   // vertical parallel reduction
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
@@ -357,7 +358,11 @@ void weight_norm_backward_last_dim_kernel(
   }
 
   // reuse the 1st row of buffer to store the sum
+  // 2nd row to store coefficient a
+  // 3rd row to store coefficient b
   accscalar_t* per_dim_sum = buffer_data;
+  accscalar_t* a = buffer_data + N;
+  accscalar_t* b = buffer_data + 2 * N;
 
   // a = g /norm
   // b = a * grad_g / norm

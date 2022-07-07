@@ -53,7 +53,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_torch_dispatch_mode_state = at::impl::TorchDispatchModeTLS::get_state();
   if (maybe_torch_dispatch_mode_state) {
-    maybe_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack, maybe_torch_dispatch_mode_state);
+    maybe_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
     return;
   }
 
@@ -69,7 +69,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     if (ivalue.isTensor()) {
       auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
       if (interpreter) {
-        interpreter->dispatch(op, stack, nullptr);
+        interpreter->dispatch(op, stack);
         return;
       }
     } else if (ivalue.isTensorList()) {
@@ -78,7 +78,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       for (const auto& nv : ivalue.toListRef()) {
         auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
         if (interpreter) {
-          interpreter->dispatch(op, stack, nullptr);
+          interpreter->dispatch(op, stack);
           return;
         }
       }
