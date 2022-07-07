@@ -961,7 +961,7 @@ class OutlierDetector(DetectorBase):
         self.ratio_threshold = ratio_threshold
 
         # make sure passed in percentile is valid
-        assert self.reference_percentile >= 0 and self.reference_percentile <= 1
+        assert reference_percentile >= 0 and reference_percentile <= 1
         self.reference_percentile = reference_percentile
         self.ch_axis = ch_axis
 
