@@ -155,6 +155,7 @@ def _communicate_optim_state(
                 buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
                 tensor_buffer = value.new_zeros(*buffer_size)
             dist._all_gather_base(tensor_buffer, value, group=group)
+            torch.cuda.synchronize()
             if to_save:
                 assert hasattr(flat_param, "_orig_size"), \
                     "Sharded flattened parameter should have `_orig_size` set"
