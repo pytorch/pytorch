@@ -10,7 +10,7 @@ In particular, note that floating point provides limited accuracy (about 7 decim
 for single precision floating point numbers, about 16 decimal digits for double precision
 floating point numbers) and that floating point addition and multiplication are not
 associative, so the order of the operations affects the results.
-Because of this, pytorch is not guaranteed
+Because of this, PyTorch is not guaranteed
 to produce bitwise identical results for floating point computations that are
 mathematically identical. Similarly, bitwise identical results are not guaranteed across
 PyTorch releases, individual commits, or different platforms. In particular, CPU and GPU
@@ -20,12 +20,12 @@ the sources of randomness.
 Batched computations or slice computations
 ------------------------------------------
 
-Many operations in pytorch support batched computation, where the same operation is performed
+Many operations in PyTorch support batched computation, where the same operation is performed
 for the elements of the batches of inputs. An example of this is :meth:`torch.mm` and
 :meth:`torch.bmm`. It is possible to implement batched computation as a loop over batch elements,
 and apply the necessary math operations to the individual batch elements, for efficiency reasons
 we are not doing that, and typically perform computation for the whole batch. The mathematical
-libraries that we are calling, and pytorch internal implementations of operations can produces
+libraries that we are calling, and PyTorch internal implementations of operations can produces
 slightly different results in this case, compared to non-batched computations. In particular,
 let ``A`` and ``B`` be 3D tensors with the dimensions suitable for batched matrix multiplication.
 Then ``(A@B)[0]`` (the first element of the batched result) is not guaranteed to be bitwise
@@ -54,7 +54,7 @@ datatype. E.g.:
 TensorFloat-32(TF32) on Nvidia Ampere devices
 ---------------------------------------------
 
-On Ampere Nvidia GPUs, pytorch by default uses TensorFloat32 (TF32) to speed up mathematically
+On Ampere Nvidia GPUs, PyTorch by default uses TensorFloat32 (TF32) to speed up mathematically
 intensive operations, in particular matrix multiplications and convolutions. When operation is performed
 using TF32 tensor cores, only the first 10 bits of the input mantissa are read. This leads to less accurate
 results, and surprising results such as multiplying a matrix by identity matrix produces
@@ -72,3 +72,50 @@ If reduced-precision reductions are problematic, they can be turned off with
 ``torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False``
 
 For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>`
+
+.. _fp16_on_mi200:
+
+Reduced Precision FP16 and BF16 GEMMs and Convolutions on AMD Instinct MI200 devices
+------------------------------------------------------------------------------------
+On AMD Instinct MI200 GPUs, the FP16 and BF16 V_DOT2 and MFMA matrix instructions flush input and output denormal values to zero. FP32 and FP64 MFMA matrix instructions do not flush input and output denormal values to zero. The affected instructions are only used by rocBLAS (GEMM) and MIOpen (convolution) kernels; all other PyTorch operations will not encounter this behavior. All other supported AMD GPUs will not encounter this behavior.
+
+rocBLAS and MIOpen provide alternate implementations for affected FP16 operations. Alternate implementations for BF16 operations are not provided; BF16 numbers have a larger dynamic range than FP16 numbers and are less likely to encounter denormal values. For the FP16 alternate implementations, FP16 input values are cast to an intermediate BF16 value and then cast back to FP16 output after the accumulate FP32 operations. In this way, the input and output types are unchanged.
+
+When training using FP16 precision, some models may fail to converge with FP16 denorms flushed to zero. Denormal values more frequently occur in the backward pass of training during gradient calculation. PyTorch by default will use the rocBLAS and MIOpen alternate implementations during the backward pass. The default behavior can be overridden using environment variables, ROCBLAS_INTERNAL_FP16_ALT_IMPL and MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP16_ALT_IMPL. The behavior of these environment variables is as follows:
+
++---------------+-----------+-----------+
+|               | forward   | backward  |
++===============+===========+===========+
+| Env unset     | original  | alternate |
++---------------+-----------+-----------+
+| Env set to 1  | alternate | alternate |
++---------------+-----------+-----------+
+| Env set to 0  | original  | original  |
++---------------+-----------+-----------+
+
+The following is the list of operations where rocBLAS may be used:
+
+* torch.addbmm
+* torch.addmm
+* torch.baddbmm
+* torch.bmm
+* torch.mm
+* torch.nn.GRUCell
+* torch.nn.LSTMCell
+* torch.nn.Linear
+* torch.sparse.addmm
+* the following torch._C._ConvBackend implementations:
+
+  * slowNd
+  * slowNd_transposed
+  * slowNd_dilated
+  * slowNd_dilated_transposed
+
+The following is the list of operations where MIOpen may be used:
+
+* torch.nn.Conv[Transpose]Nd
+* the following torch._C._ConvBackend implementations:
+
+  * ConvBackend::Miopen
+  * ConvBackend::MiopenDepthwise
+  * ConvBackend::MiopenTranspose

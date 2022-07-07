@@ -80,15 +80,22 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
-  }
-  else if(!isComplexType(lower) && isFloatingType(higher)) {
+  } else if (isComplexType(lower)) {
+    // preserve value type of higher if it is floating type.
+    if (isFloatingType(higher)) {
+      return toComplexType(higher);
+    }
+    // in case of integral input
+    // lower complex takes precedence.
+    return lower;
+  } else if (isFloatingType(higher)) {
     return higher;
   }
-  if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
+  if (higher == ScalarType::Bool || isFloatingType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
-      return higher;
+    return higher;
   }
   return lower;
 }

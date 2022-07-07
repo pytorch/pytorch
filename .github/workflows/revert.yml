@@ -6,7 +6,8 @@ on:
 
 jobs:
   do_revert:
-    runs-on: ubuntu-20.04
+    name: try_revert_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -28,11 +29,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REASON: ${{ github.event.client_payload.reason }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -ex
           if [ -n "${COMMENT_ID}" ]; then
-            python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            if [ -n "${REASON}" ]; then
+              python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" --reason "${REASON}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            fi
           else
-            python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
+            if [ -n "${REASON}" ]; then
+              python3 .github/scripts/trymerge.py --revert --reason "${REASON}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
+            fi
           fi
+
+concurrency: try-revert

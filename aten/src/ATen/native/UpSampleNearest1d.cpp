@@ -16,7 +16,7 @@ TORCH_META_FUNC(upsample_nearest1d) (
       "Non-empty 3D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact1d) (
@@ -30,7 +30,7 @@ TORCH_META_FUNC(_upsample_nearest_exact1d) (
       "Non-empty 3D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(upsample_nearest1d_backward) (
@@ -42,7 +42,7 @@ TORCH_META_FUNC(upsample_nearest1d_backward) (
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
   check_dim_size(grad_output, 3, 2, full_output_size[2]);
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact1d_backward) (
@@ -54,7 +54,7 @@ TORCH_META_FUNC(_upsample_nearest_exact1d_backward) (
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
   check_dim_size(grad_output, 3, 2, full_output_size[2]);
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 } // namespace meta

@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/Half.h>  // For c10::overflows
 
 #ifdef USE_VULKAN_API
 
@@ -41,10 +42,7 @@ namespace detail {
 
 template <typename To, typename From>
 inline constexpr To safe_downcast(const From v) {
-  typedef std::common_type_t<From, To> Type;
-  constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
-  constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
-  TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range!");
+  TORCH_CHECK(!c10::overflows<To>(v), "Cast failed: out of range!");
   return static_cast<To>(v);
 }
 
@@ -104,6 +102,27 @@ using vec3 = vec<3u>;
 using vec4 = vec<4u>;
 
 } // namespace utils
+
+inline bool operator==(
+    const utils::uvec3& _1,
+    const utils::uvec3& _2) {
+
+  return (_1.data[0u] == _2.data[0u] && \
+          _1.data[1u] == _2.data[1u] && \
+          _1.data[2u] == _2.data[2u]);
+}
+
+inline VkOffset3D create_offset3d(const utils::uvec3& offsets) {
+  return VkOffset3D{
+    static_cast<int32_t>(offsets.data[0u]),
+    static_cast<int32_t>(offsets.data[1u]),
+    static_cast<int32_t>(offsets.data[2u])};
+}
+
+inline VkExtent3D create_extent3d(const utils::uvec3& extents) {
+  return VkExtent3D{extents.data[0u], extents.data[1u], extents.data[2u]};
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native

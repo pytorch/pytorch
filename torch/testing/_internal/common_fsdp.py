@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
@@ -34,6 +35,17 @@ def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
         params = list(p.clone().detach_() for p in fsdp_model.parameters())
 
     return params
+
+def _validate(model, process_group, assert_fn):
+    module_states = [param.detach().cpu() for param in model.parameters()]
+    module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
+    world_size = dist.get_world_size(process_group)
+    olist = [None for _ in range(world_size)]
+    dist.all_gather_object(olist, module_states, group=process_group)
+    rank0_states = olist[0]
+    for state in olist[1:]:
+        for p1, p2 in zip(rank0_states, state):
+            assert_fn(p1, p2)
 
 def _zero_model(fsdp_model: FullyShardedDataParallel):
     with FullyShardedDataParallel.summon_full_params(fsdp_model):
@@ -80,6 +92,17 @@ class DummyProcessGroup:
 
     def size(self) -> int:
         return self._size
+
+    def allreduce(self, *args, **kwargs):
+        dist_wait = mock.Mock()
+
+        def get_future():
+            future = torch.futures.Future()
+            future.set_result(1)
+            return future
+
+        dist_wait.get_future = get_future
+        return dist_wait
 
 class DeterministicModel(torch.nn.Module):
     def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
@@ -250,6 +273,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         **kwargs
@@ -261,6 +285,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             ),
@@ -370,6 +395,9 @@ class FSDPTest(MultiProcessTestCase):
     def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
         self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
 
+    def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
+        self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
@@ -420,11 +448,13 @@ class FSDPTest(MultiProcessTestCase):
         clip_norm=0.3,
         norm_type=None,
         save_model=False,
-        mixed_precision=None
+        mixed_precision=None,
+        enable_sharded_grad_scaler=False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
+        sharded_grad_scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
@@ -447,6 +477,8 @@ class FSDPTest(MultiProcessTestCase):
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
+            loss = sharded_grad_scaler.scale(loss)
+
             if not mixed_precision:
                 assert (
                     loss.dtype == torch.float32
@@ -477,9 +509,11 @@ class FSDPTest(MultiProcessTestCase):
                     # Params should always be on CPU, even if
                     # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
-            optim.step()
+            # Unscale the gradients and step
+            sharded_grad_scaler.step(optim)
+            # Update the scale factor
+            sharded_grad_scaler.update()
             # if save_model, simulate save + load.
-
             if save_model:
                 state_dict = {k: v.clone() for k, v in model.state_dict().items()}
                 # Zero params, if save/load state_dict did not work properly, this
@@ -502,11 +536,13 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
+        enable_sharded_grad_scaler=False,
         **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
@@ -524,6 +560,7 @@ class FSDPTest(MultiProcessTestCase):
         ref_loss = self._train_for_several_steps(
             model, num_steps, autocast=mixed_precision is not None, lr=lr,
             fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
+            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
         )
         ref_full_params = list(model.parameters())
 
@@ -535,6 +572,7 @@ class FSDPTest(MultiProcessTestCase):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             )
@@ -546,6 +584,7 @@ class FSDPTest(MultiProcessTestCase):
             model,
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
+            forward_prefetch=forward_prefetch,
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
         )
@@ -572,6 +611,7 @@ class FSDPTest(MultiProcessTestCase):
                 model, num_steps, autocast=False, lr=lr,
                 fsdp_cpu_offload=cpu_offload, save_model=save_model,
                 mixed_precision=mixed_precision,
+                enable_sharded_grad_scaler=enable_sharded_grad_scaler,
             )
         # We only check for errors in the case we have the following setup:
         # model = FSDP(model, cpu_offload=True)
@@ -687,6 +727,6 @@ def _collect_total_grad_norm_local(model, norm_type):
     else:
         total_norm = 0.0
         for p in model.parameters():
-            local_norm = torch.linalg.norm(p.grad, norm_type, dtype=torch.float32)
+            local_norm = torch.linalg.vector_norm(p.grad, norm_type, dtype=torch.float32)
             total_norm += local_norm ** norm_type
         return total_norm ** (1.0 / norm_type)

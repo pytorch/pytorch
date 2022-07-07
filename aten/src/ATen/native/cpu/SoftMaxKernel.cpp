@@ -43,11 +43,11 @@ inline void _vec_log_softmax_lastdim(
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        scalar_t tmp_sum_scalar[CHUNK_SIZE];
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+        scalar_t max_input_arr[CHUNK_SIZE];
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t tmp_sum_scalar[CHUNK_SIZE];
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          scalar_t max_input_arr[CHUNK_SIZE];
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
             loop_end = end - ii;
@@ -104,38 +104,97 @@ inline void _vec_softmax_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  if (grain_size < 1)
-    grain_size = 1;
+  using Vec = vec::Vectorized<scalar_t>;
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      scalar_t* input_data = input_data_base + i * dim_size;
+      scalar_t* output_data = output_data_base + i * dim_size;
+      scalar_t max_input = vec::reduce_all<scalar_t>(
+          [](Vec& x, Vec& y) { return vec::maximum(x, y); },
+          input_data,
+          dim_size);
+      vec::map(
+          [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+          output_data,
+          input_data,
+          dim_size);
+      scalar_t tmp_sum = vec::reduce_all<scalar_t>(
+          [](Vec x, Vec y) { return x + y; }, output_data, dim_size);
+      tmp_sum = 1 / tmp_sum;
+      vec::map(
+          [tmp_sum](Vec x) { return x * Vec(tmp_sum); },
+          output_data,
+          output_data,
+          dim_size);
+    }
+  });
+}
 
-  parallel_for(
-      0,
-      outer_size,
-      grain_size,
-      [&](int64_t begin, int64_t end) {
-        for (const auto i : c10::irange(begin, end)) {
-          scalar_t* input_data = input_data_base + i * dim_size;
-          scalar_t* output_data = output_data_base + i * dim_size;
-          scalar_t max_input = vec::reduce_all<scalar_t>(
-              [](Vec& x, Vec& y) { return vec::maximum(x, y); },
-              input_data,
-              dim_size);
-          vec::map(
-              [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-              output_data,
-              input_data,
-              dim_size);
-          scalar_t tmp_sum = vec::reduce_all<scalar_t>(
-              [](Vec x, Vec y) { return x + y; }, output_data, dim_size);
-          tmp_sum = 1 / tmp_sum;
-          vec::map(
-              [tmp_sum](Vec x) { return x * Vec(tmp_sum); },
-              output_data,
-              output_data,
-              dim_size);
-        }
-      });
+template <>
+inline void _vec_softmax_lastdim<BFloat16>(
+    BFloat16* input_data_base,
+    BFloat16* output_data_base,
+    int64_t outer_size,
+    int64_t dim_size) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    // thread local temp buffer.
+    std::unique_ptr<float []> buffer(new float[dim_size]);
+    float* buffer_data = buffer.get();
+
+    for (const auto i : c10::irange(begin, end)) {
+      BFloat16* input_data = input_data_base + i * dim_size;
+      BFloat16* output_data = output_data_base + i * dim_size;
+      // reduce to max and cache float input data
+      fVec max_fvec = fVec(-std::numeric_limits<float>::infinity());
+      int64_t d0 = 0;
+      for (; d0 < dim_size - (dim_size % bVec::size()); d0 += bVec::size()) {
+        bVec data_bvec = bVec::loadu(input_data + d0);
+        fVec data_fvec0, data_fvec1;
+        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+        max_fvec = vec::maximum(max_fvec, data_fvec0);
+        max_fvec = vec::maximum(max_fvec, data_fvec1);
+        data_fvec0.store(buffer_data + d0);
+        data_fvec1.store(buffer_data + d0 + fVec::size());
+      }
+      float max_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return vec::maximum(x, y); }, max_fvec);
+      for (; d0 < dim_size; d0++) {
+        float data_val = input_data[d0];
+        max_val = std::max(max_val, data_val);
+        buffer_data[d0] = data_val;
+      }
+
+      // map (x - max).exp() and reduce to sum
+      fVec sum_fvec = fVec(float(0));
+      int64_t d1 = 0;
+      for (; d1 < dim_size - (dim_size % fVec::size()); d1 += fVec::size()) {
+        fVec data_fvec = (fVec::loadu(buffer_data + d1) - fVec(max_val)).exp();
+        sum_fvec += data_fvec;
+        data_fvec.store(buffer_data + d1);
+      }
+      float sum_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, sum_fvec);
+      for (; d1 < dim_size; d1++) {
+        float data_val = std::exp(buffer_data[d1] - max_val);
+        sum_val += data_val;
+        buffer_data[d1] = data_val;
+      }
+
+      sum_val = 1 / sum_val;
+      int64_t d2 = 0;
+      for (; d2 < dim_size - (dim_size % bVec::size()); d2 += bVec::size()) {
+        fVec out_fvec0 = fVec::loadu(buffer_data + d2) * fVec(sum_val);
+        fVec out_fvec1 = fVec::loadu(buffer_data + d2 + fVec::size()) * fVec(sum_val);
+        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        out_bvec.store(output_data + d2);
+      }
+      for (; d2 < dim_size; d2++) {
+        output_data[d2] = BFloat16(buffer_data[d2] * sum_val);
+      }
+    }
+  });
 }
 
 template <typename scalar_t, bool log_softmax>

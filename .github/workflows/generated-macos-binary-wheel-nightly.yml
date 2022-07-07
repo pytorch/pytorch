@@ -25,9 +25,6 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: macos-binary-wheel
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
 concurrency:
@@ -37,7 +34,7 @@ concurrency:
 jobs:
   wheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -212,7 +209,7 @@ jobs:
           docker system prune -af
   wheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -387,7 +384,7 @@ jobs:
           docker system prune -af
   wheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -562,7 +559,7 @@ jobs:
           docker system prune -af
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

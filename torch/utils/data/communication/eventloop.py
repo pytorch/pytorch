@@ -4,6 +4,17 @@ import pickle
 
 from torch.utils.data import IterDataPipe, communication, MapDataPipe
 
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
+
 __all__ = [
     "DataPipeToQueuesLoop",
     "SpawnProcessForDataPipeline",
@@ -44,8 +55,15 @@ def SpawnThreadForDataPipeline(datapipe):
 
     try:
         new_datapipe = pickle.loads(pickle.dumps(datapipe))
-    except Exception as e:
-        raise Exception('Unable to pickle DataPipe to make thread local copy', e)
+    except Exception as pe:
+        if HAS_DILL:
+            try:
+                new_datapipe = dill.loads(dill.dumps(datapipe))
+            except Exception as de:
+                raise Exception('Unable to dill DataPipe to make thread local copy', de)
+
+        else:
+            raise Exception('Unable to pickle DataPipe to make thread local copy (consider installing `dill`)', pe)
 
     process = threading.Thread(target=DataPipeToQueuesLoop, args=(
         new_datapipe, req_queue, res_queue), daemon=True)

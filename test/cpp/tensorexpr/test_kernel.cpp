@@ -69,8 +69,6 @@ TEST_F(Kernel, InliningIntermediates) {
       const auto graph_string = format(graph_template, env);
       auto graph = std::make_shared<Graph>();
       parseIR(graph_string, &*graph);
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      auto device = use_cuda ? kCUDA : kCPU;
       TensorExprKernel k(graph);
       auto stmt = k.getCodeGenStmt();
       std::ostringstream oss;
@@ -80,8 +78,6 @@ TEST_F(Kernel, InliningIntermediates) {
 
       // aten_sub should be removed by the CUDA backend by metavar rewriting
       // and by the CPU backend by horizontal fusion.
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,cppcoreguidelines-avoid-magic-numbers)
-      size_t num_out1_uses = use_cuda ? 0 : 5;
       torch::jit::testing::FileCheck().check_not("aten_sub")->run(oss.str());
     }
   }

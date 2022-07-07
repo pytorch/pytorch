@@ -3,10 +3,10 @@
 #include <map>
 #include <unordered_map>
 
-namespace torch { namespace utils {
+namespace torch {
+namespace utils {
 
 using namespace at;
-
 
 std::vector<TensorGroup> take_tensors(
     TensorList tensors,
@@ -18,13 +18,13 @@ std::vector<TensorGroup> take_tensors(
   std::map<int64_t, TensorGroup> groups;
   size_t cur_group_size = 0;
 
-  for (const auto & tensor : tensors) {
+  for (const auto& tensor : tensors) {
     size_t tensor_size = 0;
     if (tensor.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
       tensor_size = indices.numel() * indices.element_size() +
-                    values.numel() * indices.element_size();
+          values.numel() * indices.element_size();
     } else {
       tensor_size = tensor.numel() * tensor.element_size();
     }
@@ -72,10 +72,10 @@ void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   std::unordered_map<size_t, size_t> type_id_to_type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
-  for (auto & tmpl_tensor : order) {
+  for (auto& tmpl_tensor : order) {
     size_t tmpl_type_id = type_id(tmpl_tensor);
-    auto & indices = type_id_to_indices[tmpl_type_id];
-    auto & used = type_id_to_type_used[tmpl_type_id];
+    auto& indices = type_id_to_indices[tmpl_type_id];
+    auto& used = type_id_to_type_used[tmpl_type_id];
     ordered_tensors.push_back(tensors[indices[used++]]);
   }
   std::swap(tensors, ordered_tensors);
@@ -91,31 +91,37 @@ at::Tensor get_values(const at::Tensor& t) {
   return t._values();
 }
 
-}
+} // namespace
 
-std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors) {
+std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(
+    at::TensorList tensors) {
   auto flat_indices = utils::flatten_dense_tensors(fmap(tensors, &get_indices));
   auto flat_values = utils::flatten_dense_tensors(fmap(tensors, &get_values));
   return std::make_pair(flat_indices, flat_values);
 }
 
 std::vector<at::Tensor> unflatten_sparse_tensors(
-        const at::Tensor& flat_indices, const at::Tensor& flat_values,
-        at::TensorList tensors) {
-  if (tensors.size() == 0) return {};
+    const at::Tensor& flat_indices,
+    const at::Tensor& flat_values,
+    at::TensorList tensors) {
+  if (tensors.size() == 0)
+    return {};
 
-  auto indices = utils::unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
-  auto values = utils::unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
+  auto indices =
+      utils::unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
+  auto values =
+      utils::unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
 
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i) {
-    auto &ref_t = tensors[i];
-    auto t = at::_sparse_coo_tensor_unsafe(indices[i], values[i], ref_t.sizes());
+    auto& ref_t = tensors[i];
+    auto t =
+        at::_sparse_coo_tensor_unsafe(indices[i], values[i], ref_t.sizes());
     outputs.emplace_back(t._coalesced_(ref_t.is_coalesced()));
   }
   return outputs;
 }
 
-
-}}
+} // namespace utils
+} // namespace torch

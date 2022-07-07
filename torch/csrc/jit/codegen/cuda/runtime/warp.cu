@@ -44,7 +44,7 @@ __device__ void warpReduceTIDX(
 
     block_sync::sync();
 
-    if (read_write_pred && is_warp_head) {
+    if (is_warp_head) {
       shared_mem[smem_offset + warp_idx] = reduce_val;
     }
 

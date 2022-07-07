@@ -17,6 +17,10 @@ TORCH_API void ReplaceWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
+TORCH_API void ReplacePermuteWithCopy(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    bool outputs_are_immutable = true);
+
 void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
@@ -75,8 +79,6 @@ TORCH_API void RemoveUnnecessaryOutputs(std::shared_ptr<Graph>& graph);
 
 TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
     std::shared_ptr<Graph>& graph);
-
-TORCH_API void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph);
 
 TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 
