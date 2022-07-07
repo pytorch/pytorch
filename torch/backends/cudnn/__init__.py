@@ -38,24 +38,22 @@ if _cudnn is not None:
                 cudnn_compatible = runtime_minor >= compile_minor
             if not cudnn_compatible:
                 base_error_msg = (f'cuDNN version incompatibility: '
-                        f'PyTorch was compiled  against {compile_version} '
-                        f'but found runtime version {runtime_version}. '
-                        f'PyTorch already comes bundled with cuDNN. '
-                        f'One option to resolving this error is to ensure PyTorch '
-                        f'can find the bundled cuDNN.')
+                                  f'PyTorch was compiled  against {compile_version} '
+                                  f'but found runtime version {runtime_version}. '
+                                  f'PyTorch already comes bundled with cuDNN. '
+                                  f'One option to resolving this error is to ensure PyTorch '
+                                  f'can find the bundled cuDNN.')
 
                 if 'LD_LIBRARY_PATH' in os.environ:
                     ld_library_path = os.environ.get('LD_LIBRARY_PATH')
-                    if any(substring in ld_library_path for substring in ['cuda', 'cudnn']):
-                        raise RuntimeError(
-                            f'{base_error_msg}'
-                            f'Looks like your LD_LIBRARY_PATH contains incompatible version of cudnn'
-                            f'Please either remove it from the path or install cudnn {compile_version}')
+                    if 'cuda' in ld_library_path or 'cudnn' in ld_library_path:
+                        raise RuntimeError(f'{base_error_msg}'
+                                           f'Looks like your LD_LIBRARY_PATH contains incompatible version of cudnn'
+                                           f'Please either remove it from the path or install cudnn {compile_version}')
                     else:
-                        raise RuntimeError(
-                            f'{base_error_msg}'
-                            f'one possibility is that there is a '
-                            f'conflicting cuDNN in LD_LIBRARY_PATH.')
+                        raise RuntimeError(f'{base_error_msg}'
+                                           f'one possibility is that there is a '
+                                           f'conflicting cuDNN in LD_LIBRARY_PATH.')
                 else:
                     raise RuntimeError(base_error_msg)
 
