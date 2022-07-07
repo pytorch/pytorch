@@ -11,21 +11,21 @@ namespace api {
 
 class OpProfiler final {
  public:
-  explicit OpProfiler(Command::Buffer& buffer, QueryPool& querypool, const std::string& query_name)
+  explicit OpProfiler(VkCommandBuffer buffer, QueryPool& querypool, const std::string& query_name)
     : buffer_(buffer),
       querypool_(querypool) {
-    query_index_ = querypool.begin(buffer_.handle(), query_name);
+    query_index_ = querypool.begin(buffer_, query_name);
   }
   OpProfiler(const OpProfiler&) = delete;
   OpProfiler(OpProfiler&&) = delete;
   OpProfiler& operator=(const OpProfiler&) = delete;
   OpProfiler& operator=(OpProfiler&&) = delete;
   ~OpProfiler() {
-    querypool_.end(buffer_.handle(), query_index_);
+    querypool_.end(buffer_, query_index_);
   }
 
 private:
-  Command::Buffer& buffer_;
+  VkCommandBuffer buffer_;
   QueryPool& querypool_;
   int query_index_;
 };
