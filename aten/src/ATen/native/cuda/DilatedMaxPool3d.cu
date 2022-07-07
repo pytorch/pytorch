@@ -348,12 +348,25 @@ void max_pool3d_with_indices_out_cuda_template(
     "max_pool3d_with_indices_out_cuda_template()");
 
   bool channels_last = input.ndimension() == 5 && input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d;
-
+  Tensor _input = input;
   if (input.ndimension() == 4) {
-    output.resize_({ nslices, otime, oheight, owidth});
-    indices.resize_({nslices, otime, oheight, owidth});
-  }
-  else {
+    Tensor input_channels_last_check = input.unsqueeze(0);
+    // work around buggy behavior of suggest_memory_format here where
+    // suggested format of unsqueezed tensor is contiguous while it is
+    // really only contiguous in ChannelsLast3d
+    channels_last = (!input_channels_last_check.is_contiguous()) &&
+                     input_channels_last_check.is_contiguous(at::MemoryFormat::ChannelsLast3d);
+    if (!channels_last) {
+      output.resize_({ nslices, otime, oheight, owidth});
+      indices.resize_({nslices, otime, oheight, owidth});
+    } else {
+      _input = input_channels_last_check;
+      output.resize_({1, nslices, otime, oheight, owidth}, at::MemoryFormat::ChannelsLast3d);
+      indices.resize_({1, nslices, otime, oheight, owidth}, at::MemoryFormat::ChannelsLast3d);
+      output = output.squeeze(0);
+      indices = indices.squeeze(0);
+    }
+  } else {
     if (!channels_last) {
       output.resize_({nbatch, nslices, otime, oheight, owidth});
       indices.resize_({nbatch, nslices, otime, oheight, owidth});
@@ -372,19 +385,9 @@ void max_pool3d_with_indices_out_cuda_template(
   if (!channels_last) {
     work_input = input.contiguous();
   } else {
-    work_input = input.contiguous(at::MemoryFormat::ChannelsLast3d);
+    work_input = _input.contiguous(at::MemoryFormat::ChannelsLast3d);
   }
   Tensor work_indices = indices;
-  if (input.ndimension() == 5) {
-    // can remove this reshape as channels-last addition switched to flat manual indexing for channels-first as well
-    if (!channels_last) {
-      // Collapse batch and feature dimensions.
-      work_input = work_input.reshape({nbatch * nslices, itime, iheight, iwidth});
-      // don't do this for channels-last as it creates a copy
-      work_output = work_output.reshape({nbatch * nslices, otime, oheight, owidth});
-      work_indices = work_indices.reshape({nbatch * nslices, otime, oheight, owidth});
-    }
-  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(),
@@ -463,10 +466,22 @@ void max_pool3d_with_indices_backward_out_cuda_template(
 
   // Resize and initialize result tensor.
   bool channels_last = input.ndimension() == 5 && input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d;
+  Tensor _input = input;
+  if (input.ndimension() == 4) {
+    Tensor input_channels_last_check = input.unsqueeze(0);
+    // work around buggy behavior of suggest_memory_format here where
+    // suggested format of unsqueezed tensor is contiguous while it is
+    // really only contiguous in ChannelsLast3d
+    channels_last = (!input_channels_last_check.is_contiguous()) &&
+                     input_channels_last_check.is_contiguous(at::MemoryFormat::ChannelsLast3d);
+    if (channels_last) {
+      _input = input_channels_last_check;
+    }
+  }
   if (!channels_last) {
     gradInput.resize_as_(input);
   } else {
-    gradInput.resize_as_(input, at::MemoryFormat::ChannelsLast3d);
+    gradInput.resize_as_(_input, at::MemoryFormat::ChannelsLast3d);
   }
   gradInput.zero_();
 
@@ -505,17 +520,13 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     work_grad_output = gradOutput.contiguous();
     work_indices = indices.contiguous();
   } else {
-    work_grad_output = gradOutput.contiguous(at::MemoryFormat::ChannelsLast3d);
-    work_indices = indices.contiguous(at::MemoryFormat::ChannelsLast3d);
-  }
-
-  if (input.ndimension() == 5) {
-      // Collapse batch and feature dimensions.
-      if (!channels_last) {
-        work_grad_input = work_grad_input.reshape({nbatch * nslices, itime, iheight, iwidth});
-        work_grad_output = work_grad_output.reshape({nbatch * nslices, otime, oheight, owidth});
-        work_indices = work_indices.reshape({nbatch * nslices, otime, oheight, owidth});
-      }
+    if (input.ndimension() == 4) {
+      work_grad_output = gradOutput.unsqueeze(0).contiguous(at::MemoryFormat::ChannelsLast3d);
+      work_indices = indices.unsqueeze(0).contiguous(at::MemoryFormat::ChannelsLast3d);
+    } else {
+      work_grad_output = gradOutput.contiguous(at::MemoryFormat::ChannelsLast3d);
+      work_indices = indices.contiguous(at::MemoryFormat::ChannelsLast3d);
+    }
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
