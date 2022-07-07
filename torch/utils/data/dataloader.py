@@ -69,8 +69,6 @@ get_worker_info = _utils.worker.get_worker_info
 logger = logging.getLogger(__name__)
 
 
-
-
 class _DatasetKind(object):
     Map = 0
     Iterable = 1
@@ -213,7 +211,6 @@ class DataLoader(Generic[T_co]):
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
-    seeds_done = {}
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
