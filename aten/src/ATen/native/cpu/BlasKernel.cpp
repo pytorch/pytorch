@@ -37,8 +37,7 @@ auto sum(int64_t N, Func f) {
   using acc_t = decltype(f(0));
 
   // Calculate independent partial sums then add together at the end
-  std::array<acc_t, ilp_factor> partial_sums;
-  partial_sums.fill(acc_t(0));
+  std::array<acc_t, ilp_factor> partial_sums{};
 
   int64_t i = 0;
   for (; i + ilp_factor <= N; i += ilp_factor) {
