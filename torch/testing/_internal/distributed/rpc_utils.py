@@ -43,9 +43,11 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
+    FaultyAgentRpcTest,
+)
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
-    FaultyAgentRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,

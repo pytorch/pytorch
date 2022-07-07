@@ -96,6 +96,7 @@ disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+
 class _TestParametrizer(object):
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
@@ -767,6 +768,7 @@ def _check_module_exists(name: str) -> bool:
         return False
 
 TEST_NUMPY = _check_module_exists('numpy')
+TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_CUDA = torch.cuda.is_available()
@@ -821,6 +823,33 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         kwargs = kwargs or {}
         r = func(*args, **kwargs)
         return r
+
+# Run PyTorch tests with TorchDynamo
+# TODO - Remove this in next PR to have easy revert strategy in case of unstable
+# CI
+# TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+TEST_WITH_TORCHDYNAMO = False
+if TEST_WITH_TORCHDYNAMO:
+    import torchdynamo
+    # torchdynamo.config.trace = True
+    # torchdynamo.config.debug = True
+    torchdynamo.config.print_internal_exceptions = False
+    # TODO - Collect errors with fake tensors
+    torchdynamo.config.fake_tensor_propagation = False
+    # Do not spend time on helper functions that are called with different inputs
+    torchdynamo.config.cache_size_limit = 8
+
+
+def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_TORCHDYNAMO:
+                raise unittest.SkipTest(msg)
+            else:
+                fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1825,7 +1854,16 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        super().run(result=result)
+
+        if TEST_WITH_TORCHDYNAMO:
+            with torchdynamo.optimize("eager"):
+                super().run(result=result)
+
+            # TODO - Reset for each test slows down testing significantly.
+            # torchdynamo.reset()
+        else:
+            super().run(result=result)
+
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():
@@ -2194,6 +2232,17 @@ class TestCase(expecttest.TestCase):
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
+    def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
+        r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
+        """
+        if not isinstance(y, Iterable):
+            # int, float, etc. or different shape tensors
+            y = torch.ones_like(x) * y
+        if not isinstance(y, torch.Tensor):
+            # iterable, but not a tensor
+            y = torch.ones_like(x) * torch.tensor(y)
+        return self.assertEqual(x, y, *args, **kwargs)
 
     def assertEqual(
             self,
