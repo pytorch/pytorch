@@ -144,6 +144,7 @@ def generate_cct(enable_recursive_torch_dispatch=False,
 
             if elem.requires_grad:
                 # CompositeCompliantTensor steals the "requires_grad"-ness.
+                # Why a new copy of `elem`? Because sometimes OpInfo shares inputs between tests...
                 tmp = torch.empty_strided(elem.shape, elem.stride(), dtype=elem.dtype,
                                           device=elem.device, layout=elem.layout,
                                           requires_grad=False)
