@@ -9,6 +9,7 @@ import warnings
 import subprocess
 import tempfile
 import os
+import pprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1701,18 +1702,30 @@ class TestNLLLoss(TestCase):
         self.assertEqual(input.grad, input_mps.grad.to('cpu'))
 
     def test_as_strided(self):
-        def helper(n, c):
-            values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-            values_1 = [[1.0, 1.0], [1.0, 1.0]]
-            cpu_x = torch.tensor(values, device='cpu')
-            ones1 = torch.tensor(values_1, device='mps')
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-            strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
-            strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+        values_1 = [[1.0, 1.0], [1.0, 1.0]]
+        cpu_x = torch.tensor(values, device='cpu')
+        ones1 = torch.tensor(values_1, device='mps')
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+        strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
+        strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        self.assertEqual(strided_mps, strided_cpu)
+        strided_cpu_out = strided_cpu + ones1.to('cpu')
+        strided_mps_out = strided_mps + ones1
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-            self.assertEqual(strided_mps, strided_cpu)
+        # test with storage offsets
+        cpu_x = torch.rand(3, 3, device='cpu')
+        mps_x = cpu_x.to('mps')
+        strided_cpu1 = torch.as_strided(cpu_x, (2, 2), (1, 2), 0)
+        strided_mps1 = torch.as_strided(mps_x, (2, 2), (1, 2), 0)
+        strided_cpu2 = torch.as_strided(cpu_x, (2, 2), (1, 2), 1)
+        strided_mps2 = torch.as_strided(mps_x, (2, 2), (1, 2), 1)
+        strided_cpu_out = strided_cpu1 - strided_cpu2
+        strided_mps_out = strided_mps1 - strided_mps2
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-        helper(3, 3)
+
 
     def test_sum_backward(self):
         def helper(n, c):
@@ -2174,9 +2187,14 @@ class TestNLLLoss(TestCase):
 
         helper((2, 3, 4, 5))
 
-    # Test forward argmax
-    def test_argmax(self):
-        def helper(n, c, h, w, dtype=torch.float32):
+    # Test forward argmin argmax
+    def test_argmin_argmax(self):
+        def helper(n, c, h, w, reduction_type, dtype=torch.float32):
+            if reduction_type == "max":
+                arg_reduction_fn = torch.argmax
+            else:
+                arg_reduction_fn = torch.argmin
+
             cpu_x = None
             x = None
             if(dtype not in [torch.float32, torch.bool]):
@@ -2189,46 +2207,50 @@ class TestNLLLoss(TestCase):
                 cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=dtype, requires_grad=True)
                 x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            y = torch.argmax(x)
-            ref_y = torch.argmax(cpu_x)
+            y = arg_reduction_fn(x)
+            ref_y = arg_reduction_fn(cpu_x)
             self.assertEqual(y, ref_y)
 
-            y_0 = torch.argmax(x, dim=0)
-            refy_0 = torch.argmax(cpu_x, dim=0)
+            y_0 = arg_reduction_fn(x, dim=0)
+            refy_0 = arg_reduction_fn(cpu_x, dim=0)
             self.assertEqual(y_0, refy_0)
 
-            y_0dim = torch.argmax(x, dim=0, keepdim=True)
-            refy_0dim = torch.argmax(cpu_x, dim=0, keepdim=True)
+            y_0dim = arg_reduction_fn(x, dim=0, keepdim=True)
+            refy_0dim = arg_reduction_fn(cpu_x, dim=0, keepdim=True)
             self.assertEqual(y_0dim, refy_0dim)
 
-            y_1 = torch.argmax(x, dim=1)
-            refy_1 = torch.argmax(cpu_x, dim=1)
+            y_1 = arg_reduction_fn(x, dim=1)
+            refy_1 = arg_reduction_fn(cpu_x, dim=1)
             self.assertEqual(y_1, refy_1)
 
-            y_1dim = torch.argmax(x, dim=1, keepdim=True)
-            refy_1dim = torch.argmax(cpu_x, dim=1, keepdim=True)
+            y_1dim = arg_reduction_fn(x, dim=1, keepdim=True)
+            refy_1dim = arg_reduction_fn(cpu_x, dim=1, keepdim=True)
             self.assertEqual(y_1dim, refy_1dim)
 
-            y_2 = torch.argmax(x, dim=2)
-            refy_2 = torch.argmax(cpu_x, dim=2)
+            y_2 = arg_reduction_fn(x, dim=2)
+            refy_2 = arg_reduction_fn(cpu_x, dim=2)
             self.assertEqual(y_2, refy_2)
 
-            y_2dim = torch.argmax(x, dim=2, keepdim=True)
-            refy_2dim = torch.argmax(cpu_x, dim=2, keepdim=True)
+            y_2dim = arg_reduction_fn(x, dim=2, keepdim=True)
+            refy_2dim = arg_reduction_fn(cpu_x, dim=2, keepdim=True)
             self.assertEqual(y_2dim, refy_2dim)
 
-            y_3 = torch.argmax(x, dim=3)
-            refy_3 = torch.argmax(cpu_x, dim=3)
+            y_3 = arg_reduction_fn(x, dim=3)
+            refy_3 = arg_reduction_fn(cpu_x, dim=3)
             self.assertEqual(y_3, refy_3)
 
-            y_3dim = torch.argmax(x, dim=3, keepdim=True)
-            refy_3dim = torch.argmax(cpu_x, dim=3, keepdim=True)
+            y_3dim = arg_reduction_fn(x, dim=3, keepdim=True)
+            refy_3dim = arg_reduction_fn(cpu_x, dim=3, keepdim=True)
             self.assertEqual(y_3dim, refy_3dim)
 
-        helper(2, 8, 4, 4, torch.float32)
-        helper(2, 8, 4, 4, torch.int32)
-        helper(2, 8, 4, 4, torch.float16)
-        helper(2, 8, 4, 4, torch.int64)
+        helper(2, 8, 4, 4, "max", torch.float32)
+        helper(2, 8, 4, 4, "max", torch.int32)
+        helper(2, 8, 4, 4, "max", torch.float16)
+        helper(2, 8, 4, 4, "max", torch.int64)
+        helper(2, 8, 4, 4, "min", torch.float32)
+        helper(2, 8, 4, 4, "min", torch.int32)
+        helper(2, 8, 4, 4, "min", torch.float16)
+        helper(2, 8, 4, 4, "min", torch.int64)
 
     # Test forward max
     # Note - don't test grad now
@@ -3585,7 +3607,14 @@ class TestNLLLoss(TestCase):
             softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
             softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
 
+            cpu_grad = torch.randn(softplus_result.shape)
+            grad = cpu_grad.to('mps')
+
+            softplus_result.backward(gradient=grad)
+            softplus_result_cpu.backward(gradient=cpu_grad)
+
             self.assertEqual(softplus_result, softplus_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
@@ -4810,7 +4839,7 @@ class TestGatherScatter(TestCase):
         x_mps = torch.zeros(10, dtype=torch.float32, device="mps")
         x_mps[::2] = 1.0
 
-        x_cpu = torch.zeros(10, dtype=torch.float32, device="mps")
+        x_cpu = torch.zeros(10, dtype=torch.float32, device="cpu")
         x_cpu[::2] = 1.0
 
         self.assertEqual(x_cpu, x_mps)
@@ -6076,6 +6105,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['torch.float32'],
         'nn.functional.kl_div': ['torch.float32'],
         'nn.functional.l1_loss': ['torch.float32'],
+        'nn.functional.huber_loss': ['torch.float32'],
         'nn.functional.leaky_relu': ['torch.float32'],
         'nn.functional.mse_loss': ['torch.float16', 'torch.float32'],
         'nn.functional.relu': ['torch.float32',
