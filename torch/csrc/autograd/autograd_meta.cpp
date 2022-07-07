@@ -214,8 +214,8 @@ void AutogradMeta::set_fw_grad(
           // Enforce same meta here to make sure that the view op below is
           // always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base) == MatchMetadata::PerfectMatch
-              && has_same_meta(new_grad, self) == MatchMetadata::PerfectMatch) {
+          if (has_same_meta(new_grad, base) == MatchMetadata::PerfectMatch &&
+              has_same_meta(new_grad, self) == MatchMetadata::PerfectMatch) {
             // TODO extend this special case to when the underlying storage of
             // new_grad can be re-used.
             new_base_fw_grad = new_grad;
@@ -257,7 +257,8 @@ void AutogradMeta::set_fw_grad(
       res.copy_(new_grad);
       new_grad = res;
     } else if (has_same_meta(new_grad, self) == MatchMetadata::ViewToMatch) {
-      new_grad = new_grad.as_strided(self.sizes(), self.strides(), self.storage_offset());
+      new_grad = new_grad.as_strided(
+          self.sizes(), self.strides(), self.storage_offset());
     }
 
     fw_grad_->set_value(new_grad, level);
