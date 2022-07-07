@@ -8,7 +8,8 @@ from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcas
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt
 from torch.fx.node import Target, Node
-from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar
+from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar, \
+    gen_bvar
 
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
@@ -262,12 +263,14 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
-    # assert len(n.users) == 0
-    # print(len(n.users))
 
     e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
-    return [BinConstraintD(e1, e2, op_gt)], counter
+    gt_constraint = BinConstraintD(e1, e2, op_gt)
+
+    my_gt, counter = gen_bvar(counter)
+    equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
+    return [equality_constraint], counter
 
 
 @register_inference_rule(operator.lt)

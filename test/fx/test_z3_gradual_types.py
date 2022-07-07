@@ -274,6 +274,27 @@ class HFOperations(unittest.TestCase):
         mul_result = z3.Const(12, tensor_type)
         assert s.model()[mul_result] == s.model()[embedding_result]
 
+    def test_gt(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem_1 = size[-1]
+                gt = getitem_1 > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        res = z3.Bool(4)
+        self.assertEqual(s.model()[res], True)
 
     def test_view(self):
         class BasicBlock(torch.nn.Module):
