@@ -165,11 +165,11 @@ class ModelReportObserver(ObserverBase):
 
         # find the quantiles
         comp_quantile = torch.quantile(y, quantiles_to_find[0], dim=self.ch_axis, interpolation="lower")
-        cent_quartile = torch.quantile(y, quantiles_to_find[1], dim=self.ch_axis, interpolation="lower")
+        hundreth_quartile = torch.quantile(y, quantiles_to_find[1], dim=self.ch_axis, interpolation="lower")
 
         # if any of the channels have 0s, we ignore that channel for this calculation
-        ch_no_zeros: torch.Tensor = (comp_quantile != torch.tensor([0])) | (cent_quartile != torch.tensor([0]))
-        binary_ch_no_zeros: torch.Tensor = ch_no_zeros.int()  # transform boolean values to int values
+        any_non_zero_quantile_value: torch.Tensor = (comp_quantile != torch.tensor([0])) | (hundreth_quartile != torch.tensor([0]))
+        any_non_zero_quantile_value = any_non_zero_quantile_value.int()  # transform boolean values to int values
 
         # possibilities to get nan as an answer
         #   will ignore any of these three cases with 0s and just not deal with them for now
@@ -178,14 +178,14 @@ class ModelReportObserver(ObserverBase):
         # case (3) 0 in both: not outlier, channel just kinda useless, ignore
 
         # get the ratio and get rid of nan values
-        quantile_ratios = cent_quartile / comp_quantile
+        quantile_ratios = hundreth_quartile / comp_quantile
         quantile_ratios = torch.nan_to_num(quantile_ratios)
         # update averages, remembering to only update if didn't have zeros
-        ratio_if_not_zero = binary_ch_no_zeros * quantile_ratios
+        ratio_if_not_zero = any_non_zero_quantile_value * quantile_ratios
 
         # if num_batches and average_ratio are not initialized, we want to initialize them
         if self.percentile_batches_tracked.shape[0] == 0 or self.average_percentile_ratio.shape[0] == 0:
-            self.percentile_batches_tracked = torch.zeros_like(binary_ch_no_zeros)
+            self.percentile_batches_tracked = torch.zeros_like(any_non_zero_quantile_value)
             self.average_percentile_ratio = torch.zeros_like(ratio_if_not_zero)
 
         # get current num batches and average ratio
@@ -193,7 +193,7 @@ class ModelReportObserver(ObserverBase):
         average_ratio = self.average_percentile_ratio
 
         # calculate new_number of batches, new_ratios, and get rid of nans because of 0 size batches
-        new_number_of_batches: torch.Tensor = num_batches + binary_ch_no_zeros
+        new_number_of_batches: torch.Tensor = num_batches + any_non_zero_quantile_value
         new_ratios: torch.Tensor = ((average_ratio * num_batches) + ratio_if_not_zero) / new_number_of_batches
         new_ratios = torch.nan_to_num(new_ratios)
 
