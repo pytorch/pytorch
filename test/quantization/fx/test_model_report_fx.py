@@ -1127,6 +1127,9 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
         def get_fusion_modules(self):
             return [['conv', 'relu']]
 
+        def get_example_inputs(self):
+            return (torch.randn((1, 3, 3, 3)),)
+
     class ReluOnly(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -1136,11 +1139,14 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             x = self.relu(x)
             return x
 
+        def get_example_inputs(self):
+            return (torch.arange(27).reshape((1, 3, 3, 3)),)
+
     def _get_prepped_for_calibration_model(self, model, detector_set, fused=False):
         r"""Returns a model that has been prepared for callibration and corresponding model_report"""
 
         # pass in necessary inputs to helper
-        example_input = torch.arange(27).reshape((1, 3, 3, 3))
+        example_input = model.get_example_inputs()[0]
         return _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused)
 
     @skipIfNoFBGEMM
@@ -1197,13 +1203,14 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
             test_input_weight_detector = InputWeightEqualizationDetector(0.4)
             detector_set = set([test_input_weight_detector])
+            model = self.TwoBlockComplexNet()
             # prepare the model for callibration
             prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(
-                self.TwoBlockComplexNet(), detector_set
+                model, detector_set
             )
 
             # now we actually callibrate the model
-            example_input = torch.arange(27).reshape((1, 3, 3, 3))
+            example_input = model.get_example_inputs()[0]
             example_input = example_input.to(torch.float)
 
             prepared_for_callibrate_model(example_input)
@@ -1280,11 +1287,12 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             test_input_weight_detector = InputWeightEqualizationDetector(0.4)
             detector_set = set([test_input_weight_detector])
+            model = self.ReluOnly()
             # prepare the model for callibration
-            prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(self.ReluOnly(), detector_set)
+            prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(model, detector_set)
 
             # now we actually callibrate the model
-            example_input = torch.arange(27).reshape((1, 3, 3, 3))
+            example_input = model.get_example_inputs()[0]
             example_input = example_input.to(torch.float)
 
             prepared_for_callibrate_model(example_input)

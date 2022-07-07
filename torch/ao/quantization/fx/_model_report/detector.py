@@ -9,6 +9,7 @@ from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.quantize import is_activation_post_process
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -941,6 +942,9 @@ class OutlierDetector(DetectorBase):
             Default: 1
 
     * :attr:`ratio_threshold`: The threshold for p_r to determine if there are outliers in activations
+        The p_r value (average ratio of 100th percentile/reference_percentile) is compared to ratio_threshold
+        If it is significantly greater, then we consider it an outlier
+        This threshold was calculated based on the ratio of the percentiles in a normal distribution
 
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
         Should be between 0 and 1
@@ -973,30 +977,35 @@ class OutlierDetector(DetectorBase):
         r"""Returns the name of this detector"""
         return "outlier_detector"
 
-    def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
-        r"""Returns whether the given module is supported for observers
+    def _is_supported_insertion(self, module: nn.Module) -> bool:
+        r"""Returns whether the given module is supported for observers insertion
 
         Any module that doesn't have children and isn't an observer itself is supported
 
         Args
             module: The module to check and ensure is supported
-            insert: True if this is check for observer insertion, false if for report gen
 
         Returns True if the module is supported by observer, False otherwise
         """
         # case for insertion of module
         # check if the module has any children and isn't observer
+        num_children = len(list(module.children()))
+        return num_children == 0 and not is_activation_post_process(module)
         # check to see if module is of a supported type
         num_children = len(list(module.children()))
         is_supported_type = num_children == 0 and not isinstance(module, ObserverBase)
 
-        # this is check for observer insertion
-        if insert:
-            return is_supported_type
-        else:
-            # this is for report gen and we also need to check if it contains observers
-            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
-            return has_obs
+    def _is_supported_report_gen(self, module: nn.Module) -> bool:
+        r"""Returns whether the given module is supported for report generation
+
+        Any module that has a model report pre-observer is supported
+
+        Args
+            module: The module to check and ensure is supported
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        return hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r""" Determines where observers need to be inserted for the Outlier Detector.
@@ -1023,7 +1032,7 @@ class OutlierDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            if self._is_supported(module, insert=True):
+            if self._is_supported_insertion(module):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -1092,7 +1101,7 @@ class OutlierDetector(DetectorBase):
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
-            if self._is_supported(module):
+            if self._is_supported_report_gen(module):
                 # get pre observer for the module
                 pre_obs: ModelReportObserver = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
