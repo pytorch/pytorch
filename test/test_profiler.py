@@ -28,7 +28,7 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern
+from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1476,6 +1476,28 @@ aten::mm""")
         self.assertEqual(None, pattern.next_of(event_tree[-1]))
         self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
         self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern(self):
+        cases = (
+            (0, lambda: torch.ones((100, 100), device="cuda")),
+            (1, lambda: torch.ones((100, 100)).to("cuda")),
+            (1, lambda: torch.zeros((100, 100)).to("cuda")),
+            (1, lambda: torch.empty((100, 100)).fill_(5).to("cuda")),
+            (1, lambda: torch.ones((100, 100)).cuda()),
+            (1, lambda: torch.zeros((100, 100)).cuda()),
+            (1, lambda: torch.empty((100, 100)).fill_(5).cuda()),
+            (1, lambda: torch.rand((100, 100)).cuda()),
+            (1, lambda: torch.randn((100, 100)).cuda()),
+            (1, lambda: torch.full((100, 100), 10).cuda()),
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ExtraCUDACopyPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
 
 
 if __name__ == '__main__':
