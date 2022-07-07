@@ -2825,7 +2825,13 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
+        # `masked_fill`` allows cpu scalar to be moved to cuda but not otherwise.
+        check(
+            a.device.type == torch.device('cuda').type or value.device == a.device,
+            lambda: f"Expected `value` to be on same device as `a`."
+        )
         value_type = utils.dtype_to_type(value.dtype)
+        value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -2838,12 +2844,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         )
 
     # Since `where` allows type-promotion,
-    # cast value to correct type before passing to `where`
-    if isinstance(value, Number):
-        return where(mask, python_type(value), a)
-
-    assert isinstance(value, TensorLike)
-    return where(mask, prims.to_dtype(value, a.dtype), a)
+    # cast `value` to correct type before passing to `where`.
+    return where(mask, python_type(value), a)
 
 
 # TODO: add OpInfo for torch.equal and refs.equal
