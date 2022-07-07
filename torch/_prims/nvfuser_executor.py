@@ -147,9 +147,7 @@ class PartitionedInterpreter(torch.fx.Interpreter):
 @lru_cache()  # type: ignore[arg-type]
 def maybe_partition_graph(gm: GraphModule):
     supported_ops = NvfuserPrimOperatorSupport()
-    call_function_nodes = (
-        filter(lambda n: n.op == "call_function", gm.graph.nodes)
-    )
+    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
     # the graph is partitioned only if at least one node is not supported by nvFuser
     any_unsupported = any(
         not supported_ops.is_node_supported(None, node) for node in call_function_nodes
