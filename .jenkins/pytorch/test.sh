@@ -523,8 +523,8 @@ test_forward_backward_compatibility() {
   deactivate
   rm -r venv
   echo "NOW EXITING VENV"
-  ls "${REPO_DIR}/base_dist/*.whl"
-  ls "${REPO_DIR}/dist/*.whl"
+  ls base_dist/*.whl
+  ls dist/*.whl
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
