@@ -28,7 +28,7 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
+from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern, ForLoopIndexingPattern
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1496,6 +1496,37 @@ aten::mm""")
             with profile(with_stack=True) as prof:
                 fn()
             pattern = ExtraCUDACopyPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+    def test_profiler_for_loop_indexing_pattern(self):
+        x = torch.ones((100, 100))
+
+        def case1():
+            for i in range(100):
+                x[i] = i
+
+        def case2():
+            y = 0
+            for i in range(100):
+                y += x[i]
+
+        def case3():
+            y = 1
+            for i in range(100):
+                y *= x[i]
+
+        def case4():
+            y = x
+            for _ in range(100):
+                y = y @ x
+
+        cases = ((1, case1), (1, case2), (1, case3), (0, case4))
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ForLoopIndexingPattern(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
