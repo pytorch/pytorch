@@ -83,7 +83,7 @@ class ExtraCUDACopyPattern(Pattern):
     Pattern:
     build-in method                 |build-in method
         ...                         |    aten::to
-            aten::fill_/aten::zero_ |
+            aten::fill_/aten::zero_ |        aten::_to_copy
 
     Algorithm:
     We start at node aten::to, go parent events' previous events,
@@ -95,6 +95,7 @@ class ExtraCUDACopyPattern(Pattern):
         assert prof.with_stack
         super().__init__(prof)
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
+        self.init_ops = {"aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"}
 
     def match(self, event):
         # TODO: We should also check tensor identities
@@ -111,9 +112,9 @@ class ExtraCUDACopyPattern(Pattern):
         while event.children:
             event = event.children[-1]
             # aten::zero_ is a special optimzation case where fill_ is not called
-            if event.name() == "aten::fill_" or event.name() == "aten::zero_":
+            if event.name() in self.init_ops:
                 return True
-        return event.name() == "aten::fill_" or event.name() == "aten::zero_"
+        return event.name() in self.init_ops
 
 
 def eventTreeDFS(event_tree):
