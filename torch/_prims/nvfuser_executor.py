@@ -159,6 +159,12 @@ def maybe_partition_graph(gm: GraphModule):
             gm, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
+        if len(partitions) == 0:
+            raise RuntimeError(
+                "No partition found for the graph. "
+                "This is likely because the graph is not supported by nvFuser. "
+                "Please use the eager ATen mode to execute the graph."
+            )
         partitioned_graph = partitioner.fuse_partitions(partitions)
         return partitioned_graph, any_unsupported
     else:

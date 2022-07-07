@@ -180,6 +180,29 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    def test_nvfuser_executor_partitioned_no_partitions_error(self, device):
+        # This test is to ensure that nvfuser partitioned executor works correctly
+        # It's assumed that digamma is not supported by nvfuser
+        # If it's ever supported, this test will need to be updated
+        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 4, device=device)
+
+        def func(a):
+            return torch.digamma(a)  # not supported by nvfuser
+
+        with TorchRefsMode.push():
+            gm = make_fx(func)(a)
+
+        with self.assertRaisesRegex(RuntimeError, "is not supported by nvFuser"):
+            execute(gm, a, executor="nvfuser")
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
