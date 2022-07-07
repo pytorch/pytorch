@@ -383,12 +383,13 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
     """
     _check_dill_version(pickle_module)
 
-    with _open_file_like(f, 'wb') as opened_file:
-        if _use_new_zipfile_serialization:
-            with _open_zipfile_writer(opened_file) as opened_zipfile:
-                _save(obj, opened_zipfile, pickle_module, pickle_protocol)
-                return
-        _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(f) as opened_zipfile:
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+            return
+    else:
+        with _open_file_like(f, 'wb') as opened_file:
+            _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
