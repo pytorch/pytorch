@@ -12539,8 +12539,6 @@ op_db: List[OpInfo] = [
                # we skip gradient checks for this suite as they are tested in
                # variant_test_name='grad_oriented'
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
                # The values for attribute 'shape' do not match
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
@@ -12567,10 +12565,6 @@ op_db: List[OpInfo] = [
                # tests do not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-               # At this time ROCm uses magma instead of rocSolver, and the test passes
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            active_if=(not TEST_WITH_ROCM)),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
@@ -16466,12 +16460,6 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ravel,
-           skips=(
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # the stride of the tensor was modified directly without going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           )
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
