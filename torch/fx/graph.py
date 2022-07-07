@@ -907,7 +907,7 @@ class Graph:
                           "GraphModule.add_parameter to add the "
                           "necessary Parameter, or "
                           "nn.Module.register_buffer to add the "
-                          "necessary buffer")
+                          "necessary buffer", stacklevel=2)
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
