@@ -5,12 +5,15 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
-import os
-import threading
-import itertools
-import warnings
-import queue
 import functools
+import itertools
+import logging
+import os
+import queue
+import threading
+import time
+import warnings
+
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
@@ -62,6 +65,8 @@ default_collate: _collate_fn_t = _utils.collate.default_collate
 default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
+logger = logging.getLogger(__name__)
 
 
 class _DatasetKind(object):
@@ -567,21 +572,27 @@ class DataLoader(Generic[T_co]):
                 ws = dist.get_world_size()
                 store = dist.distributed_c10d._get_default_store()
                 if rank == 0:
-                    store.set("_dl_shared_seed", str(_shared_seed))
+                    _shared_seed_str = str(_shared_seed)
+                    store.set(_utils.DATAPIPE_SHARED_SEED, _shared_seed_str)
+                    logger.info(f"Shared seed ({_shared_seed_str}) sent to store on rank 0")
+                    # Use 'add' instead of 'get' since for some store implementations 'add'
+                    # doesn't work well with 'get'.
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    while _shared_seed_recv_cnt < ws:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
                     # Reset after all distributed processes have received the shared seed
-                    store.add("_dl_shared_seed_recv_cnt", 1)
-                    _shared_seed_recv_cnt = 1
-                    while _shared_seed_recv_cnt != ws:
-                        _shared_seed_recv_cnt = int(store.get("_dl_shared_seed_recv_cnt"))
-                    store.set("_dl_shared_seed", "")
-                    store.add("_dl_shared_seed_recv_cnt", -ws)
-                    assert int(store.get("_dl_shared_seed_recv_cnt")) == 0
+                    store.set(_utils.DATAPIPE_SHARED_SEED, "")
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
+                    assert _shared_seed_recv_cnt == 0
                 else:
                     _shared_seed_str = ""
-                    store.wait(["_dl_shared_seed"], _utils.MP_STATUS_CHECK_INTERVAL)
+                    store.wait([_utils.DATAPIPE_SHARED_SEED], _utils.MP_STATUS_CHECK_INTERVAL)
                     while len(_shared_seed_str) == 0:
-                        _shared_seed_str = store.get("_dl_shared_seed")
-                    store.add("_dl_shared_seed_recv_cnt", 1)
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
+                    logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
+                    store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
                     _shared_seed = int(_shared_seed_str)
             return _shared_seed
         else:

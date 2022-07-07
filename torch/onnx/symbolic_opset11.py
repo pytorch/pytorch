@@ -1062,12 +1062,15 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = 0
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim

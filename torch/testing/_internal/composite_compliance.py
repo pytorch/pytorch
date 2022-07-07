@@ -220,10 +220,9 @@ def generate_cct(enable_recursive_torch_dispatch=False,
             # Some operations are allowed to in-place modify the metadata of the
             # inputs. The only ones are the "inplace view functions"; when we
             # run into these, we manually modify the metadata of the input.
-            with enable_reentrant_dispatch():
-                with no_dispatch():
-                    if is_inplace_view_fn(func):
-                        func(*args, **kwargs)
+            with no_dispatch():
+                if is_inplace_view_fn(func):
+                    func(*args, **kwargs)
 
             # For each CompositeCompliantTensor t, we check that t and t.elem
             # have consistent metadata. If they don't have consistent metadata,
