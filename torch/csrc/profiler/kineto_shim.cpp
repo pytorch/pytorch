@@ -60,30 +60,9 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
-#ifdef USE_KINETO
-namespace {
-libkineto::ActivityType toActivityType(const KinetoActivityType type) {
-  switch (type) {
-    case KinetoActivityType::CPU_OP:
-      return libkineto::ActivityType::CPU_OP;
-    case KinetoActivityType::CPU_INSTANT_EVENT:
-      return libkineto::ActivityType::CPU_INSTANT_EVENT;
-    case KinetoActivityType::PYTHON_FUNCTION:
-      return libkineto::ActivityType::PYTHON_FUNCTION;
-    default:
-      TORCH_INTERNAL_ASSERT(
-          type == KinetoActivityType::USER_ANNOTATION,
-          "Invalid KinetoActivityType: ",
-          (int)type);
-      return libkineto::ActivityType::USER_ANNOTATION;
-  }
-}
-} // namespace
-#endif // USE_KINETO
-
 void TraceWrapper::addCPUActivity(
     const std::string& name,
-    const KinetoActivityType kineto_type,
+    const libkineto::ActivityType type,
     const DeviceAndResource device_and_resource,
     const uint64_t correlation_id,
     const int64_t start_time,
@@ -91,7 +70,6 @@ void TraceWrapper::addCPUActivity(
     const annotation_t& annotations) {
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
-  auto type = toActivityType(kineto_type);
   cpu_trace_->emplace_activity(cpu_trace_->span, type, name);
   auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
