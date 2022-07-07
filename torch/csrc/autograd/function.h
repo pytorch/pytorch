@@ -378,10 +378,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     const auto& next = next_edges_[output_edge_index];
     if (next.is_valid()) {
-      const auto exec_info_ = get_current_graph_task_exec_info();
-      if (exec_info_ && !exec_info_->empty()) {
-        auto it = exec_info_->find(next.function.get());
-        if (it == exec_info_->end() || !it->second.should_execute()) {
+      const auto exec_info = get_current_graph_task_exec_info();
+      if (exec_info && !exec_info->empty()) {
+        auto it = exec_info->find(next.function.get());
+        if (it == exec_info->end() || !it->second.should_execute()) {
           return false;
         }
       }

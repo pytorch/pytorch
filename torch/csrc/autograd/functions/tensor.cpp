@@ -89,8 +89,8 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   // Adding the missing nodes to the current graph's `exec_info`.
   // This is a workaround because the current `GraphTask::init_to_execute`
   // does not traverse into CopySlices node.
-  const auto exec_info_ = get_current_graph_task_exec_info();
-  if (exec_info_ && !exec_info_->empty()) {
+  const auto exec_info = get_current_graph_task_exec_info();
+  if (exec_info && !exec_info->empty()) {
     for (const auto& next : fn->next_edges()) {
       if (next.is_valid()) {
         add_node_to_current_graph_task_exec_info(next.function.get());
