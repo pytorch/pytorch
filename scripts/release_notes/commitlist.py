@@ -1,5 +1,4 @@
 import argparse
-from ast import Assert
 from common import run, topics, get_features
 from collections import defaultdict
 import os
@@ -31,6 +30,7 @@ class Commit:
     category: str
     topic: str
     title: str
+    pr_link: str
     author: str
 
     # This is not a list so that it is easier to put in a spreadsheet
@@ -95,7 +95,12 @@ class CommitList:
         features = features_to_dict(feature_item)
         category, topic = CommitList.categorize(features)
         a1, a2, a3 = (features["accepters"] + ("", "", ""))[:3]
-        return Commit(commit_hash, category, topic, features["title"], features["author"], a1, a2, a3)
+        if features["pr_number"] is not None:
+            pr_link = f"https://github.com/pytorch/pytorch/pull/{features['pr_number']}"
+        else:
+            pr_link = None
+
+        return Commit(commit_hash, category, topic, features["title"], pr_link, features["author"], a1, a2, a3)
 
     @staticmethod
     def categorize(features):
