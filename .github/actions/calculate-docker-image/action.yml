@@ -17,8 +17,14 @@ inputs:
   pull:
     description: If set to any value, run `docker pull`` on the calculated image.
     required: false
+  skip_push:
+    description: If set to true value, skip will be pushed, default is to skip so that pushing will be explicit
+    required: true
   force_push:
     description: If set to any value, always run the push
+    required: false
+  push-ghcr-image:
+    description: If set to any value, push docker image to the ghcr.io.
     required: false
 
 outputs:
@@ -96,8 +102,11 @@ runs:
       env:
         IMAGE_NAME: ${{inputs.docker-image-name}}
         DOCKER_SKIP_S3_UPLOAD: "1"
-        DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || 'false' }}
+        # Skip push if we don't need it, or if specified in the inputs
+        DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
+        PUSH_GHCR_IMAGE: ${{ inputs.push-ghcr-image }}
+        GHCR_PAT: ${{ env.GHCR_PAT }}
       working-directory: .circleci/docker
       shell: bash
       run: |

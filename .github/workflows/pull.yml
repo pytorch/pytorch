@@ -7,6 +7,7 @@ on:
       - master
       - main
       - release/*
+      - landchecks/*
   workflow_dispatch:
 
 concurrency:
@@ -132,6 +133,8 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
@@ -247,15 +250,14 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
         ]}
 
-  # please ensure that this and its corresponding job in trunk.yml are in sync
   win-vs2019-cuda11_6-py3-build:
-    # don't run build twice on master
     if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.6-py3
       cuda-version: "11.6"
+      sync-tag: win-cuda-build
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
@@ -307,7 +309,6 @@ jobs:
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  # please ensure that this and its corresponding job in trunk.yml are in sync
   linux-bionic-rocm5_1-py3_7-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
@@ -316,3 +317,4 @@ jobs:
     with:
       build-environment: linux-bionic-rocm5.1-py3.7
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      sync-tag: rocm-build
