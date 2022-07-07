@@ -692,6 +692,9 @@ at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
 }
 
 Tensor NestedTensor_transpose(const at::Tensor& self){
+  TORCH_CHECK(self.is_nested(), "This is nested tensor specific transpose")
+  TORCH_CHECK(self.dim() == 3, "This transpose only work nested matrices.")
+
   auto curr_size = get_nested_size_tensor(self);
   auto new_sizes = at::empty_like(curr_size);
 
@@ -701,7 +704,7 @@ Tensor NestedTensor_transpose(const at::Tensor& self){
   new_sizes.index({at::indexing::Slice(), 0}) = curr_col1;
   new_sizes.index({at::indexing::Slice(), 1}) = curr_col0;
 
-  return wrap_buffer(get_buffer(self), new_sizes);
+  return wrap_buffer(get_buffer(self).clone(), new_sizes);
 }
 
 Tensor dropout_nested(const Tensor& input, double p, bool train) {

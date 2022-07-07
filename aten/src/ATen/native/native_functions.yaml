@@ -12448,7 +12448,7 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_scaled_dot_product_self_attention
 
-- func: _flash_scaled_dot_product_self_attention(Tensor qkv, Tensor cumulative_sequence_length, int max_seqlen_batch, int num_heads, float dropout_p, bool causal) -> Tensor
+- func: _flash_scaled_dot_product_self_attention(Tensor qkv, Tensor cumulative_sequence_length, int max_seqlen_batch, float dropout_p, bool causal) -> Tensor
   variants: function
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: flash_scaled_dot_product_self_attention

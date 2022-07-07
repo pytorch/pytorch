@@ -275,7 +275,7 @@ std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   auto size_tensor_stride = sizes.stride(0);
 
   const int64_t batch_size = qkv.size(0);
-  auto cumulative_seqlen = at::zeros({batch_size + 1}, TensorOptions().dtype(at::kInt));
+  auto cumulative_seqlen = at::zeros({batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
 
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
@@ -302,11 +302,40 @@ Tensor flash_scaled_dot_product_self_attention(
     const Tensor& qkv,
     const Tensor& cumulative_sequence_length,
     const int64_t max_seqlen_batch,
-    const int64_t num_heads,
     double dropout_p,
     bool causal) {
   TORCH_CHECK(false, "This function needs to be overriden from python");
   return at::Tensor();
+}
+
+Tensor flash_attention_helper(
+    const Tensor& qkv,
+    int64_t embed_dim,
+    int64_t num_heads,
+    double dropout_p,
+    bool causal) {
+  auto cumulative_and_max = cumulative_and_max_seq_len(qkv);
+  Tensor cumulative_tensor = std::get<0>(cumulative_and_max);
+  int64_t max_seq_len = std::get<1>(cumulative_and_max);
+
+  int64_t head_dim = embed_dim / (num_heads * 3);
+  int64_t Nnz = cumulative_tensor[-1].item<int64_t>();
+
+  // The output of flash attention is (Nnz, nheads, headdim) we need to create a nested size with the last dim = nheads*headdim
+  auto atten_size = get_nested_size_tensor(qkv);
+  auto div3 = atten_size.index({at::indexing::Slice(), -1 }).div(3);
+  atten_size.index({at::indexing::Slice(), -1 }) = div3;
+
+  auto qkv_buffer_reshaped =
+      get_buffer(qkv).view({Nnz, 3, num_heads, head_dim});
+
+  Tensor atten_buffer = at::_flash_scaled_dot_product_self_attention(
+      qkv_buffer_reshaped,
+      cumulative_tensor,
+      max_seq_len,
+      dropout_p,
+      causal);
+  return wrap_buffer(atten_buffer.view(-1), atten_size);
 }
 
 Tensor NestedTensor_scaled_dot_product_self_attention(
@@ -323,18 +352,7 @@ Tensor NestedTensor_scaled_dot_product_self_attention(
       "Expected embedding dim to be divisible by 3*num_heads");
   if (true) {
     //  Hot path for flash attention
-    auto cumulative_and_max = cumulative_and_max_seq_len(qkv);
-    Tensor cumulative_tensor = std::get<0>(cumulative_and_max);
-    int64_t max_seq_len = std::get<1>(cumulative_and_max);
-
-    int64_t head_dim = embed_dim / (num_heads * 3);
-    int64_t Nnz = cumulative_tensor[-1].item<int64_t>();
-
-    auto qkv_buffer_reshaped =
-        get_buffer(qkv).view({Nnz, 3, num_heads, head_dim});
-    Tensor atten_bufer = at::_flash_scaled_dot_product_self_attention(
-        qkv, cumulative_tensor, max_seq_len, num_heads, dropout_p, causal);
-    Tensor atten_nt = wrap_buffer(atten_bufer, get_nested_size_tensor(qkv));
+    return flash_attention_helper(qkv, embed_dim, num_heads, dropout_p, causal);
   }
 
   auto qkv_transposed = NestedTensor_transpose(qkv);
