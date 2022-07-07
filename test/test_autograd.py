@@ -6826,6 +6826,25 @@ class TestAutogradForwardMode(TestCase):
                     torch.real(dual)
                     torch.imag(dual)
 
+    def test_metadata_check_match_by_view(self):
+        # See https://github.com/pytorch/pytorch/issues/80507
+        # When the metadata almost matches, perform a view to make
+        # it perfectly match
+        a = torch.tensor([1.]).as_strided((1,), (2,), 0)
+        b = torch.tensor([1.]).as_strided((1,), (1,), 0)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(a, b)
+            tangent = fwAD.unpack_dual(dual_input).tangent
+            self.assertTrue(tangent._is_view())
+            # Storage is shared, no copy is made
+            self.assertIs(tangent._base, b._base)
+
+            # Slice can fail if strides are non-matching because
+            # strides is used in the computation of storage offset
+            dual_input[1:]
+
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled

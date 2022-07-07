@@ -83,34 +83,57 @@ using at::Tensor;
 // the base if needed.
 
 namespace {
+
+enum class MatchMetadata {
+  CopyToMatch,
+  // See https://github.com/pytorch/pytorch/issues/80507
+  // The storage representation is the same, but layout metadata is different
+  // In this case we perform an out-of-place view rather than an in-place one
+  // because mutating the passed in tangent tensor would probably be unexpected
+  // to the user
+  ViewToMatch,
+  PerfectMatch,
+};
+
 // Check if two Tensor have the same storage offset, sizes and strides
-bool has_same_meta(const Variable& base, const Variable& other) {
+MatchMetadata has_same_meta(const Variable& base, const Variable& other) {
+  bool requires_view_to_match = false;
+
   if (!base.defined() || !other.defined()) {
-    return false;
+    return MatchMetadata::CopyToMatch;
   }
   if (base.storage_offset() != other.storage_offset()) {
-    return false;
+    return MatchMetadata::CopyToMatch;
   }
   if (base.dim() != other.dim()) {
-    return false;
+    return MatchMetadata::CopyToMatch;
   }
   for (const auto i : c10::irange(base.dim())) {
     if (base.sizes()[i] != other.sizes()[i]) {
-      return false;
+      return MatchMetadata::CopyToMatch;
     }
-    if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1 &&
-        base.sizes()[i] != 0) {
-      return false;
+    if (base.strides()[i] != other.strides()[i]) {
+      if (base.sizes()[i] == 0 || base.sizes()[i] == 1) {
+        requires_view_to_match = true;
+      } else {
+        return MatchMetadata::CopyToMatch;
+      }
     }
   }
   if (!at::_has_same_storage_numel(base, other)) {
-    return false;
+    return MatchMetadata::CopyToMatch;
   }
   if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
-    return false;
+    return MatchMetadata::CopyToMatch;
   }
-  return true;
+
+  if (requires_view_to_match) {
+    return MatchMetadata::ViewToMatch;
+  } else {
+    return MatchMetadata::PerfectMatch;
+  }
 }
+
 } // anonymous namespace
 
 // This function is will ensure that the fw_grad_ is properly a view of the base
@@ -191,7 +214,8 @@ void AutogradMeta::set_fw_grad(
           // Enforce same meta here to make sure that the view op below is
           // always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base) && has_same_meta(new_grad, self)) {
+          if (has_same_meta(new_grad, base) == MatchMetadata::PerfectMatch
+              && has_same_meta(new_grad, self) == MatchMetadata::PerfectMatch) {
             // TODO extend this special case to when the underlying storage of
             // new_grad can be re-used.
             new_base_fw_grad = new_grad;
@@ -220,7 +244,7 @@ void AutogradMeta::set_fw_grad(
     }
 
     // Enforce the basic layout constraint
-    if (!has_same_meta(new_grad, self)) {
+    if (has_same_meta(new_grad, self) == MatchMetadata::CopyToMatch) {
       if (is_view_) {
         auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
         TORCH_INTERNAL_ASSERT(
@@ -232,6 +256,8 @@ void AutogradMeta::set_fw_grad(
       res._set_neg(self.is_neg());
       res.copy_(new_grad);
       new_grad = res;
+    } else if (has_same_meta(new_grad, self) == MatchMetadata::ViewToMatch) {
+      new_grad = new_grad.as_strided(self.sizes(), self.strides(), self.storage_offset());
     }
 
     fw_grad_->set_value(new_grad, level);
