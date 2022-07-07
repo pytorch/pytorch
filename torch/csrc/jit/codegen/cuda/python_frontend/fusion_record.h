@@ -12,6 +12,49 @@ struct RecordFunctor {
   std::vector<size_t> outputs;
 };
 
+// With C++17, this template specialization could be replaced by
+// "if constexpr" statement in the UnaryOpRecord::operator() 
+// function.
+template<class O, class A1, class A2>
+O* binary_op_func(std::function<O*(A1*, A2*)> func, NvfVal* arg1, NvfVal* arg2) {
+  return func(arg1, arg2);
+}
+template<>
+NvfTensorView* binary_op_func<NvfTensorView, NvfTensorView, NvfTensorView>(
+    std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2) {
+  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>());
+}
+template<>
+NvfTensorView* binary_op_func<NvfTensorView, NvfTensorView, NvfVal>(
+    std::function<NvfTensorView*(NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2) {
+  return func(arg1->as<NvfTensorView>(), arg2);
+}
+template<>
+NvfTensorView* binary_op_func<NvfTensorView, NvfVal, NvfTensorView>(
+    std::function<NvfTensorView*(NvfVal*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2) {
+  return func(arg1, arg2->as<NvfTensorView>());
+}
+
+template<class OutType, class Arg1Type, class Arg2Type>
+struct BinaryOpRecord : RecordFunctor {
+  BinaryOpRecord(std::vector<size_t> _args,
+                std::vector<size_t> _outputs,
+                std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op) :
+    RecordFunctor(std::move(_args), std::move(_outputs)),
+    fusion_op_(fusion_op) {}
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg1 = fd.fusion_state.at(args.at(0));
+    auto arg2 = fd.fusion_state.at(args.at(1));
+    auto output = binary_op_func<OutType, Arg1Type, Arg2Type>(
+                     fusion_op_, arg1, arg2);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+
+ private:
+  std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op_;
+};
+
 struct InputTensorRecord : RecordFunctor {
   InputTensorRecord(std::vector<size_t> _outputs, 
                     std::vector<int64_t> _symbolic_sizes,
@@ -77,8 +120,8 @@ struct UnaryOpRecord : RecordFunctor {
     fusion_op_(fusion_op) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto input = fd.fusion_state.at(args.at(0));
-    auto output = unary_op_func<ArgType>(fusion_op_, input);
+    auto arg = fd.fusion_state.at(args.at(0));
+    auto output = unary_op_func<ArgType>(fusion_op_, arg);
     fd.fusion_state.at(outputs.at(0)) = output;
   }
 
