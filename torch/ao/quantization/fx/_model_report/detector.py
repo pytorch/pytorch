@@ -970,6 +970,9 @@ class OutlierDetector(DetectorBase):
     def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
         # initialize the variables of interest
         self.ratio_threshold = ratio_threshold
+
+        # make sure passed in percentile is valid
+        assert self.reference_percentile >= 0 and self.reference_percentile <= 1
         self.reference_percentile = reference_percentile
         self.ch_axis = ch_axis
 
@@ -977,7 +980,7 @@ class OutlierDetector(DetectorBase):
         r"""Returns the name of this detector"""
         return "outlier_detector"
 
-    def _is_supported_insertion(self, module: nn.Module) -> bool:
+    def _supports_insertion(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for observers insertion
 
         Any module that doesn't have children and isn't an observer itself is supported
@@ -995,7 +998,7 @@ class OutlierDetector(DetectorBase):
         num_children = len(list(module.children()))
         is_supported_type = num_children == 0 and not isinstance(module, ObserverBase)
 
-    def _is_supported_report_gen(self, module: nn.Module) -> bool:
+    def _supports_report_gen(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for report generation
 
         Any module that has a model report pre-observer is supported
@@ -1032,7 +1035,7 @@ class OutlierDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            if self._is_supported_insertion(module):
+            if self._supports_insertion(module):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -1101,7 +1104,7 @@ class OutlierDetector(DetectorBase):
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
-            if self._is_supported_report_gen(module):
+            if self._supports_report_gen(module):
                 # get pre observer for the module
                 pre_obs: ModelReportObserver = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
