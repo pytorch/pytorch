@@ -62,10 +62,14 @@ jobs:
       - name: Build docker image
         id: build-docker-image
         uses: ./.github/actions/calculate-docker-image
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          skip_push: false
           force_push: true
+          push-ghcr-image: ${{ github.event_name == 'push' }}
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image

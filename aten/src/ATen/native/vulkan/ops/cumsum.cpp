@@ -27,62 +27,58 @@ Tensor cumsum(
     dim < 4,
     "Vulkan cumsum expects dim < 4!");
 
+  if(dim<=1) {
+      // TODO: dim<0, dim=0, dim=1(z axis)
+      TORCH_CHECK(false, "Not implemented!");
+  }
+
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
+
   vTensor v_output{
     context,
-    input.sizes(),
-    input.options(),
+    input_arg.sizes(),
+    input_arg.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::cumsum");
+  const struct Block final {
+    int32_t axis;
+  } block {
+    (3-safe_downcast<int32_t>(dim)),
+  };
 
-    if C10_LIKELY(v_input.has_image()) {
-      const struct Block final {
-        int32_t axis;
-      } block {
-        (3-safe_downcast<int32_t>(dim)),
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      if(dim<=1) {
-          // TODO: dim<0, dim=0, dim=1(z axis)
-          TORCH_CHECK(false, "Not implemented!");
-      }
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(cumsum),
-          v_input.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(cumsum),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_input.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }

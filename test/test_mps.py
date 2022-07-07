@@ -9,6 +9,7 @@ import warnings
 import subprocess
 import tempfile
 import os
+import pprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,14 +20,15 @@ from torch.nn import Parameter
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file,
      TEST_WITH_UBSAN)
+from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
+from functools import partial
+
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
-from torch.testing import make_tensor
-from functools import partial
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
@@ -372,6 +374,12 @@ class TestMPS(TestCase):
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
+
+    def test_linear1D(self):
+        self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
+
+    def test_linear1D_backward(self):
+        self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=True)
 
     def test_linear2D(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=True, backward_pass=False)
@@ -1694,18 +1702,30 @@ class TestNLLLoss(TestCase):
         self.assertEqual(input.grad, input_mps.grad.to('cpu'))
 
     def test_as_strided(self):
-        def helper(n, c):
-            values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-            values_1 = [[1.0, 1.0], [1.0, 1.0]]
-            cpu_x = torch.tensor(values, device='cpu')
-            ones1 = torch.tensor(values_1, device='mps')
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-            strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
-            strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+        values_1 = [[1.0, 1.0], [1.0, 1.0]]
+        cpu_x = torch.tensor(values, device='cpu')
+        ones1 = torch.tensor(values_1, device='mps')
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+        strided_cpu = torch.as_strided(cpu_x, (2, 2), (1, 2))
+        strided_mps = torch.as_strided(x, (2, 2), (1, 2))
+        self.assertEqual(strided_mps, strided_cpu)
+        strided_cpu_out = strided_cpu + ones1.to('cpu')
+        strided_mps_out = strided_mps + ones1
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-            self.assertEqual(strided_mps, strided_cpu)
+        # test with storage offsets
+        cpu_x = torch.rand(3, 3, device='cpu')
+        mps_x = cpu_x.to('mps')
+        strided_cpu1 = torch.as_strided(cpu_x, (2, 2), (1, 2), 0)
+        strided_mps1 = torch.as_strided(mps_x, (2, 2), (1, 2), 0)
+        strided_cpu2 = torch.as_strided(cpu_x, (2, 2), (1, 2), 1)
+        strided_mps2 = torch.as_strided(mps_x, (2, 2), (1, 2), 1)
+        strided_cpu_out = strided_cpu1 - strided_cpu2
+        strided_mps_out = strided_mps1 - strided_mps2
+        self.assertEqual(strided_cpu_out, strided_mps_out)
 
-        helper(3, 3)
+
 
     def test_sum_backward(self):
         def helper(n, c):
@@ -2167,9 +2187,14 @@ class TestNLLLoss(TestCase):
 
         helper((2, 3, 4, 5))
 
-    # Test forward argmax
-    def test_argmax(self):
-        def helper(n, c, h, w, dtype=torch.float32):
+    # Test forward argmin argmax
+    def test_argmin_argmax(self):
+        def helper(n, c, h, w, reduction_type, dtype=torch.float32):
+            if reduction_type == "max":
+                arg_reduction_fn = torch.argmax
+            else:
+                arg_reduction_fn = torch.argmin
+
             cpu_x = None
             x = None
             if(dtype not in [torch.float32, torch.bool]):
@@ -2182,46 +2207,50 @@ class TestNLLLoss(TestCase):
                 cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=dtype, requires_grad=True)
                 x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            y = torch.argmax(x)
-            ref_y = torch.argmax(cpu_x)
+            y = arg_reduction_fn(x)
+            ref_y = arg_reduction_fn(cpu_x)
             self.assertEqual(y, ref_y)
 
-            y_0 = torch.argmax(x, dim=0)
-            refy_0 = torch.argmax(cpu_x, dim=0)
+            y_0 = arg_reduction_fn(x, dim=0)
+            refy_0 = arg_reduction_fn(cpu_x, dim=0)
             self.assertEqual(y_0, refy_0)
 
-            y_0dim = torch.argmax(x, dim=0, keepdim=True)
-            refy_0dim = torch.argmax(cpu_x, dim=0, keepdim=True)
+            y_0dim = arg_reduction_fn(x, dim=0, keepdim=True)
+            refy_0dim = arg_reduction_fn(cpu_x, dim=0, keepdim=True)
             self.assertEqual(y_0dim, refy_0dim)
 
-            y_1 = torch.argmax(x, dim=1)
-            refy_1 = torch.argmax(cpu_x, dim=1)
+            y_1 = arg_reduction_fn(x, dim=1)
+            refy_1 = arg_reduction_fn(cpu_x, dim=1)
             self.assertEqual(y_1, refy_1)
 
-            y_1dim = torch.argmax(x, dim=1, keepdim=True)
-            refy_1dim = torch.argmax(cpu_x, dim=1, keepdim=True)
+            y_1dim = arg_reduction_fn(x, dim=1, keepdim=True)
+            refy_1dim = arg_reduction_fn(cpu_x, dim=1, keepdim=True)
             self.assertEqual(y_1dim, refy_1dim)
 
-            y_2 = torch.argmax(x, dim=2)
-            refy_2 = torch.argmax(cpu_x, dim=2)
+            y_2 = arg_reduction_fn(x, dim=2)
+            refy_2 = arg_reduction_fn(cpu_x, dim=2)
             self.assertEqual(y_2, refy_2)
 
-            y_2dim = torch.argmax(x, dim=2, keepdim=True)
-            refy_2dim = torch.argmax(cpu_x, dim=2, keepdim=True)
+            y_2dim = arg_reduction_fn(x, dim=2, keepdim=True)
+            refy_2dim = arg_reduction_fn(cpu_x, dim=2, keepdim=True)
             self.assertEqual(y_2dim, refy_2dim)
 
-            y_3 = torch.argmax(x, dim=3)
-            refy_3 = torch.argmax(cpu_x, dim=3)
+            y_3 = arg_reduction_fn(x, dim=3)
+            refy_3 = arg_reduction_fn(cpu_x, dim=3)
             self.assertEqual(y_3, refy_3)
 
-            y_3dim = torch.argmax(x, dim=3, keepdim=True)
-            refy_3dim = torch.argmax(cpu_x, dim=3, keepdim=True)
+            y_3dim = arg_reduction_fn(x, dim=3, keepdim=True)
+            refy_3dim = arg_reduction_fn(cpu_x, dim=3, keepdim=True)
             self.assertEqual(y_3dim, refy_3dim)
 
-        helper(2, 8, 4, 4, torch.float32)
-        helper(2, 8, 4, 4, torch.int32)
-        helper(2, 8, 4, 4, torch.float16)
-        helper(2, 8, 4, 4, torch.int64)
+        helper(2, 8, 4, 4, "max", torch.float32)
+        helper(2, 8, 4, 4, "max", torch.int32)
+        helper(2, 8, 4, 4, "max", torch.float16)
+        helper(2, 8, 4, 4, "max", torch.int64)
+        helper(2, 8, 4, 4, "min", torch.float32)
+        helper(2, 8, 4, 4, "min", torch.int32)
+        helper(2, 8, 4, 4, "min", torch.float16)
+        helper(2, 8, 4, 4, "min", torch.int64)
 
     # Test forward max
     # Note - don't test grad now
@@ -3578,7 +3607,14 @@ class TestNLLLoss(TestCase):
             softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
             softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
 
+            cpu_grad = torch.randn(softplus_result.shape)
+            grad = cpu_grad.to('mps')
+
+            softplus_result.backward(gradient=grad)
+            softplus_result_cpu.backward(gradient=cpu_grad)
+
             self.assertEqual(softplus_result, softplus_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
@@ -4796,6 +4832,49 @@ class TestLinalgMPS(TestCase):
         m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
         self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
+class TestGatherScatter(TestCase):
+    def test_slicing_with_step(self):
+        # Slicing with step
+        # https://github.com/pytorch/pytorch/issues/78886
+        x_mps = torch.zeros(10, dtype=torch.float32, device="mps")
+        x_mps[::2] = 1.0
+
+        x_cpu = torch.zeros(10, dtype=torch.float32, device="cpu")
+        x_cpu[::2] = 1.0
+
+        self.assertEqual(x_cpu, x_mps)
+
+    def test_slicing_replace_column(self):
+        # https://github.com/pytorch/pytorch/issues/78074
+        def _helper(tensor_data):
+            x_cpu = torch.tensor(tensor_data)
+            x_mps = x_cpu.to('mps')
+
+            x_cpu[:, 0] = 7
+            x_mps[:, 0] = 7
+
+            self.assertEqual(x_cpu, x_mps)
+
+        _helper([[1, 2, 3], [4, 5, 6]])
+        _helper([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        _helper([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+
+    def test_inplace_scatter(self):
+        # https://github.com/pytorch/pytorch/issues/79672
+        a_mps = torch.ones((2, 2),).to(torch.device("mps"))
+        b_mps = torch.ones((2, 2),).to(torch.device("mps"))
+
+        a_cpu = torch.ones((2, 2),).to(torch.device("cpu"))
+        b_cpu = torch.ones((2, 2),).to(torch.device("cpu"))
+
+        a_mps[:, 0] += b_mps[:, 0]
+        a_cpu[:, 0] += b_cpu[:, 0]
+        self.assertEqual(a_cpu, a_mps)
+
+        a_mps[:, 0] = a_mps[:, 0] + b_mps[:, 0]
+        a_cpu[:, 0] = a_cpu[:, 0] + b_cpu[:, 0]
+        self.assertEqual(a_cpu, a_mps)
+
 # These tests were taken from test/test_view_ops.py
 # They are subset of those tests as currently only this subset is working.
 # This whole `class` will be removed when we add generic device testing. There
@@ -4829,6 +4908,137 @@ class TestViewOpsMPS(TestCase):
             return x
         else:
             return x.transpose(dim0, dim1)
+
+    def test_diagonal_view(self, device="mps"):
+        t = torch.ones((5, 5), device=device)
+        v = torch.diagonal(t)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0] = 0
+        self.assertEqual(t[0, 0], v[0])
+
+        t = torch.ones((3, 3, 3), device="mps")
+        v = torch.diagonal(t, offset=1, dim1=1, dim2=2)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0, 0] = 0
+        self.assertEqual(t[0, 0, 1], v[0, 0])
+
+    def test_select_view(self, device="mps") -> None:
+        t = torch.ones((5, 5), device=device)
+        v = t.select(0, 2)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0] = 0
+        self.assertEqual(t[2, 0], v[0])
+
+    def test_unbind_view(self, device="mps") -> None:
+        t = torch.zeros((5, 5), device=device)
+        tup = torch.unbind(t)
+
+        for idx, v in enumerate(tup):
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = idx + 1
+            self.assertEqual(t[idx, 0], v[0])
+
+    def test_expand_view(self, device="mps") -> None:
+        t = torch.ones((5, 1), device=device)
+        v = t.expand(5, 5)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[2, 2] = 0
+        self.assertEqual(t[2, 0], v[2, 2])
+
+    def test_expand_as_view(self, device="mps"):
+        t = torch.ones((5, 1), device=device)
+        e = torch.empty((5, 5), device=device)
+        v = t.expand_as(e)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[2, 2] = 0
+        self.assertEqual(t[2, 0], v[2, 2])
+
+    def test_narrow_view(self, device="mps"):
+        t = torch.ones((5, 5), device=device)
+        v = torch.narrow(t, 1, 2, 2)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0, 0] = 0
+        self.assertEqual(t[0, 2], v[0, 0])
+
+    def test_permute_view(self, device="mps") -> None:
+        t = torch.ones((5, 5), device=device)
+        v = t.permute(1, 0)
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_transpose_view(self, device="mps"):
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
+            t = torch.ones((5, 5), device=device)
+            v = fn(t, 0, 1)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0, 1] = 0
+            self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_transpose_inplace_view(self, device="mps"):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapdims_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapaxes_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.transpose_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_t_view(self, device="mps"):
+        t = torch.ones((5, 5), device=device)
+        v = t.t()
+        self.assertTrue(self.is_view_of(t, v))
+
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_t_inplace_view(self, device="mps"):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.t_()
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_T_view(self, device="mps"):
+        for op in ("T", "H", "mT", "mH"):
+            t = torch.ones((5, 5), device=device)
+            v = getattr(t, op)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0, 1] = 0
+            self.assertEqual(t[1, 0], v[0, 1])
+
+    # requires aten::unfold
+    # def test_unfold_view(self, device="mps"):
+    #     t = torch.ones(10, device=device)
+    #     v = t.unfold(0, 3, 2)
+    #     self.assertTrue(self.is_view_of(t, v))
+
+    #     v[1, 0] = 0
+    #     self.assertEqual(t[2], v[1, 0])
 
     def test_squeeze_view(self, device="mps"):
         t = torch.ones(5, 1, 5, device=device)
@@ -5470,15 +5680,34 @@ class TestRNNMPS(TestCase):
         hx = torch.zeros(2, 3, 4, device="cpu")
         cx = torch.zeros(2, 3, 4, device="cpu")
 
-        cpu_output, _ = rnn(input, (hx, cx))
+        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
-        device = torch.device("mps")
         rnn = rnn.to(device)
         input = input.to(device)
         hx = hx.to(device)
         cx = cx.to(device)
-        output, _ = rnn(input, (hx, cx))
+        output, (hn, cn) = rnn(input, (hx, cx))
+
         self.assertEqual(cpu_output, output)
+        self.assertEqual(cpu_hn, hn)
+        self.assertEqual(cpu_cn, cn)
+
+        # test batch_first
+        rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
+        input = torch.randn(3, 2, 1, device="cpu")
+        hx = torch.zeros(2, 3, 4, device="cpu")
+        cx = torch.zeros(2, 3, 4, device="cpu")
+        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+
+        rnn = rnn.to(device)
+        input = input.to(device)
+        hx = hx.to(device)
+        cx = cx.to(device)
+        output, (hn, cn) = rnn(input, (hx, cx))
+
+        self.assertEqual(cpu_output, output)
+        self.assertEqual(cpu_hn, hn)
+        self.assertEqual(cpu_cn, cn)
 
     @unittest.skipIf(True, "Backward of lstm returns wrong result")
     def test_lstm_2(self, device="mps", dtype=torch.float32):
@@ -5895,6 +6124,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['torch.float32'],
         'nn.functional.kl_div': ['torch.float32'],
         'nn.functional.l1_loss': ['torch.float32'],
+        'nn.functional.huber_loss': ['torch.float32'],
         'nn.functional.leaky_relu': ['torch.float32'],
         'nn.functional.mse_loss': ['torch.float16', 'torch.float32'],
         'nn.functional.relu': ['torch.float32',
