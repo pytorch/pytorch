@@ -69,9 +69,7 @@ jobs:
           always-rebuild: true
           skip_push: false
           force_push: true
-          # TODO:
-          # push-ghcr-image: ${{ github.event_name == 'push' }}
-          push-ghcr-image: true
+          push-ghcr-image: ${{ github.event_name == 'push' }}
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image
