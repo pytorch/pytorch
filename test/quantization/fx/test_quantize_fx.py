@@ -7611,6 +7611,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
             torch.testing.assert_allclose(grad[0], grad_ref[0])
 
         if 'fbgemm' in torch.backends.quantized.supported_engines:
+            # During the lowering step in convert, fold_weight calls quantized::linear_prepack
+            # which doesn't support QuantizedCuda backend
+            prepared.cpu()
+            prepared_ref.cpu()
             converted = convert_fx(prepared)
             converted_ref = convert_fx(prepared_ref)
             inp = torch.rand(5, 5)
