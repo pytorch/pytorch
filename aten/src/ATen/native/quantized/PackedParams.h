@@ -37,23 +37,23 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   }
 
   // input is NOT quantized; quantization of input occurs within the function
-  virtual at::Tensor apply_fused_qdq(
+  virtual at::Tensor apply_fused_skip_requant(
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point) {
     throw std::runtime_error(
-        "apply_fused_qdq is not implemented for this packed "
+        "apply_fused_skip_requant is not implemented for this packed "
         "parameter type");
     return {};
   }
 
   // input is NOT quantized; quantization of input occurs within the function
-  virtual at::Tensor apply_fused_qdq_relu(
+  virtual at::Tensor apply_fused_skip_requant_relu(
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point) {
     throw std::runtime_error(
-        "apply_fused_qdq_relu is not implemented for this packed "
+        "apply_fused_skip_requant_relu is not implemented for this packed "
         "parameter type");
     return {};
   }

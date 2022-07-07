@@ -148,8 +148,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_qdq_fused(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float input_scale, int input_zero_point) -> Tensor Y"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_qdq_fused(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float input_scale, int input_zero_point) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_fused_skip_requant(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float input_scale, int input_zero_point) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_fused_skip_requant_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float input_scale, int input_zero_point) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"));

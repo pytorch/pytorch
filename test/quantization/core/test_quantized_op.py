@@ -3461,30 +3461,93 @@ class TestQuantizedLinear(TestCase):
     """Tests the correctness of the fused quant-dequant linear and linear_relu op."""
     def test_qdq_fused_qlinear(self):
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        use_relu = False
-        X_scale = 0.2
-        X_zp = 0
-        batch_size = 2
-        in_features = 10
-        out_features = 20
+        reduce_range = True
+        use_relu = True
+        batch_size = 100 #4000
+        in_features = 64 #4000
+        out_features = 512 #1000
         X = torch.rand(batch_size, in_features) * 100
+        X_scale, X_zp = torch._choose_qparams_per_tensor(X, reduce_range)
+        # X_scale = 0.2
+        # X_zp = 0
         X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
         W_scale = 2.5
         W_zp = 10
         W = torch.rand(out_features, in_features) * 10000
         W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        use_bias = None
-        W_prepack = qlinear_prepack(W_q, float_bias if use_bias else None)
-        X_fake_quant = torch.fake_quantize_per_tensor_affine(X, X_scale, X_zp, 0, 255)
+        b = torch.rand(out_features) * 10000
+        use_bias = True
+        float_bias = b if use_bias else None
+        W_prepack = qlinear_prepack(W_q, float_bias)
+        X_fake_quant = torch.fake_quantize_per_tensor_affine(X, X_scale, X_zp, 0, 127 if reduce_range else 255)
         W_fake_quant = torch.fake_quantize_per_tensor_affine(W, W_scale, W_zp, -128, 127)
-        y_ref = torch.nn.functional.linear(X_fake_quant, W_fake_quant, bias=None)
-        y_fused =  torch.ops.quantized.linear_qdq_fused(X, W_prepack, X_scale, X_zp)
-        y_dynamic = torch.ops.quantized.linear_dynamic(X_q.dequantize(), W_prepack, reduce_range=False)
-        print(y_ref)
-        print(y_fused)
-        print(y_dynamic)
-        # self.assertEqual(y_ref, y_fused) # doesn't match
-        self.assertEqual(y_dynamic, y_fused) # matches
+        y_ref = torch.nn.functional.linear(X_fake_quant, W_fake_quant, bias=float_bias)
+        y_fused =  torch.ops.quantized.linear_fused_skip_requant(X, W_prepack, X_scale, X_zp)
+        y_dynamic = torch.ops.quantized.linear_dynamic(X, W_prepack, reduce_range=reduce_range)
+        # print(y_ref)
+        # print(y_fused)
+        # print(y_dynamic)
+        self.assertEqual(y_ref, y_fused) # doesn't match
+        # self.assertEqual(y_dynamic, y_fused) # matches
+
+        import time
+        num_iter = 10000
+        num_warmup_iter = 100
+        num_wait_iter = 100
+        my_schedule = torch.profiler.schedule(
+            wait=num_wait_iter,
+            warmup=num_warmup_iter,
+            active=num_iter)
+        Y_scale = 0.5
+        Y_zp = 0
+
+        torch.set_num_threads(16)
+
+
+        for i in range(num_warmup_iter):
+            torch.ops.quantized.linear_fused_skip_requant(X, W_prepack, X_scale, X_zp)
+        start = time.time()
+        for i in range(num_iter):
+            torch.ops.quantized.linear_fused_skip_requant(X, W_prepack, X_scale, X_zp)
+        end = time.time()
+        print("Runtime for fused: ", ((end - start) * 1000) / num_iter, " ms/iter", flush=True)
+
+        print(num_iter)
+        for i in range(num_warmup_iter):
+            torch.ops.quantized.linear_dynamic(X, W_prepack, reduce_range=reduce_range)
+        start = time.time()
+        for i in range(num_iter):
+            torch.ops.quantized.linear_dynamic(X, W_prepack, reduce_range=reduce_range)
+        end = time.time()
+        print("Runtime for dynamic: ", ((end - start) * 1000) / num_iter, " ms/iter", flush=True)
+
+
+        # from torch.profiler import profile, ProfilerActivity
+        # with profile(
+        #         activities=[ProfilerActivity.CPU],
+        #         schedule=my_schedule) as prof:
+        #     for i in range(num_iter):
+        #         torch.ops.quantized.linear_dynamic(X, W_prepack, reduce_range=reduce_range)
+        #         prof.step()
+
+        # print("dynamic benchmark result:")
+        # print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        # from torch.profiler import profile, ProfilerActivity
+        # with profile(
+        #         activities=[ProfilerActivity.CPU],
+        #         schedule=my_schedule) as prof:
+        #     for i in range(num_iter):
+        #         torch.ops.quantized.linear_fused_skip_requant(X, W_prepack, X_scale, X_zp)
+        #         prof.step()
+
+        # print("dynamic benchmark result:")
+        # print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+
+
+    # get scale and zero point from calling choose qparams. _choose_qparams_per_tensor to get scale and zp like how it is dnoe for dynamic
+    # then try to match output of quantize linear dynamic
 
 
     """Tests the correctness of the quantized linear and linear_relu op."""

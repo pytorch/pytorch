@@ -13,31 +13,33 @@
 #include <string>
 
 #ifdef USE_FBGEMM
-at::Tensor PackedLinearWeight::apply_fused_qdq(
+at::Tensor PackedLinearWeight::apply_fused_skip_requant(
   at::Tensor input,
   double input_scale,
   int64_t input_zero_point) {
-  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq is quantized; "
-  "Expected input tensor in PackedLinearWeight::apply_fused_qdq to be full precision.");
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_skip_requant is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_fused_skip_requant to be full precision.");
 
-  return apply_fused_qdq_impl<false>(input, input_scale, input_zero_point);
+  return apply_fused_skip_requant_impl<false>(input, input_scale, input_zero_point);
 }
 
-at::Tensor PackedLinearWeight::apply_fused_qdq_relu(
+at::Tensor PackedLinearWeight::apply_fused_skip_requant_relu(
   at::Tensor input,
   double input_scale,
   int64_t input_zero_point) {
-  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq is quantized; "
-  "Expected input tensor in PackedLinearWeight::apply_fused_qdq to be full precision.");
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_skip_requant is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_fused_skip_requant to be full precision.");
 
-  return apply_fused_qdq_impl<true>(input, input_scale, input_zero_point);
+  return apply_fused_skip_requant_impl<true>(input, input_scale, input_zero_point);
 }
 
 template <bool ReluFused>
-at::Tensor PackedLinearWeight::apply_fused_qdq_impl(
+at::Tensor PackedLinearWeight::apply_fused_skip_requant_impl(
     const at::Tensor& input,
     double input_scale,
     int64_t input_zero_point) {
+  auto start = std::chrono::steady_clock::now();
+
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
@@ -84,19 +86,18 @@ at::Tensor PackedLinearWeight::apply_fused_qdq_impl(
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
+        /*trans=*/fbgemm::matrix_op_t::NoTranspose,
+        /*nRow=*/M,
+        /*nCol=*/K,
+        /*smat=*/input_ptr,
+        /*ld=*/K,
+        /*pmat=*/nullptr,
+        /*scale=*/input_scale,
+        /*zero_pt=*/input_zero_point);
+
+    fbgemm::DoNothing<float, float> doNothingObj{};
     for (const auto task_id : c10::irange(begin, end)) {
-      fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
-          /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-          /*nRow=*/M,
-          /*nCol=*/K,
-          /*smat=*/input_ptr,
-          /*ld=*/K,
-          /*pmat=*/nullptr,
-          /*scale=*/input_scale,
-          /*zero_pt=*/input_zero_point);
-
-      fbgemm::DoNothing<float, float> doNothingObj{};
-
       if (q_scheme == c10::kPerTensorAffine) {
         fbgemm::ReQuantizeForFloat<ReluFused> outputProcObj(
                 doNothingObj,
@@ -157,7 +158,16 @@ at::Tensor PackedLinearWeight::apply_fused_qdq_impl(
       }
     }
   });
-
+  static int64_t iter = 0;
+  static double elapsed_time = 0.0;
+  auto end = std::chrono::steady_clock::now();
+  if (iter >= 100) {
+    elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  }
+  if (iter == 10000 + 99) {
+    std::cout << "elapsed_time: " << elapsed_time / 1000000.0 << "ms" <<std::endl;
+  }
+  ++iter;
   return output;
 }
 
@@ -168,7 +178,7 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearQdqFusedInt8 final {
+class QLinearFusedSkipRequantInt8 final {
  public:
   static at::Tensor run(
       at::Tensor input,
@@ -176,20 +186,20 @@ class QLinearQdqFusedInt8 final {
       double input_scale,
       int64_t input_zero_point) {
     if (ReluFused) {
-      return packed_weight->apply_fused_qdq_relu(std::move(input), input_scale, input_zero_point);
+      return packed_weight->apply_fused_skip_requant_relu(std::move(input), input_scale, input_zero_point);
     } else {
-      return packed_weight->apply_fused_qdq(std::move(input), input_scale, input_zero_point);
+      return packed_weight->apply_fused_skip_requant(std::move(input), input_scale, input_zero_point);
     }
   }
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_qdq_fused"),
-      TORCH_FN(QLinearQdqFusedInt8<false>::run));
+      TORCH_SELECTIVE_NAME("quantized::linear_fused_skip_requant"),
+      TORCH_FN(QLinearFusedSkipRequantInt8<false>::run));
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::linear_relu_qdq_fused"),
-      TORCH_FN(QLinearQdqFusedInt8<true>::run));
+      TORCH_SELECTIVE_NAME("quantized::linear_fused_skip_requant_relu"),
+      TORCH_FN(QLinearFusedSkipRequantInt8<true>::run));
 }
 
 } // anonymous

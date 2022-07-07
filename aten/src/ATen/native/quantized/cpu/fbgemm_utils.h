@@ -62,12 +62,12 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       int64_t output_zero_point,
       at::Tensor& output) override;
 
-  at::Tensor apply_fused_qdq(
+  at::Tensor apply_fused_skip_requant(
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point) override;
 
-  at::Tensor apply_fused_qdq_relu(
+  at::Tensor apply_fused_skip_requant_relu(
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point) override;
@@ -96,7 +96,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       at::Tensor& output);
 
   template <bool ReluFused>
-  at::Tensor apply_fused_qdq_impl(
+  at::Tensor apply_fused_skip_requant_impl(
       const at::Tensor& input,
       double input_scale,
       int64_t input_zero_point);

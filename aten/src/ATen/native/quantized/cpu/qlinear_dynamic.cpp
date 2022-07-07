@@ -23,6 +23,8 @@ template <bool ReluFused>
 at::Tensor PackedLinearWeight::apply_dynamic_impl(
     at::Tensor input,
     bool reduce_range) {
+  auto start = std::chrono::steady_clock::now();
+
   using at::Tensor;
   // fp32 * int8 -> fp32 (with quantization on activation, and dequantization
   // on the result).
@@ -56,12 +58,23 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
 
   // Calculate statistics for quantization of the input Tensor
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  static int64_t iter = 0;
+
   float x_min, x_max;
+  auto start1 = std::chrono::steady_clock::now();
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
+  static double elapsed_time1 = 0.0;
+  auto end1 = std::chrono::steady_clock::now();
+  if (iter >= 100) {
+    elapsed_time1 += std::chrono::duration_cast<std::chrono::nanoseconds>(end1 - start1).count();
+  }
+  if (iter == 10000 + 99) {
+    std::cout << "elapsed_time min max: " << elapsed_time1 / 1000000.0 << "ms" <<std::endl;
+  }
 
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;
@@ -212,6 +225,15 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
     }
   });
 
+  static double elapsed_time = 0.0;
+  auto end = std::chrono::steady_clock::now();
+  if (iter >= 100) {
+    elapsed_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  }
+  if (iter == 10000 + 99) {
+    std::cout << "elapsed_time: " << elapsed_time / 1000000.0 << "ms" <<std::endl;
+  }
+  ++iter;
   return output;
 }
 
