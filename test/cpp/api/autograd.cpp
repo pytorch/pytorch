@@ -835,13 +835,13 @@ TEST(CustomAutogradTest, HooksInplace) {
   auto a = torch::ones({5, 5}, torch::requires_grad()).clone();
 
   int hook1_count = 0;
-  auto hook1 = ([&a, &hook1_count](Variable grad) {
+  auto hook1 = ([&hook1_count](Variable grad) {
     hook1_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 2);
   });
 
   bool hook2_count = 0;
-  auto hook2 = ([&a, &hook2_count](Variable grad) {
+  auto hook2 = ([&hook2_count](Variable grad) {
     hook2_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}));
   });
@@ -861,19 +861,19 @@ TEST(CustomAutogradTest, HooksInplaceWithRetainsGrad) {
   auto a = torch::ones({5, 5}, torch::requires_grad()).clone();
 
   int hook1_count = 0;
-  auto hook1 = ([&a, &hook1_count](Variable grad) {
+  auto hook1 = ([&hook1_count](Variable grad) {
     hook1_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 2);
   });
 
   bool hook2_count = 0;
-  auto hook2 = ([&a, &hook2_count](Variable grad) {
+  auto hook2 = ([&hook2_count](Variable grad) {
     hook2_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 2);
   });
 
   bool hook3_count = 0;
-  auto hook3 = ([&a, &hook3_count](Variable grad) {
+  auto hook3 = ([&hook3_count](Variable grad) {
     hook3_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}));
   });
@@ -900,19 +900,19 @@ TEST(CustomAutogradTest, HooksInplaceTwiceWithRetainsGrad) {
   auto a = torch::ones({5, 5}, torch::requires_grad()).clone();
 
   int hook1_count = 0;
-  auto hook1 = ([&a, &hook1_count](Variable grad) {
+  auto hook1 = ([&hook1_count](Variable grad) {
     hook1_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 4);
   });
 
   bool hook2_count = 0;
-  auto hook2 = ([&a, &hook2_count](Variable grad) {
+  auto hook2 = ([&hook2_count](Variable grad) {
     hook2_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 4);
   });
 
   bool hook3_count = 0;
-  auto hook3 = ([&a, &hook3_count](Variable grad) {
+  auto hook3 = ([&hook3_count](Variable grad) {
     hook3_count++;
     ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}));
   });
