@@ -3,6 +3,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
@@ -263,7 +264,16 @@ Tensor quantile_compute(
     // For nanquantile, compute ranks based on number of non-nan values.
     // If all values are nan, set rank to 0 so the quantile computed is nan.
     ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
-    ranks.masked_fill_(ranks < 0, 0);
+    // For Composite Compliance,
+    // if `ranks` is `CCT` but it's tangent is a regular Tensor,
+    // then while computing jvp, we end calling `masked_fill_`
+    // on a regular Tensor with CCT args, so we call
+    // `masked_fill` instead.
+    if (isTensorSubclassLike(ranks) && ranks._fw_grad(/*level=*/0).defined()) {
+      ranks = ranks.masked_fill(ranks < 0, 0);
+    } else {
+      ranks.masked_fill_(ranks < 0, 0);
+    }
   } else {
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
@@ -296,7 +306,23 @@ Tensor quantile_compute(
     // Interpolate to compute quantiles and store in values_below
     Tensor ranks_above = ranks.ceil_().toType(kLong);
     Tensor values_above = sorted.gather(-1, ranks_above);
-    values_below.lerp_(values_above, weights);
+    // For Composite Compliance,
+    // if either `values_below`, `values_above` or `weights` are a CCT
+    // or tangents of `value_above` and `weights` are a CCT,
+    // but if the tangent of `value_below` is a regular Tensor,
+    // then while computing jvp, we will end-up copying a `CCT`,
+    // into regular Tensor. So we use out-of-place variant of `lerp`
+    auto is_primal_cct =
+        areAnyTensorSubclassLike({values_below, values_above, weights});
+    auto is_tangent_cct = areAnyTensorSubclassLike(
+        {values_above._fw_grad(/*level=*/0), weights._fw_grad(/*level=*/0)});
+    if ((is_primal_cct || is_tangent_cct) &&
+        values_below._fw_grad(/*level=*/0).defined() &&
+        !isTensorSubclassLike(values_below._fw_grad(/*level=*/0))) {
+      values_below = values_below.lerp(values_above, weights);
+    } else {
+      values_below.lerp_(values_above, weights);
+    }
   }
 
   if (q.dim() == 0) {

@@ -896,6 +896,46 @@ TEST(CustomAutogradTest, HooksInplaceWithRetainsGrad) {
   ASSERT_VARIABLE_EQ(a.grad(), torch::ones({5, 5}));
 }
 
+TEST(CustomAutogradTest, HooksInplaceTwiceWithRetainsGrad) {
+  auto a = torch::ones({5, 5}, torch::requires_grad()).clone();
+
+  int hook1_count = 0;
+  auto hook1 = ([&a, &hook1_count](Variable grad) {
+    hook1_count++;
+    ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 4);
+  });
+
+  bool hook2_count = 0;
+  auto hook2 = ([&a, &hook2_count](Variable grad) {
+    hook2_count++;
+    ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}) * 4);
+  });
+
+  bool hook3_count = 0;
+  auto hook3 = ([&a, &hook3_count](Variable grad) {
+    hook3_count++;
+    ASSERT_VARIABLE_EQ(grad, torch::ones({5, 5}));
+  });
+
+  a.register_hook(hook1);
+  a.retain_grad();
+  a.register_hook(hook2);
+
+  a.mul_(2);
+  a.mul_(2);
+  a.register_hook(hook3);
+
+  auto out = (a + 1).sum();
+  out.backward();
+
+  ASSERT_EQ(hook1_count, 1);
+  ASSERT_EQ(hook2_count, 1);
+  ASSERT_EQ(hook3_count, 1);
+
+  ASSERT_TRUE(a.retains_grad());
+  ASSERT_VARIABLE_EQ(a.grad(), torch::ones({5, 5}));
+}
+
 TEST(CustomAutogradTest, HookNone) {
   struct NoneGradientFunction : public Function<NoneGradientFunction> {
     static variable_list forward(AutogradContext* ctx, Variable x, Variable y) {

@@ -157,19 +157,19 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
 void update_retains_grad(
     const at::TensorBase& self,
     const std::shared_ptr<torch::autograd::Node>& fn) {
+  const auto& meta = impl::get_autograd_meta(self);
   if (!self.retains_grad()) {
+    meta->cpp_hooks_list_ = nullptr;
     return;
   }
-  auto idx = impl::get_autograd_meta(self)->retains_grad_;
-  auto old_list = materialize_autograd_meta(self)->cpp_hooks_list_;
-  auto retains_grad_hook = (*old_list)[idx];
+  auto idx = meta->retains_grad_;
   auto new_list = std::make_shared<hooks_list>();
-  new_list->push_back(retains_grad_hook);
-  (*old_list)[idx] = nullptr;
-  materialize_autograd_meta(self)->cpp_hooks_list_ = new_list;
-
+  new_list->push_back(std::move((*meta->cpp_hooks_list_)[idx]));
+  (*meta->cpp_hooks_list_)[idx] = nullptr;
+  meta->cpp_hooks_list_ = new_list;
+  meta->retains_grad_ = 0;
   std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionPreHook(new_list, self.output_nr()));
+      new CppFunctionPreHook(meta->cpp_hooks_list_, self.output_nr()));
   fn->add_pre_hook(std::move(hook_ptr));
 }
 
