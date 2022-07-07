@@ -4,83 +4,14 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
-
-using namespace torch::jit::fuser::cuda;
-
-namespace {
-
-class PythonFusionOwner {
- public:
-  PythonFusionOwner() : executor_cache_(std::make_unique<Fusion>()) {}
-
-  // Non-copyable
-  PythonFusionOwner(const PythonFusionOwner&) = delete;
-  PythonFusionOwner& operator=(const PythonFusionOwner&) = delete;
-
-  std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs) {
-    return executor_cache_.runFusionWithInputs(inputs);
-  }
-  Fusion* fusionPtr() {
-    return executor_cache_.fusion();
-  }
-
-  void printIr() {
-    executor_cache_.printFusion();
-  }
-  void printKernel() {
-    executor_cache_.fusion()->printKernel();
-  }
-
- private:
-  FusionExecutorCache executor_cache_;
-};
-
-// Manually applying the fusion guard via a context manager
-class FusionDefinitionContextManager {
- public:
-  FusionDefinitionContextManager(PythonFusionOwner* fusion_owner)
-      : fusion_owner_(fusion_owner), prev_fusion_(nullptr) {}
-
-  // Context Manager Methods
-  FusionDefinitionContextManager* enter() {
-    prev_fusion_ = FusionGuard::getCurFusion();
-    FusionGuard::setCurFusion(fusionPtr());
-    return this;
-  }
-
-  void exit() {
-    FusionGuard::setCurFusion(prev_fusion_);
-    prev_fusion_ = nullptr;
-  }
-
-  void addInput(torch::jit::fuser::cuda::Val* input) {
-    fusionPtr()->addInput(input);
-  }
-  void addOutput(torch::jit::fuser::cuda::Val* output) {
-    fusionPtr()->addOutput(output);
-  }
-
-  Fusion* fusionPtr() {
-    return fusion_owner_->fusionPtr();
-  }
-
-  // An Empty namespace to add arith ops
-  struct Ops {};
-
- private:
-  PythonFusionOwner* fusion_owner_;
-  Fusion* prev_fusion_;
-};
-
-} // namespace
 
 namespace torch {
 namespace jit {
@@ -94,25 +25,25 @@ void initNvFuserPythonBindings(PyObject* module) {
   // Types not related to values found in fusion defintions
   // were purposely left out.
   // NOTE: DataType was ambiguous under torch::jit without full qualification.
-  py::enum_<torch::jit::fuser::cuda::DataType>(nvfuser, "DataType")
-      .value("Double", torch::jit::fuser::cuda::DataType::Double)
-      .value("Float", torch::jit::fuser::cuda::DataType::Float)
-      .value("Half", torch::jit::fuser::cuda::DataType::Half)
-      .value("Int", torch::jit::fuser::cuda::DataType::Int)
-      .value("Int32", torch::jit::fuser::cuda::DataType::Int32)
-      .value("Bool", torch::jit::fuser::cuda::DataType::Bool)
-      .value("BFloat16", torch::jit::fuser::cuda::DataType::BFloat16)
-      .value("ComplexFloat", torch::jit::fuser::cuda::DataType::ComplexFloat)
-      .value("ComplexDouble", torch::jit::fuser::cuda::DataType::ComplexDouble)
-      .value("Null", torch::jit::fuser::cuda::DataType::Null);
+  py::enum_<NvfDataType>(nvfuser, "DataType")
+      .value("Double", NvfDataType::Double)
+      .value("Float", NvfDataType::Float)
+      .value("Half", NvfDataType::Half)
+      .value("Int", NvfDataType::Int)
+      .value("Int32", NvfDataType::Int32)
+      .value("Bool", NvfDataType::Bool)
+      .value("BFloat16", NvfDataType::BFloat16)
+      .value("ComplexFloat", NvfDataType::ComplexFloat)
+      .value("ComplexDouble", NvfDataType::ComplexDouble)
+      .value("Null", NvfDataType::Null);
 
   // Binding an object that owns a FusionExecutorCache instance and provides an
   // interface
-  py::class_<PythonFusionOwner> fusion(nvfuser, "Fusion");
+  py::class_<nvfuser::FusionOwner> fusion(nvfuser, "Fusion");
   fusion.def(py::init<>())
       .def(
           "execute",
-          [](PythonFusionOwner& self, const py::iterable& iter) {
+          [](nvfuser::FusionOwner& self, const py::iterable& iter) {
             std::vector<IValue> inputs;
             for (py::handle obj : iter) {
               inputs.push_back(toIValue(obj, c10::AnyType::get()));
@@ -120,90 +51,53 @@ void initNvFuserPythonBindings(PyObject* module) {
             return self.execute(inputs);
           },
           py::return_value_policy::reference)
-      .def("print_ir", [](PythonFusionOwner& self) { self.printIr(); })
-      .def("print_kernel", [](PythonFusionOwner& self) { self.printKernel(); });
+      .def("print_ir", [](nvfuser::FusionOwner& self) { self.printIr(); })
+      .def("print_kernel", [](nvfuser::FusionOwner& self) { self.printKernel(); });
 
-  // Bindings to Types required for Tensor/Scalar Creation
-  py::class_<TensorView>(nvfuser, "TensorView")
-      .def(
-          "__str__",
-          [](TensorView& self) -> std::string {
-            std::stringstream ss;
-            TORCH_CHECK(
-                self.getDataType().has_value(),
-                "TensorView does not have DataType?");
-            ss << self.getDataType().value();
-            return self.toString() + " DataType: " + ss.str() +
-                " Contiguity: " + self.domain()->getContiguityString();
-          },
-          py::return_value_policy::reference);
-  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val")
-      .def(
-          "__str__",
-          [](torch::jit::fuser::cuda::Val& self) -> std::string {
-            return self.toString();
-          },
-          py::return_value_policy::reference);
+  py::class_<nvfuser::Tensor>(nvfuser, "Tensor");
+  py::class_<nvfuser::Scalar>(nvfuser, "Scalar");
 
   // C++ Side of Context Manager used to mimic the FusionGuard as a way
   // to programatically distinguish code used to define the Fusion instead
   // of having the user mysteriously create an object prior to adding definition
   // code where the object is not used.
-  py::class_<FusionDefinitionContextManager> fusion_def(
-      nvfuser, "FusionDefinition");
-  fusion_def.def(py::init<PythonFusionOwner*>())
+  py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
+  fusion_def.def(py::init<nvfuser::FusionOwner*>())
+      .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",
-          [](FusionDefinitionContextManager& self) { return self.enter(); })
+          [](nvfuser::FusionDefinition& self)->nvfuser::FusionDefinition* { return self.enter(); })
       .def(
           "__exit__",
-          [](FusionDefinitionContextManager& self,
+          [](nvfuser::FusionDefinition& self,
              void* exc_type,
              void* exc_value,
-             void* traceback) { self.exit(); })
+             void* traceback) { 
+               /*for (auto& record : self.recording) {
+                 auto functor = record.get();
+                 (*functor)(self);
+               }*/
+               self.exit();
+      })
       .def(
-          "add_input",
-          [](FusionDefinitionContextManager& self,
-             torch::jit::fuser::cuda::Val* input) { self.addInput(input); })
-      .def(
-          "add_input",
-          [](FusionDefinitionContextManager& self, TensorView* input) {
-            self.addInput(input);
+          "add_output",
+          [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) { 
+            self.recording.emplace_back(
+                new nvfuser::OutputRecord<NvfVal>({output->index}));
           })
       .def(
           "add_output",
-          [](FusionDefinitionContextManager& self,
-             torch::jit::fuser::cuda::Val* output) { self.addOutput(output); })
-      .def(
-          "add_output",
-          [](FusionDefinitionContextManager& self, TensorView* output) {
-            self.addOutput(output);
+          [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
+            self.recording.emplace_back(
+                new nvfuser::OutputRecord<NvfTensorView>({output->index}));
           })
       .def(
           "define_tensor",
-          [](FusionDefinitionContextManager& self,
-             size_t ndims,
-             torch::jit::fuser::cuda::DataType dtype =
-                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
-            return TensorViewBuilder()
-                .ndims(ndims)
-                .dtype(dtype)
-                .contiguity(std::vector<bool>(ndims, true))
-                .build();
-          },
-          py::arg("ndims"),
-          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
-          py::return_value_policy::reference)
-      .def(
-          // TODO: Should the inernals of this function live more explicitly in
-          // TensorViewBuilder?
-          "define_tensor",
-          [](FusionDefinitionContextManager& self,
-             // TODO: This should come in as int64_t not int
-             std::vector<int> sizes,
-             std::vector<int> strides,
-             torch::jit::fuser::cuda::DataType dtype =
-                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
+          [](nvfuser::FusionDefinition& self,
+             std::vector<int64_t> sizes,
+             std::vector<int64_t> strides,
+             NvfDataType dtype =
+                 NvfDataType::Float) -> nvfuser::Tensor* {
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -240,17 +134,21 @@ void initNvFuserPythonBindings(PyObject* module) {
               }
             }
 
-            return TensorViewBuilder()
-                .ndims(maybe_symbolic_sizes.size())
-                .contiguity(contig_info)
-                .shape(maybe_symbolic_sizes)
-                .dtype(dtype)
-                .build();
+            nvfuser::Tensor* out = new nvfuser::Tensor(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::InputTensorRecord({out->index},
+                                               std::move(maybe_symbolic_sizes),
+                                               std::move(contig_info),
+                                               dtype));
+
+            return out;
           },
           py::arg("sizes"),
           py::arg("strides"),
-          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
-          py::return_value_policy::reference)
+          py::arg("dtype") = NvfDataType::Float,
+          py::return_value_policy::reference);
+      /*
       .def(
           "define_constant",
           [](FusionDefinitionContextManager& self,
@@ -299,21 +197,43 @@ void initNvFuserPythonBindings(PyObject* module) {
             }
           },
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Double,
-          py::return_value_policy::reference);
+          py::return_value_policy::reference); */
 
-  py::class_<FusionDefinitionContextManager::Ops> nvf_ops(fusion_def, "Ops");
+  py::class_<nvfuser::FusionDefinition::Operators> nvf_ops(fusion_def, "Operators");
+  nvf_ops.def(py::init<nvfuser::FusionDefinition*>());
 
   // ******************** INSERT OP BINDINGS BELOW HERE ********************
 
-#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)                 \
-  nvf_ops.def_static(                                                    \
-      op_str,                                                            \
-      py::overload_cast<TensorView*>(&torch::jit::fuser::cuda::op_name), \
-      py::return_value_policy::reference);                               \
-  nvf_ops.def_static(                                                    \
-      op_str,                                                            \
-      py::overload_cast<torch::jit::fuser::cuda::Val*>(                  \
-          &torch::jit::fuser::cuda::op_name),                            \
+#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)                       \
+  nvf_ops.def(                                                                 \
+      op_str,                                                                  \
+      [](nvfuser::FusionDefinition::Operators& self, nvfuser::Tensor* input)   \
+         -> nvfuser::Tensor* {                                                 \
+        nvfuser::Tensor* output =                                              \
+          new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
+        self.fusion_definition->recording_state.emplace_back(output);          \
+        self.fusion_definition->recording.emplace_back(                        \
+          new nvfuser::UnaryOpRecord<NvfTensorView>(                           \
+            {input->index}, {output->index},                                   \
+            static_cast<NvfTensorView*(*)(NvfTensorView*)>(                    \
+                torch::jit::fuser::cuda::op_name)));                           \
+        return output;                                                         \
+      },                                                                       \
+      py::return_value_policy::reference);                                     \
+  nvf_ops.def(                                                                 \
+      op_str,                                                                  \
+      [](nvfuser::FusionDefinition::Operators& self, nvfuser::Scalar* input)   \
+         -> nvfuser::Scalar* {                                                 \
+        nvfuser::Scalar* output =                                              \
+          new nvfuser::Scalar(self.fusion_definition->recording_state.size()); \
+        self.fusion_definition->recording_state.emplace_back(output);          \
+        self.fusion_definition->recording.emplace_back(                        \
+          new nvfuser::UnaryOpRecord<NvfVal>(                                  \
+            {input->index}, {output->index},                                   \
+            static_cast<NvfVal*(*)(NvfVal*)>(                                  \
+                torch::jit::fuser::cuda::op_name)));                           \
+        return output;                                                         \
+      },                                                                       \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_UNARY_OP("abs", abs)
@@ -359,6 +279,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("isreal", isreal)
 #undef NVFUSER_PYTHON_BINDING_UNARY_OP
 
+/*
 #define NVFUSER_PYTHON_BINDING_BINARY_OP(op_str, op_name)                    \
   nvf_ops.def_static(                                                        \
       op_str,                                                                \
@@ -403,7 +324,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_left_shift", bitwise_left_shift)
   NVFUSER_PYTHON_BINDING_BINARY_OP("bitwise_right_shift", bitwise_left_shift)
 #undef NVFUSER_PYTHON_BINDING_BINARY_OP
-
+*/
+/*
 #define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                   \
   nvf_ops.def_static(                                                        \
       op_str,                                                                \
@@ -658,6 +580,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           torch::jit::fuser::cuda::DataType,
           torch::jit::fuser::cuda::Val*>(&torch::jit::fuser::cuda::castOp),
       py::return_value_policy::reference);
+*/
 }
 
 } // namespace jit
