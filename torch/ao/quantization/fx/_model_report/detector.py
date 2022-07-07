@@ -475,7 +475,7 @@ class DynamicStaticDetector(DetectorBase):
             rec_lay_to_add = "dynamic quantize per tensor layer"
             dynamic_per_tensor_string = recommend_per_tensor.format(rec_lay_to_add)
             dynamic_per_tensor_reasoning_string = (
-                " This is because the input to this module has a non-stationary distribution."
+                " This is because the input to this module has a non-stationary distribution"
             )
 
             # start composing explanation
@@ -912,3 +912,79 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         # return a tuple with the string explanation and the compiled dict info
         return (input_weight_string, input_weight_equalization_info)
+
+
+class OutlierDetector(DetectorBase):
+    r"""
+    Determines whether there are significant outliers in activation data around a certain layer.
+
+    This is ideally used in conjunction with information on stationary vs. non-stationary distribution:
+        If the data is stationary, and there are significant outliers, then we want to flag them
+        We want to do this on a per channel basis for detecting outliers
+
+    Determines whether activation data is flagged as outlier based on if data is stationary and:
+        p_r = avg(100th percentile / "reference_percentile"th percentile)
+        where:
+            p_r is average percentile ratio across all batches in the epoch
+            reference_percentile is a percentile values between 0 and 100 exclusive
+
+        if p_r is above some threshold, then we consider the activations to have significant outliers
+
+    Args:
+        ratio_threshold (float): The threshold for p_r to determine if there are outliers in activations
+            Should be between 0 and 1 (both non-inclusive)
+        reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
+
+    * :attr:`ratio_threshold`: The threshold for p_r to determine if there are outliers in activations
+        Should be between 0 and 1
+
+    * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
+
+    """
+
+    def __init__(self, ratio_threshold: float = 10.0, reference_percentile: float = 0.95):
+        # initialize the variables of interest
+        self.ratio_threshold = ratio_threshold
+        self.reference_percentile = reference_percentile
+
+    def get_detector_name(self) -> str:
+        r"""Returns the name of this detector"""
+        return "outlier_detector"
+
+    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
+        r""" Determines where observers need to be inserted for the Outlier Detector.
+
+        For this detector, we want to place observers in front of supported layers.
+
+        Currently inserts observers for:
+            all layers that do not have children (leaf level layers)
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
+            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
+            key "insert_observer" -> the observer we wish to insert (ObserverBase)
+            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_args" -> The arguments that are meant to be passed into the observer
+        """
+        pass
+
+    def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
+        r"""
+        Determines whether input weight equalization is appropriate for a given module.
+
+        Takes advantage of the ModelReport Observer which records the relavent percentile information
+
+        Args:
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+
+        Returns a tuple with two elements:
+            String report of of whether there are outliers in the activations around certain modules
+            Dictionary mapping modules of interest to:
+                whether there were outliers found in activation before
+                their p_r metric compared to the threshold
+                the threshold used to make the recommendation
+                the reference_percentile used to make the recommendation
+        """
+        pass

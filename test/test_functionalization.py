@@ -1,7 +1,7 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -237,7 +237,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    _fused_moving_avg_obs_fq_helper_functional = torch.ops.aten._fused_moving_avg_obs_fq_helper.functional(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0);  a_1 = None
+    _fused_moving_avg_obs_fq_helper_functional = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0);  a_1 = None
     getitem = _fused_moving_avg_obs_fq_helper_functional[0]
     getitem_1 = _fused_moving_avg_obs_fq_helper_functional[1]
     getitem_2 = _fused_moving_avg_obs_fq_helper_functional[2]
@@ -443,6 +443,7 @@ def forward(self, a_1):
     return div_tensor
     """)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_metadata_change(self):
         def f(x):
             # ops like ge_() are allowed to change the dtype of the input.
@@ -696,22 +697,23 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
-    view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4, 4])
-    resize_functional = torch.ops.aten.resize.functional(view_copy_default, [3, 3])
-    as_strided_copy_default = torch.ops.aten.as_strided_copy.default(view_copy_default, [3, 3], [3, 1]);  view_copy_default = None
-    view_copy_default_1 = torch.ops.aten.view_copy.default(as_strided_copy_default, [-1]);  as_strided_copy_default = None
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
-    view_copy_default_2 = torch.ops.aten.view_copy.default(add_tensor, [4, 4]);  add_tensor = None
-    as_strided_copy_default_1 = torch.ops.aten.as_strided_copy.default(view_copy_default_2, [3, 3], [3, 1])
-    view_copy_default_3 = torch.ops.aten.view_copy.default(add_tensor_1, [3, 3]);  add_tensor_1 = None
-    as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(view_copy_default_2, view_copy_default_3, [3, 3], [3, 1]);  view_copy_default_2 = view_copy_default_3 = None
-    view_copy_default_4 = torch.ops.aten.view_copy.default(as_strided_scatter_default, [8, 2]);  as_strided_scatter_default = None
-    view_copy_default_5 = torch.ops.aten.view_copy.default(view_copy_default_4, [4, 4]);  view_copy_default_4 = None
-    as_strided_copy_default_2 = torch.ops.aten.as_strided_copy.default(view_copy_default_5, [3, 3], [3, 1]);  view_copy_default_5 = None
-    add_tensor_2 = torch.ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
+    add_tensor = torch._ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    view_copy_default = torch._ops.aten.view_copy.default(add_tensor, [4, 4])
+    resize_functional = torch._ops.aten.resize.functional(view_copy_default, [3, 3])
+    as_strided_copy_default = torch._ops.aten.as_strided_copy.default(view_copy_default, [3, 3], [3, 1]);  view_copy_default = None
+    view_copy_default_1 = torch._ops.aten.view_copy.default(as_strided_copy_default, [-1]);  as_strided_copy_default = None
+    add_tensor_1 = torch._ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
+    view_copy_default_2 = torch._ops.aten.view_copy.default(add_tensor, [4, 4]);  add_tensor = None
+    as_strided_copy_default_1 = torch._ops.aten.as_strided_copy.default(view_copy_default_2, [3, 3], [3, 1])
+    view_copy_default_3 = torch._ops.aten.view_copy.default(add_tensor_1, [3, 3]);  add_tensor_1 = None
+    as_strided_scatter_default = torch._ops.aten.as_strided_scatter.default(view_copy_default_2, view_copy_default_3, [3, 3], [3, 1]);  view_copy_default_2 = view_copy_default_3 = None
+    view_copy_default_4 = torch._ops.aten.view_copy.default(as_strided_scatter_default, [8, 2]);  as_strided_scatter_default = None
+    view_copy_default_5 = torch._ops.aten.view_copy.default(view_copy_default_4, [4, 4]);  view_copy_default_4 = None
+    as_strided_copy_default_2 = torch._ops.aten.as_strided_copy.default(view_copy_default_5, [3, 3], [3, 1]);  view_copy_default_5 = None
+    add_tensor_2 = torch._ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
     return add_tensor_2
     """)  # noqa: B950
+>>>>>>> 6bce79e4dc (fix functionalization regression introduced by ProxyTorchDispatchMode, migrate testing to make_fx)
 
     def test_resize_larger_valid(self):
         def f(x):
@@ -737,12 +739,12 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
-    resize_functional = torch.ops.aten.resize.functional(add_tensor, [5, 5]);  add_tensor = None
-    view_copy_default = torch.ops.aten.view_copy.default(resize_functional, [25]);  resize_functional = None
-    fill_scalar = torch.ops.aten.fill.Scalar(view_copy_default, 1);  view_copy_default = None
-    view_copy_default_1 = torch.ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1)
+    add_tensor = torch._ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    resize_functional = torch._ops.aten.resize.functional(add_tensor, [5, 5]);  add_tensor = None
+    view_copy_default = torch._ops.aten.view_copy.default(resize_functional, [25]);  resize_functional = None
+    fill_scalar = torch._ops.aten.fill.Scalar(view_copy_default, 1);  view_copy_default = None
+    view_copy_default_1 = torch._ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
+    add_tensor_1 = torch._ops.aten.add.Tensor(view_copy_default_1, 1)
     return (view_copy_default_1, add_tensor_1)
     """)
 
