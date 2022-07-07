@@ -378,7 +378,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     const auto& next = next_edges_[output_edge_index];
     if (next.is_valid()) {
-      auto exec_info_ = get_current_graph_task_exec_info();
+      const auto exec_info_ = get_current_graph_task_exec_info();
       if (exec_info_ && !exec_info_->empty()) {
         auto it = exec_info_->find(next.function.get());
         if (it == exec_info_->end() || !it->second.should_execute()) {
@@ -390,7 +390,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  /// Returns true if any of the output edges in any of the ranges are active.
+  /// Returns true if any of the output edges in any of the ranges are active
+  /// and should be computed in the current graph task.
   bool task_should_compute_output(std::initializer_list<IndexRange> idxs) const {
     return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
       for (const auto i : c10::irange(range.first, range.second)) {

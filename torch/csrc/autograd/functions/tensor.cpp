@@ -86,11 +86,14 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
   }
 
-  auto exec_info_ = get_current_graph_task_exec_info();
+  // Adding the missing nodes to the current graph's `exec_info`.
+  // This is a workaround because the current `GraphTask::init_to_execute`
+  // does not traverse into CopySlices node.
+  const auto exec_info_ = get_current_graph_task_exec_info();
   if (exec_info_ && !exec_info_->empty()) {
     for (const auto& next : fn->next_edges()) {
       if (next.is_valid()) {
-        (*exec_info_)[next.function.get()].needed_ = true;
+        add_node_to_current_graph_task_exec_info(next.function.get());
       }
     }
   }
