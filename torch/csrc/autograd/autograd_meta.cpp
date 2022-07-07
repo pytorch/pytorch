@@ -83,13 +83,27 @@ using at::Tensor;
 // the base if needed.
 
 namespace {
-// Check if two Tensor have the same storage offset, sizes and strides
+
+// Ensure that two tensors behave similarly when the same operation
+// such as an as_strided is applied to both
 bool has_same_meta(const Variable& base, const Variable& other) {
   if (!base.defined() || !other.defined()) {
     return false;
   }
-  if (base.storage_offset() != other.storage_offset() &&
-      !(base.numel() == 0 && other.numel() == 0)) {
+  if (!at::_has_same_storage_numel(base, other)) {
+    return false;
+  }
+  if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
+    return false;
+  }
+
+  // 0-element tensors can ignore the below view-specific properties
+  if (base.numel() == 0 && other.numel() == 0) {
+    return true;
+  }
+
+  // Properties of the view
+  if (base.storage_offset() != other.storage_offset()) {
     return false;
   }
   if (base.dim() != other.dim()) {
@@ -103,12 +117,6 @@ bool has_same_meta(const Variable& base, const Variable& other) {
         base.sizes()[i] != 0) {
       return false;
     }
-  }
-  if (!at::_has_same_storage_numel(base, other)) {
-    return false;
-  }
-  if (base.is_conj() != other.is_conj() || base.is_neg() != other.is_neg()) {
-    return false;
   }
   return true;
 }
