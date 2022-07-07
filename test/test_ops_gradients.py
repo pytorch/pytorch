@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import os
 from functools import partial, wraps
 from itertools import chain
 import torch
@@ -45,10 +44,7 @@ class TestGradients(TestCase):
             return variant is op.get_inplace()
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
-        small_inputs_only = ((check == "bwgrad_bwgrad" or check == "fwgrad_bwgrad") and
-                             os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1")
-        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs,
-                                   small_inputs_only=small_inputs_only)
+        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs)
 
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):
@@ -59,7 +55,7 @@ class TestGradients(TestCase):
             #   the tensors that require grad as varargs, and then recomposes them back into the
             #   original input.
 
-            # Creates gradcheck inputs by identifying tensors requiring grad.
+            # Creates gradcheck inputs by identifying tensors requiring grad
             all_args = None
             if is_iterable_of_tensors(sample.input):
                 all_args = chain(sample.input, sample.args, sample.kwargs.values())
