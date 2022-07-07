@@ -68,12 +68,11 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         raise NotImplementedError("this function is undefined for this class")
 
     def _extract_weight(self, data):
-        if isinstance(data, torch.Tensor):
+        # extract the weight parameter instead of underlying data
+        if type(data) in [torch.Tensor, nn.Parameter]:
             return data
-        elif isinstance(data, nn.Parameter):
-            return data.data
         elif type(data) in EMBEDDING_TYPES:
-            return data.weight.data
+            return data.weight
 
     def add_data(self, name: str, data, **config):
         r""" Configures and parametrizes the internal container model with name and data
@@ -82,27 +81,22 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             "specified data type not supported at the moment"
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
-        self.data_groups[name] = local_args
-
         weight = self._extract_weight(data)
 
         # Bookkeeping in the container class
         mask = local_args.get('mask', torch.ones_like(weight))
-        param_class = local_args.get('parametrization', utils.FakeSparsity)  # change once public_api for utils is fixed!
-        param = nn.Parameter(weight, requires_grad=False)
+        param_class = local_args.get('parametrization', utils.FakeSparsity)
 
         if name in self.state:
             # If the named data already exists - replace
             warnings.warn("Replacing existing data of the same name. - Did you mean a different name?")
-            # check if parametrized
-            if parametrize.is_parametrized(self._container, name):
-                # If parametrized, squash mask
-                self.squash_mask(names=[name], leave_parametrized=False)
-            self._container.get_parameter(name).data = weight  # overwrite the data
-        else:
-            setattr(self._container, name, param)
+            self.__delete_data(name=name)
+
+        # parameter creates a deepcopy of the weight inside, so create a buffer
+        self._container.register_buffer(name=name, tensor=weight)
         parametrize.register_parametrization(self._container, name, param_class(mask))
         self.state[name]['mask'] = mask
+        self.data_groups[name] = local_args
         return getattr(self._container, name)
 
     def get_data(self, name: str, return_original: bool = True):
@@ -259,3 +253,18 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     @abc.abstractmethod
     def update_mask(self, name, data, **kwargs):
         pass
+
+    def __delete_data(self, name):
+        """Detaches some data from the sparsifier.
+
+        Args:
+            name (str)
+                Name of the data to be removed from the sparsifier
+
+        Note:
+            Currently private. Kind of used as a helper function when replacing data of the same name
+        """
+        self.squash_mask(names=[name], leave_parametrized=True)
+        delattr(self._container, name)
+        self.state.pop(name)
+        self.data_groups.pop(name)
