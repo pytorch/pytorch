@@ -60,30 +60,8 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   return gen;
 }
 
-void runMPSGraph(
-    MPSStream* mpsStream,
-    MPSGraph* mpsGraph,
-    NSDictionary* feeds,
-    NSDictionary* results) {
-  dispatch_sync(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->commit(true);
-      id<MTLCommandQueue> commandQueue = mpsStream->commandQueue();
-      MPSGraphExecutionDescriptor *executionDescriptor = [[MPSGraphExecutionDescriptor new] autorelease];
-
-      executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
-                                                MPSGraphTensorData *> * resultsDictionary,
-                                                NSError * _Nullable error) {
-      };
-
-      [mpsGraph runAsyncWithMTLCommandQueue:commandQueue
-                                feeds:feeds
-                     targetOperations:nil
-                    resultsDictionary:results
-                  executionDescriptor:executionDescriptor];
-
-    }
-  });
+void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {

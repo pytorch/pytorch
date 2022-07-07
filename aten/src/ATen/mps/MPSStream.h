@@ -56,6 +56,7 @@ public:
   void synchronize();
 
   void flush();
+  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const { return _stream.device_index(); }
@@ -71,6 +72,7 @@ private:
   Stream _stream;
   MTLCommandQueue_t   _commandQueue = nil;
   MTLCommandBuffer_t  _commandBuffer = nil;
+  MPSGraphExecutionDescriptor *_executionDescriptor = nil;
   void _flush(bool commitAndWait) const;
 
   dispatch_queue_t    _serialQueue = nullptr;
