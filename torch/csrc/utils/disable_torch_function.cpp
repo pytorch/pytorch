@@ -1,124 +1,143 @@
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
 
 namespace torch {
-  PyObject* disabled_torch_function = nullptr;
-  PyObject* disabled_torch_dispatch = nullptr;
+PyObject* disabled_torch_function = nullptr;
+PyObject* disabled_torch_dispatch = nullptr;
 
-  bool torch_function_enabled() {
-      return !at::impl::PythonTorchFunctionTLS::is_disabled();
-  }
-
-  bool should_skip_torch_function() {
-    return at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
-  }
-
-  PyObject* disabled_torch_function_impl() {
-    return disabled_torch_function;
-  }
-
-  void set_disabled_torch_function_impl(PyObject* value) {
-    disabled_torch_function = value;
-  }
-
-  PyObject* disabled_torch_dispatch_impl() {
-    return disabled_torch_dispatch;
-  }
-
-  void set_disabled_torch_dispatch_impl(PyObject* value) {
-    disabled_torch_dispatch = value;
-  }
+bool torch_function_enabled() {
+  return !at::impl::PythonTorchFunctionTLS::is_disabled();
 }
+
+bool should_skip_torch_function() {
+  return at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
+}
+
+PyObject* disabled_torch_function_impl() {
+  return disabled_torch_function;
+}
+
+void set_disabled_torch_function_impl(PyObject* value) {
+  disabled_torch_function = value;
+}
+
+PyObject* disabled_torch_dispatch_impl() {
+  return disabled_torch_dispatch;
+}
+
+void set_disabled_torch_dispatch_impl(PyObject* value) {
+  disabled_torch_dispatch = value;
+}
+}
+
+PyObject* disabled_torch_function_impl() {
+  return disabled_torch_function;
+}
+
+void set_disabled_torch_function_impl(PyObject* value) {
+  disabled_torch_function = value;
+}
+
+PyObject* disabled_torch_dispatch_impl() {
+  return disabled_torch_dispatch;
+}
+
+void set_disabled_torch_dispatch_impl(PyObject* value) {
+  disabled_torch_dispatch = value;
+}
+} // namespace torch
 
 typedef struct {
-    PyObject_HEAD
-    /* Type-specific fields go here. */
-    bool old_state;
+  PyObject_HEAD
+      /* Type-specific fields go here. */
+      bool old_state;
 } DisableTorchFunction;
 
-PyObject* DisableTorchFunction__enter(PyObject* self, PyObject *unused) {
-    ((DisableTorchFunction*)self)->old_state = at::impl::PythonTorchFunctionTLS::is_disabled();
-    at::impl::PythonTorchFunctionTLS::set_disabled(true);
-    Py_RETURN_NONE;
+PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
+  ((DisableTorchFunction*)self)->old_state =
+      at::impl::PythonTorchFunctionTLS::is_disabled();
+  at::impl::PythonTorchFunctionTLS::set_disabled(true);
+  Py_RETURN_NONE;
 }
 
-PyObject* DisableTorchFunction__exit(PyObject* self, PyObject *unused) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(((DisableTorchFunction*)self)->old_state);
-    Py_RETURN_NONE;
+PyObject* DisableTorchFunction__exit(PyObject* self, PyObject* unused) {
+  at::impl::PythonTorchFunctionTLS::set_disabled(
+      ((DisableTorchFunction*)self)->old_state);
+  Py_RETURN_NONE;
 }
 
-PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused) {
-    if (torch::torch_function_enabled()) {
-        Py_RETURN_TRUE;
-    } else
-    {
-        Py_RETURN_FALSE;
-    }
+PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused) {
+  if (torch::torch_function_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
 }
 
 static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
-  {"__enter__",  DisableTorchFunction__enter, METH_NOARGS,  nullptr},
-  {"__exit__",   DisableTorchFunction__exit,  METH_VARARGS, nullptr},
-  {nullptr, nullptr, 0, nullptr}
-};
+    {"__enter__", DisableTorchFunction__enter, METH_NOARGS, nullptr},
+    {"__exit__", DisableTorchFunction__exit, METH_VARARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C.DisableTorchFunction",             /* tp_name */
-  sizeof(DisableTorchFunction),                /* tp_basicsize */
-  0,                                           /* tp_itemsize */
-  nullptr,                                     /* tp_dealloc */
-  0,                                           /* tp_vectorcall_offset */
-  nullptr,                                     /* tp_getattr */
-  nullptr,                                     /* tp_setattr */
-  nullptr,                                     /* tp_reserved */
-  nullptr,                                     /* tp_repr */
-  nullptr,                                     /* tp_as_number */
-  nullptr,                                     /* tp_as_sequence */
-  nullptr,                                     /* tp_as_mapping */
-  nullptr,                                     /* tp_hash  */
-  nullptr,                                     /* tp_call */
-  nullptr,                                     /* tp_str */
-  nullptr,                                     /* tp_getattro */
-  nullptr,                                     /* tp_setattro */
-  nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,                          /* tp_flags */
-  nullptr,                                     /* tp_doc */
-  nullptr,                                     /* tp_traverse */
-  nullptr,                                     /* tp_clear */
-  nullptr,                                     /* tp_richcompare */
-  0,                                           /* tp_weaklistoffset */
-  nullptr,                                     /* tp_iter */
-  nullptr,                                     /* tp_iternext */
-  DisableTorchFunction_methods,                /* tp_methods */
-  nullptr,                                     /* tp_members */
-  nullptr,                                     /* tp_getset */
-  nullptr,                                     /* tp_base */
-  nullptr,                                     /* tp_dict */
-  nullptr,                                     /* tp_descr_get */
-  nullptr,                                     /* tp_descr_set */
-  0,                                           /* tp_dictoffset */
-  nullptr,                                     /* tp_init */
-  PyType_GenericAlloc,                         /* tp_alloc */
-  PyType_GenericNew,                           /* tp_new */
+    PyVarObject_HEAD_INIT(
+        nullptr,
+        0) "torch._C.DisableTorchFunction", /* tp_name */
+    sizeof(DisableTorchFunction), /* tp_basicsize */
+    0, /* tp_itemsize */
+    nullptr, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    nullptr, /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    DisableTorchFunction_methods, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    PyType_GenericAlloc, /* tp_alloc */
+    PyType_GenericNew, /* tp_new */
 };
 
 PyObject* THPModule_DisableTorchFunctionType() {
   if (PyType_Ready(&DisableTorchFunctionType) < 0) {
-      return nullptr;
+    return nullptr;
   }
 
-  return (PyObject *)(&DisableTorchFunctionType);
+  return (PyObject*)(&DisableTorchFunctionType);
 }
 
-PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
+PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   HANDLE_TH_ERRORS
-  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  PyObject *func = nullptr, *types = nullptr, *args = nullptr,
+           *kwargs = nullptr;
   if (!PyArg_ParseTuple(a, "OO|OO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
@@ -130,7 +149,8 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    throw torch::TypeError("expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
+    throw torch::TypeError(
+        "expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // These are all C-API calls so no exceptions will be raised
@@ -139,15 +159,18 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   bool old_value = at::impl::PythonTorchFunctionTLS::is_disabled();
   at::impl::PythonTorchFunctionTLS::set_disabled(true);
   // kwargs can safely be nullptr here.
-  PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
+  PyObject* result = PyObject_Call(func, py_args.ptr(), kwargs);
   at::impl::PythonTorchFunctionTLS::set_disabled(old_value);
   return result;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_skip_one_hop_torch_function(PyObject */*self*/, PyObject *a) {
+PyObject* THPModule_skip_one_hop_torch_function(
+    PyObject* /*self*/,
+    PyObject* a) {
   HANDLE_TH_ERRORS
-  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  PyObject *func = nullptr, *types = nullptr, *args = nullptr,
+           *kwargs = nullptr;
   if (!PyArg_ParseTuple(a, "OOOO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
@@ -168,20 +191,24 @@ PyObject* THPModule_skip_one_hop_torch_function(PyObject */*self*/, PyObject *a)
   // PyObject_Call is a C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing the old value.
   TORCH_CHECK(
-    !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
-    "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
+      !at::impl::PythonTorchFunctionTLS::peek_skip_next(),
+      "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
   at::impl::PythonTorchFunctionTLS::exchange_skip_next(true);
-  auto result = py::reinterpret_steal<py::object>(PyObject_Call(func, py_args.ptr(), kwargs));
+  auto result = py::reinterpret_steal<py::object>(
+      PyObject_Call(func, py_args.ptr(), kwargs));
   bool prev_skip = at::impl::PythonTorchFunctionTLS::exchange_skip_next(false);
-  TORCH_CHECK(!prev_skip || !result, "skip_one_hop_torch_function called on a "
-              "function that doesn't use has_torch_function! ");
+  TORCH_CHECK(
+      !prev_skip || !result,
+      "skip_one_hop_torch_function called on a "
+      "function that doesn't use has_torch_function! ");
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
+PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
   HANDLE_TH_ERRORS
-  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  PyObject *func = nullptr, *types = nullptr, *args = nullptr,
+           *kwargs = nullptr;
   if (!PyArg_ParseTuple(a, "OO|OO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
@@ -193,7 +220,8 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    throw torch::TypeError("expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
+    throw torch::TypeError(
+        "expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // This implementation is not completely correct.  The moral
@@ -210,81 +238,69 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   c10::impl::ExcludeDispatchKeyGuard guard_(
       // TODO: add constructor for this specifically
       c10::DispatchKeySet(c10::DispatchKeySet::FULL) -
-      c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python)
+      c10::DispatchKeySet(
+          c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python)
       // NB: off by one hazard here, but it works out: python key is not
       // included in AFTER, so it is included in the negation (and that's
       // correct: we want to exclude Python key and everything BEFORE it.)
   );
   auto r = PyObject_Call(func, py_args.ptr(), kwargs);
-  if (r == nullptr) throw python_error();
+  if (r == nullptr)
+    throw python_error();
   return r;
   END_HANDLE_TH_ERRORS
 }
 
 // Makes sure that we don't check for __torch_function__ on basic Python types
-static bool is_basic_python_type(PyTypeObject *tp)
-{
+static bool is_basic_python_type(PyTypeObject* tp) {
   return (
-    /* Basic number types */
-    tp == &PyBool_Type ||
+      /* Basic number types */
+      tp == &PyBool_Type ||
 
-    tp == &PyLong_Type ||
-    tp == &PyFloat_Type ||
-    tp == &PyComplex_Type ||
+      tp == &PyLong_Type || tp == &PyFloat_Type || tp == &PyComplex_Type ||
 
-    /* Basic sequence types */
-    tp == &PyList_Type ||
-    tp == &PyTuple_Type ||
-    tp == &PyDict_Type ||
-    tp == &PySet_Type ||
-    tp == &PyFrozenSet_Type ||
-    tp == &PyUnicode_Type ||
-    tp == &PyBytes_Type ||
+      /* Basic sequence types */
+      tp == &PyList_Type || tp == &PyTuple_Type || tp == &PyDict_Type ||
+      tp == &PySet_Type || tp == &PyFrozenSet_Type || tp == &PyUnicode_Type ||
+      tp == &PyBytes_Type ||
 
-    /* other builtins */
-    tp == &PySlice_Type ||
-    tp == Py_TYPE(Py_None) ||
-    tp == Py_TYPE(Py_Ellipsis) ||
-    tp == Py_TYPE(Py_NotImplemented) ||
+      /* other builtins */
+      tp == &PySlice_Type || tp == Py_TYPE(Py_None) ||
+      tp == Py_TYPE(Py_Ellipsis) || tp == Py_TYPE(Py_NotImplemented) ||
 
-    PyModule_Check(tp) ||
-    /* sentinel to swallow trailing || */
-    false
-  );
+      PyModule_Check(tp) ||
+      /* sentinel to swallow trailing || */
+      false);
 }
 
 inline bool has_torch_function_attr(PyObject* obj) {
   // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
   auto attr = PyObject_FastGetAttrString(obj, "__torch_function__");
   return (
-    attr.ptr() != nullptr &&
-    attr.ptr() != torch::disabled_torch_function);
+      attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_function);
 }
 
 namespace torch {
 auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
   if (!ignore_mode && at::impl::PythonTorchFunctionTLS::get_mode())
     return true;
-  PyTypeObject *tp = Py_TYPE(obj);
+  PyTypeObject* tp = Py_TYPE(obj);
   return (
-    !THPVariable_CheckTypeExact(tp) &&
-    !is_basic_python_type(tp) &&
-    torch::torch_function_enabled() &&
-    has_torch_function_attr(obj)
-  );
+      !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
+      torch::torch_function_enabled() && has_torch_function_attr(obj));
 }
 
-bool has_torch_function(PyObject *obj) {
+bool has_torch_function(PyObject* obj) {
   return (
-    !torch::should_skip_torch_function() &&
-    torch::check_has_torch_function(obj));
+      !torch::should_skip_torch_function() &&
+      torch::check_has_torch_function(obj));
 }
 
 bool has_torch_function(c10::ArrayRef<PyObject*> args) {
   if (torch::should_skip_torch_function()) {
     return false;
   }
-  for (const auto obj: args) {
+  for (const auto obj : args) {
     if (check_has_torch_function(obj)) {
       return true;
     }
@@ -305,7 +321,7 @@ inline bool sequence_has_torch_function(PyObject* args) {
   return false;
 }
 
-inline bool array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
+inline bool array_has_torch_function(PyObject* const* args, Py_ssize_t nargs) {
   for (Py_ssize_t i = 0; i < nargs; i++) {
     if (torch::check_has_torch_function(args[i])) {
       return true;
@@ -316,12 +332,12 @@ inline bool array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
 
 using torch::autograd::utils::wrap;
 
-PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
   if (torch::should_skip_torch_function()) {
     Py_RETURN_FALSE;
   }
 
-  bool result;  // NOLINT(cppcoreguidelines-init-variables)
+  bool result; // NOLINT(cppcoreguidelines-init-variables)
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and
@@ -331,20 +347,23 @@ PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
     result = sequence_has_torch_function(arg);
   } else {
     auto args = py::reinterpret_steal<py::object>(
-      PySequence_Fast(arg, "expected a sequence"));
+        PySequence_Fast(arg, "expected a sequence"));
     result = sequence_has_torch_function(args.ptr());
   }
 
   return wrap(result);
 }
 
-PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj) {
+PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject* obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
   return wrap(torch::has_torch_function(obj));
 }
 
-PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs) {
+PyObject* THPModule_has_torch_function_variadic(
+    PyObject*,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
   return wrap(
-    !torch::should_skip_torch_function() &&
-    array_has_torch_function(args, nargs));
+      !torch::should_skip_torch_function() &&
+      array_has_torch_function(args, nargs));
 }

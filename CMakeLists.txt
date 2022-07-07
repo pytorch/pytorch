@@ -93,7 +93,7 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
-      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-version"
       RESULT_VARIABLE _exit_code
       OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -784,6 +784,11 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
+  if(NOT USE_CUDNN)
+    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
+    # separate PR to cudnn_frontend is needed to address this later on
+    string(APPEND CMAKE_CXX_FLAGS " -Werror=non-virtual-dtor")
+  endif()
   string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
@@ -791,7 +796,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
@@ -841,6 +845,7 @@ if(NOT MSVC)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
@@ -1090,6 +1095,7 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(DIRECTORY

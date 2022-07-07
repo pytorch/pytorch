@@ -69,8 +69,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-// some compiler does not generate the destructor correctly
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -330,6 +331,10 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  destroy_pyobj_if_needed();
+}
+
+void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
@@ -379,15 +384,18 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->sizes(this);
+  }
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
+
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have sym sizes");
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_sizes(this);
+  }
+  return sym_sizes_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
@@ -399,12 +407,16 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->strides(this);
+  }
   TORCH_CHECK(
       false,
       "Tensors of type ",
       tensorimpl_type_name(),
       " do not have strides");
 }
+
 int64_t TensorImpl::dim_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->dim(this);
@@ -412,9 +424,18 @@ int64_t TensorImpl::dim_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
+
 int64_t TensorImpl::numel_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
+}
+
+c10::Layout TensorImpl::layout_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->layout(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have layout");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -730,7 +751,12 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
 
 void TensorImpl::FreeMemory() {
   // We'll detach from the old Storage and create a new one
-  storage_ = Storage::create_legacy(storage_.device());
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
+    storage_ = Storage::create_legacy(storage_.device());
+  } else {
+    storage_.reset_legacy();
+  }
   storage_offset_ = 0;
 }
 
@@ -793,6 +819,15 @@ void TensorImpl::ShareExternalPointer(
     device_opt_ = storage_.device();
     storage_offset_ = 0;
   }
+}
+
+void TensorImpl::set_sym_sizes_and_strides(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
+  has_symbolic_sizes_strides_ = true;
+  sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
+  sizes_and_strides_.set_sizes(sizes);
+  sizes_and_strides_.set_strides(strides);
 }
 
 namespace impl {
