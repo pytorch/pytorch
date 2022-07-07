@@ -50,10 +50,12 @@
 #include <torch/csrc/lazy/core/shape_inference.h>
 
 #include <ATen/AccumulateType.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -62,6 +64,8 @@
 #include <torch/csrc/api/include/torch/enum.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
+#include <torch/csrc/lazy/core/util.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <ostream>
 #include <vector>
 
@@ -418,6 +422,59 @@ std::vector<Shape> compute_shape_embedding_dense_backward(
       Shape(grad_output.scalar_type(), {num_weights, grad_output.size(-1)})};
 }
 
+std::vector<Shape> compute_shape_expand(
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    bool implicit) {
+  CHECK_GE(size.size(), self.dim());
+  int64_t num_new_dimensions = size.size() - self.dim();
+  std::vector<int64_t> padded_self(num_new_dimensions, 0);
+  padded_self.insert(
+      padded_self.end(), self.sizes().begin(), self.sizes().end());
+  std::vector<int64_t> target_size(size.size());
+  for (const auto idx : c10::irange(size.size())) {
+    target_size[idx] = size[idx] == -1 ? padded_self[idx] : size[idx];
+  }
+  return {Shape(self.scalar_type(), target_size)};
+}
+
+std::vector<Shape> compute_shape_expand(
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    bool implicit) {
+  CHECK_GE(size.size(), self.dim());
+  std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
+  int64_t num_new_dimensions = _sizes.size() - self.dim();
+  std::vector<int64_t> padded_self(num_new_dimensions, 0);
+  padded_self.insert(
+      padded_self.end(), self.sizes().begin(), self.sizes().end());
+  std::vector<int64_t> target_size(_sizes.size());
+  for (const auto idx : c10::irange(_sizes.size())) {
+    if (_sizes[idx].is_symbolic()) {
+      std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode =
+          _sizes[idx].toSymbolicIntNode();
+      auto lazySymIntNode =
+          std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(
+              symbolicIntNode);
+      auto size_node = lazySymIntNode->node_;
+      auto static_value =
+          std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
+              ->getStaticValue();
+      target_size[idx] = static_value;
+    } else {
+      target_size[idx] = _sizes[idx].data();
+      if (_sizes[idx].data() == -1) {
+        // -1 can't be specified for non-existing dimensions
+        TORCH_CHECK(idx >= num_new_dimensions);
+        target_size[idx] = padded_self[idx];
+      } else {
+        target_size[idx] = _sizes[idx].data();
+      }
+    }
+  }
+  return {Shape(self.scalar_type(), target_size)};
+}
+
 std::vector<Shape> compute_shape_index_select(
     const at::Tensor& self,
     int64_t dim,
@@ -468,6 +525,77 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
       "Size overflow");
   out_shape[dim] = extended_dim_shape;
   return {Shape(tensors[0].scalar_type(), out_shape)};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    bool training,
+    double momentum,
+    double eps) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  if (running_mean.has_value()) {
+    shapes.emplace_back(
+        running_mean.value().scalar_type(), running_mean.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+
+  if (running_var.has_value()) {
+    shapes.emplace_back(
+        running_var.value().scalar_type(), running_var.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+  return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    const c10::optional<at::Tensor>& save_mean,
+    const c10::optional<at::Tensor>& save_invstd,
+    bool train,
+    double eps,
+    ::std::array<bool, 3> output_mask) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  // `weight` and `bias` are vectors of length C (number of channels)`
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+
+  return shapes;
 }
 
 std::vector<Shape> compute_shape_native_layer_norm(
@@ -528,6 +656,17 @@ std::vector<Shape> compute_shape_mean(
   return {Shape(self.scalar_type(), {})};
 }
 
+std::vector<Shape> compute_shape_new_empty_strided(
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory) {
+  return {Shape(dtype.has_value() ? *dtype : self.scalar_type(), size.vec())};
+}
+
 std::vector<Shape> compute_shape_mv(
     const at::Tensor& self,
     const at::Tensor& vec) {
@@ -550,25 +689,25 @@ std::vector<Shape> compute_shape_native_dropout_backward(
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t from,
     c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
@@ -596,7 +735,7 @@ std::vector<Shape> compute_shape_sum(
   ;
 }
 
-std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
+std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -641,19 +780,20 @@ std::vector<Shape> compute_shape_slogdet(const at::Tensor& self) {
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_and(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
       c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
-std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor& self) {
+std::vector<torch::lazy::Shape> compute_shape_logical_not(
+    const at::Tensor& self) {
   return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_or(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -661,7 +801,7 @@ std::vector<torch::lazy::Shape> compute_shape_logical_or(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_xor(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -878,6 +1018,12 @@ std::vector<Shape> compute_shape__to_copy(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+TORCH_API std::vector<Shape> compute_shape_clone(
+    const at::Tensor& self,
+    c10::optional<at::MemoryFormat> memory_format) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
   auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
@@ -1035,6 +1181,106 @@ std::vector<Shape> compute_shape_unsqueeze(
   return {torch::lazy::Shape(
       input_shape.scalar_type(),
       BuildUnsqueezedDimensions(input_shape.sizes(), dim))};
+}
+
+std::vector<Shape> compute_shape_select_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    int64_t index) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::select_scatter(
+      self_meta, src_meta, dim, index);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_diagonal_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::diagonal_scatter(
+      self_meta, src_meta, offset, dim1, dim2);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_slice_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::slice_scatter(
+      self_meta, src_meta, dim, start, end, step);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_as_strided_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    c10::optional<int64_t> storage_offset) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::as_strided_scatter(
+      self_meta, src_meta, size, stride, storage_offset);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
 // Restore unused-parameters warnings
