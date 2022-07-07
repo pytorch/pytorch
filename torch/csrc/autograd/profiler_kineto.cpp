@@ -293,8 +293,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     event_post_process_cb_ = std::move(cb);
   }
 
-  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
-  finalizeTrace() {
+  torch::profiler::impl::kineto::ActivityTraceWrapper finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
     materializeOpEvents();
@@ -319,11 +318,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       auto trace = torch::profiler::impl::kineto::stopTrace();
       TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
       addTraceEvents(trace);
-      return std::make_unique<
-          torch::profiler::impl::kineto::ActivityTraceWrapper>(
-          std::move(trace));
+      return trace;
     } else {
-      return nullptr;
+      return torch::profiler::impl::kineto::ActivityTraceWrapper();
     }
   }
 
@@ -756,8 +753,7 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
-    std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
-        trace,
+    torch::profiler::impl::kineto::ActivityTraceWrapper trace,
     std::vector<experimental_event_t>&& event_tree)
     : trace_start_us_(start_time),
       events_(std::move(events)),
@@ -767,7 +763,7 @@ ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
 void ProfilerResult::save(const std::string& path) {
-  trace_->save(path);
+  trace_.save(path);
 }
 
 } // namespace profiler

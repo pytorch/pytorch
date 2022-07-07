@@ -101,7 +101,7 @@ TraceWrapper::operator bool() const {
 }
 
 ActivityTraceWrapper::ActivityTraceWrapper(
-    std::unique_ptr<interface_trace_t>&& trace)
+    std::unique_ptr<interface_trace_t> trace)
     : trace_(std::move(trace)), saved_{false} {}
 
 ActivityTraceWrapper::operator bool() const {
