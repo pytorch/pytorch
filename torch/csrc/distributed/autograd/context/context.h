@@ -51,8 +51,7 @@ class TORCH_API DistAutogradContext {
       const;
 
   // Adds a future message recording an outstanding RPC.
-  void addOutstandingRpc(
-      const c10::intrusive_ptr<rpc::JitFuture>& jitFuture);
+  void addOutstandingRpc(const c10::intrusive_ptr<rpc::JitFuture>& jitFuture);
 
   // Returns all gradients.
   const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;

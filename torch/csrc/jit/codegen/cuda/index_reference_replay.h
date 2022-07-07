@@ -17,9 +17,10 @@ namespace cuda {
 
 class IndexReferenceReplay : public OptInDispatch {
  private:
-  IndexReferenceReplay(const std::vector<kir::ForLoop*>& loop_structure)
-      : loop_structure_(loop_structure),
-        ca_map_(GpuLower::current()->caIndexMap()) {}
+  IndexReferenceReplay(
+      const std::vector<kir::ForLoop*>& loop_structure,
+      const TensorView* consumer_tv)
+      : loop_structure_(loop_structure), consumer_tv_(consumer_tv) {}
 
   // Generate the replay.
   TensorDomain* computeReplay();
@@ -37,6 +38,10 @@ class IndexReferenceReplay : public OptInDispatch {
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
 
+  //! Remove mappings of reference IDs that do not end up being used
+  //! in the final reference domain
+  void cleanUpMappingsOfUnusedDomains(TensorDomain* reference_domain);
+
   using OptInDispatch::handle;
 
   void handle(Split* split) override;
@@ -46,9 +51,8 @@ class IndexReferenceReplay : public OptInDispatch {
  private:
   // Hold the loop structure we're generating a reference for.
   const std::vector<kir::ForLoop*>& loop_structure_;
-
-  // Hold the compute at map used for the replay (index map)
-  const ComputeAtMap& ca_map_;
+  // The indexed or predicated consumer tensor
+  const TensorView* consumer_tv_ = nullptr;
 
   // Keep a vector of all iteration domains used in the reference (includes all
   // transformations)
@@ -69,8 +73,9 @@ class IndexReferenceReplay : public OptInDispatch {
  public:
   // Generate the reference of the provided loop nest structure
   static ReferenceTensor getReference(
-      const std::vector<kir::ForLoop*>& loop_structure) {
-    auto replay = IndexReferenceReplay(loop_structure);
+      const std::vector<kir::ForLoop*>& loop_structure,
+      const TensorView* consumer_tv) {
+    auto replay = IndexReferenceReplay(loop_structure, consumer_tv);
     ReferenceTensor ref;
     ref.domain = replay.computeReplay();
     ref.concrete_to_id = replay.concrete_to_ref_id_;

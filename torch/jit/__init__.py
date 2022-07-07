@@ -49,7 +49,12 @@ from torch.jit._trace import (
 )
 from torch.jit._async import fork, wait
 from torch.jit._decomposition_utils import _register_decomposition
-from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
+from torch.jit._serialization import (
+    save,
+    load,
+    jit_module_from_flatbuffer,
+    save_jit_module_to_flatbuffer,
+)
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 from torch.jit._ir_utils import _InsertPoint
@@ -149,7 +154,7 @@ def script_if_tracing(fn):
 # for torch.jit.isinstance
 def isinstance(obj, target_type):
     """
-    This function provides for conatiner type refinement in TorchScript. It can refine
+    This function provides for container type refinement in TorchScript. It can refine
     parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
     refine basic types such as bools and ints that are available in TorchScript.

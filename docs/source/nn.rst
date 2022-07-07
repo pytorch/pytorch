@@ -250,6 +250,7 @@ Dropout Layers
     :template: classtemplate.rst
 
     nn.Dropout
+    nn.Dropout1d
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout

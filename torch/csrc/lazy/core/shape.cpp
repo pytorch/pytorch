@@ -108,8 +108,8 @@ void applySymbolicShapesOnLT(
   }
   auto res_symbolic = jit::calculateSymbolicShapesOnOp(&schema, converted_args);
   if (!res_symbolic) {
-    for (int64_t i = 0; i < res_symbolic->size(); i++) {
-      result_shapes[i] = result_shapes[i].with_symbolic_dims(c10::nullopt);
+    for (auto& result_shape : result_shapes) {
+      result_shape = result_shape.with_symbolic_dims(c10::nullopt);
     }
   } else {
     TORCH_INTERNAL_ASSERT(

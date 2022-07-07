@@ -6,17 +6,18 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TriangularOpsUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
 
 TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
-  set_output(self.sizes(), self.options());
+  set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 }  // namespace meta
@@ -174,7 +175,13 @@ Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
 
   auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
-  grad_input.index_fill_(0, indices, grad);
+  // for composite compliance, use out-of-place variant of
+  // `index_fill` if grad tensor is a Tensor Subclass.
+  if (isTensorSubclassLike(grad)) {
+    grad_input = grad_input.index_fill(0, indices, grad);
+  } else {
+    grad_input.index_fill_(0, indices, grad);
+  }
   return grad_input.view(sizes);
 }
 

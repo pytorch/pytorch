@@ -395,6 +395,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
+      case aten::logsumexp:
         if (!node->schema().is_mutable()) {
           castTensorInputs(
               node, aten::_autocast_to_full_precision, current_state());

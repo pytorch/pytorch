@@ -5,9 +5,9 @@ import time
 from typing import Any, NoReturn, Optional
 
 from .setting import (
+    CompilerType,
     LOG_DIR,
     PROFILE_DIR,
-    CompilerType,
     TestList,
     TestPlatform,
     TestType,

@@ -92,13 +92,16 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
+       expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
+       expr->getExprType().value() == ExprType::ExpandOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
-       expr->getExprType().value() == ExprType::ViewDtypeOp ||
+       expr->getExprType().value() == ExprType::ViewAsScalar ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||
@@ -108,7 +111,50 @@ bool isTvOp(const Expr* expr) {
   return false;
 }
 
+bool isLdMatrixOp(const Expr* expr) {
+  if (auto ldst = dynamic_cast<const LoadStoreOp*>(expr)) {
+    return ldst->opType() == LoadStoreOpType::LdMatrix ||
+        ldst->opType() == LoadStoreOpType::LdMatrixTranspose;
+  }
+  return false;
+}
+
+bool isCpAsyncOp(const Expr* expr) {
+  if (auto ldst = dynamic_cast<const LoadStoreOp*>(expr)) {
+    return ldst->opType() == LoadStoreOpType::CpAsync;
+  }
+  return false;
+}
+
+bool isTensorScalarFillOp(const Expr* expr) {
+  // Check that the input is a single scalar.
+  if (expr->inputs().size() == 1 && expr->input(0)->isScalar()) {
+    // All load store op with a single scalar input
+    //  should be a scalar filling op. Semantically
+    //  it literally means `Store`'ing a scalar
+    //  into a tensor.
+    if (expr->isA<LoadStoreOp>()) {
+      return true;
+    }
+    // Unary copy op is also a scalar filling op.
+    if (auto uop = dynamic_cast<const UnaryOp*>(expr)) {
+      return uop->getUnaryOpType() == UnaryOpType::Set;
+    }
+  }
+  // Ideally any scalar expression that outputs
+  //  to a tensor should be considered in this function
+  //  but since we currently only limit scope to
+  //  initialization patterns so other scalar expr's
+  //  are low priority and are excluded here to avoid confusion.
+  return false;
+}
+
 TensorView* getTv(Val* val) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return const_cast<TensorView*>(getTv(const_cast<const Val*>(val)));
+}
+
+const TensorView* getTv(const Val* val) {
   if (val->isA<TensorView>()) {
     return val->as<TensorView>();
   } else if (val->isA<kir::TensorIndex>()) {
@@ -137,6 +183,16 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
+bool isReductionOp(const Expr* expr) {
+  // Note that GridReduction inherits ReductionOp
+  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
+      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
+}
+
+bool isReductionTvOp(const Expr* expr) {
+  return isTvOp(expr) && isReductionOp(expr);
+}
+
 bool isScalarOp(const Expr* expr) {
   for (auto out : expr->outputs())
     if (!out->isScalar())
@@ -149,12 +205,13 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
     return false;
   }
 
-  if (!(expr->isA<ReductionOp>() || expr->isA<BroadcastOp>() ||
-        expr->isA<WelfordOp>() || expr->isA<kir::GridReduction>() ||
-        expr->isA<kir::GridBroadcast>() || expr->isA<kir::GridWelford>())) {
+  if (!(isReductionOp(expr) || expr->isA<BroadcastOp>() ||
+        expr->isA<kir::GridBroadcast>())) {
     return false;
   }
 
+  // GroupedReductionOp can have multiple output TVs, but they must be
+  // parallelized in the same way, so just checking one of them is enough.
   auto tv = getTvOutput(expr);
 
   if (tv->hasBlockReduction() || tv->hasGridReduction()) {
@@ -168,14 +225,15 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
   return false;
 }
 
-c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
-  auto tv_out = getTv(node->out());
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const Val* output,
+    const Val* input) {
+  auto tv_out = getTv(output);
   if (tv_out == nullptr) {
     return c10::nullopt;
   }
 
-  auto tv_in = getTv(node->in());
-
+  auto tv_in = getTv(input);
   // only support reducing to registers for now.
   if (tv_in->getMemoryType() != MemoryType::Local ||
       tv_out->getMemoryType() != MemoryType::Local) {
@@ -206,8 +264,8 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node) {
     return c10::optional<IterDomain*>(reduction_on_xdim);
   }
 
-  if (reduction_on_xdim->extent()->isConst()) {
-    auto extent_value = reduction_on_xdim->extent()->getInt().value();
+  if (reduction_on_xdim->extent()->isConstInt()) {
+    auto extent_value = reduction_on_xdim->extent()->evaluateInt();
     if (extent_value % at::cuda::warp_size() == 0) {
       return c10::optional<IterDomain*>(reduction_on_xdim);
     }
@@ -234,8 +292,8 @@ bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
 }
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
-    Val* val) {
-  TensorView* tv = nullptr;
+    const Val* val) {
+  const TensorView* tv = nullptr;
   if (val->isA<TensorView>()) {
     tv = val->as<TensorView>();
   } else if (val->isA<kir::TensorIndex>()) {
@@ -254,6 +312,103 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
   return parallel_domains;
 }
 
+bool isCpAsyncInit(const Expr* expr) {
+  return isTensorScalarFillOp(expr) &&
+      // FIXME:
+      //  We'd need to add a flag to all the init
+      //   exprs so we could robustly detect initialization
+      //   in all cases.
+      isCpAsyncOp(getTvOutput(expr)->definition());
+}
+
+c10::optional<Expr*> getMaybePredicatedSingleton(Expr* expr) {
+  if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+    if (ite->elseBody().empty()) {
+      if (ite->thenBody().size() == 1) {
+        return ite->thenBody().exprs()[0];
+      }
+    }
+  }
+  return c10::nullopt;
+}
+
+//! Short-cut for checking if the expression loads from global memory.
+bool isGlobalLoad(const Expr* expr) {
+  if (expr->isA<LoadStoreOp>() ||
+      (expr->isA<UnaryOp>() &&
+       expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set)) {
+    if (auto in_tv = getTv(expr->input(0))) {
+      return in_tv->getMemoryType() == MemoryType::Global;
+    }
+  }
+  return false;
+}
+
+//! Short-cut for checking if the given expression initializes buffers
+//!  for global memory load.
+bool isGlobalLoadInit(const Expr* expr) {
+  if (auto uop = dynamic_cast<const UnaryOp*>(expr)) {
+    if (uop->in()->isScalar()) {
+      // FIXME:
+      //  We'd need to add a flag to all the init
+      //   exprs so we could robustly detect initialization
+      //   in all cases.
+      if (isGlobalLoad(getTvOutput(uop)->definition())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init) {
+  const std::vector<IterDomain*> new_buffer_ids = {
+      IrBuilder::create<IterDomain>(IterDomainBuilder(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
+  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
+  return IrBuilder::create<kir::Allocate>(
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
+}
+
+namespace {
+
+class ExprFlattener : private kir::IrVisitor {
+ private:
+  using kir::IrVisitor::handle;
+
+  void handle(Expr* expr) final {
+    if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
+      kir::IrVisitor::handle(expr);
+    } else {
+      flat_exprs_.push_back(expr);
+    }
+  }
+
+ private:
+  std::vector<Expr*> flat_exprs_;
+
+ public:
+  //! Flattens scopes extracting out a single ordered list of exprs.
+  static std::vector<Expr*> flatten(const std::vector<Expr*>& loop_nests) {
+    ExprFlattener flattener;
+    for (auto expr : loop_nests) {
+      flattener.handle(expr);
+    }
+    return flattener.flat_exprs_;
+  }
+};
+
+} // namespace
+
+std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
+  return ExprFlattener::flatten(loop_nests);
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {
@@ -265,7 +420,6 @@ BasicAllocInfo getAllocInformation(
     bool use_id_map) {
   BasicAllocInfo info;
   auto gpu_lower = GpuLower::current();
-  const auto& loop_map = gpu_lower->caLoopMap();
 
   bool outer_alloc_found = false;
 
@@ -319,7 +473,8 @@ BasicAllocInfo getAllocInformation(
       }
     }
 
-    if (loop_map.areMapped(local_id, fl_id)) {
+    if (GpuLower::current()->caMap()->areMapped(
+            local_id, fl_id, IdMappingMode::PERMISSIVE)) {
       info.alloc_pos++;
     }
 
@@ -425,11 +580,31 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->init(),
           node->out(),
           replaced_inputs.value().at(node->in()),
-          node->isFused());
+          node->isAllreduce());
       registerReplaceWithPredicate(node, replacement);
     }
   }
 
+  void handle(GroupedReductionOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      const auto& map = replaced_inputs.value();
+      auto inputs = node->inputs();
+      for (auto& input : inputs) {
+        auto it = map.find(input);
+        if (it != map.end()) {
+          input = it->second;
+        }
+      }
+      auto replacement = IrBuilder::create<GroupedReductionOp>(
+          node->getReductionOpTypes(),
+          node->initVals(),
+          node->outputs(),
+          inputs,
+          node->isAllreduce());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
   void handle(BroadcastOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
@@ -467,6 +642,15 @@ class ReplaceExprInput : private kir::ExprMutator {
           replaced_inputs.value().at(node->inB()),
           node->init(),
           node->options());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(LoadStoreOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<LoadStoreOp>(
+          node->opType(), node->out(), node->in());
       registerReplaceWithPredicate(node, replacement);
     }
   }

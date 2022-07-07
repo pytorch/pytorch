@@ -46,19 +46,19 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
 
   /* resize output */
   if (ndim == 4) {
-    set_output(0, {sizeD, osizeT, osizeH, osizeW}, input.options());
+    set_output_raw_strided(0, {sizeD, osizeT, osizeH, osizeW}, {}, input.options());
     /* indices will contain max input locations for each output point */
-    set_output(1, {sizeD, osizeT, osizeH, osizeW}, input.options().dtype(kLong));
+    set_output_raw_strided(1, {sizeD, osizeT, osizeH, osizeW}, {}, input.options().dtype(kLong));
   } else {
-    set_output(0, {sizeB, sizeD, osizeT, osizeH, osizeW}, input.options());
+    set_output_raw_strided(0, {sizeB, sizeD, osizeT, osizeH, osizeW}, {}, input.options());
     /* indices will contain max input locations for each output point */
-    set_output(1, {sizeB, sizeD, osizeT, osizeH, osizeW}, input.options().dtype(kLong));
+    set_output_raw_strided(1, {sizeB, sizeD, osizeT, osizeH, osizeW}, {}, input.options().dtype(kLong));
   }
 }
 
 TORCH_META_FUNC(adaptive_max_pool3d_backward)
 (const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
-  set_output(0, input.sizes(), input.options());
+    set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta
 

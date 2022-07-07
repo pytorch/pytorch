@@ -149,6 +149,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
     OpType retrieveOpType();
 
+    static c10::intrusive_ptr<Work> create_from_future(c10::intrusive_ptr<c10::ivalue::Future>);
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -203,8 +205,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   // Subclasses must override this method to return the backend name
-  virtual const std::string getBackendName() const = 0;
+  virtual const std::string getBackendName() const {
+    TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
+  };
 
+  // Consider using ops in Ops.hpp instead of the below, which route things
+  // to the dispatcher.
+  // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {

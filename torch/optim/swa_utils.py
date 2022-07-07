@@ -7,6 +7,7 @@ import torch
 from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 
+__all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
@@ -204,7 +205,7 @@ class SWALR(_LRScheduler):
             (default: "cos")
         last_epoch (int): the index of the last epoch (default: -1)
 
-    The :class:`SWALR` scheduler is can be used together with other
+    The :class:`SWALR` scheduler can be used together with other
     schedulers to switch to a constant learning rate late in the training
     as in the example below.
 

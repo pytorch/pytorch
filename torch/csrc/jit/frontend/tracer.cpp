@@ -66,6 +66,12 @@ void badArgType(const T& v) {
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
+static std::atomic<bool> tracer_state_warn_mode{true};
+
+std::atomic<bool>& getTracerStateWarnMode() {
+  return tracer_state_warn_mode;
+}
+
 std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
@@ -600,13 +606,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymInt value) {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasValue(name)) {
-    Value* v = ArgumentStash::popValue(name);
-    n->addInput(v);
-  } else {
-    detail::genericAddInput(n, value);
-  }
+  addInputs(n, name, value.expect_int());
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
@@ -801,7 +801,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
-  TORCH_CHECK(false, "Tracing operations taking symbolic ints isn't supported");
+  addInputs(n, name, asIntArrayRefSlow(value));
 }
 
 void addInputs(

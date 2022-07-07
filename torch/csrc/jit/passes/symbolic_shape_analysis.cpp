@@ -568,6 +568,13 @@ struct SymbolicShapeOpAnalyzer {
     shape_compute_graph_ = (*maybe_graph)->copy();
   }
 
+  SymbolicShapeOpAnalyzer(
+      const FunctionSchema* schema,
+      std::shared_ptr<Graph> graph)
+      : schema_(schema) {
+    shape_compute_graph_ = graph->copy();
+  }
+
   c10::optional<std::vector<c10::SymbolicShape>> run(
       std::vector<SSArgument>& inputs) {
     if (!shape_compute_graph_) {
@@ -745,6 +752,26 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
   }
 
   return op_analyzer.getShapeComputeGraph();
+}
+
+c10::SymbolicShape combine_bounds(
+    c10::SymbolicShape& lower_bound,
+    c10::SymbolicShape& upper_bound) {
+  // TODO: At some point we might want to add support for dynamic dims
+  TORCH_INTERNAL_ASSERT(lower_bound.rank() == upper_bound.rank());
+  if (lower_bound.rank() == c10::nullopt) {
+    return c10::SymbolicShape();
+  }
+  std::vector<c10::ShapeSymbol> merged_shapes;
+  for (int i = 0; i < lower_bound.rank(); i++) {
+    // TODO: Merge equivalent expressions (not needed for current use case)
+    if (lower_bound[i] == upper_bound[i]) {
+      merged_shapes.push_back(lower_bound[i]);
+    } else {
+      merged_shapes.push_back(c10::ShapeSymbol::newSymbol());
+    }
+  }
+  return c10::SymbolicShape(merged_shapes);
 }
 
 struct SymbolicShapeGraphAnalyzer {
@@ -1076,7 +1103,9 @@ TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs) {
-  if (shapeComputeGraphForSchema(*schema) == c10::nullopt) {
+  auto bounded_graphs = boundedGraphsForSchema(*schema);
+  auto has_shape_compute = shapeComputeGraphForSchema(*schema) != c10::nullopt;
+  if (!has_shape_compute && bounded_graphs == c10::nullopt) {
     // Avoid doing all this work for functions that don't have a
     // supported schema
     return c10::nullopt;
@@ -1094,6 +1123,27 @@ calculateSymbolicShapesOnOp(
       const c10::SymbolicShape* ss = c10::get_if<c10::SymbolicShape>(&arg);
       ssa_args.emplace_back(ShapeArguments(*ss));
     }
+  }
+  // Handle bounded shape option
+  if (bounded_graphs) {
+    auto lower_bound =
+        SymbolicShapeOpAnalyzer(schema, bounded_graphs->lower_bound);
+    auto lower_bound_res = lower_bound.run(ssa_args);
+    auto upper_bound =
+        SymbolicShapeOpAnalyzer(schema, bounded_graphs->upper_bound);
+    auto upper_bound_res = upper_bound.run(ssa_args);
+    // Stitch together the values
+    if (lower_bound_res.has_value() && upper_bound_res.has_value()) {
+      TORCH_INTERNAL_ASSERT(lower_bound_res->size() == upper_bound_res->size());
+      auto merged_res = std::vector<c10::SymbolicShape>();
+      for (size_t i = 0; i < lower_bound_res->size(); i++) {
+        merged_res.push_back(
+            combine_bounds(lower_bound_res->at(i), upper_bound_res->at(i)));
+      }
+      cache_shape_function(schema, inputs, merged_res);
+      return merged_res;
+    }
+    return c10::nullopt;
   }
 
   auto op_analyzer = SymbolicShapeOpAnalyzer(schema);
