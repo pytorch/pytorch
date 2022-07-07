@@ -49,9 +49,9 @@ PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
            'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
-           'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_caffe2_gpu_file', 'is_caffe2_gpu_file',
-           'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header', 'fix_static_global_kernels', 'extract_arguments',
-           'str2bool', 'hipify']
+           'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_caffe2_gpu_file',
+           'is_caffe2_gpu_file', 'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
+           'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'hipify']
 
 class InputError(Exception):
     # Exception raised for errors in the input.

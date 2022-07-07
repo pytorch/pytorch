@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import hashlib
 import torch
 import torch.fx
-from typing import Dict, List, Any, TYPE_CHECKING
+from typing import Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name, _format_arg
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
