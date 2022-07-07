@@ -72,12 +72,12 @@ class QueryPool final {
 
   void reset(const CommandBuffer&);
 
-  uint32_t log_shader_start(
+  uint32_t shader_profile_begin(
       const CommandBuffer&,
       const std::string&,
       const VkExtent3D,
       const VkExtent3D);
-  void log_shader_end(const CommandBuffer&, const uint32_t);
+  void shader_profile_end(const CommandBuffer&, const uint32_t);
 
   void extract_results();
   void print_results();

@@ -59,7 +59,7 @@ class Context final {
   // Diagnostics
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
-#endif
+#endif  /* USE_VULKAN_GPU_DIAGNOSTICS */
   // Command buffers submission
   std::mutex cmd_mutex_;
   CommandBuffer cmd_;
@@ -126,7 +126,7 @@ class Context final {
     set_cmd();
     querypool_.reset(cmd_);
   }
-#endif
+#endif  /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Memory Management
   void register_buffer_cleanup(VulkanBuffer& buffer) {
@@ -283,6 +283,14 @@ inline void Context::submit_compute_job(
 
   set_cmd();
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_,
+      shader_descriptor.kernel_name,
+      create_extent3d(global_work_group),
+      create_extent3d(local_work_group_size));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set = submit_compute_prologue(
       cmd_,
@@ -301,6 +309,10 @@ inline void Context::submit_compute_job(
       descriptor_set,
       pipeline_barrier,
       global_work_group);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||

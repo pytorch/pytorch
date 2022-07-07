@@ -227,7 +227,7 @@ void CommandBuffer::write_timestamp(
     const VkQueryPool querypool, const uint32_t idx) const {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
-      "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
+      "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "
       "is not RECORDING.");
 
   vkCmdWriteTimestamp(
@@ -243,7 +243,7 @@ void CommandBuffer::reset_querypool(
     const uint32_t count) const {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
-      "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
+      "Vulkan CommandBuffer: called reset_querypool() on a command buffer whose state "
       "is not RECORDING.");
 
   vkCmdResetQueryPool(handle_, querypool, first_idx, count);

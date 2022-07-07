@@ -3,22 +3,23 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/ATen.h>
-#include <ATen/native/vulkan/spv.h>
 
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+#include <ATen/native/vulkan/glsl.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderSource{       \
-    #name,                                       \
-    name##_spv,                                  \
-    name##_spv_len,                              \
-  }
+    ::at::native::vulkan::api::ShaderSource{     \
+        #name,                                   \
+        name##_glsl,                             \
+      }
 #else
+#include <ATen/native/vulkan/spv.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderSource{       \
-    name##_spv,                                  \
-    name##_spv_len,                              \
-  }
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+    ::at::native::vulkan::api::ShaderSource{     \
+        #name,                                   \
+        name##_spv,                              \
+        name##_spv_len,                          \
+      }
+#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
 #ifdef USE_VULKAN_VOLK

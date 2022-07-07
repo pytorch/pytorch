@@ -18,9 +18,6 @@ QueryPool::QueryPool(
     querypool_(VK_NULL_HANDLE),
     shader_log_{},
     in_use_(0u) {
-  if (VK_NULL_HANDLE != querypool_) {
-    return;
-  }
   const VkQueryPoolCreateInfo info{
     VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,  // sType
     nullptr,  // pNext
@@ -61,16 +58,12 @@ uint32_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
   return in_use_++;
 }
 
-uint32_t QueryPool::log_shader_start(
+uint32_t QueryPool::shader_profile_begin(
     const CommandBuffer& cmd,
     const std::string& kernel_name,
     const VkExtent3D global_workgroup_size,
     const VkExtent3D local_workgroup_size) {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  if (VK_NULL_HANDLE == querypool_) {
-    return 0u;
-  }
 
   uint32_t query_idx = write_timestamp(cmd);
 
@@ -95,13 +88,9 @@ uint32_t QueryPool::log_shader_start(
   return log_idx;
 }
 
-void QueryPool::log_shader_end(
+void QueryPool::shader_profile_end(
     const CommandBuffer& cmd, const uint32_t log_idx) {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  if (VK_NULL_HANDLE == querypool_) {
-    return;
-  }
 
   uint32_t query_idx = write_timestamp(cmd);
 
@@ -110,10 +99,6 @@ void QueryPool::log_shader_end(
 
 void QueryPool::extract_results() {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  if (VK_NULL_HANDLE == querypool_) {
-    return;
-  }
 
   const VkQueryResultFlags flags = VK_QUERY_RESULT_64_BIT;
 
@@ -156,6 +141,8 @@ std::string stringize(const VkExtent3D& extents) {
 }
 
 std::string QueryPool::generate_string_report() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   std::stringstream ss;
 
   int kernel_name_w = 25;

@@ -13,7 +13,6 @@ namespace api {
 // ShaderSource
 //
 
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
 ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
   : type(ShaderSource::Type::GLSL),
     src_code{
@@ -22,7 +21,7 @@ ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
        0u,
      },
     },
-    kernel_name{name} {
+    kernel_name{std::move(name)} {
 }
 
 ShaderSource::ShaderSource(
@@ -36,31 +35,8 @@ ShaderSource::ShaderSource(
        size,
      },
     },
-    kernel_name{name} {
+    kernel_name{std::move(name)} {
 }
-#else
-ShaderSource::ShaderSource(const char* const glsl_src)
-  : type(ShaderSource::Type::GLSL),
-    src_code{
-     .glsl = {
-       glsl_src,
-       0u,
-     },
-    } {
-}
-
-ShaderSource::ShaderSource(
-    const uint32_t* const spirv_bin,
-    const uint32_t size)
-  : type(Type::SPIRV),
-    src_code{
-     .spirv = {
-       spirv_bin,
-       size,
-     },
-    } {
-}
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
 bool operator==(
     const ShaderSource& _1,

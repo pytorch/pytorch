@@ -24,7 +24,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
       querypool_(
         device_,
         config_.queryPoolConfig),
-#endif
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
       cmd_(VK_NULL_HANDLE),
@@ -90,10 +90,22 @@ void Context::submit_texture_copy(
 
   set_cmd();
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_,
+      "copy_texture_to_texture",
+      create_extent3d({0, 0, 0}),
+      create_extent3d({0, 0, 0}));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   cmd_.insert_barrier(pipeline_barrier);
 
   cmd_.copy_texture_to_texture(
       source, destination, copy_range, src_offset, dst_offset);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
