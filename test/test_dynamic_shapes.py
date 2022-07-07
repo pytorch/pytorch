@@ -165,6 +165,14 @@ class FakeSymbolicTensor(torch.Tensor):
             self = args[0]
             return self.sym_shape
 
+        # some calls can be redirected to `sym_size` rather than
+        # `sym_sizes`. `sym_size` uses `dim` to canonicalize an index
+        # so we need to implement both `sym_size` and `dim` for python
+        # tensors
+        if func_overload == torch.ops.aten.dim.default:
+            self = args[0]
+            return len(self.sym_shape)
+
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
             shape = args[1]
