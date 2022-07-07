@@ -84,12 +84,17 @@ using at::Tensor;
 
 namespace {
 
-// Ensure that two tensors behave similarly when the same operation
-// such as an as_strided is applied to both
+// The goal here is to ensure that two tensors behave similarly when
+// the same operation such as an as_strided is applied to both
+//
+// We do that by checking:
+//   1) the storages have same properties: size and conj/neg-ness
+//   2) the same indices refer to the same elements in storage
 bool has_same_meta(const Variable& base, const Variable& other) {
   if (!base.defined() || !other.defined()) {
     return false;
   }
+  // 1) The storages have the same properties
   if (!at::_has_same_storage_numel(base, other)) {
     return false;
   }
@@ -97,12 +102,12 @@ bool has_same_meta(const Variable& base, const Variable& other) {
     return false;
   }
 
-  // 0-element tensors can ignore the below view-specific properties
+  // 0-element tensors can ignore the below since there are no indices
   if (base.numel() == 0 && other.numel() == 0) {
     return true;
   }
 
-  // Properties of the view
+  // 2) The same indices refer to the same elements in storage
   if (base.storage_offset() != other.storage_offset()) {
     return false;
   }
