@@ -1522,6 +1522,10 @@
   self: grad.expand(self.sizes())
   result: auto_linear
 
+- name: sum_to_checked(Tensor self, SymInt[]? size, Tensor? tsize, int grad_idx) -> Tensor
+  self: grad.expand(self.sizes())
+  result: auto_linear
+
 - name: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
