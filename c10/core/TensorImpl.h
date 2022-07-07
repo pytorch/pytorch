@@ -552,9 +552,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
+  // TODO: make it non-virtual after a change to XLA
   virtual c10::SymIntArrayRef sym_sizes() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_sizes_custom();
+    }
     return sym_sizes_default();
   }
+
+  virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
@@ -577,12 +585,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * be faster
    */
   int64_t size(int64_t d) const {
-    d = maybe_wrap_dim(d, dim(), false);
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+      return size_custom(d);
     }
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
 
@@ -662,6 +670,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         sizes_and_strides_.size());
   }
 
+  inline c10::SymIntArrayRef sym_sizes_default() const {
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
+
  protected:
   /**
    * Customization points for the functions above.  sizes_strides_policy_
@@ -674,9 +688,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
+  // Currently this method only exists to be overwritten by subclasses such as
+  // NestedTensorImpl.
+  virtual int64_t size_custom(int64_t d) const {
+    // TODO: We could add support to Python dispatch here.
+    // TODO: We could call into aten::size.int instead of
+    // sizes_custom()[d] and enable use of the dispatcher.
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
+    return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+  }
   virtual IntArrayRef sizes_custom() const;
-  virtual c10::SymIntArrayRef sym_sizes_custom() const;
   virtual Device device_custom() const;
+  virtual Layout layout_custom() const;
 
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
@@ -691,11 +714,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
-  }
-  inline c10::SymIntArrayRef sym_sizes_default() const {
-    return c10::SymIntArrayRef(
-        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
-        sizes_and_strides_.size());
   }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
@@ -962,6 +980,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Layout layout() const {
+    if (C10_UNLIKELY(custom_layout_)) {
+      return layout_custom();
+    }
+
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.
@@ -2338,6 +2360,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+  void set_custom_layout(bool custom_layout) {
+    custom_layout_ = custom_layout;
+  }
+
  protected:
   Storage storage_;
 
@@ -2457,6 +2483,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     custom_device_ = false;
+    custom_layout_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
   }
@@ -2526,6 +2553,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call _custom() virtual method for device()
   bool custom_device_ : 1;
+
+  // Call _custom() virtual method for layout()
+  bool custom_layout_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
