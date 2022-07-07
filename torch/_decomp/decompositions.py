@@ -1245,3 +1245,21 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
         self = self.abs()
 
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
+
+
+@register_decomposition(torch.ops.aten.kl_div_backward)
+@pw_cast_for_opmath
+def kl_div_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    log_target: bool = False,
+) -> Tensor:
+    if not log_target:
+        grad_input = torch.where(target > 0, -target * grad_output, 0)
+    else:
+        grad_input = -target.exp() * grad_output
+    if reduction == Reduction.MEAN.value:
+        return grad_input / self.numel()
+    return grad_input
