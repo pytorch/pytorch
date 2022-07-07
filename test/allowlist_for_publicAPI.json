@@ -71,6 +71,15 @@
     "Union",
     "get_combined_dict"
   ],
+  "torch.ao.quantization.backend_config.utils": [
+    "Any",
+    "Dict",
+    "Callable",
+    "List",
+    "Union",
+    "Tuple",
+    "Pattern"
+  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
@@ -314,6 +323,14 @@
     "Tuple",
     "Union",
     "classproperty"
+  ],
+  "torch.cuda.comm": [
+    "broadcast",
+    "broadcast_coalesced",
+    "reduce_add",
+    "reduce_add_coalesced",
+    "scatter",
+    "gather"
   ],
   "torch.cuda.amp.autocast_mode": [
     "Any"

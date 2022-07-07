@@ -932,7 +932,7 @@ def _pow(
 
     if isinstance(b, Number):
         if b == 1.0:
-            return a  # type: ignore[return-value]
+            return a.clone()  # type: ignore[return-value]
         elif b == 2.0:
             return a * a  # type: ignore[return-value]
         elif b == 0.5:
