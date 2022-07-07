@@ -1265,18 +1265,14 @@ class Module:
         pass
 
     def __getattr__(self, name: str) -> Union[Optional[Tensor], Optional['Module']]:
-        if hasattr(self, "_parameters"):
-            if name in self._parameters:
-                return self._parameters[name]
-        if hasattr(self, "_buffers"):
-            if name in self._buffers:
-                return self._buffers[name]
-        if hasattr(self, "_modules"):
-            if name in self._modules:
-                return self._modules[name]
-        if hasattr(self, "_dynamic_attributes"):
-            if name in self._dynamic_attributes:
-                return self._dynamic_attributes[name]
+        if name in self._parameters:
+            return self._parameters[name]
+        if name in self._buffers:
+            return self._buffers[name]
+        if name in self._modules:
+            return self._modules[name]
+        if name in self._dynamic_attributes:
+            return self._dynamic_attributes[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
