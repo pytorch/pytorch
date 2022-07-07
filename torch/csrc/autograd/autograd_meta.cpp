@@ -102,7 +102,7 @@ bool has_same_meta(const Variable& base, const Variable& other) {
     return false;
   }
 
-  // 0-element tensors can ignore the below since there are no indices
+  // The check below will always be vacuously true for 0-element tensors
   if (base.numel() == 0 && other.numel() == 0) {
     return true;
   }
