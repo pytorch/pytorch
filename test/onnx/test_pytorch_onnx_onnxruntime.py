@@ -6465,6 +6465,15 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_argsort(self):
+        class ArgSortModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.argsort(x, dim=1, descending=False)
+
+        x = torch.randn(3, 4)
+        self.run_test(ArgSortModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
