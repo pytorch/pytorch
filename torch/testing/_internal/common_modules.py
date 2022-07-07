@@ -706,6 +706,26 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 desc='no_batch_dim'
             ))
 
+    def fast_path_reference_fn(module, parameters, *args, **kwargs):
+        assert not module.training
+        module = module.train(True)
+        output = module(*args, **kwargs)
+        module = module.train(False)
+        return output
+
+    if not training:
+        for norm_first in (True, False):
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first),
+                    forward_input=FunctionInput(
+                        make_input((2, 3, 4)),
+                    ),
+                    reference_fn=fast_path_reference_fn,
+                    desc="fast_path_norm_first" if norm_first else "fast_path"
+                )
+            )
+
     return samples
 
 

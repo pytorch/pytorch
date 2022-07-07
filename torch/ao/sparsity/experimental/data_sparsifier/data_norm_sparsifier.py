@@ -80,7 +80,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         mask = self.__get_scatter_folded_mask(data=unfolded_data, dim=1, indices=sorted_idx, output_size=padded_data.shape,
                                               sparse_block_shape=sparse_block_shape)
 
-        mask = mask.squeeze()[:height, :width].contiguous()  # remove padding and make contiguous
+        mask = mask.squeeze(0).squeeze(0)[:height, :width].contiguous()  # remove padding and make contiguous
         return mask
 
     def __get_data_level_mask(self, data, sparsity_level,
@@ -109,7 +109,7 @@ class DataNormSparsifier(BaseDataSparsifier):
                                               output_size=(height + dh, width + dw),
                                               sparse_block_shape=sparse_block_shape)
 
-        mask = mask.squeeze()[:height, :width]
+        mask = mask.squeeze(0).squeeze(0)[:height, :width]  # squeeze only the first 2 dimension
         return mask
 
     def update_mask(self, name, data, sparsity_level,
@@ -127,8 +127,11 @@ class DataNormSparsifier(BaseDataSparsifier):
         else:
             data_norm = (data * data).squeeze()  # square every element for L2
 
-        if len(data_norm.shape) != 2:  # only supports 2 dimenstional data at the moment
+        if len(data_norm.shape) > 2:  # only supports 2 dimenstional data at the moment
             raise ValueError("only supports 2-D at the moment")
+
+        elif len(data_norm.shape) == 1:  # in case the data is bias (or 1D)
+            data_norm = data_norm[None, :]
 
         mask = self.get_mask(name)
         if sparsity_level <= 0 or zeros_per_block == 0:

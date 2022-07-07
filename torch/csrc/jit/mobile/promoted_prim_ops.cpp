@@ -58,6 +58,11 @@ void size(Stack& stack) {
   pack(stack, t.sizes().vec());
 }
 
+void sym_size(Stack& stack) {
+  auto t = std::move(pop(stack)).toTensor();
+  pack(stack, t.sym_sizes().vec());
+}
+
 void device(Stack& stack) {
   push(stack, pop(stack).toTensor().device());
 }
@@ -66,6 +71,10 @@ void dtype(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
   push(stack, static_cast<int64_t>(a.scalar_type()));
+}
+
+void layout(Stack& stack) {
+  push(stack, pop(stack).toTensor().layout());
 }
 
 void toPrimDType(Stack& stack) {
@@ -191,7 +200,7 @@ void dictIndex(Stack& stack) {
   push(stack, value->value());
 }
 
-static const C10_UNUSED std::array<mobile::prim_op_fn_register, 15> op_reg = {
+static const C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
@@ -201,6 +210,7 @@ static const C10_UNUSED std::array<mobile::prim_op_fn_register, 15> op_reg = {
         raiseExceptionWithMessage),
     mobile::prim_op_fn_register("prim::device", device),
     mobile::prim_op_fn_register("prim::dtype", dtype),
+    mobile::prim_op_fn_register("prim::layout", layout),
     mobile::prim_op_fn_register("aten::__not__", _not),
     mobile::prim_op_fn_register("aten::__is__", is),
     mobile::prim_op_fn_register("aten::__isnot__", isNot),

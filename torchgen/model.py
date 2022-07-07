@@ -834,7 +834,7 @@ class NativeFunction:
         return self.func.name.name.base
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable"))
+SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -872,6 +872,8 @@ class NativeFunctionsGroup:
         if self.mutable is not None:
             assert self.mutable.func.kind() == SchemaKind.mutable
             assert self.mutable.namespace == self.functional.namespace
+            # See Note [Overload Ambiguity With Functional Variants]
+            assert self.functional.func.name.name.functional_overload
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
@@ -901,7 +903,7 @@ class NativeFunctionsGroup:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
                 f" To do so, it expects a line: 'autogen: {generated_fns_str}'."
-                f" Instead, it found 'autogen: {generated_fns_str}'"
+                f" Instead, it found 'autogen: {expected_generated_fns_str}'"
             )
 
     def signature(self) -> "FunctionSchema":
@@ -1201,7 +1203,15 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                assert len(self.arguments.out) == len(
+                # mutable keyward arguments whose name has _scratch_ prefix are
+                # scratch tensors for memory planning and should not be returned
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1240,6 +1250,10 @@ class FunctionSchema:
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
 
+    def is_symint_fn(self) -> bool:
+        # TODO: make this more robust
+        return "SymInt" in self.name.overload_name
+
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
         #
@@ -1277,6 +1291,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write
@@ -1292,7 +1309,15 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -2112,6 +2137,26 @@ class BaseOperatorName:
     base: str
     inplace: bool
     dunder_method: bool
+    # Note [Overload Ambiguity With Functional Variants]
+    # A handful of operators have both a "mutable" and a "functional" variant.
+    # (native_batch_norm is a good example, although this isn't the case today).
+    # For those operators, the mutable and functional variant take in the same set of
+    # arguments, but have different alias annotations.
+    # this makes it ambiguous when you try to resolve an OverloadPacket into an overload,
+    # given a set of input arguments.
+    #
+    # So instead of making the "functional" variant in this case a real overload, e.g:
+    #   native_batch_norm (mutable variant)
+    #   native_batch_norm.functional (functional variant)
+    # we make it a new base operator,
+    #   native_batch_norm_functional (functional variant)
+    #
+    # In an ideal world, we would probably invert this so the operators were:
+    #   native_batch_norm.mutable (mutable variant)
+    #   native_batch_norm (functional variant)
+    #
+    # Doing that is BC-breaking though, so we're stuck with the above modeling.
+    functional_overload: bool = False
 
     @staticmethod
     def parse(op: str) -> "BaseOperatorName":
@@ -2142,7 +2187,24 @@ class BaseOperatorName:
                 base = base[:-1]
             else:
                 inplace = False
-        r = BaseOperatorName(base=base, inplace=inplace, dunder_method=dunder_method)
+
+        # See Note [Overload Ambiguity With Functional Variants]
+        functional_suffix = "_functional"
+        if base.endswith(functional_suffix):
+            functional_overload = True
+            base = base[: -len(functional_suffix)]
+            # This seems complicated and unnecessary, so banning dunder methods
+            # for now on ops that have a functional + mutable variant (like native_batch_norm).
+            assert not dunder_method and not inplace
+        else:
+            functional_overload = False
+
+        r = BaseOperatorName(
+            base=base,
+            inplace=inplace,
+            dunder_method=dunder_method,
+            functional_overload=functional_overload,
+        )
         assert str(r) == op, f"{str(r)} != {op}"
         return r
 
@@ -2151,7 +2213,13 @@ class BaseOperatorName:
             i = "i" if self.inplace else ""
             return f"__{i}{self.base}__"
         else:
-            i = "_" if self.inplace else ""
+            i = (
+                "_"
+                if self.inplace
+                else "_functional"
+                if self.functional_overload
+                else ""
+            )
             return f"{self.base}{i}"
 
 
