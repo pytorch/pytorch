@@ -86,8 +86,6 @@ RuntimeError: Given dimension 1 is irregular and does not have a size.
 If all dimensions are regular, the NestedTensor is intended to be semantically indistinguishable from a regular torch.Tensor.
 
 >>> a = torch.randn(20, 128) # text 1
->>>
-KeyboardInterrupt
 >>> nt = torch.nested_tensor([a, a], dtype=torch.float32)
 >>> nt.size(0)
 2
