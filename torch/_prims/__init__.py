@@ -2611,7 +2611,6 @@ def _fft_r2c_meta(
         shape[last_dim] = shape[last_dim] // 2 + 1
 
     dtype = utils.corresponding_complex_dtype(input.dtype)
-    # TODO: Actual result strides may differ, is that okay?
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
 
@@ -2621,9 +2620,8 @@ def _fft_r2c_aten(
     *,
     dim: DimsSequenceType,
     onesided: bool,
-):
+) -> TensorLikeType:
     normalization = 0  # No normalization
-    dim = utils.canonicalize_dims(input.ndim, dim)
     return torch._fft_r2c(input, dim, normalization, onesided)
 
 
@@ -2650,7 +2648,6 @@ def _fft_c2c_meta(
     dim = utils.canonicalize_dims(input.ndim, dim)
     utils.validate_no_repeating_dims(dim)
 
-    # TODO: Actual result strides may differ, is that okay?
     shape = input.shape
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(
@@ -2663,9 +2660,8 @@ def _fft_c2c_aten(
     *,
     dim: DimsSequenceType,
     forward: bool,
-):
+) -> TensorLikeType:
     normalization = 0  # No normalization
-    dim = utils.canonicalize_dims(input.ndim, dim)
     return torch._fft_c2c(input, dim, normalization, forward)
 
 
@@ -2695,7 +2691,6 @@ def _fft_c2r_meta(
     shape = list(input.shape)
     shape[dim[-1]] = last_dim_size
     dtype = utils.corresponding_real_dtype(input.dtype)
-    # TODO: Actual result strides may differ, is that okay?
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
 
@@ -2705,9 +2700,8 @@ def _fft_c2r_aten(
     *,
     dim: DimsSequenceType,
     last_dim_size: int,
-):
+) -> TensorLikeType:
     normalization = 0  # No normalization
-    dim = utils.canonicalize_dims(input.ndim, dim)
     return torch._fft_c2r(input, dim, normalization, last_dim_size)
 
 
