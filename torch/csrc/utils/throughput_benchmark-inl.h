@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <aten/src/ATen/Parallel.h>
+#include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
 namespace torch {

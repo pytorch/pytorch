@@ -26,7 +26,7 @@ MPSGeneratorImpl::MPSGeneratorImpl(DeviceIndex device_index)
 }
 
 const Generator& getDefaultMPSGenerator() {
-  auto gen = make_generator<MPSGeneratorImpl>(0);
+  static auto gen = make_generator<MPSGeneratorImpl>(0);
   gen.seed();
   return gen;
 }
@@ -39,19 +39,14 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
   static const size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-  auto rng_state = state_tensor.data_ptr<uint8_t>();
 
   return state_tensor.getIntrusivePtr();
 }
 
 void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
-
-  auto new_state_size = new_state.numel();
 
   uint64_t input_seed;
   auto new_rng_state = new_state.data<uint8_t>();
@@ -63,17 +58,6 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   auto gen = new MPSGeneratorImpl(0);
   gen->set_current_seed(this->seed_);
   return gen;
-}
-
-std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
-                          const IntArrayRef strides, int64_t offset) {
-  // TODO: move storage_offset to a PlaceholderTensor and strides to a
-  // tensor too, to avoid too many cache entries.
-  return std::to_string((uintptr_t)self.storage().data()) +
-              ":" + mps::getArrayRefString(sz) +
-              ":" + mps::getArrayRefString(strides) +
-              ":" + std::to_string(offset) +
-              ":" + getMPSTypeString(self.scalar_type());
 }
 
 void runMPSGraph(
@@ -114,8 +98,10 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       return MPSDataTypeInt64;
     case ScalarType::Short:
       return MPSDataTypeInt16;
-    case ScalarType::Byte:
+    case ScalarType::Char:
       return MPSDataTypeInt8;
+    case ScalarType::Byte:
+      return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
     case ScalarType::Double:
@@ -141,8 +127,10 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeInt64;
     case ScalarType::Short:
       return MPSDataTypeInt16;
-    case ScalarType::Byte:
+    case ScalarType::Char:
       return MPSDataTypeInt8;
+    case ScalarType::Byte:
+      return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
@@ -259,110 +247,38 @@ void printTensorNDArray(const Tensor& t) {
   auto selfDType = getMPSDataType(t.scalar_type());
 
   // Initialize data
-  id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, t.storage().data());
+  id<MTLBuffer> selfBuf = getMTLBufferStorage(t);
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
                                                          dataType:selfDType] autorelease];
   [tdata printNDArray];
 }
 
-MPSCachedGraph* _getCachedGraph(const at::Tensor& src) {
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-  string key = getStridedKey(src, src.sizes(), src.strides(), src.storage_offset());
-  MPSCachedGraph* cachedGraph = cache_->LookUp(key);
-
-  return cachedGraph;
-}
-
-id<MTLBuffer> _gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer, MPSCachedGraph* mpsCachedGraph, Tensor& output) {
-  TORCH_CHECK(mpsCachedGraph != nil);
-
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-  MPSStream* stream = getCurrentMPSStream();
-
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  CachedGraph* cachedGraph = static_cast<CachedGraph *>(mpsCachedGraph);
-
-  @autoreleasepool {
-    MPSGraphTensor* inputTensor = cachedGraph->inputTensor_;
-    MPSGraphTensorData* inputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
-                                                                        shape: [inputTensor shape]
-                                                                        dataType: [inputTensor dataType]] autorelease];
-    id<MTLBuffer> resultBuffer = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-    MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: resultBuffer
-                                                                        shape: getMPSShape(src.sizes())
-                                                                        dataType: getMPSDataType(src.scalar_type())] autorelease];
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputTensor : inputTensorData
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      cachedGraph->outputTensor_ : outputTensorData
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    return resultBuffer;
-  }
-}
-
-id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer) {
-  MPSCachedGraph* mpsCachedGraph = _getCachedGraph(src);
-  if (mpsCachedGraph) {
-    Tensor output = at::native::empty_mps(
-                    src.sizes(),
-                    src.scalar_type(),
-                    c10::nullopt,
-                    kMPS,
-                    c10::nullopt,
-                    c10::nullopt);
-
-    _gatherViewTensor(src, sourceBuffer, mpsCachedGraph, output);
-    return __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-  }
-
-  return nil;
-}
-
-id<MTLBuffer> gatherViewTensorWithAllocatedMem(const at::Tensor& src, id<MTLBuffer> sourceBuffer, Tensor& output, MPSCachedGraph* mpsCachedGraph) {
-  TORCH_CHECK(mpsCachedGraph != nil);
-
-  _gatherViewTensor(src, sourceBuffer, mpsCachedGraph, output);
-  return __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-}
-
-Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape)
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
 {
-  Tensor src_ = src;
-  TORCH_CHECK(src_.is_mps(), "Placeholder storage has not been allocated on MPS device!");
-    // extract the pointer to MTLBuffer from the Tensor's storage
-  id<MTLBuffer> srcBuf = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
-  if (src.is_view()) {
-    MPSCachedGraph* cachedGraph = _getCachedGraph(src);
-    if (cachedGraph) {
-      allocateViewTensor(src);
-      id<MTLBuffer> gatherTensor = gatherViewTensorWithAllocatedMem(src, srcBuf, _viewOutput, cachedGraph);
-      if (gatherTensor) {
-        srcBuf = gatherTensor;
-      }
-    } else {
-      src_ = src.contiguous();
-      srcBuf = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
+  TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
+  // extract the pointer to MTLBuffer from the Tensor's storage
+  id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
+  // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
+  if (src.is_view() || !src.is_contiguous()) {
+     Tensor emptyShell = Tensor();
+    // use "_tensor" from Placeholder to retain view's output during its usage in other ops
+    _tensor = gatherViewTensor(src, emptyShell);
+    if (!_tensor.has_storage()) {
+      // if we cannot gather, we make the the tensor contiguous implicitly, and keep
+      // it in placeholder to be able to retrieve it when we return from constructor
+      _tensor = src.contiguous();
     }
+    srcBuf = getMTLBufferStorage(_tensor);
   }
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
 
-  const MPSDataType mpsDataType = src_.dim() == 0 ? getMPSScalarType(src_.scalar_type()) : getMPSDataType(src_.scalar_type());
+  const MPSDataType mpsDataType = _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type()) : getMPSDataType(_tensor.scalar_type());
   if (!mpsShape)
-    mpsShape = getMPSShape(src_);
+    mpsShape = getMPSShape(_tensor);
 
   _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
                                                     shape:mpsShape
@@ -379,7 +295,7 @@ MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph,
 
   MPSGraphTensorData *result = nil;
   if (tensor.numel() > 0) {
-    id<MTLBuffer> buf = __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+    id<MTLBuffer> buf = getMTLBufferStorage(tensor);
     result = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buf
                                                     shape:mpsShape
                                                  dataType:dataType]
@@ -460,10 +376,15 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataTy
 
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor) {
     return [mpsGraph placeholderWithShape:getMPSShape(tensor)
-                                 dataType:getMPSDataType(tensor.scalar_type())
+                                 dataType:getMPSScalarType(tensor.scalar_type())
                                      name:nil];
 }
 
+// this is meant to suppress the availability warning on castTensor
+// we pass ScalarType instead of MPSDataType to handle MPSDataTypeBoolean's availability too
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType) {
+  return [mpsGraph castTensor:tensor toType:getMPSScalarType(toType) name:@"castTensor"];
+}
 
 string get_mem_format_string(c10::MemoryFormat memory_format) {
   string mem_format_key;

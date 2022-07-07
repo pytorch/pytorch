@@ -132,8 +132,6 @@ class KernelIrScanner : private IrVisitor {
 
   void handle(GroupedGridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
-    updateGridReductionInLoop(dom);
     if (grid_reduction->isAllreduce()) {
       summary_.has_cooperative_grid_reduction = true;
     }
@@ -160,18 +158,6 @@ class KernelIrScanner : private IrVisitor {
  private:
   size_t max_smem_type_size_ = 0;
   KernelSummary summary_;
-
- private:
-  void updateGridReductionInLoop(TensorDomain* dom) {
-    for (const auto i : c10::irange(dom->nDims())) {
-      const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
-          dom->domain()[i], IdMappingMode::LOOP);
-
-      summary_.has_cooperative_grid_reduction =
-          summary_.has_cooperative_grid_reduction ||
-          !(id->isThread() || id->extent()->isOneInt());
-    }
-  }
 };
 
 //! Make sure tensors have valid allocations even when parallelized

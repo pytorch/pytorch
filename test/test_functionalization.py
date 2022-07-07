@@ -203,7 +203,7 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         logs = self.get_logs(f, torch.ones(1))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper_functional.default($0, $0, $0, $0, $0, $0, $0, 1.0, 0, 1, 0)""")  # noqa: B950
 
     def test_as_strided(self):
         def f(x):
@@ -527,7 +527,7 @@ $3 = torch._ops.aten.fill.Scalar($2, 0)""")
 $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, 1)
 $2 = torch._ops.aten.view_copy.default($1, [4, 4])
-$3 = torch._ops.aten.resize.functional($2, [3, 3])
+$3 = torch._ops.aten.resize.default($2, [3, 3])
 $4 = torch._ops.aten.as_strided_copy.default($2, [3, 3], [3, 1])
 $5 = torch._ops.aten.view_copy.default($4, [-1])
 $6 = torch._ops.aten.add.Tensor($5, 1)
@@ -562,7 +562,7 @@ $14 = torch._ops.aten.add.Tensor($13, 1)""")
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, 1)
-$2 = torch._ops.aten.resize.functional($1, [5, 5])
+$2 = torch._ops.aten.resize.default($1, [5, 5])
 $3 = torch._ops.aten.view_copy.default($2, [25])
 $4 = torch._ops.aten.fill.Scalar($3, 1)
 $5 = torch._ops.aten.view_copy.default($4, [5, 5])
@@ -625,7 +625,7 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         x1_not_functional = torch.ones(4)
         x2_functional = torch._to_functional_tensor(torch.ones(4))
 
-        # When dealing with mixed functional + nonfunctional tensors,
+        # When dealing with mixed functional + non functional tensors,
         # normal_tensor.add_(functional_tensor) is not valid
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):
