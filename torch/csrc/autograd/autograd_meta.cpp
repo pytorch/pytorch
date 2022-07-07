@@ -88,7 +88,8 @@ bool has_same_meta(const Variable& base, const Variable& other) {
   if (!base.defined() || !other.defined()) {
     return false;
   }
-  if (base.storage_offset() != other.storage_offset()) {
+  if (base.storage_offset() != other.storage_offset() &&
+      !(base.numel() == 0 && other.numel() == 0)) {
     return false;
   }
   if (base.dim() != other.dim()) {

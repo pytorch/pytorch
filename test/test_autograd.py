@@ -6826,6 +6826,23 @@ class TestAutogradForwardMode(TestCase):
                     torch.real(dual)
                     torch.imag(dual)
 
+    def test_metadata_check_ignore_storage_offset_for_zero_numel_tensor(self):
+        # See https://github.com/pytorch/pytorch/issues/80507
+        a = torch.tensor([1.]).as_strided((0,), (1,), 1)
+        b = torch.tensor([1.]).as_strided((0,), (1,), 2)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(a, b)
+            # Check that no copy is made
+            self.assertIs(fwAD.unpack_dual(dual_input).tangent, b)
+
+        a = torch.tensor([1.]).as_strided((1,), (2,), 0)
+        b = torch.tensor([1.]).as_strided((1,), (1,), 0)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(a, b)
+            dual_input[1:]
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
@@ -6836,6 +6853,7 @@ class TestAutogradForwardMode(TestCase):
     #     - For backward AD (regular ops)
     #   - Ensure that view + inplace for both modes work fine
     #   - Ensure we do proper cleanup on exit of a level
+
 
     def test_default_level(self):
         foo = torch.rand(2)
