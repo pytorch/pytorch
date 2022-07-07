@@ -102,6 +102,20 @@ bool has_same_meta(const Variable& base, const Variable& other) {
     return false;
   }
 
+  // Technically dim and size belong as part of (2), so we shouldn't really care
+  // if zero-numel tensor violate these. But since these properties
+  // (unlike storage_offset and strides) often determine control flow in composite ops
+  // it is useful to enforce they match for primal and tangent here so nothing funny
+  // happens later.
+  if (base.dim() != other.dim()) {
+    return false;
+  }
+  for (const auto i : c10::irange(base.dim())) {
+    if (base.sizes()[i] != other.sizes()[i]) {
+      return false;
+    }
+  }
+
   // The check below will always be vacuously true for 0-element tensors
   if (base.numel() == 0 && other.numel() == 0) {
     return true;
@@ -111,13 +125,8 @@ bool has_same_meta(const Variable& base, const Variable& other) {
   if (base.storage_offset() != other.storage_offset()) {
     return false;
   }
-  if (base.dim() != other.dim()) {
-    return false;
-  }
+
   for (const auto i : c10::irange(base.dim())) {
-    if (base.sizes()[i] != other.sizes()[i]) {
-      return false;
-    }
     if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1 &&
         base.sizes()[i] != 0) {
       return false;
