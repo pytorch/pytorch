@@ -170,7 +170,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
  private:
-  explicit CudaKernelGenerator(const kir::Kernel* kernel) : kernel_(kernel) {}
+  explicit CudaKernelGenerator(const kir::Kernel* kernel) : kernel_(kernel) {
+    initStringStreamFormat(code_);
+  }
+
+  void initStringStreamFormat(std::stringstream& ss) {
+    const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
+    ss.imbue(std::locale("C"));
+    ss << std::scientific << std::setprecision(digits);
+  }
 
   // Generates the kernel function declaration
   void genDeclaration(const std::string& kernel_name) {
@@ -358,6 +366,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   std::string gen(const Statement* stmt) {
     std::stringstream tmp_code;
+    initStringStreamFormat(tmp_code);
     std::swap(tmp_code, code_);
     OptOutConstDispatch::handle(stmt);
     std::swap(tmp_code, code_);
@@ -419,9 +428,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       } else if (std::isnan(val)) {
         code_ << "NAN";
       } else {
-        const int digits =
-            std::numeric_limits<Double::ScalarType>::max_digits10;
-        code_ << std::setprecision(digits) << val;
+        code_ << val;
       }
     } else {
       code_ << varName(d);
@@ -454,9 +461,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (c->isConst()) {
-      const int digits = std::numeric_limits<double>::max_digits10;
-      code_ << "std::complex<double>" << std::setprecision(digits)
-            << *c->value();
+      code_ << "std::complex<double>" << *c->value();
     } else {
       code_ << varName(c);
     }

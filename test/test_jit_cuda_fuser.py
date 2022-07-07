@@ -82,6 +82,11 @@ def is_pre_volta():
 
 TEST_BF16 = RUN_NVFUSER and torch.cuda.is_bf16_supported()
 
+TEST_LARGE_TENSOR = RUN_NVFUSER
+if RUN_NVFUSER:
+    torch.ones(1).cuda()  # initialize cuda context
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+
 class CudaFuserTestOptions():
     def __init__(self):
         self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
@@ -183,23 +188,27 @@ class TestCudaFuser(JitTestCase):
             self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
-    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1):
-        torch.cuda.manual_seed_all(123)
+    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1):
+        seed = 123
+        torch.cuda.manual_seed_all(seed)
         jit_o = jit_op(*args)
-        torch.cuda.manual_seed_all(123)
-        jit_o = jit_op(*args)
-        torch.cuda.manual_seed_all(123)
-        o = op(*args)
 
-        if type(jit_o) is torch.Tensor:
-            jit_o = [jit_o, ]
-            o = [o, ]
+        for i in range(check_runs):
+            torch.cuda.manual_seed_all(seed + i)
+            jit_o = jit_op(*args)
+            torch.cuda.manual_seed_all(seed + i)
+            o = op(*args)
 
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            self.assertEqual(oo, jit_oo)
-            if check_stride:
-                self.assertEqual(oo.stride(), jit_oo.stride())
+            if type(jit_o) is torch.Tensor:
+                jit_o = [jit_o, ]
+                o = [o, ]
+
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.dtype, jit_oo.dtype)
+                self.assertEqual(oo, jit_oo)
+                if check_stride:
+                    self.assertEqual(oo.stride(), jit_oo.stride())
+
         self.assertGraphContainsExactly(jit_op.graph_for(*args), FUSION_GUARD, num_fusion, consider_subgraphs=True)
 
     def _run_training_helper(self, jit_op, op, grads, *args):
@@ -2562,13 +2571,14 @@ class TestCudaFuser(JitTestCase):
 
         self._run_helper(t_jit, t, x, 0.15, False)
 
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_dropout_train_nograd_fusion(self):
         dtype = torch.float
         device = "cuda"
-        x = torch.randn([10, 4, 8], dtype=dtype, device=device)
+        x = torch.randn([64, 128, 1024], dtype=dtype, device=device)
 
         def t(x: torch.Tensor, p: float, train: bool):
             o = torch.nn.functional.dropout(x, p, training=train)
@@ -2577,7 +2587,8 @@ class TestCudaFuser(JitTestCase):
 
         t_jit = torch.jit.script(t)
 
-        self._run_helper(t_jit, t, x, 0.0, True)
+        self._run_helper(t_jit, t, x, 0.0, True, check_runs=20)
+        self._run_helper(t_jit, t, x, 1.0, True, check_runs=20)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
