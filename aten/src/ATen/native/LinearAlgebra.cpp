@@ -109,6 +109,47 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   set_output_raw_strided(0, shape, {}, options);
 }
 
+TORCH_META_FUNC(_linalg_det)(const Tensor& A) {
+  at::native::squareCheckInputs(A, "linalg.det");
+  at::native::checkFloatingOrComplex(A, "linalg.det");
+
+  auto shape = A.sizes();
+  auto ndim = shape.size();
+
+  // det
+  set_output_contiguous(0, shape.slice(0, ndim - 2), A.options());
+
+  // LU
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
+  set_output_strided(1, shape, LU_strides, A.options());
+
+  // pivots
+  set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
+}
+
+TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
+  at::native::squareCheckInputs(A, "linalg.slogdet");
+  at::native::checkFloatingOrComplex(A, "linalg.slogdet", /*low_precision*/false);
+
+  auto shape= A.sizes();
+  auto ndim = shape.size();
+
+  auto shape_outputs = shape.slice(0, ndim - 2);
+
+  // sign
+  set_output_contiguous(0, shape_outputs, A.options());
+
+  // logabsdet
+  set_output_contiguous(1, shape_outputs, A.options().dtype(toRealValueType(A.scalar_type())));
+
+  // LU
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
+  set_output_strided(2, shape, LU_strides, A.options());
+
+  // pivots
+  set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
+}
+
 template <typename Meta>
 void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -170,28 +211,42 @@ namespace native {
 
 DEFINE_DISPATCH(addr_stub);
 
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.det ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
-  const auto n = lu.size(-1);
-  auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
+Tensor lu_det_P(const Tensor& pivots) {
+  return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
     // take 0 to 1 and 1 to -1
     .mul_(-2)
     .add_(1);
-  return det_P;
 }
 
-// Given a pivoted LU factorization A = P L U,
-// det(A) = det(P) * det(L) * det(U).
-std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  auto det = det_P * at::prod(lu.diagonal(0, -2 ,-1), /*dim=*/-1);
+// Auxiliary function that returns the LU decomposition to use it in the backward
+TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivots) {
+  // info is an aux tensor
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
-  return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
+  // det = det_P * prod(diag(LU))
+  at::mul_out(const_cast<Tensor&>(result), lu_det_P(pivots), at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
+}
+
+Tensor linalg_det(const Tensor& A) {
+  return std::get<0>(at::_linalg_det(A));
+}
+
+Tensor& linalg_det_out(const Tensor& A, Tensor& result) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  at::_linalg_det_out(result, LU, pivots, A);
+  return result;
 }
 
 // torch.det, alias for torch.linalg.det
@@ -199,90 +254,59 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor linalg_det(const Tensor& self) {
-  squareCheckInputs(self, "linalg.det");
-  checkFloatingOrComplex(self, "linalg.det");
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.slogdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  return std::get<0>(at::_det_lu_based_helper(self));
+// Auxiliary function that returns the LU decomposition to use it in the backward
+TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
+  // info is an aux tensor
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
+
+  auto diag_U = LU.diagonal(0, -2, -1);
+  // sign
+  at::mul_out(const_cast<Tensor&>(sign), diag_U.sgn().prod(-1), lu_det_P(pivots));
+
+  // logabsdet
+  at::sum_out(const_cast<Tensor&>(logabsdet), diag_U.abs().log_(), -1);
 }
 
-Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("torch.linalg.det", out, self, "out");
-  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-
-  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
-  at::native::resize_output(out, out_sizes);
-
-  auto det = at::native::linalg_det(self);
-  out.copy_(det);
-  return out;
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {
+  auto out = at::_linalg_slogdet(A);
+  return std::make_tuple(std::move(std::get<0>(out)), std::move(std::get<1>(out)));
 }
 
-Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self, "logdet");
-  checkFloatingOrComplex(self, "logdet");
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  at::_linalg_slogdet_out(sign, logabsdet, LU, pivots, A);
+  return std::tie(sign, logabsdet);
+}
 
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+// Alias
+std::tuple<Tensor, Tensor> slogdet(const Tensor& A) {
+  return at::linalg_slogdet(A);
+}
 
-  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
-  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
-  if (self.dim() > 2) {
-    auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
-  } else if (det_sign.item<double>() < 0) {
-    logdet_vals.fill_(NAN);
+std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  return at::linalg_slogdet_out(sign, logabsdet, A);
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor logdet(const Tensor& A) {
+  squareCheckInputs(A, "logdet");
+  checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
+  Tensor sign, logabsdet;
+  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
+
+  if (A.is_complex()) {
+    return sign.log() + logabsdet;
+  } else {
+    return at::where(sign == -1., NAN, logabsdet);
   }
-  return logdet_vals;
-}
-
-std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self, "linalg.slogdet");
-  ScalarType t = self.scalar_type();
-  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-              "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
-
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
-  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  // Since abslogdet_val cannot take nan, no special case handling is required.
-  // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
-  return std::make_tuple(det_sign, abslogdet_val);
-}
-
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  checkSameDevice("linalg.slogdet", sign, input, "sign");
-  checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
-  checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
-  ScalarType real_dtype = toRealValueType(input.scalar_type());
-  // logabsdet is always real-valued here
-  checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
-
-  Tensor sign_tmp, logabsdet_tmp;
-  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
-
-  at::native::resize_output(sign, sign_tmp.sizes());
-  sign.copy_(sign_tmp);
-  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
-  logabsdet.copy_(logabsdet_tmp);
-
-  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
-}
-
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  return at::linalg_slogdet(self);
 }
 
 namespace {
@@ -1302,14 +1326,15 @@ static void addmm_impl_cpu_(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
+        using opmath_t = at::opmath_type<scalar_t>;
         at::native::cpublas::gemm(
             transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
-            alpha.to<scalar_t>(),
+            alpha.to<opmath_t>(),
             a.data_ptr<scalar_t>(), lda,
             b.data_ptr<scalar_t>(), ldb,
-            beta.to<scalar_t>(),
+            beta.to<opmath_t>(),
             c.data_ptr<scalar_t>(), ldc);
       });
 
@@ -2649,36 +2674,35 @@ Tensor frobenius_norm(const Tensor& self) {
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
-  //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
-  Tensor result = at::empty({0}, options);
-  return at::native::frobenius_norm_out(self, dim, keepdim, result);
+  TORCH_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  Tensor result;
+  if (dim.size() == 1 || dim.size() == 0) {
+    result = at::norm(self, 2, dim, keepdim);
+  } else {
+    auto dim_ = dim.vec();
+    maybe_wrap_dims(dim_, self.dim());
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    if (self.is_complex()) {
+      result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
+    } else {
+      result = at::sqrt(at::sum((self * self), dim_, keepdim));
+    }
+  }
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == toRealValueType(self.scalar_type()));
+  TORCH_INTERNAL_ASSERT(result.layout() == c10::Layout::Strided);
+  return result;
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  Tensor result_;
-  if (dim.size() == 1 || dim.size() == 0) {
-    result_ = at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()){
-      result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
-  }
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
+  auto result_ = at::native::frobenius_norm(self, dim, keepdim);
+  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
   at::native::resize_output(result, result_.sizes());

@@ -5,10 +5,16 @@ using APoT nonuniform quantization methods.
 
 import math
 
-r"""Converts floating point input into int4 APoT2 number
+r"""Converts floating point input into APoT number
     based on quantization levels
 """
-def float_to_apot(x, levels, indices):
+def float_to_apot(x, levels, indices, alpha):
+    # clip values based on alpha
+    if x < -alpha:
+        return -alpha
+    elif x > alpha:
+        return alpha
+
     levels_lst = list(levels)
     indices_lst = list(indices)
 
@@ -42,7 +48,7 @@ def float_to_reduced_precision(x, levels, indices):
 
     return best_fp
 
-r"""Converts int4 APoT2 input into floating point number
+r"""Converts APoT input into floating point number
 based on quantization levels
 """
 def apot_to_float(x_apot, levels, indices):
