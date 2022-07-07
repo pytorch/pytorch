@@ -299,6 +299,7 @@ class Module:
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
+    _dynamic_attributes : Dict
 
     __slots__ = (
         "training",
@@ -1263,7 +1264,7 @@ class Module:
         """
         pass
 
-    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+    def __getattr__(self, name: str) -> Union[Optional[Tensor], Optional['Module']]:
         if hasattr(self, "_parameters"):
             if name in self._parameters:
                 return self._parameters[name]
@@ -1337,7 +1338,7 @@ class Module:
         elif name in self._modules:
             del self._modules[name]
         elif name == "__class__":
-            super().__delattr__(name, value)
+            super().__delattr__(name)
         else:
             del self._dynamic_attributes[name]
 
