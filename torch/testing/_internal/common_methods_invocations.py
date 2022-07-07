@@ -20182,6 +20182,18 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.isposinf",
+        torch_opinfo_name="isposinf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isneginf",
+        torch_opinfo_name="isneginf",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.isnan",
         torch_opinfo_name="isnan",
         supports_out=True,
@@ -20710,7 +20722,7 @@ python_ref_db = [
             # at "/var/lib/jenkins/workspace/torch/csrc/jit/codegen/cuda/disjoint_set.h":218
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32, torch.int32),
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
