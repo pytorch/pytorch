@@ -730,7 +730,6 @@ def forward(self, a_1):
     add_tensor_2 = torch._ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
     return add_tensor_2
     """)  # noqa: B950
->>>>>>> 6bce79e4dc (fix functionalization regression introduced by ProxyTorchDispatchMode, migrate testing to make_fx)
 
     def test_resize_larger_valid(self):
         def f(x):
