@@ -1216,6 +1216,15 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
+@contextmanager
+def disable_functorch():
+    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
@@ -1229,7 +1238,13 @@ def freeze_rng_state():
     try:
         yield
     finally:
-        with no_dispatch():
+        # Modes are not happy with torch.cuda.set_rng_state
+        # because it clones the state (which could produce a Tensor Subclass)
+        # and then grabs the new tensor's data pointer in generator.set_state.
+        #
+        # In the long run torch.cuda.set_rng_state should probably be
+        # an operator.
+        with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.set_rng_state(rng_state)
