@@ -1,10 +1,12 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
+from itertools import product
+import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -14,6 +16,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+
+if TEST_SCIPY:
+    import scipy.special
 
 
 class TestPrims(TestCase):
@@ -105,6 +110,30 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, ())
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
+
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float64, torch.long)
+    def test_cbrt_prim(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        batches = [(), (1,), (2,), (0, 1), (1, 1), (2, 2)]
+        shapes = [(), (0,), (1,), (5,)]
+
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+
+            # Tested here, as this OP is not currently exposed or tested in ATen
+            for b, s in product(batches, shapes):
+                x = make_arg(b + s)
+                y = prims.cbrt(x)
+
+                x_np = x.cpu().numpy()
+                y_np = scipy.special.cbrt(x_np)
+
+                self.assertEqual(y, y_np, exact_device=False)
+        finally:
+            torch.set_default_dtype(cur_default)
 
     @onlyCUDA
     @skipCUDAIfRocm
