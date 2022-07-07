@@ -28,6 +28,7 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
+from torch.profiler._pattern_matcher import Pattern, NamePattern
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1441,6 +1442,40 @@ class TestExperimentalUtils(TestCase):
             expected_output, """\
 <built-in function _cuda_synchronize>
 aten::copy_""")
+
+    def test_profiler_name_pattern(self):
+        x = torch.ones((4096, 4096))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        matched_events = NamePattern(prof, "aten::mm").matched_events()
+        output = "\n".join([f"{event.name()}" for event in matched_events])
+        self.assertExpectedInline(output, """\
+aten::mm
+aten::mm
+aten::mm
+aten::mm
+aten::mm""")
+
+    def test_profiler_pattern_match_helper(self):
+        x = torch.ones((100, 100))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        event_tree = prof.profiler.kineto_results.experimental_event_tree()
+        pattern = Pattern(prof)
+        self.assertEqual([], pattern.siblings_of(event_tree[0])[0])
+        self.assertEqual(event_tree[1:], pattern.siblings_of(event_tree[0])[1])
+        child_nodes = event_tree[0].children
+        self.assertEqual([], pattern.siblings_of(child_nodes[0])[0])
+        self.assertEqual(child_nodes[1:], pattern.siblings_of(child_nodes[0])[1])
+        self.assertEqual(event_tree[0],
+                         pattern.root_of(event_tree[0].children[0].children[0]))
+        self.assertEqual(None, pattern.next_of(event_tree[-1]))
+        self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
+        self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
 
 
 if __name__ == '__main__':
