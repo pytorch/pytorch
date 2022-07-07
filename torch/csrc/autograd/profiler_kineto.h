@@ -4,11 +4,17 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
-#include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
+namespace profiler {
+namespace impl {
+struct Result;
+namespace kineto {
+struct ActivityTraceWrapper;
+} // namespace kineto
+} // namespace impl
+} // namespace profiler
 namespace autograd {
 namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
@@ -286,7 +292,8 @@ struct TORCH_API ProfilerResult {
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+          trace,
       std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
@@ -307,7 +314,7 @@ struct TORCH_API ProfilerResult {
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-  torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
+  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
   std::vector<experimental_event_t> event_tree_;
 };
 
