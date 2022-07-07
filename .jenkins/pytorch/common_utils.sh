@@ -35,19 +35,6 @@ trap_add() {
 # inherit them unless the trace attribute is set
 declare -f -t trap_add
 
-# NB: define this function before set -x, so that we don't
-# pollute the log with a premature EXITED_USER_LAND ;)
-function cleanup {
-  # Note that if you've exited user land, then CI will conclude that
-  # any failure is the CI's fault.  So we MUST only output this
-  # string
-  retcode=$?
-  set +x
-  if [ $retcode -eq 0 ]; then
-    echo "EXITED_USER_LAND"
-  fi
-}
-
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
@@ -157,8 +144,7 @@ function print_sccache_stats() {
   sccache --show-stats
 
   if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then
-    sccache --show-stats \
-      | python -m tools.stats.sccache_stats_to_json \
+    sccache --show-stats --stats-format json | jq .stats \
       > "sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
   else
     echo "env var OUR_GITHUB_JOB_ID not set, will not write sccache stats to json"
