@@ -2165,13 +2165,9 @@ size_t ONNXAssignOutputShape(
     PyObject* output_obj,
     bool onnx_shape_inference,
     bool is_script) {
-  auto index_check = [&]() {
-    TORCH_INTERNAL_ASSERT(
-        outputs_index <= graph->outputs().size(),
-        "Incorrect number of elements provided as example outputs.");
-  };
-
-  index_check();
+  TORCH_INTERNAL_ASSERT(
+      outputs_index < graph->outputs().size(),
+      "Incorrect number of elements provided as example outputs.");
 
   if (THPVariable_Check(output_obj)) {
     const at::Tensor& var = THPVariable_Unpack(output_obj);
@@ -2206,7 +2202,7 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence with mixed elment types in model outputs. "
+              "Unsupported sequence with mixed element types in model outputs. "
               "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()
@@ -2270,14 +2266,16 @@ size_t ONNXAssignOutputShape(
     // Ideally we'd remove this difference.
     outputs_index += static_cast<size_t>(is_script);
   } else {
-    std::string msg =
-        ("Model output has unsupported type. See "
-         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
-    msg += THPUtils_typename(output_obj);
-    throw std::runtime_error(msg);
+    TORCH_CHECK(
+        false,
+        "Model output has unsupported type. See ",
+        "https://pytorch.org/docs/stable/onnx.html#types. Got type: ",
+        THPUtils_typename(output_obj));
   }
 
-  index_check();
+  TORCH_INTERNAL_ASSERT(
+      outputs_index <= graph->outputs().size(),
+      "Incorrect number of elements provided as example outputs.");
 
   return outputs_index;
 }
