@@ -1162,7 +1162,7 @@ def check_in_bounds_for_storage(
     """
 
     # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
+    if reduce(operator.mul, shape, 1) == 0:
         return
 
     length = a.size() - storage_offset
