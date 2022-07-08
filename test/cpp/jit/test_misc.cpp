@@ -1386,7 +1386,7 @@ TEST(TestSymIntArrayRef, BasicConversion) {
   std::vector<int64_t> tgt_size_v{2, 4, 5};
   std::vector<c10::SymInt> tgt_size({SymInt(X), SymInt(Y), SymInt(Z)});
   auto a = at::randn({1, 4, 1}, at::kCPU);
-  auto b = a.expand(tgt_size);
+  auto b = a.expand_symint(tgt_size);
   auto c = a.expand(tgt_size_v);
   ASSERT_TRUE(torch::allclose(b, c));
 }
@@ -1395,7 +1395,7 @@ TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
   static const size_t LENGTH = 5;
   auto a = at::randn({10}, at::kCPU);
   c10::SymInt si(LENGTH);
-  auto b = a.narrow_copy(0, 0, si);
+  auto b = a.narrow_copy_symint(0, 0, si);
   auto c = a.narrow(0, 0, LENGTH);
   ASSERT_TRUE(torch::allclose(b, c));
 }

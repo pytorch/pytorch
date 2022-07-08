@@ -210,7 +210,7 @@ class TestComposability(TestCase):
                 "sparse_block_shape": (1, 4),
                 "zeros_per_block": 4,
             },
-            {"tensor_fqn": ".0.weight"},
+            {"tensor_fqn": "0.weight"},
         ]
 
         sparsifier.prepare(mod, config=sparse_config)
@@ -289,7 +289,7 @@ class TestComposability(TestCase):
                 "sparse_block_shape": (1, 4),
                 "zeros_per_block": 4,
             },
-            {"tensor_fqn": ".0.weight"},
+            {"tensor_fqn": "0.weight"},
         ]
         sparsifier.prepare(mod, config=sparse_config)
 
