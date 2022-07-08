@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/function_schema.h>
-#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 
 namespace torch {
@@ -14,13 +13,12 @@ namespace utils {
  * behavior (mutation, aliasing, special cases, etc...)
  */
 
-struct TORCH_API SchemaInfo : c10::FunctionSchema {
+struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema)
-      : FunctionSchema(schema), updated_(false) {}
+      : schema_(std::move(schema)) {}
   explicit SchemaInfo(const char* signature)
-      : FunctionSchema(torch::jit::getOperatorForLiteral(signature)->schema()),
-        updated_(false) {}
+      : schema_(torch::jit::parseSchema(signature)) {}
 
   bool is_mutable();
 
@@ -48,6 +46,8 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
   std::vector<std::unordered_set<size_t>> input_alias_map_;
 
   bool updated_;
+
+  c10::FunctionSchema schema_;
 };
 } // namespace utils
 } // namespace torch
