@@ -328,6 +328,11 @@ Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generato
   return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
+// functional variant, only used by the functionalization pass.
+Tensor normal_functional(const Tensor& self, double mean, double std, c10::optional<at::Generator> generator) {
+  return self.clone().normal_(mean, std, generator);
+}
+
 // ==================================================== Random ========================================================
 
 template<typename RNG>
