@@ -648,7 +648,8 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate(
     """\
-if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined() && ${out_arg}.defined()) {
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()
+    && ${out_arg}.defined()) {
   ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
 }
 """
