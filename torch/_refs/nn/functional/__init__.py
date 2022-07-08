@@ -368,7 +368,6 @@ def margin_ranking_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(torch.ops.aten.mse_loss)
 def mse_loss(
     input: TensorLikeType,
     target: TensorLikeType,
