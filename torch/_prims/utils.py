@@ -1226,6 +1226,8 @@ def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
     return strides
 
 
+# This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
+# c10/core/MemoryFormat.h into one function
 def are_strides_like_channels_last(
     shape: Sequence[int], strides: Sequence[int]
 ) -> bool:
@@ -1240,19 +1242,25 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    expected = 1
+    if strides[1] == 0:
+        return False
+
+    min = 0
     for d in dim_order:
-        if shape[d] != 1 and strides[d] != expected:
+        if shape[d] == 0:
             return False
-        expected *= shape[d]
+        if strides[d] < min:
+            return False
+        if d == 0 and min == strides[1]:
+            return False
+        min = strides[d]
+        if strides[d] > 1:
+            min *= shape[d]
     return True
 
 
 def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     if x.layout != torch.strided:
-        return torch.contiguous_format
-
-    if is_contiguous(x):
         return torch.contiguous_format
 
     if are_strides_like_channels_last(x.shape, x.stride()):
