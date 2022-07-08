@@ -265,7 +265,10 @@ def error_on_missing_kernels(
             native_f
         )
 
-    kernel_defn_regex = rf"{class_name}::([\w\d]*)\([^\)]*\)\s*{{"
+    # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
+    # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
+    # here, then we get a nicer error message. If we miss it, you get a linker error.
+    kernel_defn_regex = rf"{class_name}::\s*([\w\d]*)\("
     actual_backend_kernel_name_counts = Counter(
         re.findall(kernel_defn_regex, backend_defns)
     )
