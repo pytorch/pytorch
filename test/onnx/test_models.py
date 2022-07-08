@@ -100,7 +100,7 @@ class TestModels(common_utils.TestCase):
             toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x)
         )
 
-    @common_utils.skipIfNoLapack
+    @skipIfNoLapack
     def test_super_resolution(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0))
         self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
