@@ -1,15 +1,17 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <c10/util/CallOnce.h>
+
 #include <ATen/mps/MPSDevice.h>
 
 namespace at {
 namespace mps {
 
 static std::unique_ptr<MPSDevice> mps_device;
-static std::once_flag mpsdev_init;
+static c10::once_flag mpsdev_init;
 
 MPSDevice* MPSDevice::getInstance() {
-  std::call_once(mpsdev_init, [] {
+  c10::call_once(mpsdev_init, [] {
       mps_device = std::unique_ptr<MPSDevice>(new MPSDevice());
   });
   return mps_device.get();
