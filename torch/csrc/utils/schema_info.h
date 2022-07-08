@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/function_schema.h>
-#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 
 namespace torch {
@@ -10,17 +9,16 @@ namespace utils {
 /**
  * class SchemaInfo
  *
- * Subclass of FunctionSchema that publicizes argument value specific operator
+ * FunctionSchema wrapper that publicizes argument value specific operator
  * behavior (mutation, aliasing, special cases, etc...)
  */
 
-struct TORCH_API SchemaInfo : c10::FunctionSchema {
+struct TORCH_API SchemaInfo {
  public:
-  explicit SchemaInfo(c10::FunctionSchema schema)
-      : FunctionSchema(schema), updated_(false) {}
-  explicit SchemaInfo(const char* signature)
-      : FunctionSchema(torch::jit::getOperatorForLiteral(signature)->schema()),
-        updated_(false) {}
+    explicit SchemaInfo(c10::FunctionSchema schema)
+      : schema_(std::move(schema)), updated_(false) {}
+    explicit SchemaInfo(const char* signature)
+      : schema_(torch::jit::parseSchema(signature)), updated_(false) {}
 
   bool is_mutable();
 
@@ -28,10 +26,9 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
 
   bool is_mutable(c10::string_view name);
 
-  bool areAliasing(
+  bool may_alias(
       const c10::SchemaArgument& lhs,
-      const c10::SchemaArgument& rhs,
-      bool check_additional);
+      const c10::SchemaArgument& rhs);
 
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
@@ -54,6 +51,8 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
 
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
+
+  c10::FunctionSchema schema_;
 
   bool updated_;
 };
