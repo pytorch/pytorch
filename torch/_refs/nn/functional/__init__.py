@@ -270,8 +270,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    mask = refs.logical_or(refs.logical_or(a < -lambd, a > lambd), refs.isnan(a))
-    return refs.where(mask, a, 0)
+    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(torch.ops.aten.softshrink)
@@ -490,6 +489,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
 
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
