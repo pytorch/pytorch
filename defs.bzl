@@ -1,19 +1,20 @@
-def get_sleef_deps():
-    return [("sleef", None, "sleef")] if not (host_info().arch.is_aarch64) else []
+def get_sleef_arch_deps():
+    return [
+        ("x86_64", [
+            "third-party//sleef:sleef",
+        ]),
+    ]
 
-def get_blas_gomp_deps():
-    if host_info().arch.is_x86_64:
-        return [(
-            "IntelComposerXE",
-            None,
-            native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp"),
-        )]
-    if host_info().arch.is_aarch64:
-        return [
-            ("OpenBLAS", None, "OpenBLAS"),
-            ("openmp", None, "omp"),
-        ]
-    fail("Unsupported architecture")
+def get_blas_gomp_arch_deps():
+    return [
+        ("x86_64", [
+            "third-party//IntelComposerXE:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
+        ]),
+        ("aarch64", [
+            "third-party//OpenBLAS:OpenBLAS",
+            "third-party//openmp:omp",
+        ]),
+    ]
 
 default_compiler_flags = [
     "-Wall",
