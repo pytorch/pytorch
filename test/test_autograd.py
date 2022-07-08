@@ -836,6 +836,41 @@ class TestAutograd(TestCase):
         out.backward()
         self.assertEqual(input * 18, input.grad)
 
+    # NB: See test/cpp/api/autograd.cpp for more tests on the interaction between
+    #     retains_grad and hooks in cpp. There's no point testing in python because
+    #     Python hooks use a completely different mechanism.
+    def test_retain_grad_inplace(self):
+        a = torch.tensor([1.], requires_grad=True).clone()
+        a.retain_grad()
+        a.mul_(2)
+        a.sum().backward()
+        self.assertEqual(a.grad, torch.tensor([1.]))
+
+        a = torch.tensor([1.], requires_grad=True).clone()
+        a.retain_grad()
+        # Inplace multiple times is OK, the real test here would be in cpp though
+        # because the index here is always zero, having cpp hooks in addition,
+        # will force us to properly update the index
+        a.mul_(2)
+        a.mul_(2)
+        a.sum().backward()
+        self.assertEqual(a.grad, torch.tensor([1.]))
+
+    def test_retain_grad_inplace_over_view(self):
+        base = torch.tensor([1.], requires_grad=True).clone()
+        view = base[:]
+        view2 = base[:]
+        view.retain_grad()
+        view2.retain_grad()
+        view.mul_(2)
+        (view + view2).sum().backward()
+
+        # The old grad_fn, slice, wouldn't be part of the graph during backward
+        # so if the retains grad were not properly updated to the new grad_fn,
+        # the grad would still be None
+        self.assertEqual(view.grad, view2.grad)
+        self.assertEqual(view.grad, torch.tensor([1.]))
+
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
 
