@@ -1,4 +1,5 @@
 import argparse
+from ast import Assert
 from common import run, topics, get_features
 from collections import defaultdict
 import os
@@ -40,6 +41,8 @@ class Commit:
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
+commit_fields = tuple(f.name for f in dataclasses.fields(Commit))
+
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
     def __init__(self, path: str, commits: List[Commit]):
@@ -61,18 +64,23 @@ class CommitList:
     @staticmethod
     def read_from_disk(path) -> List[Commit]:
         with open(path) as csvfile:
-            reader = csv.reader(csvfile)
-            rows = list(row for row in reader)
-        assert all(len(row) >= 4 for row in rows)
-        return [Commit(*row) for row in rows]
+            reader = csv.DictReader(csvfile)
+            rows = []
+            for row in reader:
+                filtered_rows = {k: row[k] for k in commit_fields}
+                rows.append(Commit(**filtered_rows))
+        return rows
 
-    def write_to_disk(self):
-        path = self.path
-        rows = self.commits
+    def write_result(self):
+        self.write_to_disk_static(self.path, self.commits)
+
+    @staticmethod
+    def write_to_disk_static(path, commit_list):
         os.makedirs(Path(path).parent, exist_ok=True)
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
-            for commit in rows:
+            writer.writerow(commit_fields)
+            for commit in commit_list:
                 writer.writerow(dataclasses.astuple(commit))
 
     def keywordInFile(file, keywords):
@@ -234,12 +242,12 @@ class CommitList:
 
 def create_new(path, base_version, new_version):
     commits = CommitList.create_new(path, base_version, new_version)
-    commits.write_to_disk()
+    commits.write_result()
 
 def update_existing(path, new_version):
     commits = CommitList.from_existing(path)
     commits.update_to(new_version)
-    commits.write_to_disk()
+    commits.write_result()
 
 def rerun_with_new_filters(path):
     current_commits = CommitList.from_existing(path)
@@ -247,7 +255,7 @@ def rerun_with_new_filters(path):
         c = current_commits.commits[i]
         if 'Uncategorized' in str(c):
             current_commits.commits[i] = CommitList.categorize(c.commit_hash, c.title)
-    current_commits.write_to_disk()
+    current_commits.write_result()
 
 def to_markdown(commit_list, category):
     def cleanup_title(commit):
@@ -310,7 +318,7 @@ def main():
     group.add_argument('--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
     group.add_argument('--export_markdown', action='store_true')
-
+    group.add_argument('--export_csv_categories', action='store_true')
     parser.add_argument('--path', default='results/commitlist.csv')
     args = parser.parse_args()
 
@@ -328,6 +336,16 @@ def main():
         stats = commits.stat()
         pprint.pprint(stats)
         return
+
+    if args.export_csv_categories:
+        commits = CommitList.from_existing(args.path)
+        categories = list(commits.stat().keys())
+        for category in categories:
+            print(f"Exporting {category}...")
+            filename = f'results/export/result_{category}.csv'
+            CommitList.write_to_disk_static(filename, commits.filter(category=category))
+        return
+
     if args.export_markdown:
         commits = CommitList.from_existing(args.path)
         categories = list(commits.stat().keys())
@@ -340,7 +358,7 @@ def main():
             with open(filename, 'w') as f:
                 f.writelines(lines)
         return
-    assert False
+    raise AssertionError()
 
 if __name__ == '__main__':
     main()
