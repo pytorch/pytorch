@@ -1,11 +1,12 @@
 # Owner(s): ["module: onnx"]
 
 import numpy as np
-from pytorch_test_common import run_tests, skipIfUnsupportedMinOpsetVersion, TestCase
+import pytorch_test_common
 
 import torch
 from torch.onnx import _constants
 from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
+from torch.testing._internal import common_utils
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -19,9 +20,9 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(TestCase):
+class TestONNXShapeInference(common_utils.TestCase):
     def __init__(self, *args, **kwargs):
-        TestCase.__init__(self, *args, **kwargs)
+        super().__init__(self, *args, **kwargs)
         self.opset_version = _constants.onnx_main_opset
         _set_onnx_shape_inference(True)
         _set_opset_version(self.opset_version)
@@ -138,7 +139,7 @@ class TestONNXShapeInference(TestCase):
         output = g.op("Reshape", input, constant)
         self.run_test(g, output.node(), expect_tensor(None, shape=(None, None, 16)))
 
-    @skipIfUnsupportedMinOpsetVersion(14)
+    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         g = self.create_empty_graph()
         input = g.addInput()
@@ -271,4 +272,4 @@ class TestONNXShapeInference(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

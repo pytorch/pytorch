@@ -5,17 +5,12 @@ import unittest
 from collections import OrderedDict
 from typing import List, Mapping, Tuple
 
+import onnx_test_common
 import parameterized
 import PIL
-import onnx_test_common
 import torchvision
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from test_models import TestModels
-from pytorch_test_common import (
-    TestCase,
-    run_tests,
-    skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
-)
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -29,6 +24,7 @@ from torchvision.models.detection import (
 
 import torch
 from torch import nn
+from torch.testing._internal import common_utils
 
 
 def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
@@ -50,7 +46,7 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
 
 TestModels = type(
     "TestModels",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(
         TestModels.__dict__,
         is_script_test_enabled=False,
@@ -63,7 +59,7 @@ TestModels = type(
 # model tests for scripting with new JIT APIs and shape inference
 TestModels_new_jit_API = type(
     "TestModels_new_jit_API",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(
         TestModels.__dict__,
         exportTest=exportTest,
@@ -422,4 +418,4 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

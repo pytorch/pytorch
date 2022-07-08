@@ -13,29 +13,21 @@ from pytorch_test_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
-    TestCase,
     flatten,
-    run_tests,
-    skipIfCaffe2,
-    skipIfNoLapack,
 )
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx
-import torch.testing._internal.common_utils as common
 from torch.autograd import Function, Variable
 from torch.nn import Module, functional
-from torch.onnx import (
-    register_custom_op_symbolic,
-    unregister_custom_op_symbolic,
-)
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,
     parse_args,
 )
+from torch.testing._internal import common_utils
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -77,7 +69,7 @@ class FuncModule(Module):
         return self.f(*itertools.chain(args, self.params))
 
 
-class TestOperators(TestCase):
+class TestOperators(common_utils.TestCase):
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
@@ -407,7 +399,7 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -687,7 +679,7 @@ class TestOperators(TestCase):
             keep_initializers_as_inputs=True,
         )
 
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -937,7 +929,7 @@ class TestOperators(TestCase):
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), input, opset_version=11)
 
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -1019,7 +1011,7 @@ class TestOperators(TestCase):
         x = torch.ones((2, 2), requires_grad=True)
         self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
-    @skipIfNoLapack
+    @common_utils.skipIfNoLapack
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device("cpu"))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
@@ -1159,7 +1151,9 @@ class TestOperators(TestCase):
             )
             return output
 
-        register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
+        torch.onnx.register_custom_op_symbolic(
+            "::embedding", embedding, _onnx_opset_version
+        )
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1176,10 +1170,10 @@ class TestOperators(TestCase):
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version)
 
-        unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
+        torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
-    @skipIfCaffe2
+    @common_utils.skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 
@@ -1208,7 +1202,9 @@ class TestOperators(TestCase):
                 output.setType(output_type)
             return output
 
-        register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
+        torch.onnx.register_custom_op_symbolic(
+            "::embedding", embedding, _onnx_opset_version
+        )
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1233,7 +1229,7 @@ class TestOperators(TestCase):
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
 
-        unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
+        torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # Without shapeValueMap, the onnx graph looks like:
     # graph(%0 : Float(*, 1, 128, 1, strides=[128, 128, 1, 1], requires_grad=0, device=cpu)):
@@ -1277,13 +1273,13 @@ class TestOperators(TestCase):
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"
-    _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
-    if no_onnx_dep_flag in common.UNITTEST_ARGS:
-        common.UNITTEST_ARGS.remove(no_onnx_dep_flag)
+    _onnx_dep = no_onnx_dep_flag not in common_utils.UNITTEST_ARGS
+    if no_onnx_dep_flag in common_utils.UNITTEST_ARGS:
+        common_utils.UNITTEST_ARGS.remove(no_onnx_dep_flag)
     onnx_test_flag = "--produce-onnx-test-data"
-    _onnx_test = onnx_test_flag in common.UNITTEST_ARGS
-    if onnx_test_flag in common.UNITTEST_ARGS:
-        common.UNITTEST_ARGS.remove(onnx_test_flag)
+    _onnx_test = onnx_test_flag in common_utils.UNITTEST_ARGS
+    if onnx_test_flag in common_utils.UNITTEST_ARGS:
+        common_utils.UNITTEST_ARGS.remove(onnx_test_flag)
     if _onnx_test:
         _onnx_dep = True
         import onnx_test_common
@@ -1292,4 +1288,4 @@ if __name__ == "__main__":
             os.path.join(onnx_test_common.pytorch_operator_dir, "test_operator_*")
         ):
             shutil.rmtree(d)
-    run_tests()
+    common_utils.run_tests()
