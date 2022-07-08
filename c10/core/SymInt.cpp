@@ -95,13 +95,11 @@ bool SymInt::operator<(int64_t sci) const {
 }
 
 bool SymInt::operator==(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic eq isn't supported yet");
-  return data_ == sci;
+  return *this == c10::SymInt(sci);
 }
 
 bool SymInt::operator!=(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic neq isn't supported yet");
-  return data_ != sci;
+  return !(*this == sci);
 }
 
 SymInt SymInt::operator*(int64_t sci) const {
