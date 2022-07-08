@@ -195,7 +195,7 @@ def wrap_key(f, inps):
         assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                with no_dispatch():
+                with no_dispatch(), torch.utils._python_dispatch.enable_torch_dispatch_mode(torch.utils._python_dispatch.BaseTorchDispatchMode(), ignore_preexisting=True):
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
@@ -220,6 +220,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        if func_overload is torch.ops.prim.device.default:
+            import traceback
+            traceback.print_stack()
         func = func_overload.overloadpacket
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)

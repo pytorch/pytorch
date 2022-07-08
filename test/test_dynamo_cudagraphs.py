@@ -190,17 +190,23 @@ class ApplyCudaGraphs(torch.fx.Interpreter):
     # this is post AOTAutograd which would have squashed all the modules.
     # Module assumed to be called only once.
     def call_module(self, target, args, kwargs):
-        with enable_torch_dispatch_mode(self.proxy_mode.inner, replace=self.proxy_mode):
+        if hasattr(self, 'proxy_mode'):
+            proxy_mode = self.proxy_mode
+        else:
+            from torch._C import _get_torch_dispatch_mode
+            proxy_mode = _get_torch_dispatch_mode()
+            assert isinstance(proxy_mode, ProxyTorchDispatchMode)
+        with enable_torch_dispatch_mode(proxy_mode.inner, replace=proxy_mode):
             assert not kwargs
             # Don't trace the module, but do run the module to get the correct
             # out result
             out = super().call_module(target, tree_map(unwrap_elem, args), kwargs)
             submod = self.module.get_submodule(target)
             mutated_inputs = FindInputMutations(submod)(*map(unwrap_elem, args))
-            self.new_module.add_submodule(target, CudaGraphModule(submod, mutated_inputs))
+            proxy_mode.tracer.root.add_module(target, CudaGraphModule(submod, mutated_inputs))
             return wrap_output(
                 out,
-                self.proxy_mode.tracer.create_proxy(
+                proxy_mode.tracer.create_proxy(
                     "call_module",
                     target,
                     tree_map(unwrap_proxy, args),
@@ -222,17 +228,25 @@ def trace_interp(interp, inputs):
     ]
     proxy_mode = ProxyTorchDispatchMode(tracer)
     interp.proxy_mode = proxy_mode
-    interp.new_module = new_module
     with fake_mode, proxy_mode:
         outs = interp.run(*args)
     new_graph.output(tree_map(unwrap_proxy_node, outs))
     new_module.recompile()
     return new_module
 
+def fake_signature(fn, nargs):
+    """FX gets confused by varargs, de-confuse it"""
+    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
+
+def trace_interp2(interp, inputs):
+    # this looks cool but it mutates the original module
+    return torch.fx.experimental.proxy_tensor.make_fx(fake_signature(interp.run, len(inputs)), use_fake=True)(*inputs)
+
 
 def cudagraphs(model, inputs):
     model = partition_cudagraphs(model, inputs)
-    model = trace_interp(ApplyCudaGraphs(model), inputs)
+    model = trace_interp2(ApplyCudaGraphs(model), inputs)
     return model
 
 
