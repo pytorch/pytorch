@@ -109,31 +109,6 @@ c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
   return key_set;
 }
 
-// assume contiguous
-NestedTensorImpl::NestedTensorImpl(
-    at::Tensor buffer,
-    at::Tensor nested_size_tensor)
-    : TensorImpl(
-          generate_nested_key_set(buffer),
-          buffer.dtype(),
-          buffer.device()),
-      buffer_(std::move(buffer)),
-      nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
-      offsets_(construct_offsets(nested_size_tensor_)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_))
-{
-  TORCH_WARN_ONCE(
-      "The PyTorch API of nested tensors is in prototype stage and will change "
-      "in the near future.");
-  TORCH_INTERNAL_ASSERT(buffer_.is_cuda() || buffer_.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer_);
-  TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
-  int64_t size_dim = nested_size_tensor_.dim();
-  TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
-  refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
-}
-
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor,
@@ -164,6 +139,18 @@ NestedTensorImpl::NestedTensorImpl(
   refresh_dim();
   set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
+
+// assume contiguous, `nested_stride_tensor` and `offsets`
+// can be infered from `nested_size_tensor`
+NestedTensorImpl::NestedTensorImpl(
+    at::Tensor buffer,
+    at::Tensor nested_size_tensor)
+    : NestedTensorImpl(
+          buffer,
+          nested_size_tensor,
+          construct_nested_stride_tensor(nested_size_tensor),
+          construct_offsets(nested_size_tensor))
+{}
 
 void NestedTensorImpl::refresh_dim() {
   const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;

@@ -11,12 +11,14 @@ namespace at {
 namespace native {
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
-  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
   explicit NestedTensorImpl(
       at::Tensor buffer,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
       const std::vector<int64_t>& offsets);
+  // assume contiguous, `nested_stride_tensor` and `offsets`
+  // can be infered from `nested_size_tensor`
+  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
