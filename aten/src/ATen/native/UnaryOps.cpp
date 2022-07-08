@@ -80,6 +80,7 @@ CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i0)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i1)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k0)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k0)
 CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k1)
 CREATE_UNARY_FLOAT_META_FUNC(special_spherical_bessel_j0)
 
@@ -210,6 +211,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i0_out, special_modified_be
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i1_out, special_modified_bessel_i1_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k0_out, special_modified_bessel_k0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k1_out, special_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k0_out, special_scaled_modified_bessel_k0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k1_out, special_scaled_modified_bessel_k1_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_spherical_bessel_j0_out, special_spherical_bessel_j0_stub)
 
@@ -479,10 +481,6 @@ Tensor& conj_physical_(Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
-  // currently a tensor should never have both conj and neg bit set
-  // the only way to get an imag bit is complex_tensor.conj().imag but there's
-  // no intended designed mechanism to enter the complex world with this imag bit
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_conj());
   // negation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -491,10 +489,6 @@ Tensor resolve_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  // currently a tensor should never have both conj and neg bit set
-  // the only way to get an imag bit is complex_tensor.conj().imag but there's
-  // no intended designed mechanism to enter the complex world with this imag bit
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_neg());
   // conjugation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -894,6 +888,7 @@ DEFINE_DISPATCH(special_modified_bessel_i0_stub); // NOLINT(cppcoreguidelines-av
 DEFINE_DISPATCH(special_modified_bessel_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_spherical_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 

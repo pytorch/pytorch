@@ -32,6 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -627,7 +628,6 @@ class FullyShardedDataParallel(nn.Module):
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
 
     """
-
     def __init__(
         self,
         module: nn.Module,
@@ -2915,7 +2915,9 @@ class FullyShardedDataParallel(nn.Module):
                     param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
                 if self.gradient_predivide_factor > 1 and self.communication_hook is None:
-                    # Average grad by world_size for consistency with PyTorch DDP.
+                    # Average grad by pre-division factor. Together pre- and post-division factors
+                    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+                    # This is a two-step process to avoid potential underflow and overflow.
                     param.grad.div_(self.gradient_predivide_factor)
 
                 grad = param.grad.data
@@ -2942,7 +2944,9 @@ class FullyShardedDataParallel(nn.Module):
                         output, input_flattened, group=self.process_group
                     )
                     if self.gradient_postdivide_factor > 1:
-                        # Average grad by world_size for consistency with PyTorch DDP.
+                        # Average grad by pre-division factor. Together pre- and post-division factors
+                        # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+                        # This is a two-step process to avoid potential underflow and overflow.
                         output.div_(self.gradient_postdivide_factor)
 
                     # Note that we need to cast grads back to the full precision if
@@ -4290,4 +4294,9 @@ def clean_tensor_name(tensor_name: str) -> str:
     # call `replace()` twice separately
     tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
     tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    # TODO: Explicitly replacing checkpoint_wrapper prefix is not ideal,
+    # as it increases coupling between CheckpointWrapper and FSDP. This is also not
+    # scalable for additional wrapped modules, we should come up with a general solution
+    # for this issue.
+    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX + ".", "")
     return tensor_name
