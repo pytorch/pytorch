@@ -304,6 +304,24 @@ def _check_reduction_value(reduction: str):
         raise ValueError("{} is not a valid value for reduction".format(reduction))
 
 
+# This helper function maps depreciated arguments, "size_average" and "reduce"
+# to their corresponding "reduction" string argument
+def _get_string_reduction_arg(
+    *, size_average: Optional[bool], reduce: Optional[bool]
+) -> str:
+    if size_average is None:
+        size_average = True
+    if reduce is None:
+        reduce = True
+    if size_average and reduce:
+        ret = "mean"
+    elif reduce:
+        ret = "sum"
+    else:
+        ret = "none"
+    return ret
+
+
 @register_decomposition(torch.ops.aten.margin_ranking_loss)
 def margin_ranking_loss(
     input1: TensorLikeType,
@@ -348,22 +366,6 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
-
-
-def _get_string_reduction_arg(
-    size_average: Optional[bool], reduce: Optional[bool]
-) -> str:
-    if size_average is None:
-        size_average = True
-    if reduce is None:
-        reduce = True
-    if size_average and reduce:
-        ret = "mean"
-    elif reduce:
-        ret = "sum"
-    else:
-        ret = "none"
-    return ret
 
 
 def _nll_loss_nd(
@@ -437,6 +439,7 @@ def _nll_loss_nd(
         return torch.sum(loss) / torch.sum(current_weight)
 
 
+@register_decomposition(torch.ops.aten.nll_loss)
 def nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -449,7 +452,7 @@ def nll_loss(
     if size_average is not None or reduce is not None:
         # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
-        reduction = _get_string_reduction_arg(size_average, reduce)
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
     if input.ndim == 3 or input.ndim > 4:
         # input ndim is == 3 or > 4
