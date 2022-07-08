@@ -919,8 +919,6 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
                reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
-    if not pr.is_closed():
-        return post_comment(f"Can't revert open PR #{pr.pr_num}")
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
