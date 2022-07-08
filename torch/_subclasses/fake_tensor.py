@@ -307,8 +307,8 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
 
-    def new_empty(self, shape):
-        return torch.empty(shape)
+    def new_empty(self, shape, dtype=None):
+        return torch.empty(shape, dtype=dtype)
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -443,7 +443,7 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
-        with enable_torch_dispatch_mode(self):
+        with enable_torch_dispatch_mode(self), torch.overrides.enable_reentrant_dispatch():
             if func in meta_table:
                 r = meta_table[func](*args, **kwargs)
                 return r
