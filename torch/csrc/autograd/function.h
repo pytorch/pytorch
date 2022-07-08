@@ -372,6 +372,17 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return next_edges_[output_edge_index].is_valid();
   }
 
+  /// Returns true if any of the output edges in any of the ranges are active.
+  bool should_compute_output(std::initializer_list<IndexRange> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
+      for (const auto i : c10::irange(range.first, range.second)) {
+        if (should_compute_output(i))
+          return true;
+      }
+      return false;
+    });
+  }
+
   /// Same as the above `should_compute_output` function but will also
   /// check whether this edge is needed within the current graph task.
   bool task_should_compute_output(size_t output_edge_index) const {
