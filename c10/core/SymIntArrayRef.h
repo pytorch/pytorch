@@ -63,6 +63,10 @@ class SymIntArrayRef final {
       size_t length)
       : wrapped_symint_array_ref(data, length) {}
 
+  template <typename U>
+  /* implicit */ SymIntArrayRef(const SmallVectorTemplateCommon<c10::SymInt, U>& Vec):
+    wrapped_symint_array_ref(Vec) {}
+
   /// Construct an SymIntArrayRef from a range.
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef(
       const c10::SymInt* begin,
