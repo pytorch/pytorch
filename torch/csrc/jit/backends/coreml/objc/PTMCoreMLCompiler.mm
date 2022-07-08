@@ -22,32 +22,70 @@ static NSString* gModelCacheDirectory = @"";
   return gModelCacheDirectory;
 }
 
-+ (nullable MLModel *)compileMLModel:(const std::string&)modelSpecs
-                          identifier:(const std::string&)identifier
-                             backend:(const std::string&)backend
-                   allowLowPrecision:(BOOL)allowLowPrecision {
-  NSString* modelName = [NSString stringWithCString:identifier.c_str() encoding:NSUTF8StringEncoding];
++ (NSURL*)compileModel:(const std::string&)modelSpecs modelID:(const std::string&)modelID {
+  NSString* modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
   NSURL* modelPath = [PTMCoreMLCompiler _cacheFilePath:modelName];
   NSURL* compiledModelPath = [PTMCoreMLCompiler _compiledModelFilePath:modelPath.path];
 
-  BOOL modelSaved = [PTMCoreMLCompiler _saveModel:modelSpecs path:modelPath];
-  if (!modelSaved) {
-    // If the model cannot be persisted on disk then compilation cannot proceed.
-    NSLog(@"Failed to save specs for MLModel!");
-    return nil;
-  }
+  BOOL modelCached = [[NSFileManager defaultManager] fileExistsAtPath:modelPath.path];
+  BOOL compiledModelCached = [[NSFileManager defaultManager] fileExistsAtPath:compiledModelPath.path];
+  BOOL shouldRecompile = [self _shouldRecompileModel:compiledModelPath];
 
-  NSError *error;
-  [PTMCoreMLCompiler _recompileIfNeeded:modelPath compiledModelPath:compiledModelPath error:&error];
-
-  if (error) {
-    NSLog(@"Failed to compile MLModel!");
+  if (modelCached != compiledModelCached) {
+    modelCached = NO;
+    compiledModelCached = NO;
     [PTMCoreMLCompiler _cleanupModel:modelPath compiledModel:compiledModelPath];
-    return nil;
   }
 
-  MLModel *compiledModel;
+  if (!modelCached) {
+    // Note that the serialized protobuf binary contains bytes not text.
+    // https://developers.google.com/protocol-buffers/docs/pythontutorial#parsing-and-serialization
+    NSData* data = [NSData dataWithBytes:modelSpecs.c_str() length:modelSpecs.length()];
+    if (![data writeToFile:modelPath.path atomically:YES]) {
+        // If the model cannot be persisted on disk then compilation cannot proceed.
+        NSLog(@"Failed to save specs for MLModel!");
+        [PTMCoreMLCompiler _cleanupModel:modelPath compiledModel:compiledModelPath];
+        return nil;
+    }
+  }
 
+  if (shouldRecompile || !compiledModelCached) {
+    NSError *error;
+    NSURL *temporaryURL = [MLModel compileModelAtURL:modelPath error:&error];
+    if (!error) {
+      [PTMCoreMLCompiler _moveFileToCache:temporaryURL cacheURL:compiledModelPath error:&error];
+    }
+    if (error) {
+      NSLog(@"Failed to compile MLModel!");
+      [PTMCoreMLCompiler _cleanupModel:modelPath compiledModel:compiledModelPath];
+      return nil;
+    }
+  }
+
+  return compiledModelPath;
+}
+
++ (nullable MLModel*)loadCPUModelAtURL:(NSURL*)modelURL {
+  NSError *error;
+  MLModel *model;
+  if (@available(iOS 12.0, macOS 10.14, *)) {
+    MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
+    config.computeUnits = MLComputeUnitsCPUOnly;
+    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
+  } else {
+    model = [MLModel modelWithContentsOfURL:modelURL error:&error];
+  }
+  if (error) {
+    NSLog(@"Failed to initialize MLModel!");
+    [PTMCoreMLCompiler _cleanupModel:nil compiledModel:modelURL];
+    return nil;
+  }
+  return model;
+}
+
++ (nullable MLModel*)loadModelAtURL:(NSURL*)modelURL backend:(const std::string&)backend allowLowPrecision:(BOOL)allowLowPrecision {
+  NSError *error;
+  MLModel *model;
   if (@available(iOS 12.0, macOS 10.14, *)) {
     MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
     MLComputeUnits computeUnits = MLComputeUnitsCPUOnly;
@@ -58,52 +96,27 @@ static NSString* gModelCacheDirectory = @"";
     }
     config.computeUnits = computeUnits;
     config.allowLowPrecisionAccumulationOnGPU = allowLowPrecision;
-    compiledModel = [MLModel modelWithContentsOfURL:compiledModelPath configuration:config error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
   } else {
-    compiledModel = [MLModel modelWithContentsOfURL:compiledModelPath error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL error:&error];
   }
-
   if (error) {
     NSLog(@"Failed to initialize MLModel!");
-    [PTMCoreMLCompiler _cleanupModel:modelPath compiledModel:compiledModelPath];
+    [PTMCoreMLCompiler _cleanupModel:nil compiledModel:modelURL];
     return nil;
   }
-
-  return compiledModel;
+  return model;
 }
 
 + (void)_cleanupModel:(NSURL*)modelPath compiledModel:(NSURL*)compiledModelPath {
   NSFileManager* fileManager = [NSFileManager defaultManager];
   NSError* error = nil;
-  if ([fileManager fileExistsAtPath:modelPath.path]) {
+  if (modelPath && [fileManager fileExistsAtPath:modelPath.path]) {
     [fileManager removeItemAtPath:modelPath.path error:&error];
   }
-  if ([fileManager fileExistsAtPath:compiledModelPath.path]) {
+  if (compiledModelPath && [fileManager fileExistsAtPath:compiledModelPath.path]) {
     [fileManager removeItemAtPath:compiledModelPath.path error:&error];
   }
-}
-
-+ (BOOL)_saveModel:(const std::string&)spec path:(NSURL*)modelPath {
-  if ([[NSFileManager defaultManager] fileExistsAtPath:modelPath.path]) {
-    return YES;
-  }
-  // Note that the serialized protobuf binary contains bytes not text.
-  // https://developers.google.com/protocol-buffers/docs/pythontutorial#parsing-and-serialization
-  NSData* data = [NSData dataWithBytes:spec.c_str() length:spec.length()];
-  return [data writeToFile:modelPath.path atomically:YES];
-}
-
-+ (void)_recompileIfNeeded:(NSURL*)modelPath compiledModelPath:(NSURL*)compiledModelPath error:(NSError **)error {
-  if (![PTMCoreMLCompiler _shouldRecompileModel:compiledModelPath]) {
-    return;
-  }
-
-  NSURL *temporaryURL = [MLModel compileModelAtURL:modelPath error:error];
-  if (*error) {
-    return;
-  }
-
-  [PTMCoreMLCompiler _moveFileToCache:temporaryURL cacheURL:compiledModelPath error:error];
 }
 
 + (void)_moveFileToCache:(NSURL *)fileURL cacheURL:(NSURL *)cacheURL error:(NSError **)error {
@@ -119,20 +132,16 @@ static NSString* gModelCacheDirectory = @"";
 
 + (BOOL)_shouldRecompileModel:(NSURL *)compiledModelPath {
 #if TARGET_OS_IPHONE
-  NSString *currentOSVer = [UIDevice currentDevice].systemVersion;
   NSString *versionPath = [PTMCoreMLCompiler _cacheFilePath:@"version"].path;
-  BOOL cachedOSExists = [[NSFileManager defaultManager] fileExistsAtPath:versionPath];
-  if (!cachedOSExists) {
-    [currentOSVer writeToFile:versionPath atomically:YES];
-    return YES;
+  NSString *cachedOSVer = nil;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:versionPath]) {
+    NSError *error = nil;
+    cachedOSVer = [NSString stringWithContentsOfFile:versionPath encoding:NSUTF8StringEncoding error:&error];
   }
   // Compile the model when OS version changes
-  NSError *error = nil;
-  NSString *cachedOSVer = [NSString stringWithContentsOfFile:versionPath encoding:NSUTF8StringEncoding error:&error];
-  BOOL changedOS = ![cachedOSVer isEqualToString:currentOSVer];
-  BOOL compiledModelExists = !changedOS && [[NSFileManager defaultManager] fileExistsAtPath:compiledModelPath.path];
+  NSString *currentOSVer = [UIDevice currentDevice].systemVersion;
   [currentOSVer writeToFile:versionPath atomically:YES];
-  return !compiledModelExists;
+  return ![currentOSVer isEqualToString:cachedOSVer];
 #else
   return YES;
 #endif
