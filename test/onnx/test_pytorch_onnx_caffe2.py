@@ -50,6 +50,7 @@ from torch.autograd import Variable, function
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import ExportTypes
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 skip = unittest.skip
 
@@ -696,7 +697,7 @@ class TestCaffe2Backend_opset9(common_utils.TestCase):
         )
 
     # @skip("takes long to run, LAPACK needed for gpu")
-    @common_utils.skipIfNoLapack
+    @skipIfNoLapack
     @unittest.skip("This model takes too much memory")
     def test_srresnet(self):
         super_resolution_net = SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)
@@ -712,7 +713,7 @@ class TestCaffe2Backend_opset9(common_utils.TestCase):
         )
 
     @skipIfTravis
-    @common_utils.skipIfNoLapack
+    @skipIfNoLapack
     @skipIfNoCuda
     def test_super_resolution(self):
         super_resolution_net = SuperResolutionNet(upscale_factor=3)

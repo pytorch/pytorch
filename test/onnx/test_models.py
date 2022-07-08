@@ -2,7 +2,6 @@
 
 import unittest
 
-import pytorch_test_common
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -10,6 +9,7 @@ from model_defs.op_test import ConcatNet, DummyNet, FakeQuantNet, PermuteNet, PR
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
 from torchvision.models.densenet import densenet121
@@ -29,6 +29,7 @@ from torch import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 if torch.cuda.is_available():
 
@@ -71,7 +72,7 @@ class TestModels(common_utils.TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
-    @pytorch_test_common.skipScriptTest()
+    @skipScriptTest()
     def test_concat(self):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
         input_b = Variable(torch.randn(BATCH_SIZE, 3))
@@ -82,12 +83,12 @@ class TestModels(common_utils.TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
         self.exportTest(PermuteNet(), x)
 
-    @pytorch_test_common.skipScriptTest()
+    @skipScriptTest()
     def test_embedding_sequential_1(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork1(), x)
 
-    @pytorch_test_common.skipScriptTest()
+    @skipScriptTest()
     def test_embedding_sequential_2(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork2(), x)
@@ -144,7 +145,7 @@ class TestModels(common_utils.TestCase):
     @unittest.skip(
         "This test has been flaky on trunk and PRs. See https://github.com/pytorch/pytorch/issues/79540"
     )
-    @pytorch_test_common.skipScriptTest(min_opset_version=15)  # None type in outputs
+    @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
@@ -167,26 +168,26 @@ class TestModels(common_utils.TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
 
-    @pytorch_test_common.skipScriptTest()
+    @skipScriptTest()
     def test_dcgan_netD(self):
         netD = _netD(1)
         netD.apply(weights_init)
         input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
-    @pytorch_test_common.skipScriptTest()
+    @skipScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
         netG.apply(weights_init)
         input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
 
-    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quant(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(FakeQuantNet()), toC(x))
 
-    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_resnet_pertensor(self):
         # Quantize ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -209,7 +210,7 @@ class TestModels(common_utils.TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(13)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_resnet_per_channel(self):
         # Quantize ResNet50 model
         x = torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
@@ -231,7 +232,7 @@ class TestModels(common_utils.TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @pytorch_test_common.skipScriptTest(min_opset_version=15)  # None type in outputs
+    @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
@@ -244,12 +245,12 @@ class TestModels(common_utils.TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @pytorch_test_common.skipScriptTest()  # prim_data
+    @skipScriptTest()  # prim_data
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
@@ -259,7 +260,7 @@ class TestModels(common_utils.TestCase):
             atol=1e-5,
         )
 
-    @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(

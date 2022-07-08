@@ -28,6 +28,7 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -399,7 +400,7 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
-    @common_utils.skipIfCaffe2
+    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -679,7 +680,7 @@ class TestOperators(common_utils.TestCase):
             keep_initializers_as_inputs=True,
         )
 
-    @common_utils.skipIfCaffe2
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -929,7 +930,7 @@ class TestOperators(common_utils.TestCase):
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), input, opset_version=11)
 
-    @common_utils.skipIfCaffe2
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -1011,7 +1012,7 @@ class TestOperators(common_utils.TestCase):
         x = torch.ones((2, 2), requires_grad=True)
         self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
-    @common_utils.skipIfNoLapack
+    @skipIfNoLapack
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device("cpu"))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
@@ -1173,7 +1174,7 @@ class TestOperators(common_utils.TestCase):
         torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
-    @common_utils.skipIfCaffe2
+    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 
