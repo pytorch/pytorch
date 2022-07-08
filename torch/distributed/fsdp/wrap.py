@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -18,6 +19,17 @@ from typing import (
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
+
+
+__all__ = [
+    "always_wrap_policy",
+    "lambda_auto_wrap_policy",
+    "transformer_auto_wrap_policy",
+    "size_based_auto_wrap_policy",
+    "enable_wrap",
+    "wrap",
+    "ParamExecOrderWrapPolicy",
+]
 
 
 def always_wrap_policy(*args, **kwargs) -> bool:
@@ -274,6 +286,36 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             **wrap_overrides,
         )
     return module
+
+
+@dataclass
+class ParamExecOrderWrapPolicy:
+    """
+    This is the class used for the wrapping policy that wraps parameters and performs
+    the communication scheduling based on the parameter execution order in the forward pass
+    (also called non-recursive wrapping policy).
+
+    The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
+    and the wrap transfers these parameters into one FlattenParameter. In both forward and the backward passes,
+    the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
+    These parameters will then be reshaded once they have been used.
+
+    TODO (linjianma): For now, the parameters contained in each wrap of ParamExecOrderWrapPolicy
+    are the parameters in each wrap of the init_policy (a recursive wrapping policy).
+    Later we will wrap parameters based on bucket size.
+
+    Args:
+        init_policy (nn.Module):
+            The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
+            forward and backward iteration, init_policy is used. Parameter execution order is also recorded
+            in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
+
+            The default always_wrap_policy might not be the best choice for every model. For example, for
+            transformer based models, setting transformer_auto_wrap_policy as the init_policy will guarantee
+            wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
+            within each transformer layer.
+    """
+    init_policy: Callable = always_wrap_policy
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:

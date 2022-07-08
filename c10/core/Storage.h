@@ -53,6 +53,13 @@ struct C10_API Storage {
         true));
   }
 
+  // Mimic create_legacy, but without requiring a newly-created StorageImpl.
+  void reset_legacy() {
+    TORCH_CHECK(resizable() && allocator());
+    set_nbytes(0);
+    set_data_ptr_noswap(allocator()->allocate(0));
+  }
+
   template <typename T>
   T* data() const {
     return storage_impl_->data<T>();

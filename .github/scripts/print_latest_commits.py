@@ -1,9 +1,13 @@
+import sys
 from typing import Any, Dict, List, NamedTuple, Tuple
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
 import os
 import re
+
+def eprint(msg: str) -> None:
+    print(msg, file=sys.stderr)
 
 class WorkflowCheck(NamedTuple):
     workflowName: str
@@ -68,7 +72,6 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         "trunk": False,
         "lint": False,
         "linux-binary": False,
-        "android-tests": False,
         "windows-binary": False,
     }
 
@@ -77,12 +80,8 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         conclusion = check['conclusion']
         for required_check in regex:
             if re.match(required_check, workflowName, flags=re.IGNORECASE):
-                if conclusion != 'success':
-                    if check['name'] == "pull / win-vs2019-cuda11.3-py3" and conclusion == 'skipped':
-                        pass
-                        # there are trunk checks that run the same tests, so this pull workflow check can be skipped
-                    else:
-                        return (False, workflowName + " checks were not successful")
+                if conclusion not in ["success", "skipped"]:
+                    return (False, workflowName + " checks were not successful")
                 else:
                     regex[required_check] = True
         if workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
@@ -96,8 +95,13 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        if isGreen(commit, results)[0]:
+        eprint(f"Checking {commit}")
+        is_green, msg = isGreen(commit, results)
+        if is_green:
+            eprint("GREEN")
             return commit
+        else:
+            eprint("RED: " + msg)
     return None
 
 def main() -> None:
