@@ -16,9 +16,9 @@ namespace utils {
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema)
-      : schema_(std::move(schema)) {}
+      : schema_(std::move(schema)), updated_(false) {}
   explicit SchemaInfo(const char* signature)
-      : schema_(torch::jit::parseSchema(signature)) {}
+      : schema_(torch::jit::parseSchema(signature)), updated_(false) {}
 
   bool is_mutable();
 
@@ -45,9 +45,9 @@ struct TORCH_API SchemaInfo {
   // Alias map of inputs with each other
   std::vector<std::unordered_set<size_t>> input_alias_map_;
 
-  bool updated_;
-
   c10::FunctionSchema schema_;
+
+  bool updated_;
 };
 } // namespace utils
 } // namespace torch
