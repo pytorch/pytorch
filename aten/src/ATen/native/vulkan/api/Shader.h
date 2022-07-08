@@ -28,8 +28,10 @@ struct ShaderSource final {
     } spirv;
   } src_code;
 
-  explicit ShaderSource(const char* glsl);
-  explicit ShaderSource(const uint32_t* spirv, uint32_t bytes);
+  std::string kernel_name;
+  explicit ShaderSource(std::string name, const char* glsl);
+  explicit ShaderSource(
+      std::string name, const uint32_t* spirv, uint32_t bytes);
 };
 
 class ShaderLayout final {
