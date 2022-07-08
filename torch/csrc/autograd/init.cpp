@@ -31,6 +31,18 @@
 #include <set>
 #include <unordered_set>
 
+namespace {
+
+struct DisableFuncTorch {
+  DisableFuncTorch()
+      : front_guard_(c10::DispatchKey::FuncTorchDynamicLayerFrontMode),
+        back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
+  c10::impl::ExcludeDispatchKeyGuard front_guard_;
+  c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+} // namespace
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
   using namespace torch::profiler::impl;
@@ -277,6 +289,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             "parent", [](const Result& r) { return r.parent_.lock(); })
         .def_readonly("children", &Result::children_)
         .def_readonly("start_time_ns", &Result::start_time_ns_)
+        .def_readonly("start_tid", &Result::start_tid_)
         .def_property_readonly("correlation_id", &Result::correlationID)
         .def_property_readonly("end_time_ns", &Result::endTimeNS)
         .def_property_readonly("duration_time_ns", [](const Result& r) {
@@ -418,6 +431,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
