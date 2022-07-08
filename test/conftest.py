@@ -1,4 +1,5 @@
 from _pytest.junitxml import LogXML, _NodeReporter, bin_xml_escape
+from _pytest.terminal import _get_raw_skip_reason
 from _pytest.stash import StashKey
 from _pytest.reports import TestReport
 from _pytest.config.argparsing import Parser
@@ -120,6 +121,11 @@ class LogXMLReruns(LogXML):
         if report.outcome == "rerun":
             reporter = self._opentestcase(report)
             self.append_rerun(reporter, report)
+        if report.outcome == "skipped":
+            if isinstance(report.longrepr, tuple):
+                fspath, lineno, reason = report.longrepr
+                reason = f'{report.nodeid}: {_get_raw_skip_reason(report)}'
+                report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
         nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
