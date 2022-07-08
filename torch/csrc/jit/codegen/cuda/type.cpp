@@ -346,6 +346,12 @@ static const char* expr_type2string(ExprType t) {
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::Swizzle2D:
+      return "Swizzle2D";
+    case ExprType::Swizzle2DInt:
+      return "Swizzle2DInt";
+    case ExprType::PairSelect:
+      return "PairSelect";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -965,6 +971,32 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& out,
     const IterType bt) {
   return out << iter_type2string(bt);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const Swizzle2DType& swizzle) {
+  switch (swizzle) {
+    case Swizzle2DType::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case Swizzle2DType::ZShape:
+      os << "ZShape";
+      break;
+    case Swizzle2DType::Transpose:
+      os << "Transpose";
+      break;
+    case Swizzle2DType::XOR:
+      os << "Xor";
+      break;
+    case Swizzle2DType::Scatter:
+      os << "Scatter";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
 }
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(

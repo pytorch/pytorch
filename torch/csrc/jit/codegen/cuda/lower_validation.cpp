@@ -1037,6 +1037,21 @@ void validateMma(Fusion* fusion) {
   }
 }
 
+void validateSwizzle(Fusion* fusion) {
+  auto used_vals = fusion->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    if (tv->hasSwizzleOp()) {
+      // Make sure no swizzle op is inlined:
+      auto inlined_swizzles = ir_utils::getAllSwizzlesBetween(
+          tv->getMaybeRFactorDomain(),
+          {tv->domain()->domain().begin(),
+           tv->domain()->domain().begin() + tv->getComputeAtPosition()});
+      TORCH_INTERNAL_ASSERT(
+          inlined_swizzles.empty(), "No support for inlined swizzles");
+    }
+  }
+}
+
 void validateAndConvertIterDomainGrouping(Fusion* fusion) {
   for (auto tv : ir_utils::allTvs(fusion)) {
     bool is_grouped = false;

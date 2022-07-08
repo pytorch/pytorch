@@ -379,6 +379,10 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! \input axes Axes to swizzle
   TensorView* swizzle(SwizzleType type, const std::vector<int>& axes);
 
+  //! Swizzle the rectangular tile defined by the iterdomains corresponding
+  //!  to the 2 given indices.
+  TensorView* swizzle(Swizzle2DType swizzle_type, int x, int y);
+
   // WARNING: rFactor does not return this TensorView, ir returns a new
   //  tensorview consumed by this!
   //
@@ -457,6 +461,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! More detail on usage see [WarpMmaSwizzler] in scheduler/mma_utils.h .
   void applyMmaSwizzle(MmaOptions options);
 
+  //! Returns if this tensor view has swizzle operator on its tensor domain.
+  //!  This is the temporary flag for indicating that the new swizzle
+  //!  implementation is used and will be removed in follow ups.
+  bool hasSwizzleOp() const {
+    return has_swizzle_op_;
+  }
+
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API MostInlinedTransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
@@ -505,6 +516,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   // data, so we want to pass the data value as a standard kernel argument
   // value.
   bool cpu_scalar_ = false;
+
+  //! Indicates if this tensor view has swizzle operator on its tensor domain.
+  //!  This is the temporary flag for indicating that the new swizzle
+  //!  implementation is used and will be removed in follow ups.
+  bool has_swizzle_op_ = false;
 };
 
 //! A simple TensorView builder

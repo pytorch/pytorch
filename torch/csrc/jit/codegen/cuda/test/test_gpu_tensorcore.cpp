@@ -3242,7 +3242,7 @@ TEST_F(NVFuserTest, FusionAmpereStridedBatchedMatmulTN_CUDA) {
   TORCH_CHECK(cg_outputs[0].allclose(ref, 0.0001, 0.0001));
 }
 
-// Matmul test on Ampere
+// Matmul test on Ampere with a view on prolog
 TEST_F(NVFuserTest, FusionAmpereViewMatmulTN_CUDA) {
   NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
 
@@ -3732,6 +3732,182 @@ TEST_F(NVFuserTest, FusionVoltaMatMulTNCrossCTA_CUDA) {
   fe.compileFusion(&fusion, {t0, t1});
   auto cg_outputs = fe.runFusion({t0, t1});
   auto tref = t0.to(at::kFloat).matmul(t1.to(at::kFloat).t());
+  TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
+}
+
+// Test an end-to-end matmul case with swizzled smem
+// data layout.
+TEST_F(NVFuserTest, FusionAmpereMatmulTNSwizzled_CUDA) {
+  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int M = 257, N = 511, K = 136;
+
+  MatMulTileOptions gemm_tile;
+  gemm_tile.cta_tile = GemmTile(128, 128, 32);
+  gemm_tile.warp_tile = GemmTile(64, 64, 32);
+  gemm_tile.instruction_tile = GemmTile(16, 8, 16);
+
+  // [M,K]
+  auto tv0 = makeContigTensor(2, DataType::Half);
+  // [N,K]
+  auto tv1 = makeContigTensor(2, DataType::Half);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // [M,N,K]
+  auto tv0b = broadcast(tv0, {false, true, false});
+  auto tv1b = broadcast(tv1, {true, false, false});
+
+  auto mma_builder =
+      MmaBuilder(MmaOptions::MacroType::Turing_16_8_16, gemm_tile)
+          .layout(MmaOptions::MmaInputLayout::TN);
+
+  auto tv2 = fusedMultiplySum(tv0b, tv1b, {2});
+
+  fusion.addOutput(tv2);
+
+  mma_builder.configureMma(tv2);
+
+  auto tv0cw = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv0cr = tv0cw->cacheAfter(LoadStoreOpType::LdMatrix);
+  auto tv1cw = tv1->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv1cr = tv1cw->cacheAfter(LoadStoreOpType::LdMatrix);
+  auto tv2c = tv2->cacheBefore();
+
+  mma_builder.accumulatorTv(tv2c);
+
+  // Make a CTA tile
+  // ------------------------------------------------------------------
+  // [M,N]
+  tv2->split(-2, gemm_tile.cta_tile.m);
+  tv2->split(-1, gemm_tile.cta_tile.n);
+
+  //  0   1    2   3
+  // [Mo,M128, No, N128]
+  tv2->reorder({{1, 2}, {2, 1}});
+
+  //  0   1    2   3
+  // [Mo,No, M128, N128]
+  tv0->computeAt(tv2, 2);
+  tv1->computeAt(tv2, 2);
+
+  // Order K
+  //  0   1    2   3     4    5
+  // [Mo,No, M128, N128, Ko, K32]
+  tv2c->split(-1, gemm_tile.cta_tile.k);
+  tv2c->reorder({{2, 3}, {3, 4}, {4, 2}});
+
+  //  0   1  2   3     4    5
+  // [Mo,No, Ko M128, N128, K32]
+  tv0cw->computeAt(tv2c, 3);
+  tv1cw->computeAt(tv2c, 3);
+
+  // Make warp tile:
+  //
+  scheduler_utils::matmul_utils::scheduleWarpTileWithReduction(tv2c, gemm_tile);
+  scheduler_utils::matmul_utils::scheduleWarpTileWithNoReduction(
+      tv2, gemm_tile);
+  //           -8   -7  -6 -5 -4 -3 -2 -1
+  // [Mo No Ko Mwo  Nwo Kwo Mw Nw Mi Ni Ki]
+  tv0cr->computeAt(tv2c, -4);
+  tv1cr->computeAt(tv2c, -4);
+
+  // Schedule gmem read and smem write:
+  //
+  // [Mo,Ko,M,K]
+  // Swizzle tv0: 128 x 32 tile:
+  tv0cw->split(-2, 8);
+  tv0cw->split(-2, 2);
+  tv0cw->split(-1, 8);
+  //        -5   -4 -3 -2 -1
+  // [Mo,Ko,Mo16,M4,M2,Ko4,K8]
+  tv0cw->swizzle(Swizzle2DType::XOR, -4, -2);
+  tv0cw->merge(-4);
+  tv0cw->merge(-3);
+  //         -3   -2  -1
+  // [Mo,Ko,Mo16,warp,K8]
+  tv0cw->split(-3, 4);
+  tv0cw->split(-3, 2);
+  //             -4  -3   -2  -1
+  // [Mo,Ko, S4, wz2, wy2, warp,K8]
+  tv0cw->axis(-4)->parallelize(ParallelType::TIDz);
+  tv0cw->axis(-3)->parallelize(ParallelType::TIDy);
+  tv0cw->axis(-2)->parallelize(ParallelType::TIDx);
+  tv0cw->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv0cw->setMemoryType(MemoryType::Shared);
+  // [Mo,Ko,i,wy,wx,v]
+
+  // [No,Ko,N,K]
+  // Swizzle tv0: 128 x 32 tile:
+  tv1cw->split(-2, 8);
+  tv1cw->split(-2, 2);
+  tv1cw->split(-1, 8);
+  //        -5   -4 -3 -2 -1
+  // [No,Ko,No16,N4,N2,Ko4,K8]
+  tv1cw->swizzle(Swizzle2DType::XOR, -4, -2);
+  tv1cw->merge(-4);
+  tv1cw->merge(-3);
+  //         -3   -2  -1
+  // [No,Ko,No16,warp,K8]
+  tv1cw->split(-3, 4);
+  tv1cw->split(-3, 2);
+  //             -4  -3   -2  -1
+  // [No,Ko, S4, wz2, wy2, warp,K8]
+  tv1cw->axis(-4)->parallelize(ParallelType::TIDz);
+  tv1cw->axis(-3)->parallelize(ParallelType::TIDy);
+  tv1cw->axis(-2)->parallelize(ParallelType::TIDx);
+  tv1cw->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv1cw->setMemoryType(MemoryType::Shared);
+  // Schedule mma input
+  tv0cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::A).build());
+
+  // [... Mi, Ni, Ki]
+  tv0b->reorder({{-2, -3}, {-3, -2}});
+  tv0b->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::A).build());
+
+  tv1cr->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::B).build());
+  tv1b->applyMmaSwizzle(mma_builder.operand(MmaOptions::Operand::B).build());
+
+  // Schedule mma output
+  tv2c->applyMmaSwizzle(
+      mma_builder.operand(MmaOptions::Operand::Accumulator).build());
+  tv2->applyMmaSwizzle(
+      mma_builder.operand(MmaOptions::Operand::Accumulator).build());
+
+  // Parallelize
+  //  0   1  2  3    4   5  6  7  8  9  10
+  // [Mo No Ko Mwo  Nwo Kw Mw Nw (Mi Ni Ki)]
+  tv2c->axis(3)->parallelize(ParallelType::TIDz);
+  tv2c->axis(4)->parallelize(ParallelType::TIDy);
+
+  // Parallelize
+  //  0  1  2   3   4   5  6  7
+  // [Mo No Mwo Nwo Mw Nw (Mi Ni)]
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(2)->parallelize(ParallelType::TIDz);
+  tv2->axis(3)->parallelize(ParallelType::TIDy);
+
+  tv0cw->doubleBuffer();
+  tv1cw->doubleBuffer();
+  tv0cr->doubleBuffer();
+  tv1cr->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto t0 = at::randn({M, K}, options);
+  auto t1 = at::randn({N, K}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto tref = t0.to(at::kFloat).matmul(t1.t().to(at::kFloat));
+
   TORCH_CHECK(cg_outputs[0].allclose(tref, 0.0001, 0.0001));
 }
 

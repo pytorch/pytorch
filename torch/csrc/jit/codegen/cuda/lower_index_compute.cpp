@@ -679,6 +679,16 @@ IterDomain* LoopIndexingAnalysis::concretizeAndVisitId(IterDomain* id) {
 }
 
 void LoopIndexingAnalysis::visitExpr(Expr* expr) {
+  if (auto swizzle2d = dynamic_cast<Swizzle2D*>(expr)) {
+    // Swizzle outputs are already forwarded through
+    //  by exact CA map, so currently they are just
+    //  ignored in the replay pass except
+    //  that we want to note this node visited.
+    concretizeAndVisitId(swizzle2d->outX());
+    concretizeAndVisitId(swizzle2d->outY());
+    return;
+  }
+
   // Current implementation just tries to
   //  follow the exact behavior of reference replay
   //  except that no expr was actually "replayed".

@@ -617,10 +617,36 @@ void IndexCompute::handle(Merge* merge) {
   }
 }
 
+void IndexCompute::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = maybeGetExactMapConcreteID(swizzle_2d->outX());
+  auto out_y_id = maybeGetExactMapConcreteID(swizzle_2d->outY());
+  auto in_x_id = maybeGetExactMapConcreteID(swizzle_2d->inX());
+  auto in_y_id = maybeGetExactMapConcreteID(swizzle_2d->inY());
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  if (out_x_it == index_map_.end() || out_y_it == index_map_.end()) {
+    return;
+  }
+
+  const auto out_x_ind = out_x_it->second;
+  const auto out_y_ind = out_y_it->second;
+
+  // Actual swizzle operation is handled via IndexSwizzle pass
+  //  all behavior in this pass is directly forward through the
+  //  index and extent.
+  index_map_[in_x_id] = out_x_ind;
+  index_map_[in_y_id] = out_y_ind;
+  extent_map_[in_y_id] = getExtent(out_y_id);
+  extent_map_[in_x_id] = getExtent(out_x_id);
+}
+
 void IndexCompute::handle(Expr* e) {
   switch (e->getExprType().value()) {
     case (ExprType::Split):
     case (ExprType::Merge):
+    case (ExprType::Swizzle2D):
       break;
     default:
       TORCH_INTERNAL_ASSERT(
@@ -846,6 +872,16 @@ class UpdateLeafIndices : public IterVisitor {
       return;
     }
 
+    if (!index_map_.count(in_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          in_id->isReduction(), "Undefined index for ", in_id->toString());
+      return;
+    }
+
     auto factor = split->factor();
     index_map_[inner_id] =
         SimplifyingIrBuilder::modExpr(index_map_[in_id], factor);
@@ -861,6 +897,20 @@ class UpdateLeafIndices : public IterVisitor {
     auto outer_id = merge->outer();
     auto inner_id = merge->inner();
 
+    if (!index_map_.count(outer_id) || !index_map_.count(inner_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          outer_id->isReduction() && inner_id->isReduction(),
+          "Undefined index for ",
+          outer_id->toString(),
+          " and ",
+          inner_id->toString());
+      return;
+    }
+
     // Nothing need to be done when mappings for the output axes
     // already exist.
     if (index_map_.find(out_id) != index_map_.end()) {
@@ -872,13 +922,29 @@ class UpdateLeafIndices : public IterVisitor {
     TORCH_INTERNAL_ASSERT(
         index_map_.find(inner_id) != index_map_.end(), "Inner ID not found");
 
-    index_map_[out_id] = SimplifyingIrBuilder::mulExpr(
+    index_map_[out_id] = SimplifyingIrBuilder::addExpr(
         index_map_[inner_id],
         SimplifyingIrBuilder::mulExpr(
             index_map_[outer_id], getExtent(inner_id)));
 
     extent_map_[out_id] =
         SimplifyingIrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+  }
+
+  void handle(Swizzle2D* swizzle_2d) override {
+    auto in_x = swizzle_2d->inX();
+    auto in_y = swizzle_2d->inY();
+    auto out_x = swizzle_2d->outX();
+    auto out_y = swizzle_2d->outY();
+
+    // Forward propagation pass still just forward
+    //  through the indices and the actual swizzle
+    //  will be applied on the backward pass in
+    //  IndexSwizzle class implementation.
+    index_map_[out_x] = index_map_.at(in_x);
+    extent_map_[out_x] = getExtent(in_x);
+    index_map_[out_y] = index_map_.at(in_y);
+    extent_map_[out_y] = getExtent(in_y);
   }
 
   // return extent_map_[id] if exists, else return id->extent()
@@ -931,6 +997,23 @@ IndexSwizzle::IndexSwizzle(
       swizzle_type_(tv->swizzleType()),
       ids_to_swizzle_(tv->axesToSwizzle()) {}
 
+IndexSwizzle::IndexSwizzle(
+    const TensorView* tv,
+    const TensorDomain* domain,
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_map<IterDomain*, Val*> extent_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> zero_merged_in)
+    : IndexCompute(
+          domain,
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_domains),
+          std::move(zero_merged_in)),
+      tv_(tv),
+      swizzle_type_(tv->swizzleType()),
+      ids_to_swizzle_(tv->axesToSwizzle()) {}
+
 void IndexSwizzle::run() {
   TORCH_INTERNAL_ASSERT(
       swizzle_type_ == SwizzleType::NoSwizzle ||
@@ -964,15 +1047,35 @@ void IndexSwizzle::run() {
       swizzled_ids_.insert(id_to_swizzle_j);
       IndexCompute::run();
     }
+  } else if (tv_->hasSwizzleOp()) {
+    // Propagate backward for the annotated swizzle path.
+    // TODO:
+    //  eventually will unify the two swizzling implementation
+    //  code path in a follow up. Currently just focusing on
+    //  getting the necessary implementation of the swizzle
+    //  operator ready.
+    //
+    // At this intermediate state, the legacy swizzle implementation
+    //  takes precedence, i.e. whenever swizzle_type_ is not NoSwizzle,
+    //  the new swizzle op pass is disabled.
+    UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
+    index_map_ = update_leaves.indexMap();
+    extent_map_ = update_leaves.extentMap();
+    IndexCompute::run();
   }
 }
 
 void IndexSwizzle::handle(Expr* e) {
   auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
   bool needs_update =
-      std::any_of(out_ids.begin(), out_ids.end(), [this](IterDomain* id) {
-        return swizzled_ids_.find(id) != swizzled_ids_.end();
-      });
+      std::any_of(
+          out_ids.begin(),
+          out_ids.end(),
+          [this](IterDomain* id) {
+            return swizzled_ids_.find(id) != swizzled_ids_.end();
+          }) ||
+      (e->isA<Swizzle2D>() &&
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle);
   if (!needs_update) {
     return;
   }
@@ -980,6 +1083,48 @@ void IndexSwizzle::handle(Expr* e) {
   IndexCompute::handle(e);
   for (auto input : ir_utils::filterByType<IterDomain>(e->inputs())) {
     swizzled_ids_.insert(input);
+  }
+}
+
+void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = swizzle_2d->outX();
+  auto out_y_id = swizzle_2d->outY();
+  auto in_x_id = swizzle_2d->inX();
+  auto in_y_id = swizzle_2d->inY();
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  // TODO: unify the legacy path in all usage
+  TORCH_INTERNAL_ASSERT(
+      swizzle_type_ == SwizzleType::NoSwizzle,
+      "Cannot mix usage of two swizzle implementations");
+
+  TORCH_INTERNAL_ASSERT(
+      out_x_it != index_map_.end() && out_y_it != index_map_.end(),
+      "Swizzle output indices were not propagated through");
+
+  const auto out_x_ind = out_x_it->second;
+  const auto out_y_ind = out_y_it->second;
+
+  // Can propagate zero only for a few
+  //  swizzle types (TODO)
+
+  if (swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle) {
+    auto out_pair = IrBuilder::swizzle2DIntExpr(
+        out_x_ind,
+        out_y_ind,
+        getExtent(out_x_id),
+        getExtent(out_y_id),
+        swizzle_2d->swizzleType());
+
+    index_map_[in_x_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
+    index_map_[in_y_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
+
+    swizzled_ids_.insert(in_x_id);
+    swizzled_ids_.insert(in_y_id);
   }
 }
 
@@ -1186,6 +1331,11 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
   // The old swizzle interface, which should be deprecated, is not
   // supported.
   if (tv->swizzleType() != SwizzleType::NoSwizzle) {
+    return c10::nullopt;
+  }
+
+  // New swizzle interface not yet supported
+  if (tv->hasSwizzleOp()) {
     return c10::nullopt;
   }
 
@@ -1616,7 +1766,32 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
   index_swizzle.run();
 
-  const auto& index_map = index_swizzle.indexMap();
+  auto producer_swizzled_index = index_swizzle;
+
+  if (producer_tv->hasSwizzleOp()) {
+    // Special handling needed on the new swizzle
+    //  op pass:
+    //  each swizzle op is local to the tensor,
+    //  so ReplayPasC will not include the swizzle
+    //  ops on the producer iterdomain. So would
+    //  need to traverse forward the producer domain
+    //  before the replay to get the swizzle ops.
+    IndexSwizzle producer_swizzle2d(
+        producer_tv,
+        domain_guard.prevDomain(),
+        producer_indexing.indexMap(),
+        producer_indexing.extentMap(),
+        producer_indexing.zeroDomains(),
+        producer_indexing.zeroMergedIn());
+    producer_swizzle2d.run();
+    producer_swizzled_index = producer_swizzle2d;
+  }
+
+  // TODO: merge the two swizzle compute logic once the new one is ready.
+  //  will need to replace cyclic shift swizzle with xor since swizzle2d
+  //  doesn't have cyclic shift.
+  const auto& index_map = producer_swizzled_index.indexMap();
+
   const auto& extent_map = producer_indexing.extentMap();
   const auto& zero_domain_map = producer_indexing.zeroDomains();
   // Indices should now be mapped onto IterDomains in producer, so just grab

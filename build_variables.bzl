@@ -32,6 +32,7 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/index_utils.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/swizzle.cu",
     "torch/csrc/jit/codegen/cuda/runtime/memory.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",

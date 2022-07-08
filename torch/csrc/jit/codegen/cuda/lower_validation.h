@@ -44,6 +44,13 @@ void validatePartialSplit(Fusion* fusion);
 //!  mma operators on the fusion.
 void validateMma(Fusion* fusion);
 
+//! Validates swizzle ops to ensure consistent indexing:
+//!   - Currently only allow swizzle ops on the right of CA axis,
+//!   - (Except ZShape) All swizzle ops have to be on const sized ids
+//!   - Xor and Transpose swizzle have to have equal dimensions on the
+//!       participating ids.
+void validateSwizzle(Fusion* fusion);
+
 //! Validate use of ParallelType::Group. It is currently only allowed
 //! in ReductionOp and not in WelfordOp. Group has similar constraints
 //! as Vectorize, e.g., it can only be used with IterDomains with

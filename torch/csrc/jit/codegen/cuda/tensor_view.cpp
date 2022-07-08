@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -210,7 +211,8 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       memory_type_(src->memory_type_),
       swizzle_type_(src->swizzle_type_),
       is_double_buffered_(src->is_double_buffered_),
-      cpu_scalar_(src->cpu_scalar_) {
+      cpu_scalar_(src->cpu_scalar_),
+      has_swizzle_op_(src->has_swizzle_op_) {
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));
   }
@@ -565,6 +567,85 @@ TensorView* TensorView::swizzle(
       axes_to_swizzle_.push_back(axis(pos));
     }
   }
+
+  return this;
+}
+
+TensorView* TensorView::swizzle(Swizzle2DType swizzle_type, int x, int y) {
+  has_swizzle_op_ = true;
+  if (x < 0) {
+    x += domain()->nDims();
+  }
+  if (y < 0) {
+    y += domain()->nDims();
+  }
+
+  TORCH_CHECK(
+      x >= (int)getComputeAtPosition(),
+      false,
+      "Cannot swizzle axes within compute at position. Axis ",
+      x,
+      " is within computeAtPosition = ",
+      getComputeAtPosition());
+
+  TORCH_CHECK(
+      y >= (int)getMaxProducerPosition(),
+      "Cannot swizzle axes within max producer position. Axis ",
+      y,
+      " is within maxProducerPosition = ",
+      getMaxProducerPosition());
+
+  // Disable unsupported use cases at the current step.
+  //  Currently do not support reducing or broadcasting
+  //   swizzled dimensions.
+  auto all_inputs = InputsOf::outputs(fusion(), {axis(x), axis(y)});
+  for (auto id : ir_utils::filterByType<IterDomain>(all_inputs)) {
+    TORCH_INTERNAL_ASSERT(
+        !id->isBroadcast() && !id->isReduction(),
+        "Unsupported use case for swizzle.");
+  }
+
+  // Also checking that the scheduler is not trying to
+  //  compose swizzles, which is not yet supported either.
+  auto all_exprs = DependencyCheck::getAllValsBetween(
+      {all_inputs.begin(), all_inputs.end()}, {axis(x), axis(y)});
+  for (auto expr : all_exprs) {
+    TORCH_INTERNAL_ASSERT(
+        !expr->isA<Swizzle2D>(), "Composing swizzles is not yet supported");
+  }
+
+  // Check swizzle specific constraints on the input axes:
+  if (swizzle_type != Swizzle2DType::ZShape) {
+    ExpressionEvaluator const_eval(fusion());
+
+    auto x_id = axis(x);
+    auto y_id = axis(y);
+
+    TORCH_INTERNAL_ASSERT(
+        x_id->extent()->isConstInt() && y_id->extent()->isConstInt(),
+        "Only constant iterdomains supported on given swizzle type");
+
+    int in_x_size = x_id->extent()->evaluateInt();
+    int in_y_size = y_id->extent()->evaluateInt();
+
+    // Check size constraints based on swizzle type
+    if (swizzle_type == Swizzle2DType::Transpose ||
+        swizzle_type == Swizzle2DType::XOR) {
+      TORCH_INTERNAL_ASSERT(
+          in_x_size == in_y_size, "Swizzle: equal dim iterdomains only");
+    }
+
+    if (swizzle_type == Swizzle2DType::Scatter) {
+      TORCH_INTERNAL_ASSERT(
+          in_y_size == 4, "Swizzle: unsupported id size must be 4 ", in_y_size);
+      TORCH_INTERNAL_ASSERT(
+          in_x_size == 8 || in_x_size == 16 || in_x_size == 32,
+          "Swizzle: unsupported id size must be 8, 16, or 32 ",
+          in_x_size);
+    }
+  }
+
+  domain()->swizzle(swizzle_type, x, y);
 
   return this;
 }
