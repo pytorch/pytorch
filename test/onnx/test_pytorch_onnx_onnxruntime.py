@@ -12107,15 +12107,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
     @skipIfUnsupportedMinOpsetVersion(16)
-    @parametrize(
+    @common_utils.parametrize(
         "mode",
         ("bilinear", "nearest", "bicubic"),
     )
-    @parametrize(
+    @common_utils.parametrize(
         "padding_mode",
         ("zeros", "border", "reflection"),
     )
-    @parametrize(
+    @common_utils.parametrize(
         "align_corners",
         (True, False),
         name_fn=lambda align_corners: str(align_corners),
@@ -12235,7 +12235,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
-    @parametrize(
+    @common_utils.parametrize(
         "name, nonlinearity",
         [
             ("elman", "relu"),
@@ -12244,11 +12244,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ("gru", None),
         ],
     )
-    @parametrize(**_parametrize_rnn_args("layers"))
-    @parametrize(**_parametrize_rnn_args("bidirectional"))
-    @parametrize(**_parametrize_rnn_args("initial_state"))
-    @parametrize(**_parametrize_rnn_args("packed_sequence"))
-    @parametrize(**_parametrize_rnn_args("dropout"))
+    @common_utils.parametrize(**_parametrize_rnn_args("layers"))
+    @common_utils.parametrize(**_parametrize_rnn_args("bidirectional"))
+    @common_utils.parametrize(**_parametrize_rnn_args("initial_state"))
+    @common_utils.parametrize(**_parametrize_rnn_args("packed_sequence"))
+    @common_utils.parametrize(**_parametrize_rnn_args("dropout"))
     def test_rnn(self, *args, **kwargs):
         self._dispatch_rnn_test(*args, **kwargs)
 
