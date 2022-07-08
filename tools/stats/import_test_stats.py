@@ -88,9 +88,11 @@ def get_test_times(dirpath: str, filename: str) -> Optional[Dict[str, float]]:
         test_config = os.environ["TEST_CONFIG"]
         return the_response[build_environment][test_config]
 
-    # don't eat the exception here, as the CI will just time out if we can't
-    # retrieve test times and shard appropriately.
-    return fetch_and_cache(dirpath, filename, url, process_response)
+    try:
+        return fetch_and_cache(dirpath, filename, url, process_response)
+    except Exception:
+        print("Couldn't download test times...")
+        return {}
 
 
 def get_disabled_tests(

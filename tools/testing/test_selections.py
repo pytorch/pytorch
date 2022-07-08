@@ -134,11 +134,8 @@ def get_shard_based_on_S3(
     if num_shards == 1:
         return tests
 
-    try:
-        with open(test_times_file) as file:
-            jobs_to_times = json.load(file)
-    except RuntimeError as e:
-        jobs_to_times = {}
+    with open(test_times_file) as file:
+        jobs_to_times = json.load(file)
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
