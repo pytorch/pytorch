@@ -30,11 +30,6 @@ class FSDPInitMode(Enum):
     # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
-def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with FullyShardedDataParallel.summon_full_params(fsdp_model):
-        params = list(p.clone().detach_() for p in fsdp_model.parameters())
-
-    return params
 
 def _validate(model, process_group, assert_fn):
     module_states = [param.detach().cpu() for param in model.parameters()]
