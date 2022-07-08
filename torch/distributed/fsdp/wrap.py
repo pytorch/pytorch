@@ -320,6 +320,14 @@ class ParamExecOrderWrapPolicy:
             The configuration used to perform symbolic tracing at FSDP constructor to get the module and
             parameter execution order. If set as None, then symbolic tracing is not enabled, and one forward
             as well as backward iteration are needed to get the parameter execution order.
+
+    ..warning :: Note that not all modules can be successfully traced when
+    ``tracing_config`` is not None and symbolic tracing is enabled. The two
+    cases below may be unable to trace: 1. when there is a data-dependent
+    branch, 2. when the forward pass contains operators that don't support
+    ``torch.fx.Proxy`` as the input type (e.g. ``arange``, ``zeros``, ``ones``,
+    ``full``, ``full_like``, ``eye``, ``empty``, ``tensor``). For those cases,
+    users can set ``tracing_config = None`` to disable symbolic tracing.
     """
     init_policy: Callable = always_wrap_policy
     tracing_config: Optional[TracingConfig] = None
