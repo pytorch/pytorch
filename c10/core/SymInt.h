@@ -39,16 +39,14 @@ class C10_API SymInt {
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
   }
 
-  bool operator==(const SymInt& p2) const {
-    return data_ == p2.data_;
-  }
 
-  bool operator!=(const SymInt& p2) const {
-    return data_ != p2.data_;
+  bool operator!=(SymInt p2) const {
+    return !(*this == p2);
   }
 
   SymInt operator+(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  bool operator==(SymInt sci) const;
   bool operator<(SymInt sci) const;
   void operator*=(SymInt sci);
 
