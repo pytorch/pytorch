@@ -507,6 +507,28 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isposinf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("inf"))
+    return zeros_like(a, dtype=torch.bool)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isneginf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("-inf"))
+    return zeros_like(a, dtype=torch.bool)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
