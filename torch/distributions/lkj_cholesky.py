@@ -14,6 +14,7 @@ from torch.distributions import constraints, Beta
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['LKJCholesky']
 
 class LKJCholesky(Distribution):
     r"""
