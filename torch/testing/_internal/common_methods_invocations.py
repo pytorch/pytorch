@@ -1644,10 +1644,15 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
     return result
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
+    low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     sizes = ((2, 2), (2, 3, 2))
-    ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
+    if dtype in low_precision_dtypes:
+        # svdvals not supported for low precision dtypes
+        ords = ('fro', inf, -inf, 1, -1)
+    else:
+        ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
     dims = ((-2, -1), (-1, 0))
 
     for size, ord, dim, keepdim in product(sizes, ords, dims, [True, False]):
@@ -12677,7 +12682,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,
@@ -21161,6 +21166,16 @@ python_ref_db = [
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.matrix_norm",
+        torch_opinfo_name="linalg.matrix_norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
