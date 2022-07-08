@@ -1665,6 +1665,88 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for meta in metas:
             self.assertEqual(str(meta.placement.device().type), "cuda")
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_test(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st = sharded_tensor.zeros(spec, h, w)
+        # test same dtype, device return itself
+        st_self = st.to(dtype=st.dtype, device="cuda")
+        self.assertTrue(st_self is st)
+
+        # test dtype to
+        st_16 = st.to(torch.float16)
+        self.assertFalse(st_16 is st)
+        self.assertEqual(st_16.dtype, torch.float16)
+        # test device to
+        st_cpu = st.to(device=torch.device("cpu"))
+        self.assertFalse(st_cpu is st)
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to(device=torch.device("cuda"))
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        # test tensor to
+        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda")
+        st_cuda = st.to(cuda_tensor)
+        self.assertFalse(st_cuda is st)
+        self.assertEqual(st_cuda.dtype, torch.float16)
+
+        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda:2")
+        st_cuda = st.to(cuda_tensor)
+        self.assertEqual(st_cuda.dtype, torch.float16)
+
+        # test dtype and device together
+        st_cpu_16 = st.to("cpu", torch.float16)
+        self.assertEqual(st_cpu_16.dtype, torch.float16)
+        self.assertEqual(st_cpu_16.local_tensor().device.type, "cpu")
+
+        st_cuda_32 = st_cpu_16.to("cuda", torch.float32)
+        self.assertEqual(st_cuda_32.dtype, torch.float32)
+        self.assertEqual(st_cuda_32.local_tensor().device.type, "cuda")
+
+        # test pass additional process group
+        gloo_pg = dist.new_group(backend="gloo") 
+        st_gloo = st.to(device="cpu", process_group=gloo_pg)
+        self.assertFalse(st_gloo is st)
+        self.assertEqual(st_gloo.local_tensor().device.type, "cpu")
+        self.assertEqual(st_gloo._process_group, gloo_pg)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_device(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st = sharded_tensor.zeros(spec, h, w)
+        current_device = torch.device(torch.cuda.current_device())
+        self.assertEqual(current_device, st.device)
+        
+        # test after to cpu, device get changed
+        cpu_device = torch.device("cpu")
+        st_cpu = st.to(device=cpu_device)
+        self.assertEqual(st_cpu.device, cpu_device)
+
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_uneven_shards(self):

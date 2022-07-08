@@ -49,6 +49,20 @@ _register_default_op(torch.Tensor.grad.__get__, _sharded_op_impl)  # type: ignor
 _register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 
+# device property is ambiguous as from a global prospective,
+# ShardedTensor.device consists of multiple devices (might even across hosts)
+# We choose to return the current device of the local tensor to represent
+# the device property on each rank
+@_sharded_op_impl(torch.Tensor.device.__get__)
+def tensor_device(types, args=(), kwargs=None, pg=None):
+    self_st = args[0]
+    # Validate types
+    if not isinstance(self_st, ShardedTensor):
+        raise TypeError("input needs to be a ShardedTensor")
+
+    return self_st.local_shards()[0].tensor.device
+
+
 def sharded_type_as_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_type_as op such as the input needs to

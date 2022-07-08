@@ -1,6 +1,0 @@
-python_library(
-    name = "gen_selected_mobile_ops_header",
-    srcs = ["gen_selected_mobile_ops_header.py"],
-    base_module = "tools.lite_interpreter",
-    visibility = ["PUBLIC"],
-)

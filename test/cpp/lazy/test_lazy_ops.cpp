@@ -90,7 +90,7 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   auto ly = torch::lazy::TryGetLtcTensor(y);
   auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
   auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-  auto z = x.narrow_copy(X_DIM_INDEX, 0, lmn->toSymInt());
+  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, lmn->toSymInt());
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }
 
@@ -100,7 +100,7 @@ TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
   const size_t Y_DIM = 3;
   const size_t X_DIM_INDEX = 0;
   auto y = torch::rand({Y_DIM}).to(kLazy);
-  auto z = x.narrow_copy(X_DIM_INDEX, 0, y.sym_sizes()[0]);
+  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, y.sym_sizes()[0]);
   auto zc = xc.narrow_copy(X_DIM_INDEX, 0, Y_DIM);
   ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
   // shape inference assumes narrow_copy can copy the whole tensor

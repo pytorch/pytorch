@@ -67,7 +67,7 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
 
 class ShardedTensor(torch.Tensor):
     """
-    ShardedTensor is an abstraction to represent Tensors that are sharded
+    ShardedTensor is an torch.Tensor subclass to represent Tensors that are sharded
     across multiple devices and multiple processes.
 
     ShardedTensor is initialized in an SPMD like fashion where each rank
@@ -284,7 +284,7 @@ class ShardedTensor(torch.Tensor):
             return torch.device(torch.cuda.current_device())
         return torch.device("cpu")
 
-    def gather( # type: ignore[override]
+    def gather(  # type: ignore[override]
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
@@ -449,13 +449,17 @@ class ShardedTensor(torch.Tensor):
             raise RuntimeError("Only `torch.contiguous_format` or "
                                "`torch.preserve_format` is supported!")
 
+        if device is not None:
+            device = torch.device(device) if isinstance(device, str) else device
+            assert isinstance(device, torch.device) and device.index == torch.cuda.current_device(),
+                '''Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!'''
+
         current_device = torch.device(torch.cuda.current_device())
         # returns a copy of ShardedTensor on CUDA current device
         list_shards: List[Shard] = []
         # move all local shards to current device, and change metadata
         # if local shards already on the current device, there's no
         # real data movement, only the metadata are copied.
-        st_meta = copy.deepcopy(self.metadata())
         for shard in self._local_shards:
             cuda_tensor = shard.tensor.cuda(
                 device=current_device,
@@ -469,16 +473,94 @@ class ShardedTensor(torch.Tensor):
                 Shard(cuda_tensor, metadata)
             )
 
+        st_meta = copy.deepcopy(self.metadata())
+        for meta in st_meta.shards_metadata:
+            if meta.placement.device().type != "cuda":  # type: ignore[union-attr]
+                meta.placement._device = current_device  # type: ignore[union-attr]
+
         pg = self._process_group if process_group is None else process_group
         # we need to use `init_from_local_shards` to communicate between ranks
         # and update the sharding spec/shards metadata.
-        st_cuda = ShardedTensor._init_from_local_shards(
+        st_cuda = ShardedTensor._init_from_local_shards_and_global_metadata(
             list_shards,
-            self.size(),
+            sharded_tensor_metadata=st_meta,
             process_group=pg,
             init_rrefs=self._init_rrefs
         )
         return st_cuda
+
+    def to(self, *args, **kwargs) -> ShardedTensor:
+        current_device = self._local_shards[0].tensor.device
+        current_dtype = self.dtype
+        device_to = current_device
+        dtype_to = current_dtype
+        if len(args) == 1:
+            if isinstance(args[0], torch.dtype):
+                dtype_to = args[0]
+            elif isinstance(args[0], torch.Tensor):
+                dtype_to = args[0].dtype
+                device_to = args[0].device
+            else:
+                raise ValueError(f"ShardedTensor.to() have wrong arguments: {args}")
+        elif len(args) == 2:
+            device_to, dtype_to = args
+        else:
+            dtype_to = kwargs.get("dtype", current_dtype)
+            device_to = kwargs.get("device", current_device)
+
+        device_to = torch.device(device_to) if isinstance(device_to, str) else device_to
+
+        if device_to.type == "cuda":
+            # if device_to set to cuda, set to current device even
+            # if user specify the device index.
+            current_idx = torch.cuda.current_device()
+            if device_to.index != current_idx:
+                import warnings
+                warnings.warn("ShardedTensor.to only move tensor to its current device"
+                              "If you want to put to different device, use `reshard` instead.")
+            device_to = torch.device(current_idx)
+
+        copy_tensor = kwargs.get("copy", False)
+        non_blocking = kwargs.get("non_blocking", False)
+        memory_format = kwargs.get("memory_format", torch.preserve_format)
+        process_group = kwargs.get("process_group", None)
+
+        if not copy_tensor and dtype_to == current_dtype and device_to == current_device:
+            # already have correct dtype and device, return itself
+            return self
+
+        # returns a copy of ShardedTensor on CUDA current device
+        list_shards: List[Shard] = []
+
+        for shard in self._local_shards:
+            new_tensor = shard.tensor.to(
+                dtype=dtype_to,
+                device=device_to,
+                non_blocking=non_blocking,
+                copy=copy_tensor,
+                memory_format=memory_format
+            )
+            metadata = copy.deepcopy(shard.metadata)
+            metadata.placement._device = device_to
+            list_shards.append(Shard(new_tensor, metadata))
+
+        # update metadata
+        st_meta = copy.deepcopy(self.metadata())
+        st_meta.tensor_properties.dtype = dtype_to
+        for meta in st_meta.shards_metadata:
+            meta.placement._device = device_to  # type: ignore[union-attr]
+
+        pg = self._process_group if process_group is None else process_group
+        # we need to use `init_from_local_shards` to communicate between ranks
+        # and update the sharding spec/shards metadata.
+        st_to = ShardedTensor._init_from_local_shards_and_global_metadata(
+            list_shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=pg,
+            init_rrefs=self._init_rrefs
+        )
+        return st_to
+
 
     @classmethod
     def _init_from_local_shards(
@@ -928,7 +1010,7 @@ class ShardedTensor(torch.Tensor):
         """
         return self._local_shards
 
-    def is_pinned(self) -> bool: # type: ignore[override]
+    def is_pinned(self) -> bool:  # type: ignore[override]
         """
         Returns True if the sharded tensor (each local shard) resides in pinned memory.
         """
