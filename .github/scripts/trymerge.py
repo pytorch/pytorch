@@ -786,10 +786,11 @@ class GitHubPR:
         return commit
 
 
-class MandatoryChecksMissingError(Exception):
+class MandatoryChecksPendingError(Exception):
     pass
 
-
+class MandatoryChecksNotRunError(Exception):
+    pass
 @dataclass
 class MergeRule:
     name: str
@@ -875,7 +876,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = pr.get_checkrun_conclusions()
         required_checks = filter(lambda x: force is False or "CLA Check" in x, mandatory_checks)
-        [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
+        [not_run_checks, pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
@@ -883,17 +884,25 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = ("Refusing to merge as mandatory check(s) " +
                                  checks_to_str(failed_checks) + f" failed for rule {rule_name}")
             continue
+        elif len(not_run_checks) > 0:
+            if reject_reason_score < 25000:
+                reject_reason_score = 25000
+                reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(not_run_checks)}"
+                reject_reason += f" are not yet run for rule {rule_name}"
+            continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
-                reject_reason += f" are pending/not yet run for rule {rule_name}"
+                reject_reason += f" are pending for rule {rule_name}"
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
+    if reject_reason_score == 25000:
+        raise MandatoryChecksNotRunError(reject_reason)
     if reject_reason_score == 20000:
-        raise MandatoryChecksMissingError(reject_reason)
+        raise MandatoryChecksPendingError(reject_reason)
     raise RuntimeError(reject_reason)
 
 
@@ -985,7 +994,7 @@ def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[s
     checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
     check_run_conclusions = {}
     if len(checks['check_runs']) == 0:
-        raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
+        raise MandatoryChecksPendingError("Refusing to merge as land check(s) are not yet run")
     for check_run in checks['check_runs']:
         check_run_conclusions[check_run['name']] = (check_run['conclusion'],
                                                     check_run['html_url'])
@@ -993,25 +1002,31 @@ def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[s
 
 def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
     checks = fetch_check_run_conclusions(repo, commit)
-    [pending_checks, failed_checks] = categorize_checks(checks, checks)
+    [not_run_checks, pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
         raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}")
+    if len(not_run_checks) > 0:
+        raise MandatoryChecksNotRunError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
     if len(pending_checks) > 0:
-        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
+        raise MandatoryChecksPendingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are pending")
 
 def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
-                      required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
+                      required_checks: Iterable[str]) -> Tuple[
+                          List[Tuple[str, Optional[str]]],
+                          List[Tuple[str, Optional[str]]],
+                          List[Tuple[str, Optional[str]]]]:
+    not_run_checks: List[Tuple[str, Optional[str]]] = []
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []
     for checkname in required_checks:
         if checkname not in check_runs:
-            pending_checks.append((checkname, None))
+            not_run_checks.append((checkname, None))
         elif check_runs[checkname][0] is None:
-            pending_checks.append((checkname, check_runs[checkname][1]))
+            pending_checks.append((chfeckname, check_runs[checkname][1]))
         elif check_runs[checkname][0].upper() != 'SUCCESS' and check_runs[checkname][0].upper() != 'SKIPPED':
             failed_checks.append((checkname, check_runs[checkname][1]))
-    return (pending_checks, failed_checks)
+    return (not_run_checks, pending_checks, failed_checks)
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
@@ -1020,7 +1035,8 @@ def merge(pr_num: int, repo: GitRepo,
           mandatory_only: bool = False,
           on_green: bool = False,
           land_checks: bool = False,
-          timeout_minutes: int = 400,
+          timeout_minutes: int = 350,
+          queue_timeout_minutes: int = 20,
           stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
@@ -1056,16 +1072,20 @@ def merge(pr_num: int, repo: GitRepo,
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
             if (not mandatory_only and on_green) and len(pending) > 0:
-                raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
+                raise MandatoryChecksPendingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             if land_checks:
                 validate_land_time_checks(repo, commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
-        except MandatoryChecksMissingError as ex:
+        except MandatoryChecksNotRunError as ex:
+            if elapsed_time > queue_timeout_minutes * 60:
+                raise RuntimeError(f"Merge failed due to {ex} after waiting {queue_timeout_minutes} minutes.")
+        except MandatoryChecksPendingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
             time.sleep(5 * 60)
+
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"

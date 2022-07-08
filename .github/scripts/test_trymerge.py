@@ -17,7 +17,7 @@ from trymerge import (find_matching_merge_rule,
                       read_merge_rules,
                       GitHubPR,
                       MergeRule,
-                      MandatoryChecksMissingError,
+                      MandatoryChecksNotRunError,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -235,8 +235,8 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.assertRaisesRegex(MandatoryChecksMissingError,
-                               ".*are pending/not yet run.*",
+        self.assertRaisesRegex(MandatoryChecksNotRunError,
+                               ".*are not yet run.*",
                                lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
