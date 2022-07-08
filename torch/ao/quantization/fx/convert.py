@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
 import torch
 import copy
 import warnings
@@ -31,6 +31,7 @@ from .qconfig_utils import (
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
+from torch.ao.quantization import QuantType
 from torch.ao.quantization.backend_config.utils import (
     get_root_module_to_quantized_reference_module,
     get_pattern_to_dtype_configs,
@@ -484,7 +485,7 @@ def convert_custom_module(
         node: Node,
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
-        custom_module_class_mapping: Dict[Callable, Callable],
+        custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
         statically_quantized_custom_module_nodes: Set[Node]):
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
@@ -800,7 +801,7 @@ def convert(
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
-        model = duplicate_dequantize_node(model)
+        Model = duplicate_dequantize_node(model)
         model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
