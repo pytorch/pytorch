@@ -268,7 +268,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce(
   return op.call(
       tensors,
       process_group,
-      static_cast<int64_t>(opts.reduceOp),
+      static_cast<uint64_t>(opts.reduceOp),
       opts.timeout.count());
 }
 
@@ -305,7 +305,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       output_tensors,
       input_tensors,
       process_group,
-      static_cast<int64_t>(opts.reduceOp),
+      static_cast<uint64_t>(opts.reduceOp),
       opts.timeout.count());
 }
 
@@ -325,7 +325,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce(
   return op.call(
       tensors,
       process_group,
-      static_cast<int64_t>(opts.reduceOp),
+      static_cast<uint64_t>(opts.reduceOp),
       opts.rootRank,
       opts.rootTensor,
       opts.timeout.count());
