@@ -68,6 +68,9 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   int64_t size_custom(int64_t d) const override {
     return this->size(d);
   }
+  c10::SymInt sym_size_custom(int64_t d) const override {
+    return c10::SymInt{this->size(d)};
+  }
   IntArrayRef sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes() const override;
