@@ -197,13 +197,13 @@ jobs:
     with:
       build-environment: macos-10-15-py3-arm64
 
-  # please ensure that this and its corresponding job in pull.yml are in sync
   win-vs2019-cuda11_6-py3-build:
     name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.6-py3
       cuda-version: "11.6"
+      sync-tag: win-cuda-build
 
   win-vs2019-cuda11_6-py3-test:
     name: win-vs2019-cuda11.6-py3
@@ -222,13 +222,13 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-  # please ensure that this and its corresponding job in pull.yml are in sync
   linux-bionic-rocm5_1-py3_7-build:
     name: linux-bionic-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-rocm5.1-py3.7
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      sync-tag: rocm-build
 
   linux-bionic-rocm5_1-py3_7-test:
     name: linux-bionic-rocm5.1-py3.7
