@@ -1273,6 +1273,12 @@
   source: grad.take(index).reshape_as(source)
   result: auto_linear  # It is affine, but sure
 
+- name: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
+  self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
+  index: non_differentiable
+  source: grad.take(index).reshape_as(source)
+  result: auto_linear  # It is affine, but sure
+
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
   Q, R: linalg_qr_jvp(A_t, Q, R, mode)
@@ -1575,7 +1581,7 @@
   result: auto_linear
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: zeros_like(self).put_(index, grad, true)
+  self: take_backward(grad, self, index)
   index: non_differentiable
   result: auto_linear
 
