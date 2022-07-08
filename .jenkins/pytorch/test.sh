@@ -178,6 +178,33 @@ test_python() {
   assert_git_not_dirty
 }
 
+
+test_dynamo_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  time python test/run_test.py \
+    --exclude-jit-executor \
+    --exclude-distributed-tests \
+    --exclude \
+      test_autograd \
+      test_proxy_tensor \
+      test_quantization \
+      test_public_bindings \
+      test_dataloader \
+      test_reductions \
+      test_namedtensor \
+      test_namedtuple_return_api \
+      test_profiler \
+      test_profiler_tree \
+      test_overrides \
+      test_python_dispatch \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+  assert_git_not_dirty
+}
+
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
@@ -599,6 +626,17 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_without_numpy
+  install_torchvision
+  install_torchdynamo
+  test_dynamo_shard 1
+  test_aten
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  checkout_install_torchdynamo
+  test_dynamo_shard 2
+  test_dynamo
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -614,7 +652,6 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_dynamo
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchdynamo
