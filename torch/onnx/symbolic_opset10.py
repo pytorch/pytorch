@@ -1,9 +1,11 @@
 import sys
 import warnings
+from typing import Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
@@ -145,12 +147,12 @@ def _avg_pool(name, tuple_fn):
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Sequence[int],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
