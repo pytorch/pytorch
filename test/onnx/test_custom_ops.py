@@ -2,13 +2,13 @@
 
 import numpy as np
 import onnx
-from onnx_test_common import run_model_test
+import onnx_test_common
 from test_pytorch_onnx_caffe2 import do_export
 
 import caffe2.python.onnx.backend as c2
 import torch
 import torch.utils.cpp_extension
-from torch.onnx.symbolic_helper import _unimplemented
+from torch.onnx import symbolic_helper
 from torch.testing._internal import common_utils
 
 
@@ -83,7 +83,7 @@ class TestCustomAutogradFunction(common_utils.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input_args=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
     def test_register_custom_op(self):
         class MyClip(torch.autograd.Function):
@@ -117,7 +117,9 @@ class TestCustomAutogradFunction(common_utils.TestCase):
             elif name == "MyRelu":
                 return g.op("Relu", args[0], outputs=n.outputsSize())
             else:
-                return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+                return symbolic_helper._unimplemented(
+                    "prim::PythonOp", "unknown node kind: " + name
+                )
 
         from torch.onnx import register_custom_op_symbolic
 
@@ -125,7 +127,7 @@ class TestCustomAutogradFunction(common_utils.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
-        run_model_test(self, model, input_args=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
 class TestExportAsContribOps(common_utils.TestCase):
@@ -159,7 +161,7 @@ class TestExportAsContribOps(common_utils.TestCase):
 
         x = torch.randn(3, 3, 4, requires_grad=True)
         model = torch.jit.script(M())
-        run_model_test(self, model, input_args=(x,))
+        onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
 if __name__ == "__main__":
