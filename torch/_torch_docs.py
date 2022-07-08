@@ -3510,21 +3510,34 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product of two 1D tensors. The vdot(a, b) function handles complex numbers
-differently than dot(a, b). If the first argument is complex, the complex conjugate of the
-first argument is used for the calculation of the dot product.
+Computes the dot product of two 1D vectors along a dimension.
+
+In symbols, this function computes
+
+.. math::
+
+    \sum_{i=1}^n \overline{x_i}y_i.
+
+where :math:`\overline{x_i}` denotes the conjugate for complex
+vectors, and it is the identity for real vectors.
 
 .. note::
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
 
+.. seealso::
+
+        :func:`torch.linalg.vecdot` computes the dot product of two batches of vectors along a dimension.
+
 Args:
     input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
     other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
-    {out}
+""" + fr"""
+.. note:: {common_args["out"]}
+""" + r"""
 
 Example::
 
@@ -3536,7 +3549,7 @@ Example::
     tensor([16.+1.j])
     >>> torch.vdot(b, a)
     tensor([16.-1.j])
-""".format(**common_args))
+""")
 
 add_docstr(torch.eig,
            r"""
@@ -11147,15 +11160,19 @@ logdet(input) -> Tensor
 
 Calculates log determinant of a square matrix or batches of square matrices.
 
-.. note::
-    Result is ``-inf`` if :attr:`input` has zero log determinant, and is ``nan`` if
-    :attr:`input` has negative determinant.
+It returns ``-inf`` if the input has a determinant of zero, and ``NaN`` if it has
+a negative determinant.
 
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
+
+.. seealso::
+
+        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more

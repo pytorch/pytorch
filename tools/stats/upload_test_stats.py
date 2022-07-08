@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
@@ -8,7 +9,7 @@ from tempfile import TemporaryDirectory
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    upload_to_rockset,
+    upload_to_s3,
     unzip,
 )
 
@@ -37,6 +38,18 @@ def parse_xml_report(
         case["workflow_id"] = workflow_id
         case["workflow_run_attempt"] = workflow_run_attempt
         case["job_id"] = job_id
+
+        # [invoking file]
+        # The name of the file that the test is located in is not necessarily
+        # the same as the name of the file that invoked the test.
+        # For example, `test_jit.py` calls into multiple other test files (e.g.
+        # jit/test_dce.py). For sharding/test selection purposes, we want to
+        # record the file that invoked the test.
+        #
+        # To do this, we leverage an implementation detail of how we write out
+        # tests (https://bit.ly/3ajEV1M), which is that reports are created
+        # under a folder with the same name as the invoking file.
+        case["invoking_file"] = report.parent.name
         test_cases.append(case)
 
     return test_cases
@@ -145,6 +158,8 @@ def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any
             test_case["job_id"],
             test_case["workflow_id"],
             test_case["workflow_run_attempt"],
+            # [see: invoking file]
+            test_case["invoking_file"],
         )
 
     def init_value(test_case: Dict[str, Any]) -> Dict[str, Any]:
@@ -154,6 +169,8 @@ def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any
             "job_id": test_case["job_id"],
             "workflow_id": test_case["workflow_id"],
             "workflow_run_attempt": test_case["workflow_run_attempt"],
+            # [see: invoking file]
+            "invoking_file": test_case["invoking_file"],
             "tests": 0,
             "failures": 0,
             "errors": 0,
@@ -205,10 +222,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
     test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
+    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    sys.stdout.flush()
+
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
-    upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
+    upload_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "test_run_summary",
+        summarize_test_cases(test_cases),
+    )
 
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
-        upload_to_rockset("test_run", test_cases)
+        upload_to_s3(
+            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+        )

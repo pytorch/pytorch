@@ -95,7 +95,7 @@ class TracerBase:
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
+        fx_files = ['torch/fx/proxy.py', 'torch/fx/_symbolic_trace.py']
         while frame:
             frame = frame.f_back
             if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):

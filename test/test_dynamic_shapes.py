@@ -32,7 +32,7 @@ def register_meta(op):
 
 @register_meta([aten.add.Tensor, aten.sub.Tensor])
 def binary_meta(a, b):
-    return a.new_empty(a.sym_size())
+    return a.new_empty(a.shape)
 
 
 @register_meta(aten.cat.default)
@@ -53,7 +53,7 @@ def cat_meta(tensors, dim=0):
 @register_meta([aten.narrow_copy.SymInt])
 def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
     shape = []
-    for i, x in enumerate(a.sym_size()):
+    for i, x in enumerate(a.shape):
         if i == dim:
             shape.append(length)
         else:
@@ -147,6 +147,8 @@ class FakeSymbolicTensor(torch.Tensor):
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
+
+        r.sym_shape = sym_shape
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -159,6 +161,18 @@ class FakeSymbolicTensor(torch.Tensor):
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
 
+        if func_overload == torch.ops.aten.sym_size.default:
+            self = args[0]
+            return self.sym_shape
+
+        # some calls can be redirected to `sym_size` rather than
+        # `sym_sizes`. `sym_size` uses `dim` to canonicalize an index
+        # so we need to implement both `sym_size` and `dim` for python
+        # tensors
+        if func_overload == torch.ops.aten.dim.default:
+            self = args[0]
+            return len(self.sym_shape)
+
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
             shape = args[1]
@@ -168,7 +182,7 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env):
-    sym_shapes = tuple([shape_env.create_symint(f"{name}_{idx}", val) for idx, val in enumerate(arg.sym_size())])
+    sym_shapes = tuple([shape_env.create_symint(f"{name}_{idx}", val) for idx, val in enumerate(arg.size())])
     sym_strides = tuple([shape_env.create_symint(f"{name}_{idx}_stride", val) for idx, val in enumerate(arg.stride())])
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
@@ -182,22 +196,22 @@ class TestPySymInt(TestCase):
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
-        self.assertTrue(not isinstance(x.sym_size(0), PySymInt))
-        self.assertTrue(isinstance(x.sym_size(0), CPP_SYMINT_CLASS))
+        self.assertTrue(not isinstance(x.shape[0], PySymInt))
+        self.assertTrue(isinstance(x.shape[0], CPP_SYMINT_CLASS))
 
-        self.assertEqual(int(x.sym_size(0)), 5)
-        self.assertEqual(int(x.sym_size(1)), 4)
-        self.assertEqual(int(x.sym_size(2)), 3)
+        self.assertEqual(int(x.shape[0]), 5)
+        self.assertEqual(int(x.shape[1]), 4)
+        self.assertEqual(int(x.shape[2]), 3)
 
-        self.assertEqual(int(x.sym_size()[0]), 5)
-        self.assertEqual(int(x.sym_size()[1]), 4)
-        self.assertTrue(isinstance(x.sym_size()[1], CPP_SYMINT_CLASS))
-        self.assertEqual(int(x.sym_size()[2]), 3)
+        self.assertEqual(int(x.size()[0]), 5)
+        self.assertEqual(int(x.size()[1]), 4)
+        self.assertTrue(isinstance(x.size()[1], CPP_SYMINT_CLASS))
+        self.assertEqual(int(x.size()[2]), 3)
 
-        self.assertEqual(int(x.sym_size(0)), 5)
-        self.assertEqual(int(x.sym_size(1)), 4)
-        self.assertEqual(int(x.sym_size(2)), 3)
-        self.assertTrue(isinstance(x.sym_size(2), CPP_SYMINT_CLASS))
+        self.assertEqual(int(x.size(0)), 5)
+        self.assertEqual(int(x.size(1)), 4)
+        self.assertEqual(int(x.size(2)), 3)
+        self.assertTrue(isinstance(x.size(2), CPP_SYMINT_CLASS))
 
     @skipIfNoSympy
     def test_binary(self):
@@ -206,16 +220,16 @@ class TestPySymInt(TestCase):
         y = create_symbolic_tensor("y", torch.randn(5, 4, 3), shape_env)
 
         z = x + y
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # broadcasting
         y = create_symbolic_tensor("y", torch.randn(1, 4, 1), shape_env)
         z = x + y
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
     @skipIfNoSympy
     def test_symint_args(self):
@@ -223,16 +237,16 @@ class TestPySymInt(TestCase):
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
         y = create_symbolic_tensor("y", torch.randn(5, 4, 1), shape_env)
         LAST_DIM = 2
-        z = x.narrow_copy(LAST_DIM, 0, y.sym_size(LAST_DIM))
-        self.assertEqual(int(z.sym_size(2)), int(y.sym_size(2)))
+        z = x.narrow_copy(LAST_DIM, 0, y.shape[LAST_DIM])
+        self.assertEqual(int(z.shape[2]), int(y.shape[2]))
 
         # arithmetic expr with two symints
-        z = x.narrow_copy(LAST_DIM, 0, x.sym_size(LAST_DIM) - y.sym_size(LAST_DIM))
-        self.assertEqual(int(z.sym_size(2)), 2)
+        z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - y.shape[LAST_DIM])
+        self.assertEqual(int(z.shape[2]), 2)
 
         # arithmetic expr with a symint and python int
-        z = x.narrow_copy(LAST_DIM, 0, x.sym_size(LAST_DIM) - 1)
-        self.assertEqual(int(z.sym_size(2)), 2)
+        z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - 1)
+        self.assertEqual(int(z.shape[2]), 2)
 
     @skipIfNoSympy
     def test_symint_vargs(self):
@@ -241,67 +255,67 @@ class TestPySymInt(TestCase):
         y = create_symbolic_tensor("y", torch.randn(1, 4, 1), shape_env)
 
         # varargs
-        z = y.expand(x.sym_size(0), y.sym_size(1), x.sym_size(2))
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand(x.shape[0], y.shape[1], x.shape[2])
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # shape list
-        z = y.expand((x.sym_size(0), y.sym_size(1), x.sym_size(2)))
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand((x.shape[0], y.shape[1], x.shape[2]))
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # mixed python symints and ints
-        z = y.expand(x.sym_size(0), y.sym_size(1), 3)
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand(x.shape[0], y.shape[1], 3)
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # mixed python symints and ints in a list
-        z = y.expand((x.sym_size(0), y.sym_size(1), 3))
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand((x.shape[0], y.shape[1], 3))
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # mixed python symints and ints
-        z = y.expand(5, y.sym_size(1), x.sym_size(2))
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand(5, y.shape[1], x.shape[2])
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
         # mixed python ints and symints in a list
-        z = y.expand((5, y.sym_size(1), x.sym_size(2)))
-        self.assertEqual(int(z.sym_size(0)), 5)
-        self.assertEqual(int(z.sym_size(1)), 4)
-        self.assertEqual(int(z.sym_size(2)), 3)
+        z = y.expand((5, y.shape[1], x.shape[2]))
+        self.assertEqual(int(z.shape[0]), 5)
+        self.assertEqual(int(z.shape[1]), 4)
+        self.assertEqual(int(z.shape[2]), 3)
 
     @skipIfNoSympy
     def test_size_expressions(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        expand_x = x.expand(x.sym_size(0), x.sym_size(0))
-        if expand_x.sym_size(0) > 3:
+        expand_x = x.expand(x.shape[0], x.shape[0])
+        if expand_x.shape[0] > 3:
             result = expand_x + expand_x
         else:
             result = expand_x + expand_x
 
         gt_op = shape_env.guards[0][0]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
-        self.assertTrue(str(x.sym_size(0)), str(gt_op.args[0]))
-        self.assertTrue(str(expand_x.sym_size(1)), str(x.sym_size(0)))
-        self.assertTrue(str(expand_x.sym_size(1)), str(result.sym_size(0)))
+        self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
+        self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
+        self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
     @skipIfNoSympy
     def test_aten_ops(self):
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.sym_size(0))
+        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.shape[0])
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
-        torch.ops.aten.expand.SymInt(x, [x.sym_size(0), x.sym_size(1), x.sym_size(2)])
+        torch.ops.aten.expand.SymInt(x, [x.shape[0], x.shape[1], x.shape[2]])
 
     def test_fx_trace_intlist(self):
         class CustomModule(torch.nn.Module):
@@ -314,6 +328,14 @@ class TestPySymInt(TestCase):
         # should not TypeError: pad(): argument 'pad' (position 2) must be
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
+
+
+    @skipIfNoSympy
+    def test_meta_symint(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+        r = torch.empty(a0, device='meta')
+        self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
 
 
 if __name__ == '__main__':
