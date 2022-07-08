@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -66,11 +65,11 @@ Tensor _clamp(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -137,7 +136,7 @@ Tensor& _clamp_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -204,11 +203,11 @@ Tensor activation(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -256,7 +255,7 @@ Tensor& activation_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -350,11 +349,11 @@ Tensor activation_scalar(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -405,7 +404,7 @@ Tensor& activation_scalar_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -416,13 +415,15 @@ Tensor& activation_scalar_(
 Tensor hardshrink(
     const Tensor& self_arg,
     const Scalar& lambd) {
-  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink));
+  float abs_lambd = std::abs(lambd.to<float>());
+  return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(hardshrink));
 }
 
 Tensor& hardshrink_(
     Tensor& self,
     const Scalar& lambd) {
-  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_));
+  float abs_lambd = std::abs(lambd.to<float>());
+  return ops::activation_scalar_(self, abs_lambd, VK_KERNEL(hardshrink_));
 }
 
 Tensor leaky_relu(
