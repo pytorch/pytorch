@@ -144,7 +144,7 @@ def _parametrize_rnn_args(arg_name):
     **_parameterized_class_attrs_and_values(),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
-@instantiate_parametrized_tests
+@common_utils.instantiate_parametrized_tests
 class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
