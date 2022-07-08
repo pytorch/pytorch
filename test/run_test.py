@@ -877,7 +877,7 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     if IS_CI:
         # Download previous test times to make sharding decisions
-        get_test_times(dirpath=test_directory, filename=TEST_TIMES_FILE)
+        get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
 
     selected_tests = get_selected_tests(options)
 
