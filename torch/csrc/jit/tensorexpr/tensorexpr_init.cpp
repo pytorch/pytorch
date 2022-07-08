@@ -15,6 +15,10 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
+template <>
+struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
+    : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
+
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;

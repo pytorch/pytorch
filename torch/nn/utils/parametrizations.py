@@ -8,6 +8,7 @@ from .. import functional as F
 
 from typing import Optional
 
+__all__ = ['orthogonal', 'spectral_norm']
 
 def _is_orthogonal(Q, eps=None):
     n, k = Q.size(-2), Q.size(-1)
@@ -258,7 +259,7 @@ def orthogonal(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter ot buffer with name '{}'".format(module, name)
+            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
         )
 
     # We could implement this for 1-dim tensors as the maps on the sphere

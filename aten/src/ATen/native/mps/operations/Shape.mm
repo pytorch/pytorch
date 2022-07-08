@@ -533,8 +533,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
   for(const Tensor& t : materialized_inputs) {
     auto lap = at::get_overlap_status(out, t);
     TORCH_CHECK(
-        lap != at::MemOverlapStatus::PARTIAL &&
-            lap != at::MemOverlapStatus::FULL,
+        lap != at::MemOverlapStatus::Partial &&
+            lap != at::MemOverlapStatus::Full,
         "torch.cat(): unsupported operation: the input tensors cannot refer to any "
         "of the output memory locations. Found overlap in input "
         "tensor ",

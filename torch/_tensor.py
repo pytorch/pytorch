@@ -96,6 +96,7 @@ class Tensor(torch._C._TensorBase):
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
+
             if self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
