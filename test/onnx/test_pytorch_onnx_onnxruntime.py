@@ -7703,7 +7703,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(1, 1, 200, 100)
         self.run_test(Unfold(), x)
 
-    @pytorch_test_common.skipIfNoLapack
+    @common_utils.skipIfNoLapack
     @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(11)
     def test_det(self):
         class Det(torch.nn.Module):
@@ -7864,7 +7864,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(CenterCrop(), x)
 
-    @pytorch_test_common.skipIfNoLapack
+    @common_utils.skipIfNoLapack
     @pytorch_test_common.skipIfUnsupportedMinOpsetVersion(11)
     def test_logdet(self):
         class LogDet(torch.nn.Module):
