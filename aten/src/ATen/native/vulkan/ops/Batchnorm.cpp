@@ -119,23 +119,23 @@ Tensor batch_norm(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_input.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       v_weight.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       v_bias.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       v_running_mean.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       v_running_var.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

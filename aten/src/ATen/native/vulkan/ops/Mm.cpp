@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <ATen/native/vulkan/ops/Utils.h>
@@ -295,17 +294,17 @@ Tensor context_run(
         // shader arguments
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::Compute,
+            api::PipelineStage::COMPUTE,
             api::MemoryAccessType::WRITE),
         v_input.image(
             pipeline_barrier,
-            api::PipelineStage::Compute),
+            api::PipelineStage::COMPUTE),
         packed_v_weight.image(
             pipeline_barrier,
-            api::PipelineStage::Compute),
+            api::PipelineStage::COMPUTE),
         packed_v_bias.image(
             pipeline_barrier,
-            api::PipelineStage::Compute),
+            api::PipelineStage::COMPUTE),
         // params buffer
         params.buffer());
   }
@@ -346,14 +345,14 @@ Tensor context_run(
         // shader arguments
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::Compute,
+            api::PipelineStage::COMPUTE,
             api::MemoryAccessType::WRITE),
         v_input.image(
             pipeline_barrier,
-            api::PipelineStage::Compute),
+            api::PipelineStage::COMPUTE),
         packed_v_weight.image(
             pipeline_barrier,
-            api::PipelineStage::Compute),
+            api::PipelineStage::COMPUTE),
         // params buffer
         params.buffer());
   }

@@ -2,9 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
 
 #include <stack>
@@ -15,6 +13,8 @@ namespace vulkan {
 namespace api {
 
 typedef uint8_t MemoryAccessFlags;
+
+VkFormat vk_format(const caffe2::TypeMeta dtype);
 
 enum MemoryAccessType : MemoryAccessFlags {
   NONE = 0u << 0u,
