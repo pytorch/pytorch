@@ -1,15 +1,6 @@
 import sympy
 import torch
 
-def create_contiguous(shape):
-    if len(shape) == 0:
-        return []
-
-    strides = [1]
-    for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])
-    return list(reversed(strides))
-
 class PySymInt(object):
     def __init__(self, expr, shape_env):
         self.expr = expr

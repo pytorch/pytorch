@@ -279,12 +279,6 @@ def in_kernel_invocation_manager(fake_mode):
     finally:
         fake_mode.in_kernel_invocation = False
 
-def create_contiguous(shape):
-    strides = [1]
-    for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])
-    return list(reversed(strides))
-
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
@@ -318,9 +312,6 @@ class FakeTensor(torch.Tensor):
             val = val * s
         return val
 
-    def stride(self):
-        return create_contiguous(self.shape)
-
     def new_empty(self, shape):
         return torch.empty(shape)
 
@@ -353,6 +344,8 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        if func == torch.ops.aten.stride:
+            return None
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
@@ -476,7 +469,7 @@ class FakeTensorMode(TorchDispatchMode):
             if func == torch.ops.aten.is_contiguous.default:
                 return True
             if func == torch.ops.aten.stride:
-                return create_contiguous(args[0].shape)
+                return None
 
         constructors = [torch.ops.aten.empty.SymInt]
         if 'prims' not in func.overloadpacket._qualified_op_name and func not in constructors:
