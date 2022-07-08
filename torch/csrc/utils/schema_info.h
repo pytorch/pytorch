@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/function_schema.h>
-#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 namespace torch {
 namespace utils {
@@ -17,8 +16,7 @@ struct TORCH_API SchemaInfo : c10::FunctionSchema {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema) : FunctionSchema(schema) {}
   explicit SchemaInfo(const char* signature)
-      : FunctionSchema(torch::jit::getOperatorForLiteral(signature)->schema()) {
-  }
+      : FunctionSchema(torch::jit::parseSchema(signature)) {}
 };
 } // namespace utils
 } // namespace torch
