@@ -44,13 +44,13 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
-@torch.library.impl(meta_lib, "_fft_c2c")
+@register_meta(aten._fft_c2c.default)
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
     return self.new_empty(self.size())
 
 
-@torch.library.impl(meta_lib, "_fft_r2c")
+@register_meta(aten._fft_r2c.default)
 def meta_fft_r2c(self, dim, normalization, onesided):
     assert self.dtype.is_floating_point
     output_sizes = list(self.size())
@@ -65,8 +65,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
-@torch.library.impl(meta_lib, "_fft_c2r.out")
-@torch.library.impl(meta_lib, "_fft_c2r")
+@register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
     assert self.dtype.is_complex
@@ -75,7 +74,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@torch.library.impl(meta_lib, "conj_physical.out")
+@register_meta([aten.conj_physical.out])
 def meta_conj_physical_out(self, out):
     return torch._resize_output_(out, self.size(), self.device)
 
@@ -193,7 +192,7 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@torch.library.impl(meta_lib, "var_mean.correction")
+@register_meta(aten.var_mean.correction)
 def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     dim = utils.reduction_dims(self.shape, dim)
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -202,7 +201,7 @@ def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     return result1, result2
 
 
-@torch.library.impl(meta_lib, "inverse")
+@register_meta(aten.inverse.default)
 def meta_inverse(self):
     # Bug: https://github.com/pytorch/pytorch/issues/77498
     if self.numel() == 0:
@@ -218,7 +217,7 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
-@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
+@register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
         self.ndim == 3 or self.ndim == 4,
@@ -501,8 +500,7 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@torch.library.impl(meta_lib, "diag")
-@torch.library.impl(meta_lib, "diag.out")
+@register_meta([aten.diag.default, aten.diag.out])
 @out_wrapper()
 def meta_diag(self, dim=0):
     check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
