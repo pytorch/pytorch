@@ -237,4 +237,4 @@ class MetaConverter:
             # non-Tensor types don't count as hit or miss
             return t
 
-import torch._prims.utils as utils
+import torch._prims_utils as utils

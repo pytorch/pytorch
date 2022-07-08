@@ -5,7 +5,7 @@ import functools
 import torch
 import torch.overrides
 
-from torch._prims.utils import torch_function_passthrough
+from torch._prims_utils import torch_function_passthrough
 
 import torch._refs
 import torch._refs.nn
