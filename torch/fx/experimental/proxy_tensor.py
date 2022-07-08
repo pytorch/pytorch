@@ -16,11 +16,65 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch._subclasses import FakeTensor
+from .symbolic_shapes import ShapeEnv, create_contiguous
 
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+
+def create_meta(e):
+    return torch.empty_strided(e.shape, e.stride(), dtype=e.dtype, layout=e.layout, device='meta')
+
+
+class ProxySymInt(object):
+    def __init__(self, sym_int, proxy):
+        assert isinstance(sym_int, torch._C.SymbolicIntNode) or isinstance(sym_int, int)
+        self.sym_int = sym_int
+        self.proxy = proxy
+
+    def wrap(self, num):
+        return ProxySymInt(num, num)
+
+    def __str__(self):
+        return f"ProxySymInt({self.sym_int})"
+
+    def __int__(self):
+        return int(self.sym_int)
+
+    def __bool__(self):
+        return bool(self.sym_int)
+
+magic_methods = [
+    'add',
+    # 'radd',
+    'sub',
+    'mul',
+    # 'div',
+    'mod',
+    'eq',
+    'gt',
+    'lt',
+]
+
+import operator
+
+for method in magic_methods:
+    method_name = f'{method}'
+    op = getattr(operator, method_name)
+    def create_magic_impl(op):
+        def magic_impl(self, other):
+            def unwrap_proxy(x): return x.proxy if isinstance(x, ProxySymInt) else x
+            out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
+            def unwrap_proxyint(x): return x.sym_int if isinstance(x, ProxySymInt) else x
+            out_sym_int = op(unwrap_proxyint(self), unwrap_proxyint(other))
+            return ProxySymInt(out_sym_int, out_proxy)
+        return magic_impl
+
+    # this should be wrapped transparently into torch._C.SymbolicIntNode
+    setattr(ProxySymInt, method_name, create_magic_impl(op))
 
 
 @contextmanager
@@ -63,6 +117,16 @@ def wrap_output(inner_res, proxy_res):
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
+
+    if func_overload == torch.ops.prim.device.default:
+        return args[0].fake_device
+    if func_overload == aten.sym_size.default:
+        return None
+    if func_overload == aten.size.default:
+        return None
+    if func_overload == aten.dim.default:
+        return len(args[0].shape)
+
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
@@ -77,6 +141,10 @@ def proxy_call(func_overload, args, kwargs=None):
     def unwrap_elem(e):
         if isinstance(e, ProxyTensor):
             return e.elem
+        if isinstance(e, torch._C.SymbolicIntNode):
+            if isinstance(e.get_pyobj(), ProxySymInt):
+                return e.get_pyobj().sym_int
+
         return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
@@ -100,6 +168,7 @@ def proxy_call(func_overload, args, kwargs=None):
     return wrap_output(inner_res, proxy_res)
 
 
+
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
@@ -107,21 +176,26 @@ class ProxyTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None):
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls,
-            elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
-            requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
-            storage_offset=elem.storage_offset()
-        )
+        # r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        #     cls,
+        #     elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
+        #     requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
+        #     storage_offset=elem.storage_offset()
+        # )
+        def create_proxy_symint(sym_int, new_proxy):
+            return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
+
+        r = torch.Tensor._make_wrapper_subclass(cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=create_contiguous(elem.shape), storage_offset=elem.storage_offset())
         return r
 
     def __init__(self, elem, proxy, *, requires_grad=None):
-        if elem.is_sparse:
-            proxy.node.meta['tensor_meta'] = {}
-        else:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        # if elem.is_sparse:
+        #     proxy.node.meta['tensor_meta'] = {}
+        # else:
+        #     proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
         self.elem = elem
         self.proxy = proxy
+
 
     def __deepcopy__(self, memo):
         return self.clone()
@@ -134,6 +208,8 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+        if func_overload == torch.ops.prim.device.default:
+            return args[0].fake_device
         return proxy_call(func_overload, args, kwargs)
 
 
@@ -166,6 +242,10 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
+        elif isinstance(a, torch._C.SymbolicIntNode):
+            py_symint = a.get_pyobj()
+            assert isinstance(py_symint, ProxySymInt)
+            return py_symint.proxy.node
         return super().create_arg(a)
 
 
@@ -213,7 +293,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        # if func == torch.ops.aten.stride:
+        #     return
         func = func_overload.overloadpacket
+        if func_overload == torch.ops.prim.device.default:
+            return args[0].device
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
@@ -257,7 +341,7 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=True):
     if decomposition_table is None:
         decomposition_table = {}
 
@@ -265,7 +349,7 @@ def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode = FakeTensorMode() if use_fake else nullcontext()
+        fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False) if use_fake else nullcontext()
         proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
 
         def wrap_fake(x):
@@ -274,11 +358,22 @@ def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=
 
             return x
 
+        shape_env = ShapeEnv()
+        arg_cnt = 0
+        def wrap_fake_symbolic(x):
+            nonlocal arg_cnt
+            if isinstance(x, torch.Tensor):
+                arg_cnt += 1
+                val = FakeTensor(fake_tensor_mode, torch.empty([shape_env.create_symint(f"arg_{arg_cnt}_{idx}", sz) for idx, sz in enumerate(x.shape)], device='meta'), x.device)
+                return val
+            return x
+
         if use_fake:  # type: ignore[attr-defined]
-            args = pytree.tree_map(wrap_fake, args)
+            args = pytree.tree_map(wrap_fake_symbolic, args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+        t.shape_env = shape_env
         return t
 
     return wrapped
