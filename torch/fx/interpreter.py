@@ -132,6 +132,8 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
+                if output_val is None:
+                    return (None,)
                 return self.module.graph.process_outputs(output_val) if enable_io_processing else output_val
 
     @compatibility(is_backward_compatible=True)
@@ -416,7 +418,8 @@ class Transformer(Interpreter):
         """
         assert isinstance(target, str)
         default_value = next(iter(args)) if args else inspect.Signature.empty
-        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
+        type_expr = self.tracer.root.forward.__annotations__.get(target, None)
+        return Proxy(self.new_graph.placeholder(target, default_value=default_value, type_expr=type_expr), self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:

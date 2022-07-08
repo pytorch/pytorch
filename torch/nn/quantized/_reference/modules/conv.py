@@ -212,7 +212,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose1d(
@@ -256,7 +256,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
 
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose2d(
@@ -300,7 +300,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose3d(
