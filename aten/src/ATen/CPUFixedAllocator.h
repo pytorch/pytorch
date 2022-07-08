@@ -30,4 +30,4 @@ static Allocator CPU_fixed_allocator = {
     cpu_fixed_realloc,
     cpu_fixed_free};
 
-} // namespace at
+} // namespace
