@@ -88,7 +88,7 @@ fragment CommitAuthors on PullRequestCommitConnection {
 """
 
 GH_GET_PR_INFO_QUERY = GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
-query ($owner: String!, $name: String!, $number: Int!) {
+query ($owner: String!, $name: String!, $number: Int!, $commit: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       closed
@@ -113,7 +113,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       mergeCommit {
         oid
       }
-      commits_with_authors:commits(first: 100) {
+      commits_with_authors: commits(first: 100) {
         ...CommitAuthors
         totalCount
       }
@@ -139,7 +139,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 100) {
-       ...PRReviews
+        ...PRReviews
       }
       comments(last: 5) {
         nodes {
@@ -158,9 +158,17 @@ query ($owner: String!, $name: String!, $number: Int!) {
           hasPreviousPage
         }
       }
+      object(expression: $commit) {
+        ... on Commit {
+          checkSuites {
+            ...PRCheckSuites
+          }
+        }
+      }
     }
   }
 }
+
 """
 
 GH_GET_PR_NEXT_FILES_QUERY = """
@@ -425,13 +433,14 @@ class GitHubComment:
 
 
 class GitHubPR:
-    def __init__(self, org: str, project: str, pr_num: int) -> None:
+    def __init__(self, org: str, project: str, pr_num: int, land_check_commit: Optional[str] = None) -> None:
         assert isinstance(pr_num, int)
         self.org = org
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.land_check_conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
@@ -552,6 +561,9 @@ class GitHubPR:
 
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
+
+    def get_land_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
+        return
 
     def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
         """ Returns dict of checkrun -> [conclusion, url] """
