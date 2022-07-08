@@ -1231,7 +1231,7 @@ def freeze_rng_state():
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch():
+    with no_dispatch(), disable_functorch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
