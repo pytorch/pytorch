@@ -1477,6 +1477,7 @@ aten::mm""")
         self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
         self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern(self):
         cases = (
@@ -1499,6 +1500,7 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     def test_profiler_for_loop_indexing_pattern(self):
         x = torch.ones((100, 100))
 
