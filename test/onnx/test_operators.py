@@ -8,7 +8,7 @@ import os
 import shutil
 import tempfile
 
-from test_pytorch_common import (
+from pytorch_test_common import (
     BATCH_SIZE,
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
@@ -94,7 +94,7 @@ class TestOperators(TestCase):
             import onnx
             import onnx.checker
             import onnx.numpy_helper
-            import test_onnx_common
+            import onnx_test_common
 
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
@@ -102,7 +102,7 @@ class TestOperators(TestCase):
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
                 output_dir = os.path.join(
-                    test_onnx_common.pytorch_operator_dir, test_name
+                    onnx_test_common.pytorch_operator_dir, test_name
                 )
                 # Assume:
                 #     1) the old test should be delete before the test.
@@ -1286,10 +1286,10 @@ if __name__ == "__main__":
         common.UNITTEST_ARGS.remove(onnx_test_flag)
     if _onnx_test:
         _onnx_dep = True
-        import test_onnx_common
+        import onnx_test_common
 
         for d in glob.glob(
-            os.path.join(test_onnx_common.pytorch_operator_dir, "test_operator_*")
+            os.path.join(onnx_test_common.pytorch_operator_dir, "test_operator_*")
         ):
             shutil.rmtree(d)
     run_tests()

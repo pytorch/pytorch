@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 from pytorch_helper import PyTorchModule
-from test_pytorch_common import skipIfNoLapack, run_tests, TestCase
+from pytorch_test_common import skipIfNoLapack, run_tests, TestCase
 
 import torch.nn.init as init
 import torch.onnx

@@ -4,7 +4,7 @@ import onnxruntime
 import torch
 from torch._C import parse_ir
 from torch.onnx import verification
-from test_pytorch_common import TestCase, run_tests
+from pytorch_test_common import TestCase, run_tests
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):

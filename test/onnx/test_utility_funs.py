@@ -6,7 +6,7 @@ import io
 import onnx
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
-from test_pytorch_common import (
+from pytorch_test_common import (
     TestCase,
     run_tests,
     skipIfNoCuda,

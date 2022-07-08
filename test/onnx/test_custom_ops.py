@@ -2,8 +2,8 @@
 
 import numpy as np
 import onnx
-from test_onnx_common import run_model_test
-from test_pytorch_common import TestCase, run_tests
+from onnx_test_common import run_model_test
+from pytorch_test_common import TestCase, run_tests
 from test_pytorch_onnx_caffe2 import do_export
 
 import caffe2.python.onnx.backend as c2

@@ -3,7 +3,7 @@
 import unittest
 
 import onnxruntime  # noqa: F401
-from test_pytorch_common import (
+from pytorch_test_common import (
     skipIfNoBFloat16Cuda,
     skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,

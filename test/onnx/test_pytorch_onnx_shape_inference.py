@@ -1,7 +1,7 @@
 # Owner(s): ["module: onnx"]
 
 import numpy as np
-from test_pytorch_common import run_tests, skipIfUnsupportedMinOpsetVersion, TestCase
+from pytorch_test_common import run_tests, skipIfUnsupportedMinOpsetVersion, TestCase
 
 import torch
 from torch.onnx import _constants

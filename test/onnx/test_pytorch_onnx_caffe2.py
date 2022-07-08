@@ -18,7 +18,7 @@ from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
-from test_pytorch_common import (
+from pytorch_test_common import (
     BATCH_SIZE,
     RNN_BATCH_SIZE,
     RNN_HIDDEN_SIZE,

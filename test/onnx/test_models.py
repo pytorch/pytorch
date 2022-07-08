@@ -15,7 +15,7 @@ from model_defs.op_test import (
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
-from test_pytorch_common import (
+from pytorch_test_common import (
     TestCase,
     run_tests,
     skipIfNoLapack,

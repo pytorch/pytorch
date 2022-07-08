@@ -4,7 +4,7 @@ import io
 import itertools
 
 import onnx
-from test_pytorch_common import TestCase, run_tests
+from pytorch_test_common import TestCase, run_tests
 
 import torch
 import torch.onnx

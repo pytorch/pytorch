@@ -11,8 +11,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import model_defs.word_language_model as word_language_model
 import numpy as np
+import onnx_test_common
 import parameterized
-import test_onnx_common
 import torchvision
 from model_defs.lstm_flattening_result import (
     LstmFlatteningResultWithoutSeqLength,
@@ -23,20 +23,20 @@ from model_defs.rnn_model_with_packed_sequence import (
     RnnModelWithPackedSequenceWithoutState,
     RnnModelWithPackedSequenceWithState,
 )
-from test_pytorch_common import (
+from pytorch_test_common import (
     BATCH_SIZE,
     RNN_BATCH_SIZE,
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     run_tests,
+    skipForAllOpsetVersions,
     skipIfNoLapack,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
     skipTraceTest,
-    skipForAllOpsetVersions,
 )
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
@@ -154,10 +154,10 @@ def _parametrize_rnn_args(arg_name):
 
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(),
-    class_name_func=test_onnx_common.parameterize_class_name,
+    class_name_func=onnx_test_common.parameterize_class_name,
 )
 @common_utils.instantiate_parametrized_tests
-class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
+class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
             def __init__(self):

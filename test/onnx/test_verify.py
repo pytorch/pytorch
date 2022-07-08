@@ -1,6 +1,6 @@
 # Owner(s): ["module: onnx"]
 
-from test_pytorch_common import TestCase, run_tests
+from pytorch_test_common import TestCase, run_tests
 from verify import verify
 
 import caffe2.python.onnx.backend as backend
