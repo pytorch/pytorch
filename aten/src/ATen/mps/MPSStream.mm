@@ -59,6 +59,11 @@ void MPSStream::commitAndWait() {
   _commandBuffer = nil;
 }
 
+void MPSStream::commitAndContinue() {
+  assert(_commandBuffer);
+  [_commandBuffer commitAndContinue];
+}
+
 void MPSStream::flush() {
   if (_commandBuffer) {
     [_commandBuffer commit];
@@ -76,7 +81,6 @@ void MPSStream::_flush(bool commitAndWait) const {
   [_commandBuffer release];
 }
 
-#define USE_MPSCOMMANDBUFFER 1
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   dispatch_sync(_serialQueue, ^() {

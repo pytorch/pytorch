@@ -34,6 +34,8 @@ typedef void* MTLDevice_t;
 namespace at {
 namespace mps {
 
+#define USE_MPSCOMMANDBUFFER 1
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -53,6 +55,7 @@ public:
   MTLCommandBuffer_t commandBuffer();
   void commit(bool flush);
   void commitAndWait();
+  void commitAndContinue();
   void synchronize();
 
   void flush();

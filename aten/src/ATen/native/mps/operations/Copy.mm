@@ -150,7 +150,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
         [blitEncoder endEncoding];
 
         if (non_blocking) {
+#if USE_MPSCOMMANDBUFFER
+          stream->commitAndContinue();
+#else
           stream->commit(true);
+#endif
         } else {
           stream->commitAndWait();
         }
@@ -215,7 +219,11 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
                                size:(NSUInteger)size];
         [blitEncoder endEncoding];
         if (non_blocking) {
+#if USE_MPSCOMMANDBUFFER
+          stream->commitAndContinue();
+#else
           stream->commit(true);
+#endif
         } else {
           stream->commitAndWait();
         }
@@ -300,7 +308,11 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
                                size:src_size];
         [blitEncoder endEncoding];
         // GPU to GPU copy needs flushing only, and no synchronization with CPU is necessary
-        stream->commit(true);
+#if USE_MPSCOMMANDBUFFER
+          stream->commitAndContinue();
+#else
+          stream->commit(true);
+#endif
       }
     });
   } else {
