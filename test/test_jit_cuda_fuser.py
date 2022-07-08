@@ -4946,6 +4946,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
@@ -4972,6 +4975,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
                                 torch.float64, torch.complex64, torch.complex128))
     def test_nvfuser_extremal_values(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         def _get_extremal_tensor(x, val, dtype):
