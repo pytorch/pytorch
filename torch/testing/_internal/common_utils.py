@@ -825,10 +825,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-# TODO - Remove this in next PR to have easy revert strategy in case of unstable
-# CI
-# TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
-TEST_WITH_TORCHDYNAMO = False
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
 if TEST_WITH_TORCHDYNAMO:
     import torchdynamo
     # torchdynamo.config.trace = True
