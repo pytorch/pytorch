@@ -8,6 +8,8 @@ import warnings
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
+__all__ = ['ProcessException', 'ProcessRaisedException', 'ProcessExitedException', 'ProcessContext',
+           'SpawnContext', 'start_processes', 'spawn']
 
 class ProcessException(Exception):
     __slots__ = ["error_index", "error_pid"]

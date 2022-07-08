@@ -18,6 +18,10 @@ try:
 except ImportError:
     pass
 
+__all__ = ['StorageWeakRef', 'SharedCache', 'rebuild_event', 'reduce_event', 'rebuild_tensor', 'rebuild_cuda_tensor',
+           'reduce_tensor', 'fd_id', 'storage_from_cache', 'rebuild_storage_fd', 'rebuild_storage_filename',
+           'rebuild_storage_empty', 'rebuild_typed_storage', 'reduce_typed_storage', 'rebuild_typed_storage_child',
+           'reduce_typed_storage_child', 'reduce_storage', 'init_reductions']
 
 class StorageWeakRef(object):
     r"""A weak reference to a Storage.

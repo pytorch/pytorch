@@ -27,6 +27,13 @@ from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # 
 from torch import _jit_internal
 import torch.jit.annotations
 
+__all__ = ['is_reserved_name', 'FrontendError', 'NotSupportedError', 'UnsupportedNodeError',
+           'FrontendTypeError', 'build_withitems', 'build_stmts', 'get_class_properties', 'get_class_assigns',
+           'get_jit_class_def', 'get_jit_def', 'is_torch_jit_ignore_context_manager', 'Builder', 'build_class_def',
+           'build_def', 'build_param_list', 'build_param', 'build_ignore_context_manager', 'get_default_args',
+           'get_default_args_for_class', 'WithItemBuilder', 'StmtBuilder', 'ExprBuilder', 'find_before',
+           'build_expr', 'build_stmt', 'build_withitem']
+
 _IS_ASTUNPARSE_INSTALLED = False
 try:
     import astunparse  # type: ignore[import]

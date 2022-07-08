@@ -5,6 +5,8 @@ import warnings
 import torch
 from torch import Tensor
 
+__all__ = ['LSTMCell', 'LSTM']
+
 """
 We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.

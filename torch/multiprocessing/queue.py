@@ -3,6 +3,7 @@ import multiprocessing.queues
 from multiprocessing.reduction import ForkingPickler
 import pickle
 
+__all__ = ['ConnectionWrapper', 'Queue', 'SimpleQueue']
 
 class ConnectionWrapper(object):
     """Proxy class for _multiprocessing.Connection which uses ForkingPickler to

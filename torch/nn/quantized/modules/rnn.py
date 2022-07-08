@@ -1,5 +1,7 @@
 import torch
 
+__all__ = ['LSTM']
+
 class LSTM(torch.nn.quantizable.LSTM):
     r"""A quantized long short-term memory (LSTM).
 

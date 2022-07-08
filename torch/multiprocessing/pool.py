@@ -3,6 +3,7 @@ import multiprocessing.util as util
 
 from .queue import SimpleQueue
 
+__all__ = ['clean_worker', 'Pool']
 
 def clean_worker(*args, **kwargs):
     import gc

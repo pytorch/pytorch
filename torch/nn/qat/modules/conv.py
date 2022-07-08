@@ -7,6 +7,8 @@ from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d']
+
 class _ConvNd(nn.modules.conv._ConvNd):
 
     _FLOAT_MODULE = MOD
