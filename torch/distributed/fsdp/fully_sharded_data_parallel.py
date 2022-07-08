@@ -974,16 +974,16 @@ class FullyShardedDataParallel(nn.Module):
             TracingConfig
         ):
             # Initialize a dict that maps each module to its parent FSDP wrap
-            module_to_fsdp_unit: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
             for wrap in self.fsdp_modules(self):
-                module_to_fsdp_unit[wrap.module] = wrap
+                module_to_fsdp[wrap.module] = wrap
             # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
             # TODO (linjianma): self._fsdp_params_exec_order will be set based on
             # the parameter execution order rather than module_forward_order,
             # once the non-recursive wrapping policy is fully implemented.
             for m in execution_info.module_forward_order:
-                if m in module_to_fsdp_unit:
-                    for flat_param in module_to_fsdp_unit[m].params:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
         else:
