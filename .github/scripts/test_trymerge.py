@@ -74,6 +74,7 @@ def mock_parse_args(revert: bool = False,
             self.comment_id = 0
             self.on_mandatory = False
             self.on_green = False
+            self.land_checks = False
             self.reason = 'this is for testing'
 
     return Object()
@@ -90,6 +91,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
                comment_id: Optional[int] = None,
                mandatory_only: bool = False,
                on_green: bool = False,
+               land_checks: bool = False,
                timeout_minutes: int = 400,
                stale_pr_days: int = 3) -> None:
     pass
@@ -273,6 +275,7 @@ class TestGitHubPR(TestCase):
                                            force=True,
                                            comment_id=mock.ANY,
                                            on_green=False,
+                                           land_checks=False,
                                            mandatory_only=False)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
@@ -286,6 +289,7 @@ class TestGitHubPR(TestCase):
                                            force=False,
                                            comment_id=mock.ANY,
                                            on_green=False,
+                                           land_checks=False,
                                            mandatory_only=False)
 
 if __name__ == "__main__":
