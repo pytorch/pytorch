@@ -67,7 +67,7 @@ class Library:
         return self.m.define(schema, alias_analysis)
 
     def impl(self, op_name, fn, dispatch_key=''):
-        r'''impl registers the function implementation for an operator defined in the library.
+        r'''Registers the function implementation for an operator defined in the library.
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.

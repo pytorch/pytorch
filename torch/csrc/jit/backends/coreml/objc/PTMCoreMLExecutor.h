@@ -6,8 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PTMCoreMLExecutor : NSObject
 
-- (instancetype)initWithModel:(MLModel*)model
-                 featureNames:(NSArray<NSString*>*)featureNames;
+@property(atomic, strong) MLModel* model;
+
+- (instancetype)initWithFeatureNames:(NSArray<NSString*>*)featureNames;
 
 - (void)setInputs:(c10::impl::GenericList)inputs;
 
