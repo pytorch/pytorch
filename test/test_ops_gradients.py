@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import os
 from functools import partial, wraps
 from itertools import chain
 import torch
@@ -44,7 +45,9 @@ class TestGradients(TestCase):
             return variant is op.get_inplace()
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
-        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs,
+                                   small_inputs_only=os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1")
 
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):

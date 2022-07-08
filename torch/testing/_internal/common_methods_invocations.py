@@ -67,6 +67,7 @@ if TEST_SCIPY:
 L = 20
 M = 10
 S = 5
+XS = 3
 
 # Unique value to distinguish default from anything else
 _NOTHING = object()
@@ -2410,6 +2411,9 @@ def generate_elementwise_binary_noncontiguous_tensors(
 
 # Sample inputs for elementwise binary operators, like add
 def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
+
     if hasattr(op, "rhs_make_tensor_kwargs"):
         exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
 
@@ -2419,14 +2423,14 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
     shapes = (
         ((), ()),
-        ((S,), ()),
-        ((S, 1), (S,)),
-        ((M, S), ()),
-        ((S, M, S), (M, S)),
-        ((S, M, S), (S, M, S)),
-        ((M, 1, S), (M, S)),
-        ((M, 1, S), (1, M, S)),
-        ((0, 1, 3), (0, 10, 3)),
+        ((_S,), ()),
+        ((_S, 1), (_S,)),
+        ((_M, _S), ()),
+        ((_S, _M, _S), (_M, _S)),
+        ((_S, _M, _S), (_S, _M, _S)),
+        ((_M, 1, _S), (_M, _S)),
+        ((_M, 1, _S), (1, _M, _S)),
+        ((0, 1, XS), (0, _M, XS)),
     )
 
     sample_kwargs = kwargs.get("sample_kwargs", {})
@@ -2676,6 +2680,8 @@ def sample_inputs_elementwise_unary(
     if not op_kwargs:
         op_kwargs = {}
 
+    _L = S if kwargs.get("small_inputs_only", False) else L
+
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
@@ -2683,7 +2689,7 @@ def sample_inputs_elementwise_unary(
         # Tensors with dim=2 for sparse compressed testing
         yield SampleInput(
             make_tensor(
-                (L, L),
+                (_L, _L),
                 device=device,
                 dtype=dtype,
                 low=low,
@@ -2694,7 +2700,7 @@ def sample_inputs_elementwise_unary(
         )
     else:
         # Creates a 1D, empty, and scalar tensor
-        for shape in ((L,), (1, 0, 3), ()):
+        for shape in ((_L,), (1, 0, 3), ()):
             yield SampleInput(
                 make_tensor(
                     shape,
@@ -7297,12 +7303,34 @@ def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **
     for batch, m, n in product(batches, ns, ns):
         yield SampleInput(make_arg(batch + (m, n)))
 
+def error_inputs_softshrink(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"lambd": -0.5}),
+                     error_regex="lambda must be greater or equal to 0, but found to be -0.5")
 
-def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
-    N = 10
-    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
-               requires_grad=requires_grad)) for _ in range(1, N)]
-    return tensors
+def sample_inputs_softshrink(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for lbda in (0, 0.5):
+        yield SampleInput(make_arg(S, S), kwargs={"lambd": lbda})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
+
+def sample_inputs_hardshrink(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for lbda in (-0.5, 0, 0.5):
+        yield SampleInput(make_arg(S, S), kwargs={"lambd": lbda})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
+
+
+def sample_inputs_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for max_val, min_val in ((-0.5, 0.5), (0.5, -0.5), (0, 0)):
+        yield SampleInput(make_arg(S, S), kwargs={"min_val": min_val, "max_val": max_val})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
 
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
@@ -14991,7 +15019,8 @@ op_db: List[OpInfo] = [
     #                     # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
     #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
     #                 )),
-    OpInfo('nn.functional.softshrink',
+    UnaryUfuncInfo('nn.functional.softshrink',
+           ref=_NOTHING,
            aten_name="softshrink",
            aten_backward_name='softshrink_backward',
            dtypes=floating_types_and(torch.bfloat16),
@@ -15000,22 +15029,25 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=False,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
+           sample_inputs_func=sample_inputs_softshrink,
+           error_inputs_func=error_inputs_softshrink,
            supports_gradgrad=True,
            ),
-    OpInfo('nn.functional.hardshrink',
+    UnaryUfuncInfo('nn.functional.hardshrink',
+           ref=_NOTHING,
            aten_name="hardshrink",
            aten_backward_name='hardshrink_backward',
            dtypes=floating_types_and(torch.bfloat16,),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
+           sample_inputs_func=sample_inputs_hardshrink,
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::hardshrink"]),
-    OpInfo('nn.functional.hardtanh',
+    UnaryUfuncInfo('nn.functional.hardtanh',
+           ref=_NOTHING,
            aten_name="hardtanh",
            aten_backward_name='hardtanh_backward',
            dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
@@ -15024,7 +15056,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
            supports_autograd=True,
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
+           sample_inputs_func=sample_inputs_hardtanh,
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
@@ -15049,7 +15081,8 @@ op_db: List[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                # May not replicate in CI
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
-    OpInfo('nn.functional.relu6',
+    UnaryUfuncInfo('nn.functional.relu6',
+           ref=_NOTHING,
            aten_name="relu6",
            dtypes=all_types_and(torch.bfloat16),
            backward_dtypes=floating_types(),
@@ -15057,7 +15090,6 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
            supports_autograd=True,
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
@@ -20451,7 +20483,7 @@ python_ref_db = [
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
         supports_nvfuser=False,
@@ -20484,6 +20516,10 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.relu6",
+        torch_opinfo_name="nn.functional.relu6",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
     ),
@@ -20509,12 +20545,12 @@ python_ref_db = [
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardshrink",
         torch_opinfo_name="nn.functional.hardshrink",
         supports_nvfuser=False,
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
         supports_nvfuser=False,
