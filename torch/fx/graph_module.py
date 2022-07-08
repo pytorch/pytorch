@@ -705,7 +705,8 @@ class {module_name}(torch.nn.Module):
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        submodules_str = '\n'.join([submodule.__str__() for submodule in self.children()])
+        return '\n'.join([orig_str, self._code, submodules_str])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()
