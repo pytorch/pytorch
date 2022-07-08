@@ -5756,6 +5756,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5771,6 +5772,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
