@@ -6343,8 +6343,13 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
 
 
 def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
+    # Inherit sample inputs from nn.pad, but transform them to fit
+    # constant_pad_nd's interface
     nn_samples = sample_inputs_nn_pad(op_info, device, dtype, *args,
                                       mode='constant', **kwargs)
+
+    # NOTE: primTorch is more strict about the type of the fill value argument
+    # So we must cast it to the correct dtype
     from torch._prims.utils import dtype_to_type
     scalar_type = dtype_to_type(dtype)
 
