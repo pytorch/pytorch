@@ -148,6 +148,11 @@ pytest-xdist
 #Pinned versions:
 #test that import:
 
+pytest-rerunfailures
+#Description: plugin for rerunning tests
+#Pinned versions:
+#test that import:
+
 #pytest-benchmark
 #Description: fixture for benchmarking code
 #Pinned versions: 3.2.3
