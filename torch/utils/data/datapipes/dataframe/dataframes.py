@@ -9,14 +9,17 @@ from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
 
 __all__ = [
     "Capture",
+    "CaptureA",
     "CaptureAdd",
     "CaptureCall",
+    "CaptureControl",
     "CaptureDataFrame",
     "CaptureDataFrameWithDataPipeOps",
     "CaptureF",
     "CaptureGetAttr",
     "CaptureGetItem",
     "CaptureInitial",
+    "CaptureLikeMock",
     "CaptureMul",
     "CaptureSetItem",
     "CaptureSub",
@@ -24,6 +27,7 @@ __all__ = [
     "CaptureVariableAssign",
     "DataFrameTracer",
     "DataFrameTracedOps",
+    "disable_capture",
     "get_val",
 ]
 
