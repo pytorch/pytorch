@@ -2364,6 +2364,9 @@ def generate_elementwise_binary_noncontiguous_tensors(
 
 # Sample inputs for elementwise binary operators, like add
 def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
+
     if hasattr(op, "rhs_make_tensor_kwargs"):
         exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
 
@@ -2373,14 +2376,14 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
     shapes = (
         ((), ()),
-        ((S,), ()),
-        ((S, 1), (S,)),
-        ((M, S), ()),
-        ((S, M, S), (M, S)),
-        ((S, M, S), (S, M, S)),
-        ((M, 1, S), (M, S)),
-        ((M, 1, S), (1, M, S)),
-        ((0, 1, 3), (0, 10, 3)),
+        ((_S,), ()),
+        ((_S, 1), (_S,)),
+        ((_M, _S), ()),
+        ((_S, _M, _S), (_M, _S)),
+        ((_S, _M, _S), (_S, _M, _S)),
+        ((_M, 1, _S), (_M, _S)),
+        ((_M, 1, _S), (1, _M, _S)),
+        ((0, 1, XS), (0, _M, XS)),
     )
 
     sample_kwargs = kwargs.get("sample_kwargs", {})
@@ -2630,6 +2633,8 @@ def sample_inputs_elementwise_unary(
     if not op_kwargs:
         op_kwargs = {}
 
+    _L = S if kwargs.get("small_inputs_only", False) else L
+
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
@@ -2637,7 +2642,7 @@ def sample_inputs_elementwise_unary(
         # Tensors with dim=2 for sparse compressed testing
         yield SampleInput(
             make_tensor(
-                (L, L),
+                (_L, _L),
                 device=device,
                 dtype=dtype,
                 low=low,
@@ -2648,7 +2653,7 @@ def sample_inputs_elementwise_unary(
         )
     else:
         # Creates a 1D, empty, and scalar tensor
-        for shape in ((L,), (1, 0, 3), ()):
+        for shape in ((_L,), (1, 0, 3), ()):
             yield SampleInput(
                 make_tensor(
                     shape,
