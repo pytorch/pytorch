@@ -2806,6 +2806,9 @@ torch.cuda.synchronize()
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
                 should_error_from_not_implemented = 'cudnn' in op or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
+                if 'TORCH_CUDNN_V8_API_ENABLED' in os.environ and\
+                    int(os.environ['TORCH_CUDNN_V8_API_ENABLED']):
+                    skip_test = True
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
