@@ -91,7 +91,6 @@ on:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
