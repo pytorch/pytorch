@@ -49,6 +49,12 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
 
+    # steal the identity of the committer of the commit on the orig branch
+    email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
+    name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
+    repo._run_git("config", "--global", "user.name", name)
+    repo._run_git("config", "--global", "user.email", email)
+
     os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
     with open('.ghstackrc', 'w+') as f:
         f.write('[ghstack]\n' +
