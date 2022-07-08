@@ -965,7 +965,7 @@ class OutlierDetector(DetectorBase):
     RATIO_THRES_KEY = "ratio_threshold"
     REF_PERCENTILE_KEY = "reference_percentile"
     CHANNEL_AXIS_KEY = "channel_axis"
-    MAX_VALS_KEY = "max_values"
+    MAX_VALS_KEY = "per_channel_max"
 
     def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
         # initialize the variables of interest
