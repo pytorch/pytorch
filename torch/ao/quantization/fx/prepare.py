@@ -5,7 +5,7 @@ import warnings
 from torch.fx import (
     GraphModule,
 )
-from torch.fx.experimental.normalize import NormalizeArgs
+from .normalize import NormalizeArgsPreservingFQNs
 from torch.fx.graph import (
     Graph,
     Node,
@@ -1595,7 +1595,7 @@ def prepare(
 
     # print("before normalization:", model)
     # model, _ = _normalize_args_for_model(model, prepare_custom_config, is_standalone_module)
-    model = NormalizeArgs(model).transform()
+    model = NormalizeArgsPreservingFQNs(model).transform()
     model = _move_all_kwargs_to_args_with_exceptions(model)
     model = _cleanup_args(model)
     # print("after normalization:", model)
