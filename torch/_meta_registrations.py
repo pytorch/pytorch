@@ -11,18 +11,27 @@ from torch.utils._pytree import tree_map
 from torch._decomp_tables import meta_funcs
 
 from typing import List, Optional
+
 aten = torch.ops.aten
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+
+
 def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(op):
             meta_funcs[op] = f
             if register_dispatcher:
-                name = op.__name__ if op._overloadname != 'default' else op.overloadpacket.__name__
+                name = (
+                    op.__name__
+                    if op._overloadname != "default"
+                    else op.overloadpacket.__name__
+                )
                 meta_lib.impl(name, f)
+
         tree_map(add_func, op)
         return f
+
     return wrapper
 
 
@@ -79,14 +88,17 @@ def meta_index_select(self, dim, index):
         result_size[dim] = index.numel()
     return self.new_empty(result_size)
 
+
 @register_meta(aten.index_select.out)
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
 
+
 @register_meta(aten.sum.default)
 def meta_max(self):
     return self.new_empty(())
+
 
 @register_meta(aten.max.default)
 def meta_max(self):
@@ -163,6 +175,7 @@ def meta_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
+
 
 @register_meta(aten.dot.default)
 def meta_dot(self, tensor):
