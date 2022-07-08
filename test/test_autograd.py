@@ -4601,6 +4601,18 @@ for shape in [(1,), ()]:
             nn.Linear(nz_bottleneck, nz_inp)
         )
 
+        # Module holder for testing activation checkpointing with no_reentrant
+        # supports kwargs.
+        class MyModule(nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.module = mod
+
+            def forward(self, data):
+                return self.module(data)
+
+        module = MyModule(mod=module)
+
         # Run model with and without checkpointing and verify gradients are
         # equivalent, regardless of if inputs require grads or not.
         module_copy = deepcopy(module)
@@ -4612,7 +4624,7 @@ for shape in [(1,), ()]:
             data_r.uniform_()
             data_r.requires_grad = input_requires_grad
             data_r_copy = data_r.clone()
-            feat_r = checkpoint(module, data_r, use_reentrant=False)
+            feat_r = checkpoint(module, data=data_r, use_reentrant=False)
             feat_combined.append(feat_r)
             feat_r_no_checkpoint = module_copy(data_r)
             feat_combined_no_checkpoint.append(feat_r_no_checkpoint)
