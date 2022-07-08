@@ -736,7 +736,7 @@ class TestSparseCompressed(TestCase):
                torch.tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'`c{row|col}_indices[..., 0] == 0` is not satisfied.')
+               r'`c{row|col}_indices[..., -1] == nnz` is not satisfied.')
 
         yield ('invalid compressed_indices.diff(dim=-1)',
                torch.tensor([0, 0, 4]),
