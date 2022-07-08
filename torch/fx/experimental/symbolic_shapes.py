@@ -1,5 +1,10 @@
-import sympy
 import torch
+
+try:
+    import sympy
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
 
 class PySymInt(object):
     def __init__(self, expr, shape_env):
@@ -56,6 +61,8 @@ class ShapeEnv(object):
         self.shape_env = {}
 
     def create_symint(self, name, val):
+        if not HAS_SYMPY:
+            raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val == 0 or val == 1:
             return val
         sympy_expr = sympy.Symbol(name, positive=True)
