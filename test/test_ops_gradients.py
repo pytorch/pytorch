@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import os
 from functools import partial, wraps
 from itertools import chain
 import torch
