@@ -17,7 +17,7 @@ struct TORCH_API SchemaInfo {
   explicit SchemaInfo(c10::FunctionSchema schema)
       : schema_(std::move(schema)) {}
   explicit SchemaInfo(const char* signature)
-      : schema_(std::move(torch::jit::parseSchema(signature))) {}
+      : schema_(torch::jit::parseSchema(signature)) {}
 
  private:
   c10::FunctionSchema schema_;
