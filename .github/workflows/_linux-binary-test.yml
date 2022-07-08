@@ -145,30 +145,30 @@ jobs:
       # End of non-ROCm setup
 
       # Setup the environment for ROCm builds
-      - name: Clean workspace
+      - name: [ROCm Only] Clean workspace
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
+      - name: [ROCm Only] Set DOCKER_HOST
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
         run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
+      - name: [ROCm Only] Runner health check system info
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always() }}
         run: |
           cat /etc/os-release || true
           cat /etc/apt/sources.list.d/rocm.list || true
           cat /opt/rocm/.info/version || true
           whoami
-      - name: Runner health check rocm-smi
+      - name: [ROCm Only] Runner health check rocm-smi
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm'  && always()}}
         run: |
           rocm-smi
-      - name: Runner health check rocminfo
+      - name: [ROCm Only] Runner health check rocminfo
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always()}}
         run: |
           rocminfo
-      - name: Runner health check GPU count
+      - name: [ROCm Only] Runner health check GPU count
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always() }}
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
@@ -176,11 +176,11 @@ jobs:
               echo "Failed to detect GPUs on the runner"
               exit 1
           fi
-      - name: Runner health check disconnect on failure
+      - name: [ROCm Only] Runner health check disconnect on failure
         if: ${{ failure() && inputs.GPU_ARCH_TYPE == 'rocm' }}
         run: |
           killall runsvc.sh
-      - name: Preserve github env variables for use in docker
+      - name: [ROCm Only] Preserve github env variables for use in docker
         if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -280,7 +280,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
-        if: always()
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
