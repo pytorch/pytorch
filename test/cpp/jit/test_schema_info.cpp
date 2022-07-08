@@ -4,10 +4,8 @@
 namespace torch {
 namespace utils {
 TEST(FunctionSchemaIsMutableTest, Basic) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_TRUE(schema.is_mutable(0));
   ASSERT_TRUE(schema.is_mutable("self"));
   ASSERT_FALSE(schema.is_mutable(1));
@@ -17,11 +15,8 @@ TEST(FunctionSchemaIsMutableTest, Basic) {
 }
 
 TEST(FunctionSchemaIsMutableTest, InvalidArgument) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
-  ASSERT_THROW(schema.is_mutable(-1), c10::Error);
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_THROW(schema.is_mutable(4), c10::Error);
   ASSERT_THROW(schema.is_mutable("named_argument"), c10::Error);
 }
