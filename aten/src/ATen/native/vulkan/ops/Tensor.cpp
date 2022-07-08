@@ -145,6 +145,8 @@ vTensorStorage::vTensorStorage(
     sizes_(sizes),
     strides_(sizes.size()),
     is_quantized_{true},
+    q_scale{q_scale_in},
+    q_zero_point{q_zero_point_in},
     image_(allocate_image(context_, extents_, options_.dtype())),
     last_access_{} {
   ops::verify(options);
