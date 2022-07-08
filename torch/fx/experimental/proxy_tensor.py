@@ -59,6 +59,13 @@ def wrap_output(inner_res, proxy_res, **kwargs):
     else:
         return inner_res
 
+def unwrap_proxy(e):
+    return e.proxy if isinstance(e, ProxyTensor) else e
+
+def unwrap_elem(e):
+    if isinstance(e, ProxyTensor):
+        return e.elem
+    return e
 
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
@@ -74,14 +81,6 @@ def proxy_call(func_overload, args, kwargs=None):
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
-
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)

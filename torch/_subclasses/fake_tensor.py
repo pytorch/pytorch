@@ -334,6 +334,9 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        if any(not issubclass(t, FakeTensor) and not t is torch.Tensor for t in types):
+            return NotImplemented
+
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):

@@ -12,8 +12,12 @@ from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.experimental.proxy_tensor import (
     ProxyTensor,
+    ProxyTorchDispatchMode,
     wrap_output,
+    unwrap_proxy,
+    PythonKeyTracer,
 )
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -152,8 +156,16 @@ class ProxyTensorInterpreter(torch.fx.Interpreter):
             out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
         )
 
-    # call_function, call_method, call_module get traced automatically by the ProxyTensors.
-    # NB: methods and modules will get inlined if you don't override explicitly
+    # Use the mode in case the function call doesn't have any tensor arguments
+    def call_function(self, target, args, kwargs):
+        with ProxyTorchDispatchMode(self.tracer):
+            return super().call_function(target, args, kwargs)
+
+    def call_method(self, target, args, kwargs):
+        with ProxyTorchDispatchMode(self.tracer):
+            return super().call_method(target, args, kwargs)
+
+    # Can't do call_module because the interpreter not reentrant
 
     def output(self, target, args, kwargs):
         out = super().output(target, args, kwargs)
@@ -173,42 +185,54 @@ def unwrap_proxy_node(e):
     return e.proxy.node if isinstance(e, ProxyTensor) else e
 
 
-class ApplyCudaGraphs(ProxyTensorInterpreter):
+class ApplyCudaGraphs(torch.fx.Interpreter):
     # All module calls are assumed to be fusion groups, since
     # this is post AOTAutograd which would have squashed all the modules.
     # Module assumed to be called only once.
     def call_module(self, target, args, kwargs):
-        assert not kwargs
-        # Don't trace the module, but do run the module to get the correct
-        # out result
-        out = super().call_module(target, tree_map(unwrap_elem, args), kwargs)
-        submod = self.module.get_submodule(target)
-        mutated_inputs = FindInputMutations(submod)(*map(unwrap_elem, args))
-        # smh the module didn't get transferred wut
-        self.new_module.add_submodule(target, CudaGraphModule(submod, mutated_inputs))
-        return wrap_output(
-            out,
-            torch.fx.Proxy(
-                self.new_graph.call_module(
+        with enable_torch_dispatch_mode(self.proxy_mode.inner, replace=self.proxy_mode):
+            assert not kwargs
+            # Don't trace the module, but do run the module to get the correct
+            # out result
+            out = super().call_module(target, tree_map(unwrap_elem, args), kwargs)
+            submod = self.module.get_submodule(target)
+            mutated_inputs = FindInputMutations(submod)(*map(unwrap_elem, args))
+            self.new_module.add_submodule(target, CudaGraphModule(submod, mutated_inputs))
+            return wrap_output(
+                out,
+                self.proxy_mode.tracer.create_proxy(
+                    "call_module",
                     target,
-                    tree_map(unwrap_proxy_node, args),
-                    tree_map(unwrap_proxy_node, kwargs),
-                ),
-                self.tracer,
-            ),
-        )
+                    tree_map(unwrap_proxy, args),
+                    tree_map(unwrap_proxy, kwargs)
+                )
+            )
+
+def trace_interp(interp, inputs):
+    new_graph = torch.fx.Graph()
+    new_module = torch.fx.GraphModule(interp.module, new_graph)
+    tracer = PythonKeyTracer()
+    tracer.graph = new_graph
+    tracer.root = new_module
+    tracer.tensor_attrs = {}
+    fake_mode = FakeTensorMode()
+    args = [
+        ProxyTensor(fake_mode.from_tensor(i), tracer.create_proxy("placeholder", n.target, n.args, n.kwargs))
+        for i, n in zip(inputs, filter(lambda n: n.op == "placeholder", interp.module.graph.nodes))
+    ]
+    proxy_mode = ProxyTorchDispatchMode(tracer)
+    interp.proxy_mode = proxy_mode
+    interp.new_module = new_module
+    with fake_mode, proxy_mode:
+        outs = interp.run(*args)
+    new_graph.output(tree_map(unwrap_proxy_node, outs))
+    new_module.recompile()
+    return new_module
 
 
 def cudagraphs(model, inputs):
     model = partition_cudagraphs(model, inputs)
-
-    # Your interpreter
-    t = ApplyCudaGraphs(model)
-    with FakeTensorMode.push() as mode:
-        t.run(*map(mode.from_tensor, inputs))
-    model = t.new_module
-    model.recompile()
-
+    model = trace_interp(ApplyCudaGraphs(model), inputs)
     return model
 
 
@@ -321,6 +345,20 @@ class TestDynamoCudaGraphs(TestCase):
                     y = torch.randn(1, device="cuda")
                     loss = model(x, y).sum()
                     self.assertEqual(loss, torch.tensor(3.0, device="cuda"))
+                    loss.backward()
+
+    @patch("torchdynamo.config.verify_correctness", True)
+    def test_factory(self):
+        def model(y):
+            x = torch.zeros(3, device="cuda:0")
+            x.add_(3)
+            return x * y
+
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
+            for i in range(5):
+                with self.subTest(i):
+                    y = torch.randn(3, device="cuda:0", requires_grad=True)
+                    loss = model(y).sum()
                     loss.backward()
 
 
