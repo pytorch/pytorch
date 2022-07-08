@@ -240,8 +240,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(
 void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<SafePyObject>& type);
+    torch::jit::Stack* stack);
 bool concrete_is_contiguous_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
@@ -2124,19 +2123,10 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [dispatch_fn's type argument]
-// `type` is nullable and represents the TorchDispatchMode going on.
-// Right now we only support a single TorchDispatchMode, but in the future we
-// could change this to a stack of TorchDispatchModes.
-//
-// If `type` isn't null, then we consider the type for dispatch by prepending
-// it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
-// is responsible for doing overload resolution.
 void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<SafePyObject>& type) {
+    torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
@@ -2171,10 +2161,6 @@ void concrete_dispatch_fn(
         torch_api_function.attr(overload_name.c_str());
   }
   std::string module_name_str = "torch.ops." + ns_str;
-
-  if (type) {
-    append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
-  }
 
   // Find overloaded tensors
   for (const auto idx : c10::irange(arguments.size())) {

@@ -1100,6 +1100,56 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
 
+    def test_notimplemented_mode(self):
+        sub_count = 0
+
+        class PoliteMode(TorchDispatchMode):
+            def __init__(self):
+                self.pre_count = 0
+                self.post_count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.pre_count += 1
+                if any(t is not torch.Tensor for t in types):
+                    return NotImplemented
+                self.post_count += 1
+                return func(*args, **kwargs)
+
+        class SubTensor(torch.Tensor):
+            def __new__(cls, elem):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal sub_count
+                sub_count += 1
+
+                def unwrap(t):
+                    if isinstance(t, SubTensor):
+                        return t.elem
+                    else:
+                        return t
+
+                return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        a = SubTensor(torch.randn(2))
+        mode = PoliteMode()
+        with mode:
+            a.abs()
+
+        self.assertEqual(mode.pre_count, 2)
+        self.assertEqual(mode.post_count, 1)
+        self.assertEqual(sub_count, 1)
+
+        # make sure this doesn't error
+        with PoliteMode():
+            with PoliteMode():
+                a.abs()
+
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
             def __new__(cls, elem, mode):
