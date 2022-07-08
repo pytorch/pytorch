@@ -1,12 +1,14 @@
 import torch
 from torch import Tensor
-from torch._prims import utils
-from torch._prims.utils import (
+import torch._prims_utils as utils
+from torch._prims_utils import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     check,
     elementwise_dtypes,
 )
-from torch._prims.wrappers import out_wrapper
+from torch._prims_utils.wrappers import out_wrapper
+from torch.utils._pytree import tree_map
+from torch._decomp_tables import meta_funcs
 
 from typing import List, Optional
 

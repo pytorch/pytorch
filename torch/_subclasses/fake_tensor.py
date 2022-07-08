@@ -14,6 +14,7 @@ import functools
 import itertools
 import contextlib
 from dataclasses import dataclass
+from torch._decomp_tables import decomposition_table, meta_funcs
 
 
 aten = torch.ops.aten
