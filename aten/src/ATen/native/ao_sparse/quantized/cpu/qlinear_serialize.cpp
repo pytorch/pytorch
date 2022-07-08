@@ -30,6 +30,7 @@ at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
  * and without determining row_offsets
  * https://github.com/pytorch/FBGEMM/blob/9d7c48a65419d0350f9e9e72f31e05bfe37e85a4/src/FbgemmSparseDense.cc#L84
  */
+#ifdef USE_PYTORCH_QNNPACK
 ao::sparse::BCSR pack_bcsr(
     const int8_t* src,
     const int64_t R,
@@ -93,6 +94,7 @@ ao::sparse::BCSR pack_bcsr(
   return ao::sparse::BCSR(
       std::move(values), std::move(rowBPtr), std::move(colBIdx));
 }
+#endif // USE_PYTORCH_QNNPACK
 } // namespace
 
 #ifdef USE_FBGEMM
