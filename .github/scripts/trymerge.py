@@ -1079,8 +1079,10 @@ def merge(pr_num: int, repo: GitRepo,
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksNotRunError as ex:
+            last_exception = str(ex)
             if elapsed_time > queue_timeout_minutes * 60:
                 raise RuntimeError(f"Merge failed due to {ex} after waiting {queue_timeout_minutes} minutes.")
+            time.sleep(5 * 60)
         except MandatoryChecksPendingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
