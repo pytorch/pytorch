@@ -416,13 +416,15 @@ Tensor& activation_scalar_(
 Tensor hardshrink(
     const Tensor& self_arg,
     const Scalar& lambd) {
-  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink));
+  float abs_lambd = std::abs(lambd.to<float>());
+  return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(hardshrink));
 }
 
 Tensor& hardshrink_(
     Tensor& self,
     const Scalar& lambd) {
-  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_));
+  float abs_lambd = std::abs(lambd.to<float>());
+  return ops::activation_scalar_(self, abs_lambd, VK_KERNEL(hardshrink_));
 }
 
 Tensor leaky_relu(
