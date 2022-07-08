@@ -255,12 +255,26 @@ class TestRefs(TestCase):
             res = refs.constant_pad_nd(a, pad=[1] * (2 * ndim))
             self.assertTrue(res.is_contiguous(memory_format=mf))
 
-        # Test that ambiguous cases default to contiguous
+        # Ambiguous cases
+
+        # is_channels_last_ and is_contiguous_, results in channels_last output
         a = torch.empty_strided((2, 1, 2, 2), stride=(4, 1, 2, 1))
         self.assertTrue(a.is_contiguous(memory_format=torch.channels_last))
-        res = refs.constant_pad_nd(a, pad=[1] * 8)
-        self.assertTrue(res.is_contiguous())
-        self.assertFalse(res.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(a.is_contiguous())
+        actual = refs.constant_pad_nd(a, pad=[1] * 8)
+        expect = torch.constant_pad_nd(a, pad=[1] * 8)
+        self.assertEqual(actual.stride(), expect.stride())
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
+        # is_channels_last_contiguous_ but not is_channels_last_, results in
+        # contiguous output
+        a = torch.empty_strided((2, 1, 2, 2), stride=(4, 4, 2, 1))
+        self.assertTrue(a.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(a.is_contiguous())
+        actual = refs.constant_pad_nd(a, pad=[1] * 8)
+        expect = torch.constant_pad_nd(a, pad=[1] * 8)
+        self.assertEqual(actual.stride(), expect.stride())
+        self.assertTrue(actual.is_contiguous())
 
 
 instantiate_device_type_tests(TestRefs, globals())
