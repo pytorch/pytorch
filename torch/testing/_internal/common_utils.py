@@ -96,6 +96,7 @@ disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+
 class _TestParametrizer(object):
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
@@ -823,6 +824,33 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         r = func(*args, **kwargs)
         return r
 
+# Run PyTorch tests with TorchDynamo
+# TODO - Remove this in next PR to have easy revert strategy in case of unstable
+# CI
+# TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+TEST_WITH_TORCHDYNAMO = False
+if TEST_WITH_TORCHDYNAMO:
+    import torchdynamo
+    # torchdynamo.config.trace = True
+    # torchdynamo.config.debug = True
+    torchdynamo.config.print_internal_exceptions = False
+    # TODO - Collect errors with fake tensors
+    torchdynamo.config.fake_tensor_propagation = False
+    # Do not spend time on helper functions that are called with different inputs
+    torchdynamo.config.cache_size_limit = 8
+
+
+def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_TORCHDYNAMO:
+                raise unittest.SkipTest(msg)
+            else:
+                fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
@@ -1188,6 +1216,15 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
+@contextmanager
+def disable_functorch():
+    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
@@ -1201,7 +1238,13 @@ def freeze_rng_state():
     try:
         yield
     finally:
-        with no_dispatch():
+        # Modes are not happy with torch.cuda.set_rng_state
+        # because it clones the state (which could produce a Tensor Subclass)
+        # and then grabs the new tensor's data pointer in generator.set_state.
+        #
+        # In the long run torch.cuda.set_rng_state should probably be
+        # an operator.
+        with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.set_rng_state(rng_state)
@@ -1826,7 +1869,16 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        super().run(result=result)
+
+        if TEST_WITH_TORCHDYNAMO:
+            with torchdynamo.optimize("eager"):
+                super().run(result=result)
+
+            # TODO - Reset for each test slows down testing significantly.
+            # torchdynamo.reset()
+        else:
+            super().run(result=result)
+
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():

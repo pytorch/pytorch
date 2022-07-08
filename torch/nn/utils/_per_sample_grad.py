@@ -6,9 +6,9 @@ from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeigh
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
-def call_for_per_sample_grads(module, batch_size, loss_reduction="mean"):
+def call_for_per_sample_grads(module, batch_size, loss_reduction="sum"):
     r"""
-    call_for_per_sample_grads(module, batch_size, loss_reduction="mean")
+    call_for_per_sample_grads(module, batch_size, loss_reduction="sum")
     ``call_for_per_sample_grads`` returns a function that is invoked like the forward
     function of ``module`` and will produce the same result. Then, when backward is invoked,
     the parameters of ``module`` will have a ``grad_sample`` field populated with the per sample
@@ -19,7 +19,8 @@ def call_for_per_sample_grads(module, batch_size, loss_reduction="mean"):
           parameters will compute per sample gradients, located in a ``grad_sample``
           field when ``backward`` is invoked
         batch_size: The batch size of the input. Typically the input's first dimension
-        loss_reduction: The reduction used on the loss. Must be "mean" or "sum". Default: "mean"
+        loss_reduction: The reduction used on the loss. If "mean", per sample gradients will be scaled by the batch size
+          to offset the crossbatch interaction from running mean across a batch. Must be "mean" or "sum". Default: "sum"
 
     Examples::
         >>> model = nn.Linear(4, 3)

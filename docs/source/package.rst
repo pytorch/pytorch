@@ -5,7 +5,7 @@
 
 torch.package
 =============
-``torch.package`` adds support for creating hermetic packages containing arbitrary
+``torch.package`` adds support for creating packages containing both artifacts and arbitrary
 PyTorch code. These packages can be saved, shared, used to load and execute models
 at a later date or on a different machine, and can even be deployed to production using
 ``torch::deploy``.
