@@ -10,6 +10,8 @@ from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.parameter import Parameter
 from typing import TypeVar
 
+__all__ = ['ConvBn1d', 'ConvBnReLU1d', 'ConvReLU1d', 'ConvBn2d', 'ConvBnReLU2d', 'ConvReLU2d', 'ConvBn3d',
+           'ConvBnReLU3d', 'ConvReLU3d', 'update_bn_stats', 'freeze_bn_stats']
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,
     2: nn.BatchNorm2d,
