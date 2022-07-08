@@ -3,8 +3,6 @@ import onnxruntime
 
 import torch
 from torch.onnx import verification
-from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
-from torch.onnx.utils import _optimize_graph
 from torch.testing._internal import common_utils
 
 
@@ -20,9 +18,11 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
 
     # Shape inference is required because some ops' symbolic functions
     # generate sub-graphs based on inputs' types.
-    _set_onnx_shape_inference(True)
-    _set_opset_version(opset_version)
-    graph = _optimize_graph(graph, operator_export_type, params_dict={})
+    torch.onnx.symbolic_helper._set_onnx_shape_inference(True)
+    torch.onnx.symbolic_helper._set_opset_version(opset_version)
+    graph = torch.onnx.utils._optimize_graph(
+        graph, operator_export_type, params_dict={}
+    )
     proto, _, _, _ = graph._export_onnx(
         {},
         opset_version,
