@@ -6465,6 +6465,15 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_argsort(self):
+        class ArgSortModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.argsort(x, dim=1, descending=False)
+
+        x = torch.randn(3, 4)
+        self.run_test(ArgSortModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
@@ -8160,16 +8169,16 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
-        x = torch.rand(5).log()
-        y = torch.rand(5)
+        x = torch.randn(5)
+        y = torch.randn(5)
         self._kldiv_loss(x, y)
 
-        x = torch.rand(2, 3, 5).log()
-        y = torch.rand(2, 3, 5)
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
         self._kldiv_loss(x, y)
 
-        x = torch.rand(2, 3, 5, 7).log()
-        y = torch.rand(2, 3, 5, 7)
+        x = torch.randn(2, 3, 5, 7)
+        y = torch.randn(2, 3, 5, 7)
         self._kldiv_loss(x, y)
 
     def _kldiv_loss(self, x, y):
@@ -8179,7 +8188,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 self.loss = torch.nn.KLDivLoss(reduction="none", log_target=True)
 
             def forward(self, input, target):
-                return self.loss(input, target.log())
+                return self.loss(input, target)
 
         self.run_test(KLDivLossNone(), input_args=(x, y))
 
@@ -8199,7 +8208,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 self.loss = torch.nn.KLDivLoss(reduction="sum", log_target=True)
 
             def forward(self, input, target):
-                return self.loss(input, target.log())
+                return self.loss(input, target)
 
         self.run_test(KLDivLossSum(), input_args=(x, y))
 
@@ -8221,7 +8230,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 )
 
             def forward(self, input, target):
-                return self.loss(input, target.log())
+                return self.loss(input, target)
 
         self.run_test(KLDivLossMiniBatchMean(), input_args=(x, y))
 
