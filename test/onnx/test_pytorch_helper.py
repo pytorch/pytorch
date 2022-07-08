@@ -12,10 +12,11 @@ from caffe2.python.core import workspace
 from caffe2.python.model_helper import ModelHelper
 from torch import nn
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 class TestCaffe2Backend(common_utils.TestCase):
-
+    @skipIfNoLapack
     @unittest.skip("test broken because Lapack was always missing.")
     def test_helper(self):
         class SuperResolutionNet(nn.Module):
