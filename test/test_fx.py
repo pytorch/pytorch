@@ -4060,7 +4060,7 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
@@ -4076,11 +4076,17 @@ class TestVisionTracing(JitTestCase):
 
     UNTRACEABLE_MODELS = {
         "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
+        "fasterrcnn_resnet50_fpn_v2": PROXY_ITERATED,
         "fasterrcnn_mobilenet_v3_large_320_fpn": PROXY_ITERATED,
         "fasterrcnn_mobilenet_v3_large_fpn": PROXY_ITERATED,
         "maskrcnn_resnet50_fpn": PROXY_ITERATED,
+        "maskrcnn_resnet50_fpn_v2": PROXY_ITERATED,
         "keypointrcnn_resnet50_fpn": PROXY_ITERATED,
         "retinanet_resnet50_fpn": PROXY_ITERATED,
+        "retinanet_resnet50_fpn_v2": PROXY_ITERATED,
+        "ssd300_vgg16": PROXY_ITERATED,
+        "fcos_resnet50_fpn": PROXY_ITERATED,
+        "ssdlite320_mobilenet_v3_large": PROXY_ITERATED,
     }
     UNSCRIPTABLE_MODELS = {
         "googlenet": INCONSISTENT_TYPE,
@@ -4132,7 +4138,7 @@ class TestVisionTracing(JitTestCase):
     @classmethod
     def generate_classification_tests(cls):
         for k, v in torchvision_models.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
+            if callable(v) and k[0].lower() == k[0] and k[0] != "_" and k != 'get_weight':
                 test_name = 'test_torchvision_models_' + k
                 x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
                 kwargs = dict(num_classes=50)
@@ -4164,7 +4170,7 @@ class TestVisionTracing(JitTestCase):
         for k, v in torchvision_models.video.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
                 test_name = 'test_torchvision_models_video_' + k
-                x = torch.rand(1, 3, 4, 112, 112)
+                x = torch.rand(1, 3, 4, 112, 112) if k != 'mvit_v1_b' else torch.rand(1, 3, 16, 224, 224)
                 kwargs = dict(num_classes=50)
                 model_test = cls.generate_test_fn(k, v, x, kwargs)
                 setattr(cls, test_name, model_test)

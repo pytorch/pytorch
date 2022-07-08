@@ -98,7 +98,7 @@ function get_pinned_commit() {
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
-  pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
