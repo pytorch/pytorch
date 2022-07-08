@@ -96,7 +96,7 @@ struct InputMetadata {
       return at::native::get_nested_size_tensor(grad).is_same_size(
           shape_as_tensor());
     }
-    return grad.sizes().equals(c10::asIntArrayRefSlow(shape_as_dim_vector()));
+    return grad.sym_sizes().equals(shape_as_dim_vector());
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
     // Currently NestedTensors are not expandable. If this support is added then
@@ -106,7 +106,7 @@ struct InputMetadata {
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
     return grad.is_nested()
         ? false
-        : at::is_expandable_to(c10::asIntArrayRefSlow(shape_as_dim_vector()), grad.sizes());
+        : at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
   }
 
   at::Tensor reduce_grad(at::Tensor& grad) const {
@@ -114,7 +114,7 @@ struct InputMetadata {
     // true For nested tensors this always returns False, so this check
     // shouldn't fail
     TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_tensor())
-    return at::sum_to(std::move(grad), c10::asIntArrayRefSlow(shape_as_dim_vector()));
+    return at::sum_to(std::move(grad), shape_as_dim_vector());
   }
 
   std::stringstream incompatible_shape_error_message(
