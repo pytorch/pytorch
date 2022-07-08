@@ -1,4 +1,5 @@
 import torch
+import copy
 from torch.fx.graph import Node, Graph
 from ..utils import _parent_name
 from torch.ao.quantization.quantization_types import NodePattern, Pattern
@@ -74,6 +75,9 @@ class DefaultFuseHandler(FuseHandler):
             else:
                 n = pattern
                 if n.op == "call_module":
+                    # copy relu module instance since it can be used multiple times
+                    if isinstance(named_modules[n.target], torch.nn.ReLU):
+                        return copy.deepcopy(named_modules[n.target])
                     return named_modules[n.target]
                 elif n.op == "call_function" and n.target == torch.nn.functional.relu:
                     relu = torch.nn.ReLU()

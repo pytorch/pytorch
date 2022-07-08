@@ -729,7 +729,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         (_, b) = self._weight_bias()
         return b
 
-    def forward(self, input):
+    def forward(self, input, output_size=None):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
@@ -817,7 +817,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         (_, b) = self._weight_bias()
         return b
 
-    def forward(self, input):
+    def forward(self, input, output_size=None):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -906,7 +906,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         (_, b) = self._weight_bias()
         return b
 
-    def forward(self, input):
+    def forward(self, input, output_size=None):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:

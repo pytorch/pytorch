@@ -63,7 +63,7 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
         self._init_weight_qparams(weight_qparams, device)
 
     def _get_name(self):
-        return "QuantizedEmbedding(Reference)"
+        return "QuantizedEmbeddingBag(Reference)"
 
     def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
         weight_quant_dequant = self.get_weight()

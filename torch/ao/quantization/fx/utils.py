@@ -12,6 +12,7 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
+from torch.fx.node import Argument
 from .custom_config import PrepareCustomConfig
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
@@ -50,6 +51,7 @@ __all__ = [
     "return_arg_list",
     "WEIGHT_INDEX_DICT",
     "get_skipped_module_name_and_classes",
+    "get_all_args_as_positional_args",
 ]
 
 
@@ -345,10 +347,14 @@ def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
     produces the observed node or None if we can't extract a self contained
     graph without free variables(inputs of the forward function).
     '''
+    if isinstance(node, Node) and node.op == "placeholder":
+        return None
     nodes = [node]
     frontier = [node]
     while frontier:
         node = frontier.pop()
+        if node is None:
+            return None
         all_args = list(node.args) + list(node.kwargs.values())
         for arg in all_args:
             if not isinstance(arg, Node):
@@ -642,3 +648,10 @@ def get_skipped_module_name_and_classes(
         skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
 
     return skipped_module_names, skipped_module_classes
+
+def get_all_args_as_positional_args(node: Node) -> List[Argument]:
+    """ Get a list of args and kwargs as positional args
+    """
+    all_args = list(node.args)
+    all_args.extend(list(node.kwargs.values()))
+    return all_args
