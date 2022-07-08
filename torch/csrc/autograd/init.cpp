@@ -270,7 +270,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   {
     using torch::profiler::impl::Result;
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_);
+
+    py::class_<Inputs>(m, "_Inputs")
+        .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("dtypes", &Inputs::dtypes_);
+
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
