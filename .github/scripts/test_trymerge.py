@@ -93,6 +93,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
                on_green: bool = False,
                land_checks: bool = False,
                timeout_minutes: int = 400,
+               queue_timeout_minutes: int = 20,
                stale_pr_days: int = 3) -> None:
     pass
 
