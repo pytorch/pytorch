@@ -11765,6 +11765,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         self.run_test(FlattenModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat(self):
         class QuantizedConcatenationModel(torch.nn.Module):
             def forward(self, x):
