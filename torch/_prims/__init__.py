@@ -67,14 +67,15 @@ __all__ = [
     "exp2",
     "fill",
     "floor",
+    "imag",
     "isfinite",
-    "is_infinite",
     "lgamma",
     "log",
     "log1p",
     "log2",
     "log10",
     "neg",
+    "real",
     "reciprocal",
     "round",
     "sign",
@@ -204,6 +205,7 @@ _nvfuser_unary_ops = {
     "exp",
     "expm1",
     "floor",
+    "imag",
     "isfinite",
     "lgamma",
     "log",
@@ -212,6 +214,7 @@ _nvfuser_unary_ops = {
     "log10",
     "reciprocal",
     "neg",
+    "real",
     "round",
     "rsqrt",
     "sin",
@@ -465,6 +468,13 @@ def _elementwise_meta(
     return TensorMeta(number)
 
 
+def _complex_only_elementwise_meta(*args, **kwargs):
+    utils.check(
+        utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
+    )
+    return _elementwise_meta(*args, **kwargs)
+
+
 def _make_elementwise_unary_prim(
     name: str, *, type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, **kwargs
 ):
@@ -611,8 +621,18 @@ bitwise_not = _make_elementwise_unary_prim(
 )
 
 
-def _cbrt_aten(a: torch.Tensor):
-    return pow(a, (1 / 3))
+def _cbrt_aten(a: torch.Tensor) -> Tensor:
+    utils.check(
+        not a.is_complex(),
+        lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
+    )
+    # Returns the real cubic root of the number.
+    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
+    # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
+    # which is a complex number.
+    # For more info see the section Note in
+    # https://en.cppreference.com/w/cpp/numeric/math/cbrt
+    return torch.copysign(torch.pow(a.abs(), 1 / 3), a)
 
 
 cbrt = _make_elementwise_unary_prim(
@@ -732,17 +752,22 @@ floor = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+imag = _make_prim(
+    schema="imag(Tensor self) -> Tensor",
+    meta=partial(
+        _complex_only_elementwise_meta,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    ),
+    return_type=RETURN_TYPE.VIEW,
+    impl_aten=torch.imag,
+    impl_nvfuser=_imag_nvfuser,  # type: ignore[name-defined]
+    doc="",
+)
+
 isfinite = _make_elementwise_unary_prim(
     "isfinite",
     impl_aten=torch.isfinite,
     impl_nvfuser=_isfinite_nvfuser,  # type: ignore[name-defined]
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-)
-
-is_infinite = _make_elementwise_unary_prim(
-    "is_infinite",
-    impl_aten=torch.isinf,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -785,6 +810,18 @@ log10 = _make_elementwise_unary_prim(
     impl_nvfuser=_log10_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+real = _make_prim(
+    schema="real(Tensor self) -> Tensor",
+    meta=partial(
+        _complex_only_elementwise_meta,
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    ),
+    return_type=RETURN_TYPE.VIEW,
+    impl_aten=torch.real,
+    impl_nvfuser=_real_nvfuser,  # type: ignore[name-defined]
+    doc="",
 )
 
 reciprocal = _make_elementwise_unary_prim(
