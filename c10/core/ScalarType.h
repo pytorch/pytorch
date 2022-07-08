@@ -114,6 +114,9 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 #undef SPECIALIZE_ScalarTypeToCPPType
 
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
+
 } // namespace impl
 
 template <typename T>
