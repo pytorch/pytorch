@@ -591,7 +591,7 @@ def lint_test_case_extension(suite):
 
 def sanitize_pytest_xml(xml_file: str):
     # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
-    # should consider writing an equivalent of junitxml plugin to do this
+    # consider somehow modifying the XML logger in conftest to do this instead
     import xml.etree.ElementTree as ET
     tree = ET.parse(xml_file)
     for testcase in tree.iter('testcase'):

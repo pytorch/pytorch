@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import functools
 
 
-xml_key = StashKey["LogXML2"]()
+xml_key = StashKey["LogXMLReruns"]()
 
 
 def pytest_addoption(parser: Parser) -> None:
@@ -21,7 +21,7 @@ def pytest_addoption(parser: Parser) -> None:
         action="store",
         dest="xmlpath_reruns",
         metavar="path",
-        type=functools.partial(filename_arg, optname="--junit-xml-me"),
+        type=functools.partial(filename_arg, optname="--junit-xml-reruns"),
         default=None,
         help="create junit-xml style report file at given path.",
     )
@@ -53,7 +53,7 @@ def pytest_addoption(parser: Parser) -> None:
         default="total",
     )  # choices=['total', 'call'])
     parser.addini(
-        "junit_family_me",
+        "junit_family_reruns",
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
@@ -63,8 +63,8 @@ def pytest_configure(config: Config) -> None:
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
-        junit_family = config.getini("junit_family")
-        config.stash[xml_key] = LogXML2(
+        junit_family = config.getini("junit_family_reruns")
+        config.stash[xml_key] = LogXMLReruns(
             xmlpath,
             config.option.junitprefix,
             config.getini("junit_suite_name_reruns"),
@@ -83,7 +83,7 @@ def pytest_unconfigure(config: Config) -> None:
         config.pluginmanager.unregister(xml)
 
 
-class NodeReporter(_NodeReporter):
+class _NodeReporterReruns(_NodeReporter):
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
@@ -95,7 +95,7 @@ class NodeReporter(_NodeReporter):
         self.append(tag)
 
 
-class LogXML2(LogXML):
+class LogXMLReruns(LogXML):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -121,7 +121,7 @@ class LogXML2(LogXML):
             reporter = self._opentestcase(report)
             self.append_rerun(reporter, report)
 
-    def node_reporter(self, report: Union[TestReport, str]) -> NodeReporter:
+    def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
         nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
         # Local hack to handle xdist report order.
         workernode = getattr(report, "node", None)
@@ -132,7 +132,7 @@ class LogXML2(LogXML):
             # TODO: breaks for --dist=each
             return self.node_reporters[key]
 
-        reporter = NodeReporter(nodeid, self)
+        reporter = _NodeReporterReruns(nodeid, self)
 
         self.node_reporters[key] = reporter
         self.node_reporters_ordered.append(reporter)

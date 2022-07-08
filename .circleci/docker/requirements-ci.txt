@@ -144,12 +144,12 @@ pytest
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
 
 pytest-xdist
-#Description: pluging for running pytest in parallel
+#Description: plugin for running pytest in parallel
 #Pinned versions:
 #test that import:
 
 pytest-rerunfailures
-#Description: plugin for rerunning tests
+#Description: plugin for rerunning tests in pytest
 #Pinned versions:
 #test that import:
 
