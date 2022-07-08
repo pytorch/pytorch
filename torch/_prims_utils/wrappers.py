@@ -1,12 +1,12 @@
 import torch
-from torch._prims.utils import (
+from torch._prims_utils import (
     Number,
     NumberType,
     TensorLike,
     TensorLikeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims.utils as utils
+import torch._prims_utils as utils
 from torch.utils._pytree import tree_flatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
@@ -267,6 +267,3 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
 
-
-# avoid mypy import cycle
-import torch._prims as prims
