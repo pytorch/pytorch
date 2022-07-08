@@ -307,9 +307,11 @@ class ParamExecOrderWrapPolicy:
 
     Args:
         init_policy (Callable):
-            The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
-            forward and backward iteration, ``init_policy`` is used. Parameter execution order is also recorded
-            in the first iteration. Starting from second iteration, ``ParamExecOrderWrapPolicy`` will be used.
+            The initial recursive wrapping policy used to guide the wrapping of
+            this policy. If tracing_config is none, in the first forward and
+            backward iteration, ``init_policy`` is used to record parameter
+            execution order. Otherwise, init_policy is only used in FSDP
+            constructor for module level wrapping.
 
             The default ``always_wrap_policy`` might not be the best choice for every model. For example, for
             transformer based models, setting ``transformer_auto_wrap_policy`` as the ``init_policy`` will guarantee
