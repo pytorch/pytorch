@@ -24,10 +24,34 @@ from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 
+__all__ = ['conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d', 'conv_tbc',
+           'avg_pool1d', 'avg_pool2d', 'avg_pool3d', 'fractional_max_pool2d_with_indices', 'fractional_max_pool2d',
+           'fractional_max_pool3d_with_indices', 'fractional_max_pool3d', 'fractional_max_pool1d_with_indices',
+           'fractional_max_pool1d', 'max_unpool1d', 'max_unpool2d', 'max_unpool3d', 'lp_pool1d', 'lp_pool2d',
+           'adaptive_max_pool1d_with_indices', 'adaptive_max_pool1d', 'adaptive_max_pool2d_with_indices', 'adaptive_max_pool2d',
+           'adaptive_max_pool3d_with_indices', 'adaptive_max_pool3d', 'adaptive_avg_pool1d', 'adaptive_avg_pool2d',
+           'adaptive_avg_pool3d', 'dropout', 'alpha_dropout', 'dropout1d', 'dropout2d', 'dropout3d', 'feature_alpha_dropout',
+           'relu', 'relu_', 'glu', 'hardtanh', 'hardtanh_', 'relu6', 'elu', 'elu_', 'selu', 'selu_', 'celu', 'celu_',
+           'leaky_relu', 'leaky_relu_', 'prelu', 'rrelu', 'rrelu_', 'logsigmoid', 'gelu', 'hardshrink', 'tanhshrink',
+           'softsign', 'softplus', 'softmin', 'softmax', 'gumbel_softmax', 'log_softmax', 'softshrink', 'tanh', 'sigmoid',
+           'hardsigmoid', 'linear', 'bilinear', 'silu', 'mish', 'hardswish', 'embedding', 'embedding_bag', 'batch_norm',
+           'instance_norm', 'layer_norm', 'group_norm', 'local_response_norm', 'ctc_loss', 'nll_loss', 'poisson_nll_loss',
+           'gaussian_nll_loss', 'kl_div', 'cross_entropy', 'binary_cross_entropy', 'binary_cross_entropy_with_logits',
+           'smooth_l1_loss', 'huber_loss', 'l1_loss', 'mse_loss', 'margin_ranking_loss', 'hinge_embedding_loss',
+           'multilabel_margin_loss', 'soft_margin_loss', 'multilabel_soft_margin_loss', 'cosine_embedding_loss', 'multi_margin_loss',
+           'pixel_shuffle', 'pixel_unshuffle', 'channel_shuffle', 'native_channel_shuffle', 'upsample', 'interpolate',
+           'upsample_nearest', 'upsample_bilinear', 'grid_sample', 'affine_grid', 'pad', 'pairwise_distance', 'pdist',
+           'cosine_similarity', 'one_hot', 'triplet_margin_loss', 'triplet_margin_with_distance_loss', 'normalize', 'fold',
+           'unfold', 'multi_head_attention_forward', 'max_pool1d', 'max_pool1d_with_indices']
+
+def _set_module_and_doc_str(fn, doc_str):
+    fn_ = _add_docstr(fn, doc_str)
+    fn_.__module__ = 'torch.nn.functional'
+    return fn
 
 Tensor = torch.Tensor
 
-conv1d = _add_docstr(
+conv1d = _set_module_and_doc_str(
     torch.conv1d,
     r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
@@ -78,7 +102,7 @@ Examples::
 """,
 )
 
-conv2d = _add_docstr(
+conv2d = _set_module_and_doc_str(
     torch.conv2d,
     r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
@@ -131,7 +155,7 @@ Examples::
 """,
 )  # noqa: E501
 
-conv3d = _add_docstr(
+conv3d = _set_module_and_doc_str(
     torch.conv3d,
     r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
@@ -183,7 +207,7 @@ Examples::
 """,
 )  # noqa: E501
 
-conv_transpose1d = _add_docstr(
+conv_transpose1d = _set_module_and_doc_str(
     torch.conv_transpose1d,
     r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
@@ -226,7 +250,7 @@ Examples::
 """,
 )
 
-conv_transpose2d = _add_docstr(
+conv_transpose2d = _set_module_and_doc_str(
     torch.conv_transpose2d,
     r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
@@ -271,7 +295,7 @@ Examples::
 """,
 )  # noqa: E501
 
-conv_transpose3d = _add_docstr(
+conv_transpose3d = _set_module_and_doc_str(
     torch.conv_transpose3d,
     r"""
 conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
@@ -315,7 +339,7 @@ Examples::
 """,
 )  # noqa: E501
 
-conv_tbc = _add_docstr(
+conv_tbc = _set_module_and_doc_str(
     torch.conv_tbc,
     r"""
 Applies a 1-dimensional sequence convolution over an input sequence.
@@ -331,7 +355,7 @@ Args:
 
 
 # Pooling
-avg_pool1d = _add_docstr(
+avg_pool1d = _set_module_and_doc_str(
     torch.avg_pool1d,
     r"""
 avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
@@ -365,7 +389,7 @@ Examples::
 )
 
 
-avg_pool2d = _add_docstr(
+avg_pool2d = _set_module_and_doc_str(
     torch._C._nn.avg_pool2d,
     r"""
 avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
@@ -393,7 +417,7 @@ Args:
 """,
 )
 
-avg_pool3d = _add_docstr(
+avg_pool3d = _set_module_and_doc_str(
     torch._C._nn.avg_pool3d,
     r"""
 avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
@@ -1181,7 +1205,7 @@ adaptive_max_pool3d = boolean_dispatch(
 )
 
 
-adaptive_avg_pool1d = _add_docstr(
+adaptive_avg_pool1d = _set_module_and_doc_str(
     torch.adaptive_avg_pool1d,
     r"""
 adaptive_avg_pool1d(input, output_size) -> Tensor
@@ -1433,7 +1457,7 @@ def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = Fa
 # function needed for __torch_function__ support
 threshold = _threshold
 
-threshold_ = _add_docstr(
+threshold_ = _set_module_and_doc_str(
     _VF.threshold_,
     r"""
 threshold_(input, threshold, value) -> Tensor
@@ -1458,7 +1482,7 @@ def relu(input: Tensor, inplace: bool = False) -> Tensor:
     return result
 
 
-relu_ = _add_docstr(
+relu_ = _set_module_and_doc_str(
     torch.relu_,
     r"""
 relu_(input) -> Tensor
@@ -1509,7 +1533,7 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     return result
 
 
-hardtanh_ = _add_docstr(
+hardtanh_ = _set_module_and_doc_str(
     torch._C._nn.hardtanh_,
     r"""
 hardtanh_(input, min_val=-1., max_val=1.) -> Tensor
@@ -1549,7 +1573,7 @@ def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     return result
 
 
-elu_ = _add_docstr(
+elu_ = _set_module_and_doc_str(
     torch._C._nn.elu_,
     r"""
 elu_(input, alpha=1.) -> Tensor
@@ -1578,7 +1602,7 @@ def selu(input: Tensor, inplace: bool = False) -> Tensor:
     return result
 
 
-selu_ = _add_docstr(
+selu_ = _set_module_and_doc_str(
     torch.selu_,
     r"""
 selu_(input) -> Tensor
@@ -1605,7 +1629,7 @@ def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     return result
 
 
-celu_ = _add_docstr(
+celu_ = _set_module_and_doc_str(
     torch.celu_,
     r"""
 celu_(input, alpha=1.) -> Tensor
@@ -1633,7 +1657,7 @@ def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = Fals
     return result
 
 
-leaky_relu_ = _add_docstr(
+leaky_relu_ = _set_module_and_doc_str(
     torch._C._nn.leaky_relu_,
     r"""
 leaky_relu_(input, negative_slope=0.01) -> Tensor
@@ -1643,7 +1667,7 @@ In-place version of :func:`~leaky_relu`.
 )
 
 
-prelu = _add_docstr(
+prelu = _set_module_and_doc_str(
     torch.prelu,
     r"""prelu(input, weight) -> Tensor
 
@@ -1683,7 +1707,7 @@ def rrelu(
     return result
 
 
-rrelu_ = _add_docstr(
+rrelu_ = _set_module_and_doc_str(
     torch.rrelu_,
     r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
@@ -1692,7 +1716,7 @@ In-place version of :func:`~rrelu`.
 """,
 )
 
-logsigmoid = _add_docstr(
+logsigmoid = _set_module_and_doc_str(
     torch._C._nn.log_sigmoid,
     r"""
 logsigmoid(input) -> Tensor
@@ -1703,7 +1727,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """,
 )
 
-gelu = _add_docstr(
+gelu = _set_module_and_doc_str(
     torch._C._nn.gelu,
     r"""
 gelu(input, approximate = 'none') -> Tensor
@@ -1719,7 +1743,7 @@ When the approximate argument is 'tanh', Gelu is estimated with:
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
 
-hardshrink = _add_docstr(
+hardshrink = _set_module_and_doc_str(
     torch.hardshrink,
     r"""
 hardshrink(input, lambd=0.5) -> Tensor
@@ -1754,7 +1778,7 @@ def softsign(input):
     return input / (input.abs() + 1)
 
 
-softplus = _add_docstr(
+softplus = _set_module_and_doc_str(
     torch._C._nn.softplus,
     r"""
 softplus(input, beta=1, threshold=20) -> Tensor
@@ -1933,7 +1957,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
     return ret
 
 
-softshrink = _add_docstr(
+softshrink = _set_module_and_doc_str(
     torch._C._nn.softshrink,
     r"""
 softshrink(input, lambd=0.5) -> Tensor
@@ -1990,7 +2014,7 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
-linear = _add_docstr(
+linear = _set_module_and_doc_str(
     torch._C._nn.linear,
     r"""
 linear(input, weight, bias=None) -> Tensor
@@ -2009,7 +2033,7 @@ Shape:
 """)
 
 
-bilinear = _add_docstr(
+bilinear = _set_module_and_doc_str(
     torch.bilinear,
     r"""
 bilinear(input1, input2, weight, bias=None) -> Tensor
@@ -3524,7 +3548,7 @@ def multi_margin_loss(
     return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction_enum)
 
 
-pixel_shuffle = _add_docstr(
+pixel_shuffle = _set_module_and_doc_str(
     torch.pixel_shuffle,
     r"""
 pixel_shuffle(input, upscale_factor) -> Tensor
@@ -3547,7 +3571,7 @@ Examples::
 """,
 )
 
-pixel_unshuffle = _add_docstr(
+pixel_unshuffle = _set_module_and_doc_str(
     torch.pixel_unshuffle,
     r"""
 pixel_unshuffle(input, downscale_factor) -> Tensor
@@ -3571,7 +3595,7 @@ Examples::
 """,
 )
 
-channel_shuffle = _add_docstr(
+channel_shuffle = _set_module_and_doc_str(
     torch.channel_shuffle,
     r"""
 channel_shuffle(input, groups) -> Tensor
@@ -3613,7 +3637,7 @@ Examples::
 """,
 )
 
-native_channel_shuffle = _add_docstr(
+native_channel_shuffle = _set_module_and_doc_str(
     torch.native_channel_shuffle,
     r"""
 native_channel_shuffle(input, groups) -> Tensor
@@ -4326,7 +4350,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-pad = _add_docstr(
+pad = _set_module_and_doc_str(
     torch._C._nn.pad,
     r"""
 pad(input, pad, mode="constant", value=None) -> Tensor
@@ -4394,7 +4418,7 @@ pad.__module__ = "torch.nn.functional"
 # distance
 
 
-pairwise_distance = _add_docstr(
+pairwise_distance = _set_module_and_doc_str(
     torch.pairwise_distance,
     r"""
 pairwise_distance(x1, x2, p=2.0, eps=1e-6, keepdim=False) -> Tensor
@@ -4403,7 +4427,7 @@ See :class:`torch.nn.PairwiseDistance` for details
 """)
 
 
-pdist = _add_docstr(
+pdist = _set_module_and_doc_str(
     torch.pdist,
     r"""
 pdist(input, p=2) -> Tensor
@@ -4430,7 +4454,7 @@ Args:
 )
 
 
-cosine_similarity = _add_docstr(
+cosine_similarity = _set_module_and_doc_str(
     torch.cosine_similarity,
     r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
@@ -4462,7 +4486,7 @@ Example::
 )
 
 
-one_hot = _add_docstr(
+one_hot = _set_module_and_doc_str(
     torch._C._nn.one_hot,
     r"""
 one_hot(tensor, num_classes=-1) -> LongTensor
