@@ -69,7 +69,7 @@ __all__ = [
 Tensor = torch.Tensor
 
 entr = _set_module_and_doc_str(_special.special_entr,
-                   r"""
+                               r"""
 entr(input, *, out=None) -> Tensor
 Computes the entropy on :attr:`input` (as defined below), elementwise.
 
@@ -98,14 +98,14 @@ Example::
 """)
 
 psi = _set_module_and_doc_str(_special.special_psi,
-                  r"""
+                              r"""
 psi(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.digamma`.
 """)
 
 digamma = _set_module_and_doc_str(_special.special_digamma,
-                      r"""
+                                  r"""
 digamma(input, *, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
@@ -133,7 +133,7 @@ Example::
 """.format(**common_args))
 
 gammaln = _set_module_and_doc_str(_special.special_gammaln,
-                      r"""
+                                  r"""
 gammaln(input, *, out=None) -> Tensor
 
 Computes the natural logarithm of the absolute value of the gamma function on :attr:`input`.
@@ -156,7 +156,7 @@ Example::
 """.format(**common_args))
 
 polygamma = _set_module_and_doc_str(_special.special_polygamma,
-                        r"""
+                                    r"""
 polygamma(n, input, *, out=None) -> Tensor
 
 Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
@@ -188,7 +188,7 @@ Example::
 """.format(**common_args))
 
 erf = _set_module_and_doc_str(_special.special_erf,
-                  r"""
+                              r"""
 erf(input, *, out=None) -> Tensor
 
 Computes the error function of :attr:`input`. The error function is defined as follows:
@@ -209,7 +209,7 @@ Example::
 """.format(**common_args))
 
 erfc = _set_module_and_doc_str(_special.special_erfc,
-                   r"""
+                               r"""
 erfc(input, *, out=None) -> Tensor
 
 Computes the complementary error function of :attr:`input`.
@@ -231,7 +231,7 @@ Example::
 """.format(**common_args))
 
 erfcx = _set_module_and_doc_str(_special.special_erfcx,
-                    r"""
+                                r"""
 erfcx(input, *, out=None) -> Tensor
 
 Computes the scaled complementary error function for each element of :attr:`input`.
@@ -255,7 +255,7 @@ Example::
 """.format(**common_args))
 
 erfinv = _set_module_and_doc_str(_special.special_erfinv,
-                     r"""
+                                 r"""
 erfinv(input, *, out=None) -> Tensor
 
 Computes the inverse error function of :attr:`input`.
@@ -278,7 +278,7 @@ Example::
 """.format(**common_args))
 
 logit = _set_module_and_doc_str(_special.special_logit,
-                    r"""
+                                r"""
 logit(input, eps=None, *, out=None) -> Tensor
 
 Returns a new tensor with the logit of the elements of :attr:`input`.
@@ -313,14 +313,14 @@ Example::
 """.format(**common_args))
 
 logsumexp = _set_module_and_doc_str(_special.special_logsumexp,
-                        r"""
+                                    r"""
 logsumexp(input, dim, keepdim=False, *, out=None)
 
 Alias for :func:`torch.logsumexp`.
 """.format(**multi_dim_common))
 
 expit = _set_module_and_doc_str(_special.special_expit,
-                    r"""
+                                r"""
 expit(input, *, out=None) -> Tensor
 
 Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
@@ -344,7 +344,7 @@ Example::
 """.format(**common_args))
 
 exp2 = _set_module_and_doc_str(_special.special_exp2,
-                   r"""
+                               r"""
 exp2(input, *, out=None) -> Tensor
 
 Computes the base two exponential function of :attr:`input`.
@@ -366,7 +366,7 @@ Example::
 """.format(**common_args))
 
 expm1 = _set_module_and_doc_str(_special.special_expm1,
-                    r"""
+                                r"""
 expm1(input, *, out=None) -> Tensor
 
 Computes the exponential of the elements minus 1
@@ -391,7 +391,7 @@ Example::
 """.format(**common_args))
 
 xlog1py = _set_module_and_doc_str(_special.special_xlog1py,
-                      r"""
+                                  r"""
 xlog1py(input, other, *, out=None) -> Tensor
 
 Computes ``input * log1p(other)`` with the following cases.
@@ -433,7 +433,7 @@ Example::
 """.format(**common_args))
 
 xlogy = _set_module_and_doc_str(_special.special_xlogy,
-                    r"""
+                                r"""
 xlogy(input, other, *, out=None) -> Tensor
 
 Computes ``input * log(other)`` with the following cases.
@@ -475,7 +475,7 @@ Example::
 """.format(**common_args))
 
 i0 = _set_module_and_doc_str(_special.special_i0,
-                 r"""
+                             r"""
 i0(input, *, out=None) -> Tensor
 
 Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
@@ -498,7 +498,7 @@ Example::
 """.format(**common_args))
 
 i0e = _set_module_and_doc_str(_special.special_i0e,
-                  r"""
+                              r"""
 i0e(input, *, out=None) -> Tensor
 Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
 for each element of :attr:`input`.
@@ -519,7 +519,7 @@ Example::
 """.format(**common_args))
 
 i1 = _set_module_and_doc_str(_special.special_i1,
-                 r"""
+                             r"""
 i1(input, *, out=None) -> Tensor
 Computes the first order modified Bessel function of the first kind (as defined below)
 for each element of :attr:`input`.
@@ -540,7 +540,7 @@ Example::
 """.format(**common_args))
 
 i1e = _set_module_and_doc_str(_special.special_i1e,
-                  r"""
+                              r"""
 i1e(input, *, out=None) -> Tensor
 Computes the exponentially scaled first order modified Bessel function of the first kind (as defined below)
 for each element of :attr:`input`.
@@ -562,7 +562,7 @@ Example::
 """.format(**common_args))
 
 ndtr = _set_module_and_doc_str(_special.special_ndtr,
-                   r"""
+                               r"""
 ndtr(input, *, out=None) -> Tensor
 Computes the area under the standard Gaussian probability density function,
 integrated from minus infinity to :attr:`input`, elementwise.
@@ -583,7 +583,7 @@ Example::
 """.format(**common_args))
 
 ndtri = _set_module_and_doc_str(_special.special_ndtri,
-                    r"""
+                                r"""
 ndtri(input, *, out=None) -> Tensor
 Computes the argument, x, for which the area under the Gaussian probability density function
 (integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
@@ -607,7 +607,7 @@ Example::
 """.format(**common_args))
 
 log_ndtr = _set_module_and_doc_str(_special.special_log_ndtr,
-                       r"""
+                                   r"""
 log_ndtr(input, *, out=None) -> Tensor
 Computes the log of the area under the standard Gaussian probability density function,
 integrated from minus infinity to :attr:`input`, elementwise.
@@ -628,14 +628,14 @@ Example::
 """.format(**common_args))
 
 log1p = _set_module_and_doc_str(_special.special_log1p,
-                    r"""
+                                r"""
 log1p(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.log1p`.
 """)
 
 sinc = _set_module_and_doc_str(_special.special_sinc,
-                   r"""
+                               r"""
 sinc(input, *, out=None) -> Tensor
 
 Computes the normalized sinc of :attr:`input.`
@@ -663,14 +663,14 @@ Example::
 """.format(**common_args))
 
 round = _set_module_and_doc_str(_special.special_round,
-                    r"""
+                                r"""
 round(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.round`.
 """)
 
 softmax = _set_module_and_doc_str(_special.special_softmax,
-                      r"""
+                                  r"""
 softmax(input, dim, *, dtype=None) -> Tensor
 
 Computes the softmax function.
@@ -698,7 +698,7 @@ Examples::
 """)
 
 log_softmax = _set_module_and_doc_str(_special.special_log_softmax,
-                          r"""
+                                      r"""
 log_softmax(input, dim, *, dtype=None) -> Tensor
 
 Computes softmax followed by a logarithm.
@@ -726,7 +726,7 @@ Example::
 """)
 
 zeta = _set_module_and_doc_str(_special.special_zeta,
-                   r"""
+                               r"""
 zeta(input, other, *, out=None) -> Tensor
 
 Computes the Hurwitz zeta function, elementwise.
@@ -756,7 +756,7 @@ Example::
 """.format(**common_args))
 
 multigammaln = _set_module_and_doc_str(_special.special_multigammaln,
-                           r"""
+                                       r"""
 multigammaln(input, p, *, out=None) -> Tensor
 
 Computes the `multivariate log-gamma function
@@ -790,7 +790,7 @@ Example::
 """.format(**common_args))
 
 gammainc = _set_module_and_doc_str(_special.special_gammainc,
-                       r"""
+                                   r"""
 gammainc(input, other, *, out=None) -> Tensor
 
 Computes the regularized lower incomplete gamma function:
@@ -836,7 +836,7 @@ Example::
 """.format(**common_args))
 
 gammaincc = _set_module_and_doc_str(_special.special_gammaincc,
-                        r"""
+                                    r"""
 gammaincc(input, other, *, out=None) -> Tensor
 
 Computes the regularized upper incomplete gamma function:
@@ -881,7 +881,7 @@ Example::
 """.format(**common_args))
 
 airy_ai = _set_module_and_doc_str(_special.special_airy_ai,
-                      r"""
+                                  r"""
 airy_ai(input, *, out=None) -> Tensor
 
 Airy function :math:`\text{Ai}\left(\text{input}\right)`.
@@ -895,7 +895,7 @@ Keyword args:
 """.format(**common_args))
 
 bessel_j0 = _set_module_and_doc_str(_special.special_bessel_j0,
-                        r"""
+                                    r"""
 bessel_j0(input, *, out=None) -> Tensor
 
 Bessel function of the first kind of order :math:`0`.
@@ -908,8 +908,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-bessel_j1 = _set_module_and_doc_str(_special.special_bessel_j1,
-                        r"""
+bessel_j1 = _set_module_and_doc_str(_special.special_bessel_j1, r"""
 bessel_j1(input, *, out=None) -> Tensor
 
 Bessel function of the first kind of order :math:`1`.
@@ -922,8 +921,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-bessel_y0 = _set_module_and_doc_str(_special.special_bessel_y0,
-                        r"""
+bessel_y0 = _set_module_and_doc_str(_special.special_bessel_y0, r"""
 bessel_y0(input, *, out=None) -> Tensor
 
 Bessel function of the second kind of order :math:`0`.
@@ -936,8 +934,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-bessel_y1 = _set_module_and_doc_str(_special.special_bessel_y1,
-                        r"""
+bessel_y1 = _set_module_and_doc_str(_special.special_bessel_y1, r"""
 bessel_y1(input, *, out=None) -> Tensor
 
 Bessel function of the second kind of order :math:`1`.
@@ -950,8 +947,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-chebyshev_polynomial_t = _set_module_and_doc_str(_special.special_chebyshev_polynomial_t,
-                                     r"""
+chebyshev_polynomial_t = _set_module_and_doc_str(_special.special_chebyshev_polynomial_t, r"""
 chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
@@ -978,8 +974,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-chebyshev_polynomial_u = _set_module_and_doc_str(_special.special_chebyshev_polynomial_u,
-                                     r"""
+chebyshev_polynomial_u = _set_module_and_doc_str(_special.special_chebyshev_polynomial_u, r"""
 chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
@@ -1007,8 +1002,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-chebyshev_polynomial_v = _set_module_and_doc_str(_special.special_chebyshev_polynomial_v,
-                                     r"""
+chebyshev_polynomial_v = _set_module_and_doc_str(_special.special_chebyshev_polynomial_v, r"""
 chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
@@ -1022,8 +1016,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-chebyshev_polynomial_w = _set_module_and_doc_str(_special.special_chebyshev_polynomial_w,
-                                     r"""
+chebyshev_polynomial_w = _set_module_and_doc_str(_special.special_chebyshev_polynomial_w, r"""
 chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
@@ -1037,8 +1030,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-hermite_polynomial_h = _set_module_and_doc_str(_special.special_hermite_polynomial_h,
-                                   r"""
+hermite_polynomial_h = _set_module_and_doc_str(_special.special_hermite_polynomial_h, r"""
 hermite_polynomial_h(input, n, *, out=None) -> Tensor
 
 Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
@@ -1060,8 +1052,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-hermite_polynomial_he = _set_module_and_doc_str(_special.special_hermite_polynomial_he,
-                                    r"""
+hermite_polynomial_he = _set_module_and_doc_str(_special.special_hermite_polynomial_he, r"""
 hermite_polynomial_he(input, n, *, out=None) -> Tensor
 
 Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
@@ -1083,8 +1074,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-laguerre_polynomial_l = _set_module_and_doc_str(_special.special_laguerre_polynomial_l,
-                                    r"""
+laguerre_polynomial_l = _set_module_and_doc_str(_special.special_laguerre_polynomial_l, r"""
 laguerre_polynomial_l(input, n, *, out=None) -> Tensor
 
 Laguerre polynomial :math:`L_{n}(\text{input})`.
@@ -1106,8 +1096,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-legendre_polynomial_p = _set_module_and_doc_str(_special.special_legendre_polynomial_p,
-                                    r"""
+legendre_polynomial_p = _set_module_and_doc_str(_special.special_legendre_polynomial_p, r"""
 legendre_polynomial_p(input, n, *, out=None) -> Tensor
 
 Legendre polynomial :math:`P_{n}(\text{input})`.
@@ -1129,8 +1118,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-modified_bessel_i0 = _set_module_and_doc_str(_special.special_modified_bessel_i0,
-                                 r"""
+modified_bessel_i0 = _set_module_and_doc_str(_special.special_modified_bessel_i0, r"""
 modified_bessel_i0(input, *, out=None) -> Tensor
 
 Modified Bessel function of the first kind of order :math:`0`.
@@ -1143,8 +1131,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-modified_bessel_i1 = _set_module_and_doc_str(_special.special_modified_bessel_i1,
-                                 r"""
+modified_bessel_i1 = _set_module_and_doc_str(_special.special_modified_bessel_i1, r"""
 modified_bessel_i1(input, *, out=None) -> Tensor
 
 Modified Bessel function of the first kind of order :math:`1`.
@@ -1157,8 +1144,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-modified_bessel_k0 = _set_module_and_doc_str(_special.special_modified_bessel_k0,
-                                 r"""
+modified_bessel_k0 = _set_module_and_doc_str(_special.special_modified_bessel_k0, r"""
 modified_bessel_k0(input, *, out=None) -> Tensor
 
 Modified Bessel function of the second kind of order :math:`0`.
@@ -1171,8 +1157,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-modified_bessel_k1 = _set_module_and_doc_str(_special.special_modified_bessel_k1,
-                                 r"""
+modified_bessel_k1 = _set_module_and_doc_str(_special.special_modified_bessel_k1, r"""
 modified_bessel_k1(input, *, out=None) -> Tensor
 
 Modified Bessel function of the second kind of order :math:`1`.
@@ -1185,8 +1170,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-scaled_modified_bessel_k0 = _set_module_and_doc_str(_special.special_scaled_modified_bessel_k0,
-                                        r"""
+scaled_modified_bessel_k0 = _set_module_and_doc_str(_special.special_scaled_modified_bessel_k0, r"""
 scaled_modified_bessel_k0(input, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`0`.
@@ -1199,8 +1183,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-scaled_modified_bessel_k1 = _set_module_and_doc_str(_special.special_scaled_modified_bessel_k1,
-                                        r"""
+scaled_modified_bessel_k1 = _set_module_and_doc_str(_special.special_scaled_modified_bessel_k1, r"""
 scaled_modified_bessel_k1(input, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`1`.
@@ -1213,8 +1196,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-shifted_chebyshev_polynomial_t = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_t,
-                                             r"""
+shifted_chebyshev_polynomial_t = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_t, r"""
 shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
@@ -1228,8 +1210,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-shifted_chebyshev_polynomial_u = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_u,
-                                             r"""
+shifted_chebyshev_polynomial_u = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_u, r"""
 shifted_chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
@@ -1243,8 +1224,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-shifted_chebyshev_polynomial_v = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_v,
-                                             r"""
+shifted_chebyshev_polynomial_v = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_v, r"""
 shifted_chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
@@ -1258,8 +1238,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-shifted_chebyshev_polynomial_w = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_w,
-                                             r"""
+shifted_chebyshev_polynomial_w = _set_module_and_doc_str(_special.special_shifted_chebyshev_polynomial_w, r"""
 shifted_chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
@@ -1273,8 +1252,7 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-spherical_bessel_j0 = _set_module_and_doc_str(_special.special_spherical_bessel_j0,
-                                  r"""
+spherical_bessel_j0 = _set_module_and_doc_str(_special.special_spherical_bessel_j0, r"""
 spherical_bessel_j0(input, *, out=None) -> Tensor
 
 Spherical Bessel function of the first kind of order :math:`0`.

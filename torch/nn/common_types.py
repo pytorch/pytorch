@@ -1,7 +1,7 @@
-from typing import TypeVar, Union, Tuple, Optional
+from typing import TypeVar, Union, Tuple, Optional, List
 from .. import Tensor
 
-__all__ = []
+__all__ : List[str] = []
 # Create some useful type aliases
 
 # Template for arguments which can be supplied as a tuple, or which can be a scalar which PyTorch will internally
