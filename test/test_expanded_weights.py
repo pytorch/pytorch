@@ -1,5 +1,5 @@
 # Owner(s): ["module: nn"]
-
+from dataclasses import dataclass
 from functools import partial
 from itertools import product, chain
 import unittest
@@ -252,17 +252,17 @@ class TestExpandedWeightFunctional(TestCase):
         input = torch.randint(0, num_embedding, (batch_size, 5, 5), device=device)
         return self._test_model(partial(model, num_embedding=num_embedding), batch_size, input, device)
 
-    def _test_conv_model(self, model, input_size, num_dim, device):
+    def _test_conv_model(self, model, input_size, num_dim, device, loss_reduction="sum"):
         batch_size = 32
         input_ending = [input_size] * num_dim
         input = torch.randn([batch_size, 3] + input_ending, device=device)
-        return self._test_model(partial(model, num_dim=num_dim), batch_size, input, device)
+        return self._test_model(partial(model, num_dim=num_dim), batch_size, input, device, loss_reduction)
 
-    def _test_model(self, model, batch_size, input, device):
+    def _test_model(self, model, batch_size, input, device, loss_reduction="sum"):
         model = model(10).to(device)
         targets = torch.randint(0, 10, (batch_size,), device=device)
-        criterion = CrossEntropyLoss(reduction='sum')  # use a loss that doesn't average across the batch to test in a for loop
-        result = call_for_per_sample_grads(model, loss_reduction="sum")(input)
+        criterion = CrossEntropyLoss(reduction=loss_reduction)
+        result = call_for_per_sample_grads(model, loss_reduction=loss_reduction)(input)
         loss = criterion(result, targets)
         loss.backward()
         result = []
@@ -280,7 +280,7 @@ class TestExpandedWeightFunctional(TestCase):
             self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
 
 
-    def test_cnn_model(self, device):
+    def test_cnn_model_sum(self, device):
         def convnet(num_classes, num_dim):
             return nn.Sequential(
                 nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
@@ -300,6 +300,27 @@ class TestExpandedWeightFunctional(TestCase):
             )
 
         return self._test_conv_model(convnet, 28, 2, device)
+
+    def test_cnn_model_mean(self, device):
+        def convnet(num_classes, num_dim):
+            return nn.Sequential(
+                nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AvgPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(start_dim=1, end_dim=-1),
+                nn.Linear(128, num_classes, bias=True),
+            )
+
+        return self._test_conv_model(convnet, 28, 2, device, loss_reduction="mean")
 
     @parametrize('num_dim', [1, 2, 3])
     def test_instance_norm_model(self, num_dim, device):
@@ -451,12 +472,58 @@ class TestExpandedWeightModule(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expected loss_reduction argument to be sum or mean"):
             call_for_per_sample_grads(module, loss_reduction="")(input)
 
-        with self.assertRaisesRegex(RuntimeError, "found at least one input with batch size 4 and one with batch size 5"):
-            input1 = torch.randn(4, 10)
-            input2 = torch.randn(5, 10)
+    def test_per_sample_api_compute_batch_size(self):
+        class CustomModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(5, 5)
 
-            # NB: this would still fail if run because we pass too many inputs. This is just for ease of testing
+            def forward(self, input1, input2):
+                return self.linear(input1) + self.linear(input2)
+
+        module = CustomModule()
+        input1 = torch.randn(4, 5)
+        input2 = torch.randn(5, 5)
+
+        with self.assertRaisesRegex(RuntimeError, "found at least one input with batch size 4 and one with batch size 5"):
             call_for_per_sample_grads(module)(input1, input2)
+
+        input2 = torch.randn(4, 5)
+        call_for_per_sample_grads(module)(input1, input2)
+
+        module = CustomModule()
+        call_for_per_sample_grads(module)(input1, input2=input2)
+
+        module = CustomModule()
+        call_for_per_sample_grads(module)(input1=input1, input2=input2)
+
+    def test_per_sample_api_compute_batch_size_not_pytreeable(self):
+        @dataclass
+        class NonPytreeableTuple:
+            elem1: torch.Tensor
+            elem2: torch.Tensor
+
+        class CustomModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(5, 5)
+
+            def forward(self, input1, input2):
+                return self.linear(input1.elem1) + self.linear(input1.elem2)
+
+        input = NonPytreeableTuple(torch.randn(4, 5), torch.randn(4, 5))
+        model = CustomModule()
+        with self.assertRaisesRegex(RuntimeError, "ExpandedWeights cannot compute the batch size from the inputs"):
+            call_for_per_sample_grads(model)(input, "")
+
+        # would prefer for it to error because input is not pytree-able but that's hard to detect
+        with self.assertRaisesRegex(RuntimeError, "Expected ExpandedWeights to have batch size matching input"):
+            call_for_per_sample_grads(model)(input, torch.randn(5))
+
+        model = CustomModule()  # TODO: functional call bug, sam will fix
+        call_for_per_sample_grads(model)(input, torch.randn(4, 5))
+        model = CustomModule()
+        call_for_per_sample_grads(model, batch_size=4)(input, torch.randn(5))
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):

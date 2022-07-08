@@ -4,14 +4,14 @@ import torch
 from torch.nn.utils._stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
-# dependency on `functional_call` means that this can't be exposed in utils
-# without creating circular dependency
 from torch.utils._pytree import tree_flatten
 
+# dependency on `functional_call` means that this can't be exposed in utils
+# without creating circular dependency
 
-def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
+def call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum"):
     r"""
-    call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean")
+    call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum")
     ``call_for_per_sample_grads`` returns a function that is invoked like the forward
     function of ``module`` and will produce the same result. Then, when backward is invoked,
     the parameters of ``module`` will have a ``grad_sample`` field populated with the per sample
@@ -24,7 +24,8 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
         batch_size: The batch size of the input. If None is passed, all tensor arguments in args and kwargs must have
           the same batch size, which is the size of the first dimension. Otherwise, it must be passed manually.
           Default: None
-        loss_reduction: The reduction used on the loss. Must be "mean" or "sum". Default: "mean"
+        loss_reduction: The reduction used on the loss. If "mean", per sample gradients will be scaled by the batch size
+          to offset the crossbatch interaction from running mean across a batch. Must be "mean" or "sum". Default: "sum"
 
     Examples::
         >>> model = nn.Linear(4, 3)
@@ -50,16 +51,22 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
             return og_tensor
 
     def compute_batch_size(*args, **kwargs):
-        args_and_kwargs = tree_flatten(args)[0] + tree_flatten(kwargs.values())[0]
+        args_and_kwargs = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
         batch_size = None
         for arg in args_and_kwargs:
-            if isinstance(arg, torch.Tensor):
-                arg_batch_size = arg.shape[0]  # we assume batch size is the first dim
-                if batch_size is not None and batch_size != arg_batch_size:
-                    raise RuntimeError("When computing batch size, found at least one input with batch size "
-                                       f"{batch_size} and one with batch size {arg_batch_size}. Please specify it "
-                                       "explicitly using the batch size kwarg in call_for_per_sample_grads")
-                batch_size = arg_batch_size
+            if not isinstance(arg, torch.Tensor):
+                continue
+
+            arg_batch_size = arg.shape[0]  # we assume batch size is the first dim
+            if batch_size is not None and batch_size != arg_batch_size:
+                raise RuntimeError("When computing batch size, found at least one input with batch size "
+                                   f"{batch_size} and one with batch size {arg_batch_size}. Please specify it "
+                                   "explicitly using the batch size kwarg in call_for_per_sample_grads")
+            batch_size = arg_batch_size
+        if batch_size is None:
+            raise RuntimeError("Unable to find a tensor in the passed args and kwargs. They may not be pytree-able "
+                               "and so ExpandedWeights cannot compute the batch size from the inputs. Please specify "
+                               "it explicitly")
         return batch_size
 
     if loss_reduction not in ["sum", "mean"]:
@@ -79,10 +86,10 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="mean"):
 
     @functools.wraps(module.forward)
     def wrapper(*args, **kwargs):
-        nonlocal batch_size
-        if batch_size is None:
-            batch_size = compute_batch_size(*args, **kwargs)
+        wrapper_batch_size = batch_size
+        if wrapper_batch_size is None:
+            wrapper_batch_size = compute_batch_size(*args, **kwargs)
 
-        params = {name: maybe_build_expanded_weight(value, batch_size) for (name, value) in module.named_parameters()}
+        params = {name: maybe_build_expanded_weight(value, wrapper_batch_size) for (name, value) in module.named_parameters()}
         return functional_call(module, params, args, kwargs)
     return wrapper
