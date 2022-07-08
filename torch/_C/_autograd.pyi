@@ -87,6 +87,7 @@ class _KinetoEvent:
 class _ProfilerEvent:
     id: int
     correlation_id: int
+    start_tid: int
     start_time_ns: int
     end_time_ns: int
     duration_time_ns: int
