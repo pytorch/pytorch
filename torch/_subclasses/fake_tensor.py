@@ -306,12 +306,6 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
 
-    def numel(self):
-        val = 1
-        for s in self.shape:
-            val = val * s
-        return val
-
     def new_empty(self, shape):
         return torch.empty(shape)
 

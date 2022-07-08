@@ -207,8 +207,6 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        if func_overload == torch.ops.prim.device.default:
-            return args[0].fake_device
         return proxy_call(func_overload, args, kwargs)
 
 
