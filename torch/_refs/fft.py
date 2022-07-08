@@ -532,7 +532,7 @@ def ihfft2(
 
 
 def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
-    """Handle defaulting of Convert optional[DimsType]Canonicalize the dims"""
+    """Convert Optional[DimsType] to a simple list, defaulting to all dimensions"""
     if dim is None:
         return list(range(x.ndim))
     elif not isinstance(dim, Sequence):
