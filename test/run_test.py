@@ -32,8 +32,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.stats.import_test_stats import get_test_times
     from tools.testing.test_selections import (
-        export_S3_test_times,
         get_shard_based_on_S3,
         get_reordered_tests,
         get_test_case_configs,
@@ -677,13 +677,6 @@ def parse_args():
         "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
     )
     parser.add_argument(
-        "--export-past-test-times",
-        nargs="?",
-        type=str,
-        const=TEST_TIMES_FILE,
-        help="dumps test times from previous S3 stats into a file, format JSON",
-    )
-    parser.add_argument(
         "--shard",
         nargs=2,
         type=int,
@@ -881,16 +874,11 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 def main():
     options = parse_args()
 
-    # TODO: move this export & download function in tools/ folder
-    test_times_filename = options.export_past_test_times
-    if test_times_filename:
-        print(
-            f"Exporting past test times from S3 to {test_times_filename}, no tests will be run."
-        )
-        export_S3_test_times(test_times_filename)
-        return
-
     test_directory = str(REPO_ROOT / "test")
+    if IS_CI:
+        # Download previous test times to make sharding decisions
+        get_test_times(dirpath=test_directory, filename=TEST_TIMES_FILE)
+
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
