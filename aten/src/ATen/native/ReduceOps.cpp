@@ -1079,6 +1079,10 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<Scal
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
+Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
+}
+
 Tensor& sum_out(const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);

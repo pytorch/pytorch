@@ -4584,6 +4584,13 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
+- func: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: sum_symint
+
+
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
