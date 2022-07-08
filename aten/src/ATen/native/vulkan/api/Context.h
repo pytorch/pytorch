@@ -34,8 +34,7 @@ struct ContextConfig final {
 
 class Context final {
  public:
-  explicit Context(
-      const VkInstance instance, size_t adapter_i, const ContextConfig);
+  explicit Context(size_t adapter_i, const ContextConfig&);
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -49,7 +48,6 @@ class Context final {
   // Config
   ContextConfig config_;
   // Important handles
-  VkInstance instance_;
   Adapter* adapter_p_;
   VkDevice device_;
   Adapter::Queue queue_;
@@ -69,17 +67,6 @@ class Context final {
   std::vector<VulkanImage> images_to_clear_;
 
  public:
-
-  inline GPU gpu() {
-    const Adapter* p_adapter = adapter_p_;
-    return {
-      instance_,
-      p_adapter,
-      device_,
-      queue_.family_index,
-      queue_.handle,
-    };
-  }
 
   // Adapter access
 
