@@ -219,7 +219,8 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
             allows ``checkpoint`` to support additional functionality, such as
-            working as expected with ``torch.autograd.grad``. Note that future
+            working as expected with ``torch.autograd.grad`` and support for
+            keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
