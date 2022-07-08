@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
@@ -30,14 +29,14 @@ using gemm_fn = void(*)(
 
 DECLARE_DISPATCH(gemm_fn, gemm_stub);
 
-template <typename scalar_t, typename opmath_t=at::opmath_type<scalar_t>>
+template <typename scalar_t>
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    opmath_t alpha,
+    scalar_t alpha,
     const scalar_t *a, int64_t lda,
     const scalar_t *b, int64_t ldb,
-    opmath_t beta,
+    scalar_t beta,
     scalar_t *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
   gemm_stub(
