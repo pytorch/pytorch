@@ -44,6 +44,9 @@ if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This needs to be removed when we stop compiling with gcc 7
+    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 endif()
 
@@ -813,8 +816,6 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
-    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
-    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
