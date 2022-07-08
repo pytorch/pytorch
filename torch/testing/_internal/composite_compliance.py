@@ -142,12 +142,18 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                 device=elem.device, requires_grad=elem.requires_grad,
                 strides=elem.stride(), storage_offset=elem.storage_offset())
 
-            # CompositeCompliantTensor steals the "requires_grad"-ness.
             if elem.requires_grad:
-                # Why clone? Because sometimes OpInfo shares inputs between tests...
-                r.elem = elem.detach().clone()
+                # CompositeCompliantTensor steals the "requires_grad"-ness.
+                # Why a new copy of `elem`? Because sometimes OpInfo shares inputs between tests...
+                tmp = torch.empty_strided(elem.shape, elem.stride(), dtype=elem.dtype,
+                                          device=elem.device, layout=elem.layout,
+                                          requires_grad=False)
+                tmp.copy_(elem.detach())
+                r.elem = tmp
             else:
                 r.elem = elem
+
+            assert r.stride() == r.elem.stride()
 
             # Propagate conjugate bits to the wrapper tensor
             # Ref: https://github.com/albanD/subclass_zoo/issues/24
@@ -220,10 +226,9 @@ def generate_cct(enable_recursive_torch_dispatch=False,
             # Some operations are allowed to in-place modify the metadata of the
             # inputs. The only ones are the "inplace view functions"; when we
             # run into these, we manually modify the metadata of the input.
-            with enable_reentrant_dispatch():
-                with no_dispatch():
-                    if is_inplace_view_fn(func):
-                        func(*args, **kwargs)
+            with no_dispatch():
+                if is_inplace_view_fn(func):
+                    func(*args, **kwargs)
 
             # For each CompositeCompliantTensor t, we check that t and t.elem
             # have consistent metadata. If they don't have consistent metadata,
