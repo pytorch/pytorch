@@ -87,6 +87,10 @@ class CommandBuffer final {
       const api::utils::uvec3&,
       const api::utils::uvec3&);
 
+  void write_timestamp(const VkQueryPool, const uint32_t) const;
+  void reset_querypool(
+      const VkQueryPool, const uint32_t, const uint32_t) const;
+
   VkCommandBuffer get_submit_handle();
 
   inline operator bool() const {
