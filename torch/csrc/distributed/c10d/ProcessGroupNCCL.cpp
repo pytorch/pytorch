@@ -32,24 +32,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-// RAII helper class to manage NCCL group API and CUDA free mutex.
-// The destructor is allowed to throw since this helper class only
-// manages group and lock lifetimes.
-struct AutoNcclGroup {
-  AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
-#endif
-  }
-  ~AutoNcclGroup() noexcept(false) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-#endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-  }
-};
-
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
 #define NCCL_HAS_AVG 1
@@ -81,6 +63,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 #endif
 };
 
+// TODO(crcrpar): Replace `getNcclDataType` with `to_nccl_data_type`
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
   auto it = ncclDataType.find(type);
@@ -90,30 +73,6 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
       type);
   return it->second;
 }
-
-// Helper that automatically cleans up premul sums.
-struct ncclRedOpRAII {
-  ncclRedOpRAII() {}
-  ncclRedOpRAII(ncclRedOp_t op) : op_(op) {}
-  ncclRedOpRAII(ncclRedOp_t op, ncclComm_t comm) :
-    op_(op), comm_(comm), premul_sum_(true) {}
-  ncclRedOpRAII(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
-    std::swap(tmp.op_, this->op_);
-    std::swap(tmp.comm_, this->comm_);
-    std::swap(tmp.premul_sum_, this->premul_sum_);
-  }
-  ~ncclRedOpRAII() {
-    if (premul_sum_) {
-      ncclRedOpDestroy(op_, comm_);
-    }
-  }
-  operator ncclRedOp_t() const { return op_; }
-  ncclRedOp_t op_;
-  ncclComm_t comm_;
-  bool premul_sum_ = false;
-};
 
 template<typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(const ReduceOp& reduceOp,
@@ -1605,7 +1564,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   pre(ncclStreams);
 
   {
-    AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
     for (const auto i : c10::irange(inputs.size())) {
       if (!inputs_same_dev || (inputs_same_dev && i == 0)) {
         gpuGuard.set_index(devices[i].index());
@@ -1748,7 +1707,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   }
 
   {
-    AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
     for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
