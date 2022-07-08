@@ -20619,25 +20619,19 @@ python_ref_db = [
         torch_opinfo_name="fmax",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmin",
         torch_opinfo_name="fmin",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
+        supports_rhs_python_scalar=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
@@ -20656,6 +20650,18 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.heaviside",
+        torch_opinfo_name="heaviside",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.hypot",
+        torch_opinfo_name="hypot",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
