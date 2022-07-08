@@ -516,8 +516,10 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
+  if (impl->sizes_strides_policy_ < static_cast<uint8_t>(SizesStridesPolicy::CustomSizes)) {
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+  }
   return impl;
 }
 

@@ -2315,6 +2315,7 @@ c10::IntArrayRef concrete_strides_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(!self->has_symbolic_sizes_strides(), "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
 
@@ -2373,6 +2374,7 @@ c10::IntArrayRef concrete_sizes_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(!self->has_symbolic_sizes_strides(), "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
 
