@@ -593,7 +593,7 @@ class DataLoader(Generic[T_co]):
                         _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
                     logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
-                    # Exit only when all ranks received seed, otherwise we are at risk that current rank 
+                    # Exit only when all ranks received seed, otherwise we are at risk that current rank
                     # will reach same section of the code again while rank zero still in the previous iteration
                     while _shared_seed_recv_cnt > 0:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
