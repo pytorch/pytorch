@@ -1850,7 +1850,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  return [](ProcessedNode* p_node) {
+
+  return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     c10::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->num_inputs() > 2) {
@@ -1861,12 +1862,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
         : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::div(in0_t, in1_t, rounding_mode);
-      return;
+      p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+
+    if (in0_t.sizes() == in1_t.sizes() &&
+        in0_t.scalar_type() == in1_t.scalar_type() &&
+        in0_t.strides() == in1_t.strides() && in0_t.is_contiguous() &&
+        in0_t.scalar_type() == at::kFloat) {
+      int64_t dim = in0_t.numel();
+      int i_rounding_mode = 0;
+      if (rounding_mode && !rounding_mode.value().empty()) {
+        const char peek_rounding_mode = rounding_mode.value().at(0);
+        if (peek_rounding_mode == 't') {
+          // trunc after div
+          i_rounding_mode = 1;
+        } else if (peek_rounding_mode == 'f') {
+          // floor after div
+          i_rounding_mode = 2;
+        }
+      }
+      at::native::resize_(out_t, in0_t.sizes());
+      te->call(
+          {out_t.data_ptr(),
+           in0_t.data_ptr(),
+           in1_t.data_ptr(),
+           &i_rounding_mode,
+           &dim});
+    } else {
+      fastResizeToZero(out_t);
+      at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+    }
   };
 });
 
