@@ -30,13 +30,29 @@ std::vector<StackEntry> _pythonCallstack() {
   std::vector<StackEntry> entries;
 
   while (nullptr != frame) {
+#if PY_VERSION_HEX >= 0x030B0000
+    size_t line =
+        PyCode_Addr2Line(PyFrame_GetCode(frame), PyFrame_GetLasti(frame));
+#else
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+#endif
+#if PY_VERSION_HEX >= 0x030B0000
+    std::string filename =
+        THPUtils_unpackString(PyFrame_GetCode(frame)->co_filename);
+    std::string funcname =
+        THPUtils_unpackString(PyFrame_GetCode(frame)->co_name);
+#else
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+#endif
     auto source = std::make_shared<Source>(funcname, filename, line);
     entries.emplace_back(
         StackEntry{funcname, SourceRange(source, 0, funcname.size())});
+#if PY_VERSION_HEX >= 0x030B0000
+    frame = PyFrame_GetBack(frame);
+#else
     frame = frame->f_back;
+#endif
   }
   return entries;
 }

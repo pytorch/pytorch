@@ -38,11 +38,18 @@ static constexpr size_t CallTypeSize = 3;
 struct CodeLocation {
   CodeLocation() = default;
   explicit CodeLocation(const PyFrameObject* frame)
+  // clang-format off
+#if PY_VERSION_HEX >= 0x030B0000
+      : code_{PyFrame_GetCode(frame)},
+        lasti_{PyFrame_GetLasti(frame)} {}
+#else
       : code_{frame->f_code}, lasti_{frame->f_lasti} {}
+#endif
 
   bool operator==(const CodeLocation& other) const {
     return code_ == other.code_ && lasti_ == other.lasti_;
   }
+  // clang-format on
 
   PyCodeObject* code_{nullptr};
   int lasti_{0};
@@ -257,7 +264,12 @@ void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey& key) {
   if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
       auto frame = PyEval_GetFrame();
+#if PY_VERSION_HEX >= 0x030B0000
+      TORCH_INTERNAL_ASSERT(
+          (PyObject*)(PyFrame_GetCode(frame)) == nnModuleCode());
+#else
       TORCH_INTERNAL_ASSERT((PyObject*)(frame->f_code) == nnModuleCode());
+#endif
       cache.module_forward_ = PyCallKey(frame);
       store<CallType::PyCall>(*cache.module_forward_);
     }
@@ -534,7 +546,11 @@ void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
       current_stack.push_back(frame);
+#if PY_VERSION_HEX >= 0x030B0000
+      frame = PyFrame_GetBack(frame);
+#else
       frame = frame->f_back;
+#endif
       depth++;
     }
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
@@ -575,7 +591,11 @@ void PythonTracer::clear() {
 void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
   static constexpr auto E = EventType::PyCall;
   auto get_key = [&]() -> TraceKey {
+#if PY_VERSION_HEX >= 0x030B0000
+    if ((PyObject*)(PyFrame_GetCode(frame)) == module_call_code_) {
+#else
     if ((PyObject*)(frame->f_code) == module_call_code_) {
+#endif
       // By default, CPython stores locals in a "fast" format, with an array
       // of names and an array of values. Consequently, frame->f_locals is
       // NULL since the interpreter has no need to populate it.
@@ -586,13 +606,28 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       // `PyFrame_FastToLocals` which forces the interpreter to materialize
       // the full dict of locals.
       PyFrame_FastToLocals(frame);
+#if PY_VERSION_HEX >= 0x030B0000
+      auto self = PyDict_GetItemString(PyFrame_GetLocals(frame), "self");
+#else
       auto self = PyDict_GetItemString(frame->f_locals, "self");
+#endif
       PyFrame_LocalsToFast(frame, 0);
+#if PY_VERSION_HEX >= 0x030B0000
+      TORCH_INTERNAL_ASSERT(PyFrame_GetBack(frame) != nullptr);
+      return tls.intern<CallType::PyModuleCall, E>(
+          self, PyFrame_GetBack(frame));
+#else
       TORCH_INTERNAL_ASSERT(frame->f_back != nullptr);
       return tls.intern<CallType::PyModuleCall, E>(self, frame->f_back);
+#endif
 
     } else {
+#if PY_VERSION_HEX >= 0x030B0000
+      auto f_back =
+          PyFrame_GetBack(frame) != nullptr ? PyFrame_GetBack(frame) : frame;
+#else
       auto f_back = frame->f_back != nullptr ? frame->f_back : frame;
+#endif
       return tls.intern<CallType::PyCall, E>(frame, f_back);
     }
   };

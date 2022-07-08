@@ -107,7 +107,12 @@ PyTypeObject THPStreamType = {
 
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
-  Py_TYPE(&THPStreamType) = &PyType_Type;
+#if PY_VERSION_HEX < 0x030900A4 && !defined(Py_SET_TYPE)
+  static inline void _Py_SET_TYPE(PyObject * ob, PyTypeObject * type) {
+    ob->ob_type = type;
+  }
+#define Py_SET_TYPE(ob, type) _Py_SET_TYPE((PyObject*)(ob), type)
+#endif
   if (PyType_Ready(&THPStreamType) < 0) {
     throw python_error();
   }

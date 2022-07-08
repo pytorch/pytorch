@@ -19,9 +19,15 @@ c10::optional<SourceLocation> GetPythonFrameTop() {
     return c10::nullopt;
   }
   SourceLocation loc;
+#if PY_VERSION_HEX >= 0x030B0000
+  loc.line = PyCode_Addr2Line(PyFrame_GetCode(frame), PyFrame_GetLasti(frame));
+  loc.file = THPUtils_unpackString(PyFrame_GetCode(frame)->co_filename);
+  loc.function = THPUtils_unpackString(PyFrame_GetCode(frame)->co_name);
+#else
   loc.line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
   loc.file = THPUtils_unpackString(frame->f_code->co_filename);
   loc.function = THPUtils_unpackString(frame->f_code->co_name);
+#endif
   return loc;
 }
 
@@ -32,11 +38,22 @@ std::vector<SourceLocation> GetPythonFrames() {
     PyFrameObject* frame = PyEval_GetFrame();
     while (frame != nullptr) {
       SourceLocation loc;
+#if PY_VERSION_HEX >= 0x030B0000
+      loc.line =
+          PyCode_Addr2Line(PyFrame_GetCode(frame), PyFrame_GetLasti(frame));
+      loc.file = THPUtils_unpackString(PyFrame_GetCode(frame)->co_filename);
+      loc.function = THPUtils_unpackString(PyFrame_GetCode(frame)->co_name);
+#else
       loc.line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
       loc.file = THPUtils_unpackString(frame->f_code->co_filename);
       loc.function = THPUtils_unpackString(frame->f_code->co_name);
+#endif
       frames.push_back(std::move(loc));
+#if PY_VERSION_HEX >= 0x030B0000
+      frame = PyFrame_GetBack(frame);
+#else
       frame = frame->f_back;
+#endif
     }
   }
   return frames;
