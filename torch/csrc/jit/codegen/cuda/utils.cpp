@@ -152,8 +152,10 @@ auto parseDisableOptions() {
 
 auto parseEnableOptions() {
   std::unordered_map<EnableOption, bool> options_map = {
-      {EnableOption::Complex, false}, {EnableOption::KernelProfile, false},
-      {EnableOption::LinearDecomposition, false}, {EnableOption::ConvDecomposition, false}};
+      {EnableOption::Complex, false},
+      {EnableOption::KernelProfile, false},
+      {EnableOption::LinearDecomposition, false},
+      {EnableOption::ConvDecomposition, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
