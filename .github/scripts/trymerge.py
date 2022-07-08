@@ -1023,7 +1023,7 @@ def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
         if checkname not in check_runs:
             not_run_checks.append((checkname, None))
         elif check_runs[checkname][0] is None:
-            pending_checks.append((chfeckname, check_runs[checkname][1]))
+            pending_checks.append((checkname, check_runs[checkname][1]))
         elif check_runs[checkname][0].upper() != 'SUCCESS' and check_runs[checkname][0].upper() != 'SKIPPED':
             failed_checks.append((checkname, check_runs[checkname][1]))
     return (not_run_checks, pending_checks, failed_checks)
