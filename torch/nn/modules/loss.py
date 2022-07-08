@@ -8,6 +8,11 @@ from .. import _reduction as _Reduction
 from torch import Tensor
 from typing import Callable, Optional
 
+__all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
+           'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
+           'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
+           'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
+           'TripletMarginWithDistanceLoss', 'CTCLoss']
 
 class _Loss(Module):
     reduction: str
