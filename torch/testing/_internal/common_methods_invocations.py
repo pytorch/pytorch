@@ -1350,7 +1350,7 @@ class ReductionOpInfo(OpInfo):
     the optional keyword parameters of the ReductionOpInfo constructor.
 
     If a reduction operator does not yet implement the full required API of
-    reduction operators, this should be documented by skipping the failing
+    reduction operators, this should be documented by xfailing the failing
     tests rather than adding optional parameters to ReductionOpInfo.
 
     NOTE
@@ -3042,6 +3042,17 @@ def error_inputs_isclose(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_float_arg(()), args=(make_float_arg(()),), kwargs={'atol': -0.4}),
                      error_type=RuntimeError,
                      error_regex='atol must be greater than or equal to zero')
+
+
+def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    batches = ((), (0,), (1,), (5,))
+    ns = (0, 1, 3, 5)
+    for b, n in product(batches, ns):
+        shape = b + (n,)
+        yield SampleInput(make_arg(shape), args=(make_arg(shape),))
+        for i in range(len(shape)):
+            yield SampleInput(make_arg(shape), args=(make_arg(shape),), kwargs=dict(dim=i))
 
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
@@ -12432,6 +12443,15 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
+    OpInfo('linalg.vecdot',
+           aten_name='linalg_vecdot',
+           ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_linalg_vecdot,
+           check_batched_forward_grad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
@@ -13450,9 +13470,6 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Scalars failed to compare as equal!
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_variant_consistency_eager'),
-               # RuntimeError: This operator is not Composite Compliant
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_forward_ad'),
                # Not close
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_complex_half_reference_testing'),
@@ -18278,7 +18295,6 @@ op_db: List[OpInfo] = [
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
-        gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
@@ -18297,20 +18313,34 @@ op_db: List[OpInfo] = [
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
-            # vmap: We do not yet support calling random operations inside of vmap.
-            # Please perform random operations outside of vmap as a workaround
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
-        gradcheck_wrapper=wrapper_set_seed,
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
+        check_batched_forward_grad=False,
         # As per the docs, valid input dims are (3, 4)
         sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(3, 4)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "nn.functional.dropout3d",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # lambda impl
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        check_batched_forward_grad=False,
+        # As per the docs, valid input dims are (4, 5)
+        sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(4, 5)),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs, inplace=True)),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
     OpInfo(
@@ -18330,7 +18360,6 @@ op_db: List[OpInfo] = [
             # Please perform random operations outside of vmap as a workaround
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
-        gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -20610,25 +20639,19 @@ python_ref_db = [
         torch_opinfo_name="fmax",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmin",
         torch_opinfo_name="fmin",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
+        supports_rhs_python_scalar=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
@@ -20647,6 +20670,18 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.heaviside",
+        torch_opinfo_name="heaviside",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.hypot",
+        torch_opinfo_name="hypot",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
