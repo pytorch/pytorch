@@ -12,6 +12,7 @@ __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
+
 decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 

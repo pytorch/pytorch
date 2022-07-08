@@ -807,9 +807,7 @@ def add(
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
         )
-
     a, b = _maybe_broadcast(a, b)
-
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)

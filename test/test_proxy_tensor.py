@@ -247,28 +247,6 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
-    # Masked failures (creating a scalar tensor just to call `.item` on it)
-    xfail('_masked.amax'),
-    xfail('_masked.amax'),
-    xfail('_masked.amin'),
-    xfail('_masked.argmax'),
-    xfail('_masked.argmin'),
-    xfail('_masked.cumprod'),
-    xfail('_masked.cumsum'),
-    xfail('_masked.log_softmax'),
-    xfail('_masked.logaddexp'),
-    xfail('_masked.logsumexp'),
-    xfail('_masked.mean'),
-    xfail('_masked.median'),
-    xfail('_masked.norm'),
-    xfail('_masked.prod'),
-    xfail('_masked.softmax'),
-    xfail('_masked.softmin'),
-    xfail('_masked.std'),
-    xfail('_masked.sum'),
-    xfail('_masked.var'),
-    # Same as masked failures - preventing torch.tensor constants from turning into proxytensors causes issues with faketensors
-    xfail('__getitem__'),
 }
 
 
