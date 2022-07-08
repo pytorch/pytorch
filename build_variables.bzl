@@ -1155,6 +1155,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
+    "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
@@ -1163,8 +1164,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_deserialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_serialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",
@@ -1357,6 +1360,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseFactories.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",

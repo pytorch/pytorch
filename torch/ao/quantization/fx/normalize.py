@@ -2,6 +2,10 @@ from typing import Tuple, Dict, Any
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.node import Argument
 
+__all__ = [
+    "NormalizeArgsPreservingFQNs",
+]
+
 class NormalizeArgsPreservingFQNs(NormalizeArgs):
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         module_qualified_name = target
