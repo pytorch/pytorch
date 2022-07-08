@@ -358,20 +358,23 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1))
             log_input("x", x)
-            torch.ops.aten._foobar(x)
-            torch.ops.aten._foobar(x, False)
-            torch.ops.aten._foobar(x, arg3=False)
-            torch.ops.aten._foobar(x, False, arg3=False)
+            log_input("y", y)
+            torch.ops.aten.kl_div(x, y)
+            torch.ops.aten.kl_div(x, y, 2)
+            torch.ops.aten.kl_div(x, y, log_target=True)
+            torch.ops.aten.kl_div(x, y, 2, log_target=True)
 
-        # What we are testing here is that we omit arg2
+        # What we are testing here is that we omit reduction
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten._foobar.default($0)
-$2 = torch._ops.aten._foobar.default($0, False)
-$3 = torch._ops.aten._foobar.default($0, arg3=False)
-$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
+$1 = input('y')
+$2 = torch._ops.aten.kl_div.default($0, $1)
+$3 = torch._ops.aten.kl_div.default($0, $1, 2)
+$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
