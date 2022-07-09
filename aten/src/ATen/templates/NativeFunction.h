@@ -14,4 +14,10 @@
 #include <vector>
 ${extra_includes}
 
+namespace at {
+namespace native {
+
 ${native_function_declarations}
+
+} // namespace native
+} // namespace at

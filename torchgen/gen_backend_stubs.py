@@ -8,6 +8,7 @@ from typing import List, Dict, Union, Sequence, Optional
 from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
+    NamespaceHelper,
 )
 from torchgen.model import (
     BackendIndex,
@@ -18,14 +19,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import (
-    Target,
-    concatMap,
-    context,
-    YamlLoader,
-    FileManager,
-    NamespaceHelper,
-)
+from torchgen.utils import Target, concatMap, context, YamlLoader, FileManager
 from torchgen.context import native_function_manager
 from torchgen.code_template import CodeTemplate
 import torchgen.dest as dest
