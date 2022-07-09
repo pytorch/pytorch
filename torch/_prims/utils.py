@@ -673,6 +673,30 @@ def type_to_dtype(typ: type) -> torch.dtype:
 _ordered_types = (bool, int, float, complex)
 
 
+def check_fp_or_complex(
+    dtype: torch.dtype, fn_name: str, allow_low_precision_dtypes: bool = True
+):
+    """
+    Checks whether the input is floating point or complex.
+    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
+    """
+    check(
+        is_float_dtype(dtype) or is_complex_dtype(dtype),
+        lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
+    )
+    check(
+        allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
+        lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
+    )
+
+
+def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
+    check(
+        len(A.shape) >= 2,
+        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
+    )
+
+
 def get_higher_type(a: type, b: type) -> type:
     """
     Returns the higher of the two given Number types.
@@ -1099,7 +1123,14 @@ def reduction_dtypes(
     return computation_dtype, result_dtype
 
 
-def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+def make_contiguous_strides_for(
+    shape: ShapeType, row_major: bool = True
+) -> Tuple[int, ...]:
+    """
+    Returns the strides of a contriguous tensor if row_major
+    If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
+    This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
+    """
     validate_shape(shape)
     if not shape:
         return ()
@@ -1107,14 +1138,18 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     multiplier = 1
     strides = []
     for l in reversed(shape):
+        strides.append(multiplier)
         if l != 0:
-            strides.append(multiplier)
-            multiplier = l * multiplier
-        else:
-            strides.append(multiplier)
+            multiplier *= l
 
     result = tuple(reversed(strides))
-    return result
+
+    if row_major:
+        return result
+    else:
+        if len(shape) < 2:
+            return result
+        return result[:-2] + (1, max(shape[-2], 1))
 
 
 def compute_reduction_output_shape(
