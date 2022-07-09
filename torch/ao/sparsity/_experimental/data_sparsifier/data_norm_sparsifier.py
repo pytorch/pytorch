@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 from functools import reduce
 from typing import Tuple, Any, List
+
 from .base_data_sparsifier import BaseDataSparsifier
 
 __all__ = ['DataNormSparsifier']
