@@ -9,6 +9,7 @@ from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.quantize import is_activation_post_process
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -475,7 +476,7 @@ class DynamicStaticDetector(DetectorBase):
             rec_lay_to_add = "dynamic quantize per tensor layer"
             dynamic_per_tensor_string = recommend_per_tensor.format(rec_lay_to_add)
             dynamic_per_tensor_reasoning_string = (
-                " This is because the input to this module has a non-stationary distribution."
+                " This is because the input to this module has a non-stationary distribution"
             )
 
             # start composing explanation
@@ -912,3 +913,133 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         # return a tuple with the string explanation and the compiled dict info
         return (input_weight_string, input_weight_equalization_info)
+
+
+class OutlierDetector(DetectorBase):
+    r"""
+    Determines whether there are significant outliers in activation data around a certain layer.
+
+    This is ideally used in conjunction with information on stationary vs. non-stationary distribution:
+        If the data is stationary, and there are significant outliers, then we want to flag them
+        We want to do this on a per channel basis for detecting outliers
+
+    Determines whether activation data is flagged as outlier based on if data is stationary and:
+        p_r = avg(100th percentile / "reference_percentile"th percentile)
+        where:
+            p_r is average percentile ratio across all batches in the epoch
+            reference_percentile is a percentile values between 0 and 100 exclusive
+
+        if p_r is above some threshold, then we consider the activations to have significant outliers
+
+    Args:
+        ratio_threshold (float, optional): The threshold for p_r to determine if there are outliers in activations
+            Default: 3.5
+        reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
+            Should be between 0 and 1
+            Default: 0.975
+        ch_axis (int, optional): The channel axis being observed to determine input weight equalization
+            Default: 1
+
+    * :attr:`ratio_threshold`: The threshold for p_r to determine if there are outliers in activations
+        The p_r value (average ratio of 100th percentile/reference_percentile) is compared to ratio_threshold
+        If it is significantly greater, then we consider it an outlier
+        This threshold was calculated based on the ratio of the percentiles in a normal distribution
+
+    * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
+        Should be between 0 and 1
+
+    * :attr:`ch_axis`: The channel axis being observed to determine outliers
+
+    * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
+    """
+
+    # names for the pre observers that are inserted
+    DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
+
+    def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
+        # initialize the variables of interest
+        self.ratio_threshold = ratio_threshold
+
+        # make sure passed in percentile is valid
+        assert reference_percentile >= 0 and reference_percentile <= 1
+        self.reference_percentile = reference_percentile
+        self.ch_axis = ch_axis
+
+    def get_detector_name(self) -> str:
+        r"""Returns the name of this detector"""
+        return "outlier_detector"
+
+    def _supports_insertion(self, module: nn.Module) -> bool:
+        r"""Returns whether the given module is supported for observers insertion
+
+        Any module that doesn't have children and isn't an observer itself is supported
+
+        Args
+            module: The module to check and ensure is supported
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # case for insertion of module
+        # check if the module has any children and isn't observer
+        num_children = len(list(module.children()))
+        return num_children == 0 and not is_activation_post_process(module)
+
+    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
+        r""" Determines where observers need to be inserted for the Outlier Detector.
+
+        For this detector, we want to place observers in front of supported layers.
+
+        Currently inserts observers for:
+            all layers that do not have children (leaf level layers)
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
+            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
+            key "insert_observer" -> the observer we wish to insert (ObserverBase)
+            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_args" -> The arguments that are meant to be passed into the observer
+        """
+        # observer for this detector is ModelReportObserver
+        obs_ctr = ModelReportObserver
+
+        # return dict
+        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+
+        for fqn, module in prepared_fx_model.named_modules():
+            # check to see if module is of a supported type
+            if self._supports_insertion(module):
+                # if it's a supported type, we want to get node and add observer insert locations
+                targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
+
+                # add entry for pre-observer
+                pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
+
+                obs_fqn_to_info[pre_obs_fqn] = {
+                    "target_node": targeted_node,
+                    "insert_observer": obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    "insert_post": False,
+                    "observer_args": targeted_node.args,
+                }
+
+        return obs_fqn_to_info
+
+    def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
+        r"""
+        Determines whether input weight equalization is appropriate for a given module.
+
+        Takes advantage of the ModelReport Observer which records the relavent percentile information
+
+        Args:
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+
+        Returns a tuple with two elements:
+            String report of of whether there are outliers in the activations around certain modules
+            Dictionary mapping modules of interest to:
+                whether there were outliers found in activation before
+                their p_r metric compared to the threshold
+                the threshold used to make the recommendation
+                the reference_percentile used to make the recommendation
+        """
+        pass

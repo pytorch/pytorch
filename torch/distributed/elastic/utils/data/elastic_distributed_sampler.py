@@ -11,7 +11,6 @@ import math
 import torch
 from torch.utils.data.distributed import DistributedSampler
 
-__all__ = ['ElasticDistributedSampler']
 
 class ElasticDistributedSampler(DistributedSampler):
     """

@@ -11,6 +11,13 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -116,9 +123,11 @@ jobs:
           export SHARD_NUMBER=0
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          # trim all new lines from commit messages so we don't run into issues with batch environment
+
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          export PR_BODY="${PR_BODY//[$'\n\r']}"
 
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
