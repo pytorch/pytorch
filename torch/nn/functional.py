@@ -1073,6 +1073,8 @@ def adaptive_max_pool1d_with_indices(
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if output_size == 0:
+        raise ValueError(f"Unallowed output_size argument value: {output_size}")
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool1d_with_indices, (input,), input, output_size, return_indices=return_indices
@@ -1113,6 +1115,8 @@ def adaptive_max_pool2d_with_indices(
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if output_size == 0 or output_size == (0, 0):
+        raise ValueError(f"Unallowed output_size argument value: {output_size}")
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool2d_with_indices, (input,), input, output_size, return_indices=return_indices
@@ -1154,6 +1158,8 @@ def adaptive_max_pool3d_with_indices(
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if output_size == 0 or output_size == (0, 0, 0):
+        raise ValueError(f"Unallowed output_size argument value: {output_size}")
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool3d_with_indices, (input,), input, output_size, return_indices=return_indices
@@ -1208,6 +1214,8 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
         output_size: the target output size (single integer or
             double-integer tuple)
     """
+    if output_size == 0 or output_size == (0, 0):
+        raise ValueError(f"Unallowed output_size argument value: {output_size}")
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
@@ -1225,6 +1233,8 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
+    if output_size == 0 or output_size == (0, 0, 0):
+        raise ValueError(f"Unallowed output_size argument value: {output_size}")
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
