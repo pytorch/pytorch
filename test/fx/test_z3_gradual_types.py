@@ -32,6 +32,91 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class HFOperations(unittest.TestCase):
 
+    def test_getitem_tensor(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([4, 4])):
+                getitem = x[(None, None, slice(None, None, None), slice(None, None, None))]
+                return getitem
+
+        B = BasicBlock()
+        b = B.forward(torch.rand(4, 4))
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(B)
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        get_item_res = z3.Const(2, tensor_type)
+        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
+        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
+        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
+        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+
+        # change the annotation on the input to make sure it propagates
+        # to the output
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, 4])
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        # dyn check
+        assert s.model()[get_item_res].arg(2).arg(0) == 0
+
+
+    def test_getitem_tensor2(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([4, 4])):
+                getitem = x[(None, None)]
+                return getitem
+
+        B = BasicBlock()
+        b = B.forward(torch.rand(4, 4))
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(B)
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        get_item_res = z3.Const(2, tensor_type)
+        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
+        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
+        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
+        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+
+
+    def test_getitem_tensor_3(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([4, 4])):
+                getitem = x[(None, slice(None, None, None), None, slice(None, None, None))]
+                return getitem
+
+        B = BasicBlock()
+        b = B.forward(torch.rand(4, 4))
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(B)
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        get_item_res = z3.Const(2, tensor_type)
+        assert s.model()[get_item_res].arg(0).arg(1) == b.shape[0]
+        assert s.model()[get_item_res].arg(1).arg(1) == b.shape[1]
+        assert s.model()[get_item_res].arg(2).arg(1) == b.shape[2]
+        assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
+
+
     def test_masked_fill(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -77,6 +162,7 @@ class HFOperations(unittest.TestCase):
         s = z3.Solver()
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
+
 
     def test_layer_norm(self):
 
@@ -294,6 +380,30 @@ class HFOperations(unittest.TestCase):
         arange_result = z3.Const(5, tensor_type)
         add_result = z3.Const(6, tensor_type)
         self.assertEqual(s.model()[arange_result], s.model()[add_result])
+
+
+    def test_regular_add_2(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                to = x.to()
+                size = to.size()
+                getitem = size[-1]
+                add = getitem + 1
+                return add
+
+        b = BasicBlock().forward(torch.rand(2, 4))
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        res = z3.Int(5)
+        self.assertEqual(s.model()[res], b)
+
 
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
