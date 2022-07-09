@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: "${{ github.workflow }}
-    -${{ github.event.pull_request.number || (startsWith(github.event.ref, 'refs/tags/ciflow') && github.event.ref) || github.sha }}
+    -${{ github.event.pull_request.number || (startsWith(github.ref, 'refs/tags/ciflow') && github.ref) || github.sha }}
     -${{ github.event_name == 'workflow_dispatch' }}"
   cancel-in-progress: true
 
@@ -22,7 +22,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - run: "echo ${{ github.workflow }}
-          -${{ github.event.pull_request.number || (startsWith(github.event.ref, 'refs/heads/ciflow') && github.event.ref) || github.sha }}
+          -${{ github.event.pull_request.number || (startsWith(github.ref, 'refs/heads/ciflow') && github.ref) || github.sha }}
           -${{ github.event_name == 'workflow_dispatch' }}; echo ${{ toJSON(github) }}"
 
   # parallelnative-linux-focal-py3_7-gcc7-build:
