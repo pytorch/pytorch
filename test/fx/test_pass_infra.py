@@ -4,7 +4,6 @@ import torch
 import torch.fx as fx
 
 from torch.testing._internal.common_utils import TestCase
-from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
