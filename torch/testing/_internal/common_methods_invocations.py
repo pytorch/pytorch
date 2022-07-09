@@ -21166,6 +21166,7 @@ python_ref_db = [
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
+        supports_nvfuser=False,  # clone_default
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",
