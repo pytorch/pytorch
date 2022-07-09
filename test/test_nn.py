@@ -6075,6 +6075,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 input = torch.randn(output_size)
                 self.assertRaises(ValueError, lambda: module(input))
 
+    def test_adaptive_pooling_output_size(self):
+        for numel in (2, 3):
+            for pool_type in ('Max', 'Avg'):
+                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                module_cls = getattr(nn, cls_name)
+                output_size = (0,) * numel
+                module = module_cls(output_size)
+                input = torch.randn((4,) * (numel + 1))
+                self.assertRaises(ValueError, lambda: module(input))
+
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
