@@ -2255,7 +2255,9 @@ torch.cuda.synchronize()
     def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case(optimizer_ctor=optimizer_ctor)
+            (
+                mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
+            ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor)
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
@@ -3848,66 +3850,69 @@ torch.cuda.synchronize()
         model_control.eval()
         self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
 
+    def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
+        for actually_do_graphs in (True, False):
+            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params_control = [p.clone().requires_grad_() for p in params]
+            params_graphed = [p.clone().requires_grad_() for p in params]
+
+            grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
+
+            # Control (capturable=False)
+
+            opt = optimizer_ctor(params_control, capturable=False, **kwargs)
+
+            for i in range(steps_warmup + steps_train):
+                for j, p in enumerate(params_control):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            # capturable=True
+
+            opt = optimizer_ctor(params_graphed, capturable=True, **kwargs)
+
+            for i in range(steps_warmup):
+                for j, p in enumerate(params_graphed):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            if actually_do_graphs:
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    opt.step()
+
+            for i in range(steps_train):
+                if actually_do_graphs:
+                    for j, p in enumerate(params_graphed):
+                        p.grad.copy_(grads[i + steps_warmup][j])
+                    g.replay()
+                else:
+                    # Passing capturable=True to the constructor and running without graphs should still be
+                    # numerically correct, even if it's not ideal for performance.
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i + steps_warmup][j]
+                    opt.step()
+
+            for p_control, p_graphed in zip(params_control, params_graphed):
+                self.assertEqual(p_control, p_graphed)
+
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_adam_adamw(self):
-        OptClasses = (torch.optim.Adam, torch.optim.AdamW)
-        cases = []
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        for Class, foreach, amsgrad in product(OptClasses, (False, True), (False, True)):
-            cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad}))
-            if Class == torch.optim.Adam and foreach:
-                cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "fused": foreach, "amsgrad": amsgrad}))
+        cases = [
+            (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
+            for optimizer_ctor, foreach, amsgrad in product(
+                (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
+        ] + [
+            (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
+            for amsgrad in (False, True)
+        ]
 
-        steps_warmup = 3
-        steps_train = 2
-
-        for OptClass, kwargs in cases:
-            for actually_do_graphs in (True, False):
-                params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
-                params_control = [p.clone().requires_grad_() for p in params]
-                params_graphed = [p.clone().requires_grad_() for p in params]
-
-                grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
-
-                # Control (capturable=False)
-
-                opt = OptClass(params_control, capturable=False, **kwargs)
-
-                for i in range(steps_warmup + steps_train):
-                    for j, p in enumerate(params_control):
-                        p.grad = grads[i][j]
-                    opt.step()
-
-                # capturable=True
-
-                opt = OptClass(params_graphed, capturable=True, **kwargs)
-
-                for i in range(steps_warmup):
-                    for j, p in enumerate(params_graphed):
-                        p.grad = grads[i][j]
-                    opt.step()
-
-                if actually_do_graphs:
-                    g = torch.cuda.CUDAGraph()
-                    with torch.cuda.graph(g):
-                        opt.step()
-
-                for i in range(steps_train):
-                    if actually_do_graphs:
-                        for j, p in enumerate(params_graphed):
-                            p.grad.copy_(grads[i + steps_warmup][j])
-                        g.replay()
-                    else:
-                        # Passing capturable=True to the constructor and running without graphs should still be
-                        # numerically correct, even if it's not ideal for performance.
-                        for j, p in enumerate(params_graphed):
-                            p.grad = grads[i + steps_warmup][j]
-                        opt.step()
-
-                for p_control, p_graphed in zip(params_control, params_graphed):
-                    self.assertEqual(p_control, p_graphed)
+        for optimizer_ctor, kwargs in cases:
+            with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
+                self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     # TODO(crcrpar): Merge this into test_graph_adam_adamw.
     # TODO(crcrpar): Better check `step` when `found_inf = 1`.
