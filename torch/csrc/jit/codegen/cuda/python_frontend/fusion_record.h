@@ -13,7 +13,7 @@ struct RecordFunctor {
 };
 
 // With C++17, this template specialization could be replaced by
-// "if constexpr" statement in the UnaryOpRecord::operator() 
+// "if constexpr" statement in the BinaryOpRecord::operator() 
 // function.
 template<class O, class A1, class A2>
 O* binary_op_func(std::function<O*(A1*, A2*)> func, NvfVal* arg1, NvfVal* arg2) {
@@ -48,6 +48,47 @@ struct BinaryOpRecord : RecordFunctor {
     auto arg2 = fd.fusion_state.at(args.at(1));
     auto output = binary_op_func<OutType, Arg1Type, Arg2Type>(
                      fusion_op_, arg1, arg2);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+
+ private:
+  std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op_;
+};
+
+// With C++17, this template specialization could be replaced by
+// "if constexpr" statement in the operator() 
+// function.
+template<class O, class A1, class A2>
+O* binary_with_alpha_op_func(std::function<O*(A1*, A2*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
+  return func(arg1, arg2, arg3);
+}
+template<>
+NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfTensorView, NvfTensorView>(std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
+  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>(), arg3);
+}
+template<>
+NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfTensorView, NvfVal>(std::function<NvfTensorView*(NvfTensorView*, NvfVal*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
+  return func(arg1->as<NvfTensorView>(), arg2, arg3);
+}
+template<>
+NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfVal, NvfTensorView>(std::function<NvfTensorView*(NvfVal*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
+  return func(arg1, arg2->as<NvfTensorView>(), arg3);
+}
+
+template<class OutType, class Arg1Type, class Arg2Type>
+struct BinaryWithAlphaOpRecord : RecordFunctor {
+  BinaryWithAlphaOpRecord(std::vector<size_t> _args,
+                std::vector<size_t> _outputs,
+                std::function<OutType*(Arg1Type*, Arg2Type*, NvfVal*)> fusion_op) :
+    RecordFunctor(std::move(_args), std::move(_outputs)),
+    fusion_op_(fusion_op) {}
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg1 = fd.fusion_state.at(args.at(0));
+    auto arg2 = fd.fusion_state.at(args.at(1));
+    auto arg3 = fd.fusion_state.at(args.at(2));
+    auto output = binary_with_alpha_op_func<OutType, Arg1Type, Arg2Type>(
+                     fusion_op_, arg1, arg2, arg3);
     fd.fusion_state.at(outputs.at(0)) = output;
   }
 
