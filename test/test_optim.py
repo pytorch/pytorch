@@ -2793,6 +2793,46 @@ class TestSWAUtils(TestCase):
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
 
+    def test_functional_fused_adam_with_foundinf(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is required.")
+
+        from torch.optim import adam
+
+        num_tensors = 5
+        for amsgrad in (False, True):
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.randn(4, device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.randn(4, device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            inv_grad_scale = torch.full((1,), 2, dtype=torch.float32, device="cuda")
+            found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
+
+            adam._fused_adam(
+                params,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=amsgrad,
+                beta1=0.9,
+                beta2=0.99,
+                lr=1e-2,
+                weight_decay=.0,
+                eps=1e-8,
+                maximize=False,
+                capturable=False,
+                inv_grad_scale=inv_grad_scale,
+                found_inf=found_inf,
+            )
+
+            self.assertEqual(
+                state_steps,
+                [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
+            )
+
+
+
 instantiate_parametrized_tests(TestLRScheduler)
 
 
