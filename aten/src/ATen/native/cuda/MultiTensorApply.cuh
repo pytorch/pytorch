@@ -201,7 +201,7 @@ void multi_tensor_apply(
 template<int depth, typename T, typename... ArgTypes>
 void multi_tensor_apply_for_fused_optimizer(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
-    std::vector<at::Tensor>& state_steps,
+    at::TensorList state_steps,
     T callable,
     ArgTypes... args) {
   TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth");

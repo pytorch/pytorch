@@ -167,7 +167,6 @@ void _fused_adam_kernel_cuda_(
     tensor_lists.emplace_back(grads.vec());
     tensor_lists.emplace_back(exp_avgs.vec());
     tensor_lists.emplace_back(exp_avg_sqs.vec());
-    auto state_steps_vec = state_steps.vec();
     if (amsgrad) {
         tensor_lists.emplace_back(max_exp_avg_sqs.vec());
     }
@@ -178,7 +177,7 @@ void _fused_adam_kernel_cuda_(
             if (amsgrad) {
                 multi_tensor_apply_for_fused_optimizer<5>(
                     tensor_lists,
-                    state_steps_vec,
+                    state_steps,
                     FusedAdamMathFunctor<scalar_t, 5>(),
                     lr,
                     beta1,
@@ -193,7 +192,7 @@ void _fused_adam_kernel_cuda_(
             } else {
                 multi_tensor_apply_for_fused_optimizer<4>(
                     tensor_lists,
-                    state_steps_vec,
+                    state_steps,
                     FusedAdamMathFunctor<scalar_t, 4>(),
                     lr,
                     beta1,
