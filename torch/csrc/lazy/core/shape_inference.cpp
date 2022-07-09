@@ -689,25 +689,25 @@ std::vector<Shape> compute_shape_native_dropout_backward(
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     c10::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
-std::vector<Shape> compute_shape_random_functional(
+std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t from,
     c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
-  return compute_shape_random_functional(self, generator);
+  return compute_shape_random(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
@@ -735,7 +735,7 @@ std::vector<Shape> compute_shape_sum(
   ;
 }
 
-std::vector<Shape> compute_shape_zero_functional(const at::Tensor& self) {
+std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -780,19 +780,20 @@ std::vector<Shape> compute_shape_slogdet(const at::Tensor& self) {
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_and(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
       c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
-std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor& self) {
+std::vector<torch::lazy::Shape> compute_shape_logical_not(
+    const at::Tensor& self) {
   return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_or(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -800,7 +801,7 @@ std::vector<torch::lazy::Shape> compute_shape_logical_or(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_xor(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
