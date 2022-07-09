@@ -202,7 +202,7 @@ inline bool operator!=(const Argument& lhs, const Argument& rhs) {
   return !(lhs == rhs);
 }
 
-enum TORCH_API SchemaArgType { input, output };
+enum struct TORCH_API SchemaArgType { input, output };
 
 /**
  * struct SchemaArgument
@@ -216,7 +216,7 @@ struct TORCH_API SchemaArgument {
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
-struct FunctionSchema {
+struct TORCH_API FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
@@ -339,71 +339,15 @@ struct FunctionSchema {
     }
   }
 
-  void flattenAliasTypeSet(const ArrayRef<TypePtr>& types, std::unordered_set<TypePtr>& flattened_types) const {
-    for (const TypePtr& type: types) {
-      if (!flattened_types.count(type)) {
-        flattenAliasTypeSet(type->containedTypes(), flattened_types);
-        flattened_types.insert(type);
-      }
-    }
-  }
+  // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
+  // Used to map types to a type such that all types that can alias will be mapped to the same type.
+  // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
+  // on 'List[int]'.
+  c10::optional<std::vector<TypePtr>> mapTypeToAliasTypeSet(const TypePtr& type) const;
 
-  c10::optional<std::vector<TypePtr>> mapTypeToAliasTypeSet(const TypePtr& type) const {
-    switch(type->kind()) {
-      case TypeKind::ListType:
-      case TypeKind::DictType:
-      case TypeKind::ClassType:
-      case TypeKind::TensorType:
-        return std::vector<TypePtr> {c10::unshapedType(type)};
-      case TypeKind::UnionType: {
-        std::vector<TypePtr> mutable_types;
-        for (const TypePtr& inner :
-             type->expectRef<UnionType>().containedTypes()) {
-          if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
-            mutable_types.insert(
-                mutable_types.end(),
-                (*maybe_inner_types).begin(),
-                (*maybe_inner_types).end());
-          }
-        }
-        if (mutable_types.size() == 0) {
-          return c10::nullopt;
-        }
-        return mutable_types;
-      }
-      case TypeKind::AnyType:
-        return {std::vector<TypePtr>{type}};
-      case TypeKind::OptionalType: {
-        auto inner = type->castRaw<OptionalType>()->getElementType();
-        return mapTypeToAliasTypeSet(inner);
-      }
-      case TypeKind::TupleType: {
-        std::vector<TypePtr> mutable_types;
-        for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
-          if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
-            mutable_types.insert(
-                mutable_types.end(),
-                (*maybe_inner_types).begin(),
-                (*maybe_inner_types).end());
-          }
-        }
-        if (mutable_types.size() == 0) {
-          return c10::nullopt;
-        }
-        return {std::vector<TypePtr>{TupleType::create(mutable_types)}};
-      }
-      default:
-        return c10::nullopt;
-    }
-  }
-
-  std::vector<Argument> getCorrectList(SchemaArgType type) const {
-    if (type == SchemaArgType::input) {
-      return arguments();
-    } else {
-      return returns();
-    }
-  }
+  // Returns either arguments() or returns() depending on the SchemaArgType
+  // output => returns(), input => arguments()
+  std::vector<Argument> getCorrectList(SchemaArgType type) const;
 
  public:
 
@@ -451,61 +395,9 @@ struct FunctionSchema {
 
     return is_mutable(*index);
   }
-  bool areAliasing(const SchemaArgument& lhs, const SchemaArgument& rhs) const {
-    TORCH_INTERNAL_ASSERT(
-        (lhs.index < getCorrectList(lhs.type).size()),
-        "Invalid index for schema.");
-    TORCH_INTERNAL_ASSERT(
-        (rhs.index < getCorrectList(rhs.type).size()),
-        "Invalid index for schema.");
 
-    const Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
-    const Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
-    if (lhsArg.alias_info() && rhsArg.alias_info()) {
-      for (const auto& lhsSet : lhsArg.alias_info()->afterSets()) {
-        for (const auto& rhsSet : rhsArg.alias_info()->afterSets()) {
-          if (lhsSet == rhsSet) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-  bool areAliasing(const SchemaArgument& lhs, const SchemaArgument& rhs, bool check_additional) const {
-    bool basic_check = areAliasing(lhs, rhs);
-    if (check_additional) {
-      const c10::Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
-      const c10::Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
-      if (lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter()) {
-        c10::optional<std::vector<TypePtr>> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-        c10::optional<std::vector<TypePtr>> rhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-        if (lhsTypes && rhsTypes) {
-          std::unordered_set<TypePtr> flattened_types;
-          flattenAliasTypeSet(ArrayRef<TypePtr>(*lhsTypes), flattened_types);
-          if (std::all_of((*rhsTypes).begin(), (*rhsTypes).end(), [&flattened_types](const TypePtr& type) {
-            return flattened_types.count(type);
-          })) {
-            return true;
-          }
-        }
-      }
-      if (rhsArg.alias_info() && rhsArg.alias_info()->isWildcardAfter()) {
-        c10::optional<std::vector<TypePtr>> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-        c10::optional<std::vector<TypePtr>> rhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-        if (lhsTypes && rhsTypes) {
-          std::unordered_set<TypePtr> flattened_types;
-          flattenAliasTypeSet(ArrayRef<TypePtr>(*lhsTypes), flattened_types);
-          if (std::all_of((*lhsTypes).begin(), (*lhsTypes).end(), [&flattened_types](const TypePtr& type) {
-            return flattened_types.count(type);
-          })) {
-            return true;
-          }
-        }
-      }
-    }
-    return basic_check;
-  }
+  bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
+
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
