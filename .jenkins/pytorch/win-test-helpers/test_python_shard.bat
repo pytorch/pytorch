@@ -21,9 +21,6 @@ if "%SHARD_NUMBER%" == "1" (
   )
 )
 
-echo Copying over test times file
-copy /Y "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.pytorch-test-times.json" "%TEST_DIR_WIN%"
-
 echo Run nn tests
 python run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
 if ERRORLEVEL 1 goto fail

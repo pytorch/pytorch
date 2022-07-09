@@ -296,10 +296,4 @@ else
   fi
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  # export test times so that potential sharded tests that'll branch off this build will use consistent data
-  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
-  python test/run_test.py --export-past-test-times
-fi
-
 print_sccache_stats
