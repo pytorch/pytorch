@@ -180,10 +180,11 @@ def check_file(
     except (OSError, subprocess.CalledProcessError) as err:
         return [format_error_message(filename, err)]
     finally:
-        # Always revert the formatting change back to the original content
-        # to fit with lintrunner -a workflow
-        with open(filename, "wb") as f:
-            f.write(original)
+        if not replacement or original != replacement:
+            # Always revert the formatting change back to the original content
+            # to fit with lintrunner -a workflow
+            with open(filename, "wb") as f:
+                f.write(original)
 
 
 def main() -> None:
