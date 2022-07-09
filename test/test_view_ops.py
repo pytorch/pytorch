@@ -10,7 +10,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
-    numpy_to_torch_dtype_dict,
+    numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
@@ -126,6 +126,7 @@ class TestViewOps(TestCase):
         s = t.conj()
         self.assertTrue(s is t)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
@@ -1027,6 +1028,7 @@ class TestOldViewOps(TestCase):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_expand(self, device):
         tensor = torch.rand(1, 8, 1, device=device)
         tensor2 = torch.rand(5, device=device)
@@ -1268,6 +1270,7 @@ class TestOldViewOps(TestCase):
             tensor.chunk(-2)
 
     # TODO: make work on CUDA, too
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyCPU
     def test_unsqueeze(self, device) -> None:
         x = torch.randn(2, 3, 4)

@@ -102,6 +102,7 @@ __all__ = [
     "gcd",
     "ge",
     "gt",
+    "hypot",
     "igamma",
     "igammac",
     "le",
@@ -197,6 +198,7 @@ _nvfuser_unary_ops = {
     "exp",
     "expm1",
     "floor",
+    "imag",
     "isfinite",
     "lgamma",
     "log",
@@ -205,6 +207,7 @@ _nvfuser_unary_ops = {
     "log10",
     "reciprocal",
     "neg",
+    "real",
     "round",
     "rsqrt",
     "sin",
@@ -733,6 +736,7 @@ imag = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
+    impl_nvfuser=_imag_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
@@ -792,6 +796,7 @@ real = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
+    impl_nvfuser=_real_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
@@ -1013,6 +1018,13 @@ gt = _make_elementwise_binary_prim(
     impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+hypot = _make_elementwise_binary_prim(
+    "hypot",
+    impl_aten=torch.hypot,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 igamma = _make_elementwise_binary_prim(
