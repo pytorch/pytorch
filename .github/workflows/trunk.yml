@@ -22,7 +22,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - run: "echo ${{ github.workflow }}
-          -${{ github.event.pull_request.number || (startsWith(github.ref, 'refs/heads/ciflow') && github.ref) || github.sha }}
+          -${{ github.event.pull_request.number || (startsWith(github.ref, 'refs/tags/ciflow') && github.ref) || github.sha }}
           -${{ github.event_name == 'workflow_dispatch' }}; echo ${{ github.ref }}"
 
   # parallelnative-linux-focal-py3_7-gcc7-build:
