@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/vulkan/Context.h>
 
@@ -10,11 +9,9 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Context::Context(
-    const VkInstance instance, size_t adapter_i, const ContextConfig config)
+Context::Context(size_t adapter_i, const ContextConfig& config)
     : config_(config),
       // Important handles
-      instance_(instance),
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
@@ -22,10 +19,12 @@ Context::Context(
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
       descriptor_pool_(device_, config_.descriptorPoolConfig),
       fences_(device_),
+      // Diagnostics
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
       querypool_(
         device_,
-        adapter_p_->timestamp_compute_and_graphics(),
-        adapter_p_->timestamp_period()),
+        config_.queryPoolConfig),
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
       cmd_(VK_NULL_HANDLE),
@@ -96,10 +95,22 @@ void Context::submit_texture_copy(
 
   set_cmd();
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_,
+      "copy_texture_to_texture",
+      create_extent3d({0, 0, 0}),
+      create_extent3d({0, 0, 0}));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   cmd_.insert_barrier(pipeline_barrier);
 
   cmd_.copy_texture_to_texture(
       source, destination, copy_range, src_offset, dst_offset);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
@@ -136,6 +147,8 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
+      const uint32_t submit_frequency = 16u;
+
       const CommandPoolConfig cmd_config{
         32u,  // cmdPoolInitialSize
         8u,  // cmdPoolBatchSize
@@ -150,13 +163,19 @@ Context* context() {
         32u,  // descriptorPileSizes
       };
 
+      const QueryPoolConfig query_pool_config{
+        4096u,  // maxQueryCount
+        256u,  //initialReserveSize
+      };
+
       const ContextConfig config{
-        16u,  // cmdSubmitFrequency
+        submit_frequency,  // cmdSubmitFrequency
         cmd_config,  // cmdPoolConfig
         descriptor_pool_config,  // descriptorPoolConfig
+        query_pool_config,  // queryPoolConfig
       };
-      return new Context(
-          runtime()->instance(), runtime()->default_adapter_i(), config);
+
+      return new Context(runtime()->default_adapter_i(), config);
     }
     catch (const std::exception& e) {
       TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
