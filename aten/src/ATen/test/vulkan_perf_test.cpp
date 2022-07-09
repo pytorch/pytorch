@@ -28,11 +28,8 @@ static void cat_op_channel_perf_gpu_only(benchmark::State& state) {
 
   // Act
   for (auto _ : state) {
-    at::native::vulkan::api::context()->querypool().enable();
     const auto vulkan_out = at::cat({in_vulkan1, in_vulkan2, in_vulkan3}, 1);
     vulkan_out.cpu();
-    auto perf_info = at::native::vulkan::api::context()->querypool().disable(true);
-    state.SetIterationTime(perf_info[0].execution_time_us / 1'000'000.); // us to sec
   }
 }
 
