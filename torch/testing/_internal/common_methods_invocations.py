@@ -20473,8 +20473,18 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.softplus",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.l1_loss",
+        torch_opinfo_name="nn.functional.l1_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.mse_loss",
+        torch_opinfo_name="nn.functional.mse_loss",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
