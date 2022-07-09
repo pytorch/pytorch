@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
 from torch.ao.quantization.quant_type import QuantType
 import torch
 import copy

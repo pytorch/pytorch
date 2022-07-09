@@ -433,7 +433,7 @@ def _partial_wrapper_equals(obs1: _PartialWrapper, obs2: _PartialWrapper):
     obs1_keywords = copy.copy(obs1.p.keywords)
     obs2_keywords = copy.copy(obs2.p.keywords)
     keywords_equal = True
-    # compare observer with _partial_wrapper_equals as well since direct compare would fail
+    # compare observer with _observer_equals since direct compare would fail
     if "observer" in obs1_keywords and "observer" in obs2_keywords:
         keywords_equal = keywords_equal and _observer_equals(obs1_keywords["observer"], obs2_keywords["observer"])
         obs1_keywords.pop("observer")

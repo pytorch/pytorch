@@ -1354,9 +1354,9 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
                 for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
                     if _partial_wrapper_equals(
                             qconfig.activation,
-                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)):
-                        bad_observer = False
-                    if _partial_wrapper_equals(qconfig.activation, observer_ctr):
+                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
+                            :
+                        _partial_wrapper_equals(qconfig.activation, observer_ctr):
                         bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
