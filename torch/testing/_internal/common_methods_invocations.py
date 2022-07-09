@@ -44,6 +44,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.linalg
 
 import torch._prims as prims  # noqa: F401
 
@@ -21177,6 +21178,15 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        supports_nvfuser=False,  # clone_default
     ),
     #
     # Tensor Creation Reference OpInfos
