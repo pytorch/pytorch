@@ -1438,10 +1438,6 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 # get the info for the specific module
                 module_dict = outlier_dict[module_fqn]
 
-                # because we only ran once, all batches run should say statisitically insignificant amount of data
-                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
-                self.assertEqual(sum(sufficient_batches_info), 0)
-
                 # there really should not be any outliers since we used a normal distribution to perform this calculation
                 outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
                 self.assertEqual(sum(outlier_info), 0)
@@ -1492,10 +1488,6 @@ class TestFxDetectOutliers(QuantizationTestCase):
             for module_fqn in outlier_dict:
                 # get the info for the specific module
                 module_dict = outlier_dict[module_fqn]
-
-                # because we only ran once, all batches run should say statisitically insignificant amount of data
-                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
-                self.assertEqual(sum(sufficient_batches_info), 0)
 
                 # everything should be an outlier because we said that the max should be equal to the min for all of them
                 # however we will just test and say most should be in case we have several 0 channel values

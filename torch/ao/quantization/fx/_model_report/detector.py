@@ -938,6 +938,9 @@ class OutlierDetector(DetectorBase):
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
             Should be between 0 and 1
             Default: 0.975
+        statistical_threshold (float, optional): Fraction of batches to determine outliers per channel should be above this
+            Should be between 0 and 1
+            Default: 0.95
         ch_axis (int, optional): The channel axis being observed to determine input weight equalization
             Default: 1
 
@@ -947,6 +950,10 @@ class OutlierDetector(DetectorBase):
         This threshold was calculated based on the ratio of the percentiles in a normal distribution
 
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
+        Should be between 0 and 1
+
+    * :attr:`statistical_threshold`: The fraction of batches to determine outliers for each channel should be above this
+        Some batches may not be used because of 0-based errors, so this is to ensure a good amount of the total batches are used
         Should be between 0 and 1
 
     * :attr:`ch_axis`: The channel axis being observed to determine outliers
@@ -967,13 +974,21 @@ class OutlierDetector(DetectorBase):
     CHANNEL_AXIS_KEY = "channel_axis"
     MAX_VALS_KEY = "per_channel_max"
 
-    def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
+    def __init__(
+        self,
+        ratio_threshold: float = 3.5,
+        reference_percentile: float = 0.975,
+        statistical_threshold: float = 0.95,
+        ch_axis: int = 1,
+    ):
         # initialize the variables of interest
         self.ratio_threshold = ratio_threshold
 
         # make sure passed in percentile is valid
         assert reference_percentile >= 0 and reference_percentile <= 1
+        assert statistical_threshold >= 0 and statistical_threshold <= 1
         self.reference_percentile = reference_percentile
+        self.statistical_threshold = statistical_threshold
         self.ch_axis = ch_axis
 
     def get_detector_name(self) -> str:
@@ -1051,7 +1066,9 @@ class OutlierDetector(DetectorBase):
 
         return obs_fqn_to_info
 
-    def _calculate_outlier_info(self, percentile_ratios: torch.Tensor, counted_batches: torch.Tensor) -> Dict[str, List[bool]]:
+    def _calculate_outlier_info(
+            self, percentile_ratios: torch.Tensor, counted_batches: torch.Tensor, total_batches: int
+    ) -> Dict[str, List[bool]]:
         r"""
         Gives info on whether the percentile ratios cacluated would be considered outliers
         Also gives information on whether the collected data is statistically significant to make this claim
@@ -1059,10 +1076,12 @@ class OutlierDetector(DetectorBase):
         Args:
             percentile_ratios (torch.Tensor): The average percentile_ratios per channel calculated by the observer
             counted_batches (torch.Tensor): The number of batches used for average calculation per tensor
+            total_batches (int): The total number of batches that passed through observer in this epoch
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
-            "above_sample_threshold_count": if the per channel calculation had at least 30 samples (a random threshold)
+            "above_sample_threshold_count": if o_r was >= statistical_threshold:
+                where o_r = counted_batches / total_batches
         """
         outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
 
@@ -1071,7 +1090,9 @@ class OutlierDetector(DetectorBase):
         num_batches_list: List = counted_batches.tolist()
 
         # calculate whether channels were statistically significant
-        significant_size = [True if batch_size >= 30 else False for batch_size in num_batches_list]
+        significant_size = [
+            True if batch_size / total_batches >= self.statistical_threshold else False for batch_size in num_batches_list
+        ]
         outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate for each channel whether it's an outlier or not based on ratio
@@ -1092,7 +1113,7 @@ class OutlierDetector(DetectorBase):
         Returns a dict mapping relavent module fqns to:
             whether there were outliers found in activation before
             the number of batches used for each channel
-            whether the number of applicable batches is above a minimum set threshold (30)
+            whether fraction of applicable batches used is above statistical_threshold
             their p_r metric compared to the threshold
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
@@ -1111,6 +1132,7 @@ class OutlierDetector(DetectorBase):
                 # get the number of batches and calculated ratio thresholds
                 num_batches: torch.Tensor = pre_obs.percentile_batches_tracked
                 average_ratios: torch.Tensor = pre_obs.average_percentile_ratio
+                total_batches: int = pre_obs.num_batches_tracked
 
                 # also get the max values
                 max_vals: torch.Tensor = pre_obs.max_val
@@ -1126,7 +1148,7 @@ class OutlierDetector(DetectorBase):
                         # if it's less than 1 we have the flip it as well
                         average_ratios[index] = 1 / ratio_val
 
-                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches)
+                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches, total_batches)
 
                 # calculate whether ratios were outliers
                 info_dict[fqn] = {
@@ -1156,7 +1178,7 @@ class OutlierDetector(DetectorBase):
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
                 the number of batches used for each channel
-                whether the number of applicable batches is above a minimum set threshold (30)
+                whether fraction of applicable batches used is above statistical_threshold
                 their p_r metric compared to the threshold
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
