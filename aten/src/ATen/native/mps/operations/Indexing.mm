@@ -126,6 +126,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
   dim = maybe_wrap_dim(dim, self.dim());
+  auto alpha_f = alpha.to<float>();
 
   if (numel == 0) {
     return;
@@ -159,7 +160,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
-          MPSGraphTensor* alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, alpha);
+          MPSGraphTensor* alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, alpha_f);
           MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
                                                            indicesTensor:indexTensor
                                                                     axis:dim
@@ -188,14 +189,13 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
-    Placeholder alphaPlaceholder = Placeholder(cachedGraph->alphaTensor_, alpha);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
       sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
-      alphaPlaceholder.getMPSGraphTensor() : alphaPlaceholder.getMPSGraphTensorData()
+      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_f, MPSDataTypeFloat32)
     };
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
