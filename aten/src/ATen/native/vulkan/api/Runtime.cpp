@@ -73,7 +73,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
     std::vector<const char*> requested_extensions {
       #ifdef VK_EXT_debug_report
       VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-      #endif
+      #endif /* VK_EXT_debug_report */
     };
 
     find_requested_layers_and_extensions(
@@ -100,7 +100,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
 
 #ifdef USE_VULKAN_VOLK
   volkLoadInstance(instance);
-#endif
+#endif /* USE_VULKAN_VOLK */
 
   return instance;
 }
