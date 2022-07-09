@@ -1479,7 +1479,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
               MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
               MPSGraphTensor* betaTensor = mpsGraphRankedPlaceHolder(mpsGraph, beta);
-              
+
               MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor
                                                                name:nil];
               MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
