@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 
@@ -17,10 +18,10 @@ void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
       // images
       src.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER),
+          api::PipelineStage::Transfer),
       dst.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER,
+          api::PipelineStage::Transfer,
           api::MemoryAccessType::WRITE),
       // copy details
       src.extents(),

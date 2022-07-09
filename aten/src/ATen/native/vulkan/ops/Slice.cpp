@@ -1,4 +1,5 @@
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -70,11 +71,11 @@ Tensor slice_4d(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE,
+          api::PipelineStage::Compute,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+          api::PipelineStage::Compute),
       // params buffer
       params.buffer());
 
@@ -112,10 +113,10 @@ Tensor slice_width(
       // images
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER),
+          api::PipelineStage::Transfer),
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER,
+          api::PipelineStage::Transfer,
           api::MemoryAccessType::WRITE),
       // copy details
       copy_extents,
@@ -149,10 +150,10 @@ Tensor slice_width(
         // images
         v_self.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER),
+            api::PipelineStage::Transfer),
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER,
+            api::PipelineStage::Transfer,
             api::MemoryAccessType::WRITE),
         // copy details
         copy_extents,
@@ -197,10 +198,10 @@ Tensor slice_height(
       // images
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER),
+          api::PipelineStage::Transfer),
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::TRANSFER,
+          api::PipelineStage::Transfer,
           api::MemoryAccessType::WRITE),
       // copy details
       copy_extents,
@@ -232,10 +233,10 @@ Tensor slice_height(
         // images
         v_self.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER),
+            api::PipelineStage::Transfer),
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER,
+            api::PipelineStage::Transfer,
             api::MemoryAccessType::WRITE),
         // copy details
         copy_extents,

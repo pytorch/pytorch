@@ -21,7 +21,6 @@ struct ContextConfig final {
   uint32_t cmdSubmitFrequency;
   CommandPoolConfig cmdPoolConfig;
   DescriptorPoolConfig descriptorPoolConfig;
-  QueryPoolConfig queryPoolConfig;
 };
 
 //
@@ -35,7 +34,8 @@ struct ContextConfig final {
 
 class Context final {
  public:
-  explicit Context(size_t adapter_i, const ContextConfig&);
+  explicit Context(
+      const VkInstance instance, size_t adapter_i, const ContextConfig);
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -49,6 +49,7 @@ class Context final {
   // Config
   ContextConfig config_;
   // Important handles
+  VkInstance instance_;
   Adapter* adapter_p_;
   VkDevice device_;
   Adapter::Queue queue_;
@@ -56,10 +57,7 @@ class Context final {
   CommandPool command_pool_;
   DescriptorPool descriptor_pool_;
   FencePool fences_;
-  // Diagnostics
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
-#endif  /* USE_VULKAN_GPU_DIAGNOSTICS */
   // Command buffers submission
   std::mutex cmd_mutex_;
   CommandBuffer cmd_;
@@ -71,6 +69,17 @@ class Context final {
   std::vector<VulkanImage> images_to_clear_;
 
  public:
+
+  inline GPU gpu() {
+    const Adapter* p_adapter = adapter_p_;
+    return {
+      instance_,
+      p_adapter,
+      device_,
+      queue_.family_index,
+      queue_.handle,
+    };
+  }
 
   // Adapter access
 
@@ -115,18 +124,9 @@ class Context final {
     return fences_;
   }
 
-  // Diagnostics
-
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   inline QueryPool& querypool() {
     return querypool_;
   }
-
-  inline void reset_querypool() {
-    set_cmd();
-    querypool_.reset(cmd_);
-  }
-#endif  /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Memory Management
   void register_buffer_cleanup(VulkanBuffer& buffer) {
@@ -297,14 +297,6 @@ inline void Context::submit_compute_job(
 
   set_cmd();
 
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_,
-      shader_descriptor.kernel_name,
-      create_extent3d(global_work_group),
-      create_extent3d(local_work_group_size));
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
-
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set = submit_compute_prologue(
       cmd_,
@@ -323,10 +315,6 @@ inline void Context::submit_compute_job(
       descriptor_set,
       pipeline_barrier,
       global_work_group);
-
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
