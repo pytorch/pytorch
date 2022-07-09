@@ -93,7 +93,7 @@ struct BinaryWithAlphaOpRecord : RecordFunctor {
   }
 
  private:
-  std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op_;
+  std::function<OutType*(Arg1Type*, Arg2Type*, NvfVal*)> fusion_op_;
 };
 
 struct InputTensorRecord : RecordFunctor {
