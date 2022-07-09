@@ -6,8 +6,6 @@ from typing import List, Callable, Tuple, Any, Dict, Optional
 
 __all__ = [
     "QuantizationTracer",
-    "Scope",
-    "ScopeContextManager",
 ]
 
 class Scope(object):

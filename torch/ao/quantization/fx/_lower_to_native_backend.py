@@ -25,26 +25,13 @@ from .utils import create_node_from_old_node_preserve_meta
 from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set, Optional
 import operator
 
-QOP_TO_ARG_INDEXES_TO_SKIP = {
-    # ['inplace']
-    torch._ops.ops.quantized.hardswish: [1],
-    # ['inplace']
-    torch._ops.ops.quantized.elu: [2],
-    # ['inplace'],
-    torch._ops.ops.quantized.dropout: [3],
-    # ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
-    torch._ops.ops.quantized.instance_norm: [1, 2, 5, 6],
+QOP_TO_ARG_NAMES_TO_SKIP = {
+    torch._ops.ops.quantized.hardswish: ['inplace'],
+    torch._ops.ops.quantized.elu: ['inplace'],
+    torch._ops.ops.quantized.dropout: ['inplace'],
+    torch._ops.ops.quantized.instance_norm:
+    ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
-
-# a map from quantized operator to the insert index of the quantization parameter
-# arguments like scale and zero_point
-# if the quantized operator is not in the list, we will append quantization parameter
-# arguments in the end of the argument list
-QOP_TO_QPARAMS_INSERT_INDEX = {
-    torch._ops.ops.quantized.elu: 1,
-    torch._ops.ops.quantized.dropout: 1,
-}
-
 
 def _is_node_in_list(node, modules, func_list, method_list, module_type_list):
     is_call_function = node.op == "call_function" and node.target in func_list
@@ -382,7 +369,7 @@ def fold_weight(
             env[node.name] = folded_graph.create_node(
                 'get_attr', packed_weight_name, (), {})
         elif prepack_node is not None:
-            # remove the folded node
+            # remove the foled node
             continue
         else:
             # copy other nodes
@@ -624,10 +611,10 @@ def _lower_static_weighted_ref_functional(
         (_, output_scale_node, output_zp_node, _) = q_node.args
         (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
         assert(isinstance(output_zp_node, Node))
-        assert isinstance(input_dq_node, Node)
-        assert isinstance(weight_dq_node, Node)
+        assert(isinstance(input_dq_node, Node))
+        assert(isinstance(weight_dq_node, Node))
         quantized_weight = weight_dq_node.args[0]
-        assert isinstance(quantized_weight, Node)
+        assert(isinstance(quantized_weight, Node))
         if quantized_weight.op != "call_function" or\
                 quantized_weight.target not in (torch.quantize_per_tensor, torch.quantize_per_channel):
             continue
@@ -778,7 +765,6 @@ def _lower_dynamic_weighted_ref_functional(
             dqn_input = dqn.args[0]
             dqn.replace_all_uses_with(dqn_input)
             model.graph.erase_node(dqn)
-        input_dynamic_q_node.replace_all_uses_with(input_dynamic_q_node.args[0])
         model.graph.erase_node(input_dynamic_q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
@@ -921,22 +907,17 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)
-            new_args = args
-            qparams = [qnode_qparams[0], qnode_qparams[1]]
-            if qop in QOP_TO_ARG_INDEXES_TO_SKIP:
-                arg_indexes_to_skip = QOP_TO_ARG_INDEXES_TO_SKIP[qop]
-                new_args = [arg for index, arg in enumerate(args) if index not in arg_indexes_to_skip]
-
-            if qop in QOP_TO_QPARAMS_INSERT_INDEX:
-                qparam_insert_index = QOP_TO_QPARAMS_INSERT_INDEX[qop]
-                new_args = new_args[:qparam_insert_index] + qparams + new_args[qparam_insert_index:]
-            else:
-                new_args.extend(qparams)
-
+            if qop in QOP_TO_ARG_NAMES_TO_SKIP:
+                args_to_skip = QOP_TO_ARG_NAMES_TO_SKIP[qop]
+                for arg in args_to_skip:
+                    if arg in kwargs:
+                        kwargs.pop(arg)
+            kwargs["output_scale"] = qnode_qparams[0]
+            kwargs["output_zero_point"] = qnode_qparams[1]
             with model.graph.inserting_after(qnode_qparams[1]):
                 qop_node = create_node_from_old_node_preserve_meta(
                     model.graph,
-                    ("call_function", qop, tuple(new_args), kwargs),
+                    ("call_function", qop, tuple(args), kwargs),
                     ref_node)
                 ref_node.replace_all_uses_with(qop_node)
                 model.graph.erase_node(ref_node)
@@ -948,7 +929,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
 
     return model
 
-def _lower_getattr_tensor_metadata_op(model: QuantizedGraphModule):
+def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
     """ Modified the graph of the model inplace, to skip extra dequantize op before
     the general tensor shape ops when possible
     """
@@ -977,7 +958,7 @@ def _lower_to_native_backend(
     _lower_static_weighted_ref_functional(model, qconfig_map)
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
-    _lower_getattr_tensor_metadata_op(model)
+    _lower_getattr_tensor_metadta_op(model)
     special_pattern_replacement(model)
     model = fold_weight(model, node_name_to_scope)
     model.graph.eliminate_dead_code()
