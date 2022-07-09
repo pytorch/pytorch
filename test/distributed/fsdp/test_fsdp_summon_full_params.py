@@ -537,8 +537,8 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("recurse", [False, True])
     def test_named_parameters_buffers(self, prefix: str, recurse: bool):
         """Tests that ``named_parameters()`` and ``named_buffers()`` for a
-        non-FSDP-root nested FSDP-wrapped model matches their behavior for the
-        equivalent non-wrapped model."""
+        top-level FSDP-wrapped model matches their behavior for the equivalent
+        non-wrapped model."""
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -546,11 +546,16 @@ class TestSummonFullParams(FSDPTest):
             deterministic=True,
         )
         model.register_buffer("buffer", torch.ones(1))
-        fsdp_model = NestedWrappedModule.init(
+        # `named_parameters()` and `named_buffers` will contain FSDP prefixes
+        # if called on a non-FSDP root module
+        fsdp_model = FSDP(
+            NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                deterministic=True,
+            ),
             self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
         )
         fsdp_model.register_buffer("buffer", torch.ones(1))
         with FSDP.summon_full_params(fsdp_model):
