@@ -34,7 +34,6 @@ try:
     sys.path.append(str(REPO_ROOT))
     from tools.stats.import_test_stats import get_test_times
     from tools.testing.test_selections import (
-        get_shard_based_on_S3,
         get_reordered_tests,
         get_test_case_configs,
         calculate_shards,
@@ -886,7 +885,6 @@ def main():
     options = parse_args()
 
     test_directory = str(REPO_ROOT / "test")
-
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
