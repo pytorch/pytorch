@@ -20774,6 +20774,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        supports_nvfuser=False,  # clone default
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
