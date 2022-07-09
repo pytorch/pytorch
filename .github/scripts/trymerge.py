@@ -308,8 +308,6 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
     re.MULTILINE
 )
-RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
-RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*-c.*|-c.*-m.*)")
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 
 def _fetch_url(url: str, *,
@@ -921,11 +919,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
                reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
-    if not pr.is_closed():
-        return post_comment(f"Can't revert open PR #{pr.pr_num}")
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
-    if not RE_REVERT_CMD.match(comment.body_text) and not RE_REVERT_CMD_CLI.match(comment.body_text):
-        raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
     if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
     author_association = comment.author_association

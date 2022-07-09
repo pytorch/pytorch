@@ -222,21 +222,21 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-  linux-bionic-rocm5_1-py3_7-build:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-focal-rocm5_1-py3_7-build:
+    name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      build-environment: linux-focal-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
       sync-tag: rocm-build
 
-  linux-bionic-rocm5_1-py3_7-test:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-focal-rocm5_1-py3_7-test:
+    name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm5_1-py3_7-build
+    needs: linux-focal-rocm5_1-py3_7-build
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.1-py3.7
+      docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
