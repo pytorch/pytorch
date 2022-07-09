@@ -32,6 +32,44 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class HFOperations(unittest.TestCase):
 
+    def test_expand(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([1, 4])):
+                size = x.size()
+                getitem = size[-1]
+                expand = x.expand(getitem, 4)
+                return expand
+
+        b = BasicBlock().forward(torch.rand(1, 4))
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        expand_res = z3.Const(4, tensor_type)
+        assert s.model()[expand_res].arg(0).arg(1) == b.shape[0]
+        assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
+
+        # change the annotation on the input to Dyn.
+        # We should get [Dyn, 4]
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        assert s.model()[expand_res].arg(0).arg(0) == 0
+        assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
+
     def test_getitem_tensor(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):

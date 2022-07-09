@@ -68,13 +68,42 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
     raise NotImplementedError('Not yet implemented')
 
-# TODO:
 @register_inference_rule("expand")
 def expand_inference_rule(n: Node, symbols, constraints, counter):
     """
+    We generate the exact constraints as we do for tensor additions but we constraint
+    the rank of this expression to be equal to len(n.args[1:]) so that only
+    those cases get considered for the output
     """
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node)
 
+    # define the output for expand
+    expand, counter = gen_tvar(counter)
+    symbols[n] = expand
+
+    # since we do not have two nodes here, we will construct an argument variable
+    e1 = symbols[n.args[0]]
+    e2, counter = gen_tvar(counter)
+
+    e2_nat_constraints = []
+    for arg in n.args[1:]:
+        assert isinstance(arg, Node) or isinstance(arg, int)
+        if isinstance(arg, Node):
+            assert isinstance(symbols[arg], DVar)
+            e2_nat_constraints.append(BinConstraintD(0, symbols[arg], op_leq))
+
+    e2_constraint = BinConstraintT(e2, TensorType([arg if isinstance(arg, int) else symbols[arg] for arg in n.args[1:]]), op_eq)
+
+
+    constraints, counter = gen_broadcasting_constraints(e1, e2, symbols, counter, expand)
+
+    # constraint the output size
+    dims, counter = gen_tensor_dims(len(n.args[1:]), counter)
+    nat_constraints = gen_nat_constraints(dims)
+    c = [BinConstraintT(expand, TensorType(dims), op_eq), *nat_constraints, e2_constraint, *e2_nat_constraints]
+    constraints += c
+
+    return constraints, counter
 
 
 @register_inference_rule("to")
@@ -108,7 +137,7 @@ def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     if isinstance(e1, TVar) and isinstance(e2, TVar):
         masked_fill_tensor, counter = gen_tvar(counter)
         symbols[n] = masked_fill_tensor
-        return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, masked_fill_tensor)
+        return gen_broadcasting_constraints(e1, e2, symbols, counter, masked_fill_tensor)
     else:
         raise NotImplementedError('Not yet implemented')
 
@@ -346,7 +375,7 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
         if isinstance(e1, TVar) and isinstance(e2, TVar):
             gt_tensor, counter = gen_tvar(counter)
             symbols[n] = gt_tensor
-            return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, gt_tensor)
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, gt_tensor)
 
         elif isinstance(e1, DVar) and isinstance(e2, DVar):
             # This is meant to be used for flow analysis only
@@ -389,7 +418,7 @@ def lt_inference_rule(n: Node, symbols, constraints, counter):
         if isinstance(e1, TVar) and isinstance(e2, TVar):
             lt_tensor, counter = gen_tvar(counter)
             symbols[n] = lt_tensor
-            return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, lt_tensor)
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, lt_tensor)
 
         elif isinstance(e1, DVar) and isinstance(e2, DVar):
             # This is meant to be used for flow analysis only
@@ -462,11 +491,7 @@ def arange_inference_rule(n: Node, symbols, constraints, counter):
 
     return [BinConstraintT(arange, TensorType([d1]), op_eq), Disj([both_dyn, both_numbers])], counter
 
-def gen_broadcasting_constraints(arg1, arg2, symbols, counter, output_var):
-    # retrive arg variables
-    e1 = symbols[arg1]  # n.args[0]
-    e2 = symbols[arg2]  # n.args[1]
-
+def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
     # additional vars that don't correspond to expressions
     e11, counter = gen_tvar(counter)
     e22, counter = gen_tvar(counter)
@@ -492,7 +517,7 @@ def ne_inference_rule(n: Node, symbols, constraints, counter):
 
     assert isinstance(n.args[0], Node)
     assert isinstance(n.args[1], Node)
-    return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
+    return gen_broadcasting_constraints(symbols[n.args[0]], symbols[n.args[1]], symbols, counter, my_add)
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
@@ -503,7 +528,9 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
             my_add, counter = gen_tvar(counter)
             symbols[n] = my_add
             e1 = symbols[n.args[0]]
-            return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
+            e2 = symbols[n.args[1]]
+
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, my_add)
         else:
             raise NotImplementedError('Method not yet implemented')
 
