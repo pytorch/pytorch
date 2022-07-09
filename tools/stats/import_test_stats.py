@@ -81,7 +81,7 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times(dirpath: str, filename: str) -> Optional[Dict[str, float]]:
+def get_test_times(dirpath: str, filename: str) -> Dict[str, float]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
 
     def process_response(the_response: Dict[str, Any]) -> Any:

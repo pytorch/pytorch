@@ -37,6 +37,7 @@ try:
         get_shard_based_on_S3,
         get_reordered_tests,
         get_test_case_configs,
+        calculate_shards,
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -830,11 +831,21 @@ def get_selected_tests(options):
         assert num_shards <= len(
             selected_tests
         ), f"Number of shards must be less than {len(selected_tests)}"
-        # TODO: fix this to use test_times_filename, but currently this is not working
-        # because setting the export arg immeidately halts the test execution.
-        selected_tests = get_shard_based_on_S3(
-            which_shard, num_shards, selected_tests, TEST_TIMES_FILE
-        )
+
+        if num_shards == 1:
+            return selected_tests
+
+        # Download previous test times to make sharding decisions
+        test_file_times = get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
+        if len(test_file_times) == 0:
+            print(
+                "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+            )
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        else:
+            shards = calculate_shards(num_shards, selected_tests, test_file_times)
+            _, tests_from_shard = shards[which_shard - 1]
+            selected_tests = tests_from_shard
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
@@ -875,9 +886,6 @@ def main():
     options = parse_args()
 
     test_directory = str(REPO_ROOT / "test")
-    if IS_CI:
-        # Download previous test times to make sharding decisions
-        get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
 
     selected_tests = get_selected_tests(options)
 

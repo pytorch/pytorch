@@ -58,37 +58,43 @@ def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
 
 
 def calculate_shards(
-    num_shards: int, tests: List[str], job_times: Dict[str, float]
+    num_shards: int, test_files: List[str], test_file_times: Dict[str, float]
 ) -> List[Tuple[float, List[str]]]:
-    filtered_job_times: Dict[str, float] = dict()
-    unknown_jobs: List[str] = []
-    for test in tests:
-        if test in job_times:
-            filtered_job_times[test] = job_times[test]
+    filtered_test_file_times: Dict[str, float] = dict()
+    unknown_test_files: List[str] = []
+    for test_file in test_files:
+        if test_file in test_file_times:
+            filtered_test_file_times[test_file] = test_file_times[test_file]
         else:
-            unknown_jobs.append(test)
+            unknown_test_files.append(test_file)
 
     # The following attempts to implement a partition approximation greedy algorithm
     # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
-    sorted_jobs = sorted(
-        filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True
+    sorted_test_files = sorted(
+        filtered_test_file_times,
+        key=lambda j: filtered_test_file_times[j],
+        reverse=True,
     )
-    sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
-    for job in sorted_jobs:
-        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
-        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
-        curr_shard_jobs.append(job)
-        sharded_jobs[min_shard_index] = (
-            curr_shard_time + filtered_job_times[job],
-            curr_shard_jobs,
+    sharded_test_files: List[Tuple[float, List[str]]] = [
+        (0.0, []) for _ in range(num_shards)
+    ]
+    for test_file in sorted_test_files:
+        min_shard_index = sorted(
+            range(num_shards), key=lambda i: sharded_test_files[i][0]
+        )[0]
+        curr_shard_time, curr_shard_test_files = sharded_test_files[min_shard_index]
+        curr_shard_test_files.append(test_file)
+        sharded_test_files[min_shard_index] = (
+            curr_shard_time + filtered_test_file_times[test_file],
+            curr_shard_test_files,
         )
 
-    # Round robin the unknown jobs starting with the smallest shard
-    index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
-    for job in unknown_jobs:
-        sharded_jobs[index][1].append(job)
+    # Round robin the unknown test files starting with the smallest shard
+    index = sorted(range(num_shards), key=lambda i: sharded_test_files[i][0])[0]
+    for test_file in unknown_test_files:
+        sharded_test_files[index][1].append(test_file)
         index = (index + 1) % num_shards
-    return sharded_jobs
+    return sharded_test_files
 
 
 def _pull_job_times_from_S3() -> Dict[str, float]:
@@ -124,29 +130,6 @@ def _query_changed_test_files() -> List[str]:
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
     return lines
-
-
-# Get sharded test allocation based on historic S3 data.
-def get_shard_based_on_S3(
-    which_shard: int, num_shards: int, tests: List[str], test_times_file: str
-) -> List[str]:
-    # Short circuit and don't do any work if there's only 1 shard
-    if num_shards == 1:
-        return tests
-
-    with open(test_times_file) as file:
-        jobs_to_times = json.load(file)
-
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print(
-            "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
-        )
-        return tests[which_shard - 1 :: num_shards]
-
-    shards = calculate_shards(num_shards, tests, jobs_to_times)
-    _, tests_from_shard = shards[which_shard - 1]
-    return tests_from_shard
 
 
 def get_reordered_tests(tests: List[str]) -> List[str]:
