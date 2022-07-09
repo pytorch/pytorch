@@ -122,7 +122,6 @@ class Sequential(Module):
     def __len__(self) -> int:
         return len(self._modules)
 
-    @_copy_to_script_wrapper
     def __add__(self, other) -> 'Sequential':
         if isinstance(other, Sequential):
             ret = Sequential()
