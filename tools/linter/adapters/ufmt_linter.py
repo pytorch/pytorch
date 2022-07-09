@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, BinaryIO, List, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional, Union
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -43,7 +43,7 @@ def as_posix(name: str) -> str:
 def _run_command(
     args: List[str],
     *,
-    stdin: BinaryIO,
+    input: Optional[bytes],
     timeout: int,
 ) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
@@ -51,7 +51,7 @@ def _run_command(
     try:
         return subprocess.run(
             args,
-            stdin=stdin,
+            input=input,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=IS_WINDOWS,  # So batch scripts are found.
@@ -66,14 +66,14 @@ def _run_command(
 def run_command(
     args: List[str],
     *,
-    stdin: BinaryIO,
+    input: Optional[bytes],
     retries: int,
     timeout: int,
 ) -> "subprocess.CompletedProcess[bytes]":
     remaining_retries = retries
     while True:
         try:
-            return _run_command(args, stdin=stdin, timeout=timeout)
+            return _run_command(args, input=input, timeout=timeout)
         except subprocess.TimeoutExpired as err:
             if remaining_retries == 0:
                 raise err
@@ -87,103 +87,121 @@ def run_command(
             time.sleep(1)
 
 
+def format_timeout_message(filename: str) -> LintMessage:
+    return LintMessage(
+        path=filename,
+        line=None,
+        char=None,
+        code="UFMT",
+        severity=LintSeverity.ERROR,
+        name="timeout",
+        original=None,
+        replacement=None,
+        description=(
+            "ufmt timed out while trying to process a file. "
+            "Please report an issue in pytorch/pytorch with the "
+            "label 'module: lint'"
+        ),
+    )
+
+
+def format_error_message(
+    filename: str, err: Union[OSError, subprocess.CalledProcessError]
+) -> LintMessage:
+    return LintMessage(
+        path=filename,
+        line=None,
+        char=None,
+        code="UFMT",
+        severity=LintSeverity.ADVICE,
+        name="command-failed",
+        original=None,
+        replacement=None,
+        description=(
+            f"Failed due to {err.__class__.__name__}:\n{err}"
+            if not isinstance(err, subprocess.CalledProcessError)
+            else (
+                "COMMAND (exit code {returncode})\n"
+                "{command}\n\n"
+                "STDERR\n{stderr}\n\n"
+                "STDOUT\n{stdout}"
+            ).format(
+                returncode=err.returncode,
+                command=" ".join(as_posix(x) for x in err.cmd),
+                stderr=err.stderr.decode("utf-8").strip() or "(empty)",
+                stdout=err.stdout.decode("utf-8").strip() or "(empty)",
+            )
+        ),
+    )
+
+
 def check_file(
     filename: str,
     retries: int,
     timeout: int,
 ) -> List[LintMessage]:
+    with open(filename, "rb") as f:
+        original = f.read()
+
     try:
-        with open(filename, "rb") as f:
-            original = f.read()
-        with open(filename, "rb") as f:
-            proc = run_command(
-                [sys.executable, "-mblack", "--stdin-filename", filename, "-"],
-                stdin=f,
-                retries=retries,
-                timeout=timeout,
-            )
-    except subprocess.TimeoutExpired:
-        return [
-            LintMessage(
-                path=filename,
-                line=None,
-                char=None,
-                code="BLACK",
-                severity=LintSeverity.ERROR,
-                name="timeout",
-                original=None,
-                replacement=None,
-                description=(
-                    "black timed out while trying to process a file. "
-                    "Please report an issue in pytorch/pytorch with the "
-                    "label 'module: lint'"
-                ),
-            )
-        ]
-    except (OSError, subprocess.CalledProcessError) as err:
-        return [
-            LintMessage(
-                path=filename,
-                line=None,
-                char=None,
-                code="BLACK",
-                severity=LintSeverity.ADVICE,
-                name="command-failed",
-                original=None,
-                replacement=None,
-                description=(
-                    f"Failed due to {err.__class__.__name__}:\n{err}"
-                    if not isinstance(err, subprocess.CalledProcessError)
-                    else (
-                        "COMMAND (exit code {returncode})\n"
-                        "{command}\n\n"
-                        "STDERR\n{stderr}\n\n"
-                        "STDOUT\n{stdout}"
-                    ).format(
-                        returncode=err.returncode,
-                        command=" ".join(as_posix(x) for x in err.cmd),
-                        stderr=err.stderr.decode("utf-8").strip() or "(empty)",
-                        stdout=err.stdout.decode("utf-8").strip() or "(empty)",
-                    )
-                ),
-            )
-        ]
-
-    replacement = proc.stdout
-    if original == replacement:
-        return []
-
-    return [
-        LintMessage(
-            path=filename,
-            line=None,
-            char=None,
-            code="BLACK",
-            severity=LintSeverity.WARNING,
-            name="format",
-            original=original.decode("utf-8"),
-            replacement=replacement.decode("utf-8"),
-            description="Run `lintrunner -a` to apply this patch.",
+        # Note that UFMT returns error code 1 if there are differences
+        # so the diff output is actually in the error
+        proc = run_command(
+            [sys.executable, "-mufmt", "format", filename],
+            input=None,
+            retries=retries,
+            timeout=timeout,
         )
-    ]
+
+        # UFMT is a bit unyielding to use in lintrunner workflow because it
+        # only includes options to check, generate diff, and apply the patch
+        # in place
+        with open(filename, "rb") as f:
+            replacement = f.read()
+
+        if original == replacement:
+            return []
+
+        return [
+            LintMessage(
+                path=filename,
+                line=None,
+                char=None,
+                code="UFMT",
+                severity=LintSeverity.WARNING,
+                name="format",
+                original=original.decode("utf-8"),
+                replacement=replacement.decode("utf-8"),
+                description="Run `lintrunner -a` to apply this patch.",
+            )
+        ]
+    except subprocess.TimeoutExpired:
+        return [format_timeout_message(filename)]
+    except (OSError, subprocess.CalledProcessError) as err:
+        return [format_error_message(filename, err)]
+    finally:
+        # Always revert the formatting change back to the original content
+        # to fit with lintrunner -a workflow
+        with open(filename, "wb") as f:
+            f.write(original)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Format files with black.",
+        description="Format files with ufmt (black + usort).",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
         "--retries",
         default=3,
         type=int,
-        help="times to retry timed out black",
+        help="times to retry timed out ufmt (black + usort)",
     )
     parser.add_argument(
         "--timeout",
         default=90,
         type=int,
-        help="seconds to wait for black",
+        help="seconds to wait for ufmt (black + usort)",
     )
     parser.add_argument(
         "--verbose",
