@@ -459,6 +459,12 @@
   "torch.distributed.elastic.metrics": [
     "Optional"
   ],
+  "torch.distributed.elastic.metrics.api": [
+    "Dict",
+    "Optional",
+    "namedtuple",
+    "wraps"
+  ],
   "torch.distributed.elastic.multiprocessing": [
     "Callable",
     "Dict",
@@ -501,6 +507,12 @@
     "field",
     "get_logger",
     "wraps"
+  ],
+  "torch.distributed.elastic.multiprocessing.errors.error_handler": [
+    "Optional"
+  ],
+  "torch.distributed.elastic.multiprocessing.errors.handlers": [
+    "ErrorHandler"
   ],
   "torch.distributed.elastic.multiprocessing.redirects": [
     "contextmanager",
@@ -908,7 +920,15 @@
     "svd_lowrank"
   ],
   "torch.futures": [
-    "Future"
+    "Callable",
+    "Future",
+    "Generic",
+    "List",
+    "Optional",
+    "Type",
+    "TypeVar",
+    "Union",
+    "cast"
   ],
   "torch.fx": [
     "ProxyableClassMeta",
@@ -1013,6 +1033,25 @@
     "Tuple",
     "compatibility"
   ],
+  "torch.fx.node": [
+    "Any",
+    "ArgsKwargsPair",
+    "Argument",
+    "BaseArgumentTypes",
+    "Callable",
+    "Dict",
+    "List",
+    "Optional",
+    "Set",
+    "Target",
+    "Tuple",
+    "Union",
+    "compatibility",
+    "immutable_dict",
+    "immutable_list",
+    "normalize_function",
+    "normalize_module"
+  ],
   "torch.fx.operator_schemas": [
     "Any",
     "Callable",
@@ -1031,6 +1070,53 @@
     "Dict",
     "TensorMetadata",
     "chain",
+    "compatibility"
+  ],
+  "torch.fx.passes.graph_manipulation": [
+    "Any",
+    "Argument",
+    "Dict",
+    "Graph",
+    "GraphModule",
+    "List",
+    "NamedTuple",
+    "Node",
+    "Optional",
+    "ShapeProp",
+    "Target",
+    "Tuple",
+    "compatibility",
+    "lift_lowering_attrs_to_nodes",
+    "map_aggregate",
+    "map_arg"
+  ],
+  "torch.fx.passes.param_fetch": [
+    "Any",
+    "Callable",
+    "Dict",
+    "GraphModule",
+    "List",
+    "Tuple",
+    "Type",
+    "compatibility"
+  ],
+  "torch.fx.passes.shape_prop": [
+    "Any",
+    "Dict",
+    "NamedTuple",
+    "Node",
+    "Optional",
+    "Tuple",
+    "compatibility",
+    "map_aggregate"
+  ],
+  "torch.fx.passes.split_module": [
+    "Any",
+    "Callable",
+    "Dict",
+    "GraphModule",
+    "List",
+    "Optional",
     "compatibility"
   ],
   "torch.fx.proxy": [
@@ -1326,6 +1412,11 @@
   "torch.nn.intrinsic.modules": [
     "_FusedModule"
   ],
+  "torch.nn.intrinsic.qat.modules.conv_fused": [
+    "Parameter",
+    "TypeVar",
+    "fuse_conv_bn_weights"
+  ],
   "torch.nn.intrinsic.qat.modules.linear_fused": [
     "Parameter",
     "fuse_linear_bn_weights"
@@ -1345,6 +1436,14 @@
   "torch.nn.parallel.comm": [
     "List"
   ],
+  "torch.nn.parallel.data_parallel": [
+    "Module",
+    "chain",
+    "gather",
+    "parallel_apply",
+    "replicate",
+    "scatter_kwargs"
+  ],
   "torch.nn.parallel.parallel_apply": [
     "ExceptionWrapper",
     "autocast"
@@ -1353,7 +1452,8 @@
     "OrderedDict"
   ],
   "torch.nn.parallel.scatter_gather": [
-    "is_namedtuple"
+    "Gather",
+    "Scatter"
   ],
   "torch.nn.parameter": [
     "OrderedDict"
@@ -1414,6 +1514,26 @@
     "Iterable",
     "Optional"
   ],
+  "torch.nn.utils.parametrizations": [
+    "Enum",
+    "Module",
+    "Optional",
+    "Tensor",
+    "auto"
+  ],
+  "torch.nn.utils.parametrize": [
+    "Dict",
+    "Module",
+    "ModuleDict",
+    "ModuleList",
+    "Optional",
+    "Parameter",
+    "Sequence",
+    "Tensor",
+    "Tuple",
+    "Union",
+    "contextmanager"
+  ],
   "torch.onnx": [
     "Dict",
     "OperatorExportTypes",
@@ -1429,6 +1549,11 @@
     "get_default_nowrap_functions",
     "has_torch_function",
     "push_torch_function_mode"
+  ],
+  "torch.package.analyze.find_first_use_of_broken_modules": [
+    "Dict",
+    "List",
+    "PackagingError"
   ],
   "torch.package.analyze.is_from_package": [
     "Any",
@@ -1794,6 +1919,10 @@
     "rand",
     "randn"
   ],
+  "torch.torch_version": [
+    "Any",
+    "Iterable"
+  ],
   "torch.types": [
     "Any",
     "Device",
@@ -1807,6 +1936,14 @@
     "disable_minidumps",
     "enable_minidumps",
     "enable_minidumps_on_exceptions"
+  ],
+  "torch.utils.benchmark.utils.common": [
+    "_make_temp_dir",
+    "ordered_unique",
+    "select_unit",
+    "set_torch_threads",
+    "trim_sigfig",
+    "unit_to_english"
   ],
   "torch.utils.benchmark.utils.compare": [
     "Colorize",
