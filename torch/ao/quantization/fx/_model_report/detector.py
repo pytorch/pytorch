@@ -1062,7 +1062,7 @@ class OutlierDetector(DetectorBase):
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
-            "statistically_significant": if the per channel calculation had at least 30 samples
+            "above_sample_threshold_count": if the per channel calculation had at least 30 samples (a random threshold)
         """
         outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
 
@@ -1092,7 +1092,7 @@ class OutlierDetector(DetectorBase):
         Returns a dict mapping relavent module fqns to:
             whether there were outliers found in activation before
             the number of batches used for each channel
-            whether the number of applicable batches is above statistical threshold (30)
+            whether the number of applicable batches is above a minimum set threshold (30)
             their p_r metric compared to the threshold
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
@@ -1116,10 +1116,15 @@ class OutlierDetector(DetectorBase):
                 max_vals: torch.Tensor = pre_obs.max_val
 
                 # we have to specifically modify how we are recording negative ratio for pre-relu layers
-                negative_mask: torch.Tensor = average_ratios < 0
-                average_ratios = -1 * negative_mask * average_ratios + ~negative_mask * average_ratios
-                fraction_mask: torch.Tensor = (average_ratios < 1)
-                average_ratios = fraction_mask * 1 / average_ratios + ~fraction_mask * average_ratios
+                for index, ratio_val in enumerate(average_ratios):
+                    # check if we have a negative ratio
+                    if ratio_val.item() < 0:
+                        # first make it positive
+                        average_ratios[index] = -ratio_val
+
+                    if ratio_val.item() < 1:
+                        # if it's less than 1 we have the flip it as well
+                        average_ratios[index] = 1 / ratio_val
 
                 outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches)
 
@@ -1151,7 +1156,7 @@ class OutlierDetector(DetectorBase):
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
                 the number of batches used for each channel
-                whether the number of applicable batches is above statistical threshold (30)
+                whether the number of applicable batches is above a minimum set threshold (30)
                 their p_r metric compared to the threshold
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation

@@ -1509,7 +1509,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_multiple_run_consistent_spike_outlier_report_gen(self):
         # specifically make a row really high consistently in the number of batches that you are testing and try that
-        # generate report after just 1 run, and after many runs (30) and make sure statisically significant difference is there
+        # generate report after just 1 run, and after many runs (30) and make sure above minimum threshold is there
         with override_quantized_engine('fbgemm'):
 
             # detector of interest
@@ -1529,7 +1529,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
             example_input = model.get_outlier_inputs()[0]
             example_input = example_input.to(torch.float)
 
-            # now callibrate minimum 30 times to make it statisically significant size
+            # now callibrate minimum 30 times to make it above minimum threshold
             for i in range(30):
                 example_input = model.get_outlier_inputs()[0]
                 example_input = example_input.to(torch.float)
