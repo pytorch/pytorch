@@ -78,6 +78,7 @@ def celu(
 
 
 # TODO: should we allow the user to set a different dtype for the mask generation?
+@register_decomposition(torch.ops.aten.dropout)
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
 ) -> TensorLikeType:
@@ -204,6 +205,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return a * torch.tanh(torch.nn.functional.softplus(a))
 
 
+@register_decomposition(torch.ops.aten.selu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -261,6 +263,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
+@register_decomposition(torch.ops.aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
@@ -270,6 +273,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return refs.where(abs(a) > abs(lambd), a, 0)
 
 
+@register_decomposition(torch.ops.aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
@@ -299,6 +303,7 @@ def _check_reduction_value(reduction: str):
         raise ValueError("{} is not a valid value for reduction".format(reduction))
 
 
+@register_decomposition(torch.ops.aten.margin_ranking_loss)
 def margin_ranking_loss(
     input1: TensorLikeType,
     input2: TensorLikeType,
@@ -326,6 +331,7 @@ def margin_ranking_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+@register_decomposition(torch.ops.aten.hinge_embedding_loss)
 def hinge_embedding_loss(
     input: TensorLikeType,
     target: TensorLikeType,
