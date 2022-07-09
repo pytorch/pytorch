@@ -4,6 +4,7 @@ import torch
 import torch.fx as fx
 
 from torch.testing._internal.common_utils import TestCase
+from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
@@ -45,7 +46,8 @@ class TestPassManager(TestCase):
         pm.validate_constraints()
         self.assertEqual(len(pm.passes), 2)
 
-        modified_m = pm(traced_m)
+        pass_res = pm(traced_m)
+        modified_m = pass_res.graph_module
         assert isinstance(modified_m, fx.GraphModule)
 
         # Check that all call_function nodes are divs
