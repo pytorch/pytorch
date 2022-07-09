@@ -41,6 +41,7 @@ def fetch_and_cache(
     This fetch and cache utils allows sharing between different process.
     """
     path = os.path.join(dirpath, name)
+    print(f"Downloading {url} to {path}")
 
     def is_cached_file_valid() -> bool:
         # Check if the file is new enough (see: FILE_CACHE_LIFESPAN_SECONDS). A real check
