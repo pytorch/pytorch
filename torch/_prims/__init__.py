@@ -103,6 +103,7 @@ __all__ = [
     "gcd",
     "ge",
     "gt",
+    "hypot",
     "igamma",
     "igammac",
     "le",
@@ -1022,6 +1023,13 @@ gt = _make_elementwise_binary_prim(
     impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+hypot = _make_elementwise_binary_prim(
+    "hypot",
+    impl_aten=torch.hypot,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 igamma = _make_elementwise_binary_prim(
