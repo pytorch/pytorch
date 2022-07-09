@@ -275,7 +275,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
         .def_readonly("dtypes", &Inputs::dtypes_);
+
+    py::class_<TensorMetadata>(m, "_TensorMetadata")
+        .def_readonly("layout", &TensorMetadata::layout_);
 
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(

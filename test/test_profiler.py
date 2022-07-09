@@ -1144,8 +1144,8 @@ class TestTorchTidyProfiler(TestCase):
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
 
-    def test_tensor_sizes(self):
-        x = torch.ones(10, 10)
+    def test_tensor_properties(self):
+        x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
         y = torch.ones(1, 10)
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
@@ -1159,9 +1159,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._autograd._ExtraFields_TorchOp)
 
-        # The alpha scalar has a [] size
         self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
-        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
+
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch.strided, torch.strided, None])
 
 
 @dataclass(frozen=True)
