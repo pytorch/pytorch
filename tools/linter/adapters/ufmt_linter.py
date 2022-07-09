@@ -58,8 +58,6 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
 
 def check_file(
     filename: str,
-    retries: int,
-    timeout: int,
 ) -> List[LintMessage]:
     with open(filename, "rb") as f:
         original = f.read().decode("utf-8")
@@ -104,18 +102,6 @@ def main() -> None:
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--retries",
-        default=3,
-        type=int,
-        help="times to retry timed out ufmt (black + usort)",
-    )
-    parser.add_argument(
-        "--timeout",
-        default=90,
-        type=int,
-        help="seconds to wait for ufmt (black + usort)",
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
@@ -141,10 +127,7 @@ def main() -> None:
         max_workers=os.cpu_count(),
         thread_name_prefix="Thread",
     ) as executor:
-        futures = {
-            executor.submit(check_file, x, args.retries, args.timeout): x
-            for x in args.filenames
-        }
+        futures = {executor.submit(check_file, x): x for x in args.filenames}
         for future in concurrent.futures.as_completed(futures):
             try:
                 for lint_message in future.result():
