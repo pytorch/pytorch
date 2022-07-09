@@ -5756,6 +5756,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5771,6 +5772,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -11608,6 +11610,13 @@
   variants: function
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
+- func: linalg_vecdot(Tensor x, Tensor y, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_vecdot.out(Tensor x, Tensor y, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 - func: linalg_matrix_exp(Tensor self) -> Tensor
