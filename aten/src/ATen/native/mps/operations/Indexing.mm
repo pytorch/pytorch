@@ -137,6 +137,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* indexTensor_ = nil;
     MPSGraphTensor* sourceTensor_ = nil;
+    MPSGraphTensor* alphaTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
 
@@ -144,7 +145,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
 
   @autoreleasepool {
 
-    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim) + ":" + std::to_string(alpha.to<double>());
+    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source, alpha}) + ":" + std::to_string(dim);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -158,9 +159,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
-          MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.to<double>()
-                                                               shape:@[@1]
-                                                            dataType:getMPSScalarType(self.scalar_type())];
+          MPSGraphTensor* alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, alpha);
           MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
                                                            indicesTensor:indexTensor
                                                                     axis:dim
@@ -178,6 +177,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->indexTensor_ = indexTensor;
           newCachedGraph->sourceTensor_ = sourceTensor;
+          newCachedGraph->alphaTensor_ = alphaTensor;
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
@@ -188,12 +188,14 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
+    Placeholder alphaPlaceholder = Placeholder(cachedGraph->alphaTensor_, alpha);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
-      sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData()
+      sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
+      alphaPlaceholder.getMPSGraphTensor() : alphaPlaceholder.getMPSGraphTensorData()
     };
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
