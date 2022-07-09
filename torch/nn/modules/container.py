@@ -135,6 +135,59 @@ class Sequential(Module):
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
 
+    def __iadd__(self, other: 'Sequential') -> 'Sequential':
+        if isinstance(other, __class__):
+            offset = len(self)
+            for i, module in enumerate(other):
+                self.add_module(str(i+offset), module)
+            return self
+        else:
+            raise ValueError(f"unsupported operand type(s) for +=: {type(self)} and {type(other)}")
+
+    def __mul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            combined = Sequential()
+            offset = 0
+            for _ in range(other):
+                for module in self:
+                    combined.add_module(str(offset), module)
+                    offset += 1
+            return combined
+
+    def __rmul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(other)} and {type(self)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            combined = Sequential()
+            offset = 0
+            for _ in range(other):
+                for module in self:
+                    combined.add_module(str(offset), module)
+                    offset += 1
+            return combined
+
+    def __imul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            offset = len(self)
+            copy = Sequential()
+            for i, module in enumerate(self):
+                copy.add_module(str(i), module)
+            for _ in range(other-1):
+                for module in copy:
+                    self.add_module(str(offset), module)
+                    offset += 1
+            return self
+
     @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
