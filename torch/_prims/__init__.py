@@ -102,6 +102,7 @@ __all__ = [
     "gcd",
     "ge",
     "gt",
+    "hypot",
     "igamma",
     "igammac",
     "le",
@@ -197,6 +198,7 @@ _nvfuser_unary_ops = {
     "exp",
     "expm1",
     "floor",
+    "imag",
     "isfinite",
     "lgamma",
     "log",
@@ -205,6 +207,7 @@ _nvfuser_unary_ops = {
     "log10",
     "reciprocal",
     "neg",
+    "real",
     "round",
     "rsqrt",
     "sin",
@@ -611,8 +614,18 @@ bitwise_not = _make_elementwise_unary_prim(
 )
 
 
-def _cbrt_aten(a: torch.Tensor):
-    return pow(a, (1 / 3))
+def _cbrt_aten(a: torch.Tensor) -> Tensor:
+    utils.check(
+        not a.is_complex(),
+        lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
+    )
+    # Returns the real cubic root of the number.
+    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
+    # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
+    # which is a complex number.
+    # For more info see the section Note in
+    # https://en.cppreference.com/w/cpp/numeric/math/cbrt
+    return torch.copysign(torch.pow(a.abs(), 1 / 3), a)
 
 
 cbrt = _make_elementwise_unary_prim(
@@ -723,6 +736,7 @@ imag = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.imag,
+    impl_nvfuser=_imag_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
@@ -782,6 +796,7 @@ real = _make_prim(
     ),
     return_type=RETURN_TYPE.VIEW,
     impl_aten=torch.real,
+    impl_nvfuser=_real_nvfuser,  # type: ignore[name-defined]
     doc="",
 )
 
@@ -1003,6 +1018,13 @@ gt = _make_elementwise_binary_prim(
     impl_nvfuser=_gt_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+hypot = _make_elementwise_binary_prim(
+    "hypot",
+    impl_aten=torch.hypot,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 igamma = _make_elementwise_binary_prim(
