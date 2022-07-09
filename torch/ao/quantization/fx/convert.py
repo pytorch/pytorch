@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
 import torch
 import copy
 import warnings
@@ -31,11 +31,13 @@ from .qconfig_utils import (
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
+from torch.ao.quantization import QuantType
 from torch.ao.quantization.backend_config.utils import (
     get_root_module_to_quantized_reference_module,
     get_pattern_to_dtype_configs,
     get_fused_module_classes,
     get_qat_module_classes,
+    get_module_to_qat_module,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from .graph_module import (
@@ -158,7 +160,12 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
             if len(users) > 1:
                 for user in users:
                     with quantized.graph.inserting_before(node):
-                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
+                        new_node = quantized.graph.create_node(
+                            "call_method",
+                            "dequantize",
+                            node.args,
+                            node.kwargs
+                        )
                     user.replace_input_with(node, new_node)
                 quantized.graph.erase_node(node)
 
@@ -178,7 +185,12 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
         if len(dequant_users) > 1:
             with quantized.graph.inserting_after(node):
-                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
+                unique_dq = quantized.graph.create_node(
+                    "call_method",
+                    "dequantize",
+                    users[0].args,
+                    users[0].kwargs,
+                )
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
                 quantized.graph.erase_node(dequant)
@@ -473,7 +485,7 @@ def convert_custom_module(
         node: Node,
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
-        custom_module_class_mapping: Dict[Callable, Callable],
+        custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
         statically_quantized_custom_module_nodes: Set[Node]):
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
@@ -569,6 +581,9 @@ def convert(
             "in a future version. Please pass in a ConvertCustomConfig instead.")
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
+    if backend_config_dict is None:
+        backend_config_dict = get_native_backend_config_dict()
+
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
@@ -579,14 +594,6 @@ def convert(
 
     node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-
-    # TODO this should be removed now that gpu support for quantization is being supported.
-    # however in practice, as of 7/22/2021, certain functions that get called by convert expect
-    # only cpu arguments.
-    # As an example, in TestQuantizeFxModels.test_qat_functional_linear when device='cuda',
-    # fold_weight will call quantized::linear_prepack which doesn't support QuantizedCuda backend.
-    if not is_reference:
-        model.cpu()
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -606,7 +613,8 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            update_qconfig_for_qat(qconfig_mapping, {})
+            module_to_qat_module = get_module_to_qat_module(backend_config_dict)
+            update_qconfig_for_qat(qconfig_mapping, module_to_qat_module)
         update_qconfig_for_fusion(model, qconfig_mapping)
 
         compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
@@ -712,8 +720,6 @@ def convert(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
 
-    if backend_config_dict is None:
-        backend_config_dict = get_native_backend_config_dict()
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
@@ -787,7 +793,7 @@ def convert(
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
-        model = duplicate_dequantize_node(model)
+        Model = duplicate_dequantize_node(model)
         model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
