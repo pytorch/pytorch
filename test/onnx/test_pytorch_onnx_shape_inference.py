@@ -22,7 +22,6 @@ def expect_tensor(scalar_type, shape=None):
 
 class TestONNXShapeInference(common_utils.TestCase):
     def __init__(self, *args, **kwargs):
-        super().__init__(self, *args, **kwargs)
         self.opset_version = _constants.onnx_main_opset
         _set_onnx_shape_inference(True)
         _set_opset_version(self.opset_version)
