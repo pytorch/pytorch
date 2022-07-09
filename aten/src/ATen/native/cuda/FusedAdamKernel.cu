@@ -34,11 +34,11 @@ C10_DEVICE __forceinline__ void adam_math(
         // Load values.
         opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
         opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
-        if (maximize) {
-            grad = -grad;
-        }
         if (inv_grad_scale_ptr) {
             grad *= (*inv_grad_scale_ptr);
+        }
+        if (maximize) {
+            grad = -grad;
         }
         opmath_t exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
         opmath_t exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
@@ -46,7 +46,8 @@ C10_DEVICE __forceinline__ void adam_math(
         if (amsgrad) {
             max_exp_avg_sq = static_cast<opmath_t>(r_args[kMaxExpAvgSqIdx][ii]);
         }
-        // Update mat.
+
+        // Update param, grad, 1st and 2nd order momentum.
         if (weight_decay != 0) {
             grad += param * weight_decay;
         }
@@ -64,10 +65,14 @@ C10_DEVICE __forceinline__ void adam_math(
 
         const opmath_t bias_correction2_sqrt = ::sqrt(bias_correction2);
 
-        const opmath_t denom = (::sqrt((amsgrad ? max_exp_avg_sq : exp_avg_sq)) / bias_correction2_sqrt) + eps;
+        opmath_t denom;
+        if (amsgrad) {
+            denom = (::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
+        } else {
+            denom = (::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
+        }
 
         param -= step_size * exp_avg / denom;
-        param = param + (-step_size) * exp_avg / denom;
 
         // Store results.
         r_args[kParamIdx][ii] = param;
@@ -128,15 +133,13 @@ struct FusedAdamMathFunctor {
             }
         } else {
             for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+              load_args<Depth>(r_args, args, i_start, chunk_size, n);
+              adam_math<scalar_type, opmath_t, Depth>(
+                  r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
 #pragma unroll
-                for (int ii = 0; ii < kILP; ii++) {
-                    load_args<Depth>(r_args, args, i_start, chunk_size, n);
-                    adam_math<scalar_type, opmath_t, Depth>(
-                            r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
-                    for (int i = 0; i < Depth; i++) {
-                        store_args(args[i], r_args[i], i_start, chunk_size, n);
-                    }
-                }
+              for (int i = 0; i < Depth; i++) {
+                  store_args(args[i], r_args[i], i_start, chunk_size, n);
+              }
             }
         }
     }
