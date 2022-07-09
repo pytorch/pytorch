@@ -9,15 +9,13 @@ TEST(SchemaInfoHasSideEffectsTest, Basic) {
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   SchemaInfo side_effects_schema_info(
       "aten::warn(str message, int stacklevel=2) -> ()");
-  ASSERT_TRUE(side_effects_schema_info.hasSideEffects());
-  ASSERT_FALSE(no_side_effects_schema_info.hasSideEffects());
+  ASSERT_TRUE(side_effects_schema_info.has_side_effects());
+  ASSERT_FALSE(no_side_effects_schema_info.has_side_effects());
 }
 
 TEST(FunctionSchemaIsMutableTest, Basic) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_TRUE(schema.is_mutable(0));
   ASSERT_TRUE(schema.is_mutable("self"));
   ASSERT_FALSE(schema.is_mutable(1));
@@ -27,10 +25,8 @@ TEST(FunctionSchemaIsMutableTest, Basic) {
 }
 
 TEST(FunctionSchemaIsMutableTest, InvalidArgument) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_THROW(schema.is_mutable(4), c10::Error);
   ASSERT_THROW(schema.is_mutable("named_argument"), c10::Error);
 }
@@ -66,77 +62,86 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
   ASSERT_TRUE(schema.is_mutable(1));
   ASSERT_TRUE(schema.is_mutable("other"));
 }
-
 TEST(SchemaInfoIsNonDeterministicTest, Basic) {
   SchemaInfo deterministic_schema_info(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   SchemaInfo nondeterministic_schema_info(
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor");
-  ASSERT_FALSE(deterministic_schema_info.isNonDeterministic());
-  ASSERT_TRUE(nondeterministic_schema_info.isNonDeterministic());
+  ASSERT_FALSE(deterministic_schema_info.is_non_deterministic());
+  ASSERT_TRUE(nondeterministic_schema_info.is_non_deterministic());
 }
 
-TEST(FunctionSchemaAreAliasingTest, Basic) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
-  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}));
-  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::output, 0}));
-  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::input, 0}));
+TEST(FunctionSchemaMayAliasTest, Basic) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::input, 0}));
 }
 
-TEST(FunctionSchemaAreAliasingTest, InvalidArgument) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))")
-          ->schema();
+TEST(FunctionSchemaMayAliasTest, InvalidArgument) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_THROW(
-      schema.areAliasing({c10::input, 15}, {c10::output, 0}), c10::Error);
+      schema.may_alias(
+          {c10::SchemaArgType::input, 15}, {c10::SchemaArgType::output, 0}),
+      c10::Error);
   ASSERT_THROW(
-      schema.areAliasing({c10::input, 0}, {c10::output, 15}), c10::Error);
+      schema.may_alias(
+          {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 15}),
+      c10::Error);
 }
 
-TEST(FunctionSchemaAreAliasingTest, Wildcard) {
-  c10::FunctionSchema schema =
-      torch::jit::getOperatorForLiteral(
-          "aten::split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]")
-          ->schema();
-  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
-  ASSERT_FALSE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, false));
+TEST(FunctionSchemaMayAliasTest, Wildcard) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::test.Tensor(Tensor(*) self) -> (Tensor(*), Tensor)");
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 1}, {c10::SchemaArgType::input, 0}));
 }
 
-TEST(SchemaInfoAreAliasingTest, AliasingInputs) {
+TEST(SchemaInfoMayAliasTest, AliasingInputs) {
   SchemaInfo schema(
       "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
-  ASSERT_FALSE(schema.areAliasing({c10::input, 0}, {c10::input, 1}, true));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
   at::Tensor input = at::randn({3, 3});
   schema.addArgumentValue("self", input);
   schema.addArgumentValue("other", input);
-  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::input, 1}, true));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
 }
 
-TEST(SchemaInfoAreAliasingTest, AliasingOutputs) {
+TEST(SchemaInfoMayAliasTest, AliasingOutputs) {
   SchemaInfo schema(
       "aten::aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)");
-  ASSERT_FALSE(schema.areAliasing({c10::output, 0}, {c10::output, 1}, true));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::output, 1}));
   at::Tensor input = at::randn({3, 3});
   schema.addArgumentValue("min", input);
   schema.addArgumentValue("max", input);
-  ASSERT_TRUE(schema.areAliasing({c10::output, 0}, {c10::output, 1}, true));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::output, 1}));
 }
 
-TEST(SchemaInfoAreAliasingTest, AliasingInputOutput) {
+TEST(SchemaInfoMayAliasTest, AliasingInputOutput) {
   SchemaInfo schema(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
-  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
-  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, true));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
   at::Tensor input = at::randn({3, 3});
   schema.addArgumentValue("self", input);
   schema.addArgumentValue("other", input);
-  ASSERT_TRUE(schema.areAliasing({c10::input, 0}, {c10::output, 0}, true));
-  ASSERT_TRUE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, true));
-  ASSERT_FALSE(schema.areAliasing({c10::input, 1}, {c10::output, 0}, false));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
 }
 
 } // namespace utils
