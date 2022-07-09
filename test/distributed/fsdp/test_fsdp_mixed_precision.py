@@ -493,12 +493,15 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
         )
         with patch_reduce_scatter(test_reduce_scatter, param_dtype):
-            fsdp_model = TransformerWithSharedParams.init(
+            # TODO: `test_mp_embedding_reduce()` fails if we do not wrap the
+            # entire `TransformerWithSharedParams` with a single top-level FSDP
+            model = TransformerWithSharedParams.init(
                 self.process_group,
-                FSDPInitMode.RECURSIVE,
+                FSDPInitMode.NO_FSDP,
                 CUDAInitMode.CUDA_BEFORE,
                 {"mixed_precision": mp_config},
             )
+            fsdp_model = FSDP(model, mixed_precision=mp_config)
             optim = torch.optim.SGD(fsdp_model.parameters(), lr=0.1)
             for _ in range(6):
                 inp = fsdp_model.module.get_input(torch.device("cuda"))
