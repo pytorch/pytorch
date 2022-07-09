@@ -40,7 +40,7 @@ namespace detail {
           " for ", isComplexType(self_dtype) ? "complex" : "real", " inputs, but got ", dtype);
       TORCH_CHECK(promoteTypes(self_dtype, dtype) == dtype,
           name, ": the dtype of the input ", "(", self_dtype, ") should be convertible ",
-          "without narrowing to the specified dtype (", dtype, ").");
+          "without narrowing to the specified dtype (", dtype, ")");
     }
   }
 }
@@ -89,13 +89,14 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce the whole tensor
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
-    TORCH_CHECK(opt_dim.has_value(),
+    // dim=None or dim=() reduces the whole tensor
+    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
       TORCH_CHECK(self.size(dim_num) != 0,
-        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
-        "dimension because the operation does not have an identity");
+        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on the dimension ", dim_num ,
+        "because this dimension is empty and the operation does not have an identity");
     }
   }
 
