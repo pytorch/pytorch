@@ -77,6 +77,20 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     if (ivalue.isTensor()) {
       tensor_args.push_back(ivalue.toTensor());
       tensor_args_indices.push_back(idx);
+    } else if (ivalue.isOptionalTensorList()) {
+      auto ivalue_vec = ivalue.toOptionalTensorList().vec();
+      c10::List<at::Tensor> result;
+
+      result.reserve(ivalue_vec.size());
+      for (const auto i : c10::irange(ivalue_vec.size())) {
+        if (ivalue_vec[i].has_value()){
+          result.push_back(ivalue_vec[i].value());
+        }
+      }
+      auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(result.vec())));
+      (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
+      tensorlist_args.push_back(result);
+
     } else if (ivalue.isTensorList()) {
       // Note: we copy each TensorList argument to CPU individually out of convenience,
       // but XLA would benefit from materializing all tensor and TensorList args onto the CPU at the same time.
