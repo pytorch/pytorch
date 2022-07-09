@@ -18,7 +18,7 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
-    _partial_wrapper_equals,
+    obs_or_fq_ctr_equals,
     float16_dynamic_qconfig,
     float16_static_qconfig,
     is_reuse_input_qconfig,
@@ -1352,11 +1352,10 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
                 bad_observer = False
             else:
                 for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
-                    if _partial_wrapper_equals(
+                    if obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
-                            :
-                        _partial_wrapper_equals(qconfig.activation, observer_ctr):
+                        obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
                         bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
