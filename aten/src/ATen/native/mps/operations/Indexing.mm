@@ -145,7 +145,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
 
   @autoreleasepool {
 
-    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source, alpha}) + ":" + std::to_string(dim);
+    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
