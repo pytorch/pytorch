@@ -153,6 +153,7 @@ class Sequential(Module):
     def extend(self, sequential) -> 'Sequential':
         for layer in sequential:
             self.append(layer)
+        return self
 
 
 class ModuleList(Module):
