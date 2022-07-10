@@ -451,7 +451,7 @@ class ShardedTensor(torch.Tensor):
 
         if device is not None:
             device = torch.device(device) if isinstance(device, str) else device
-            assert isinstance(device, torch.device) and device.index == torch.cuda.current_device(),
+            assert isinstance(device, torch.device) and device.index == torch.cuda.current_device(), \
                 '''Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!'''
 
         current_device = torch.device(torch.cuda.current_device())
