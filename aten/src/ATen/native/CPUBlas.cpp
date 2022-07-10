@@ -19,8 +19,8 @@ extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 #ifdef BLAS_HAS_SBGEMM
 extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *alpha,
-                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int *lda,
-                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int *ldb,
+                const at::BFloat16 *a, int *lda,
+                const at::BFloat16 *b, int *ldb,
                 float *beta,
                 float *c, int *ldc);
 #endif  // BLAS_HAS_SBGEMM
@@ -288,19 +288,19 @@ void gemm(
 void gemm(
    TransposeType transa, TransposeType transb,
    int64_t m, int64_t n, int64_t k,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) alpha,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int64_t lda,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int64_t ldb,
-   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) beta,
-   decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *c, int64_t ldc) {
+   const float alpha,
+   const at::BFloat16 *a, int64_t lda,
+   const at::BFloat16 *b, int64_t ldb,
+   const float beta,
+   at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
-      // alpha and beta and C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
-      float alpha_ = (float) alpha, beta_ = (float) beta;
+      float alpha_ = alpha, beta_ = beta;
       int c_size = n_ * ldc_;
+      // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c, c + c_size);
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
@@ -310,7 +310,7 @@ void gemm(
               &beta_,
               float_v.data(), &ldc_);
       for (auto cv: float_v) {
-        *(c++) = static_cast<_bfloat16_t>(cv);
+        *(c++) = c10::convert<at::BFloat16>(cv);
       }
       return;
    }
