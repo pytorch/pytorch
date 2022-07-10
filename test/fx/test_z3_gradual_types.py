@@ -56,7 +56,7 @@ class HFOperations(unittest.TestCase):
         assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
 
         # change the annotation on the input to Dyn.
-        # We should get [Dyn, 4]
+        # the last dimension should still be 4
         for n in symbolic_traced.graph.nodes:
             if n.op == 'placeholder':
                 n.type = Dyn
@@ -67,7 +67,6 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEquals(s.check(), z3.sat)
 
-        assert s.model()[expand_res].arg(0).arg(0) == 0
         assert s.model()[expand_res].arg(1).arg(1) == b.shape[1]
 
     def test_getitem_tensor(self):
