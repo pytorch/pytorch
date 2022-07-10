@@ -44,6 +44,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.linalg
 
 import torch._prims as prims  # noqa: F401
 
@@ -7203,7 +7204,7 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    is_linalg_svd = (op_info.name == "linalg.svd")
+    is_linalg_svd = ("linalg.svd" in op_info.name)
     batches = [(), (0, ), (3, )]
     ns = [0, 3, 5]
 
@@ -20473,8 +20474,18 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.softplus",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.l1_loss",
+        torch_opinfo_name="nn.functional.l1_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.mse_loss",
+        torch_opinfo_name="nn.functional.mse_loss",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -20764,6 +20775,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        supports_nvfuser=False,  # clone default
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -21166,6 +21178,27 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        supports_nvfuser=False,  # clone_default
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svd",
+        torch_opinfo_name="linalg.svd",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svdvals",
+        torch_opinfo_name="linalg.svdvals",
+        supports_out=True,
+        supports_nvfuser=False,
     ),
     #
     # Tensor Creation Reference OpInfos
