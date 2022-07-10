@@ -305,9 +305,11 @@ def meta_conv(
         )
 
     else:
-        if weight.shape[1] != input_tensor.shape[1]:
-            raise RuntimeError("Invalid channel dimensions")
         out_channels = weight.shape[0]
+        if weight.shape[1] != input_tensor.shape[1] / groups:
+            raise RuntimeError(
+                "Invalid channel dimensions"
+            )
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation
         )
