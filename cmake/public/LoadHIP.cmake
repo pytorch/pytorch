@@ -300,10 +300,18 @@ if(HIP_FOUND)
   find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  if(TARGET ${miopen_LIBRARIES})
+    set(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES})
+  else()
+    find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  endif()
   # TODO: rccl_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  if(TARGET ${rccl_LIBRARIES})
+    set(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES})
+  else()
+    find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  endif()
   # hiprtc is part of HIP
   find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer

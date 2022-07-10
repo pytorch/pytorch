@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
 import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper_multi
+from torch._prims.wrappers import out_wrapper
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1203,7 +1203,7 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
 
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
-@out_wrapper_multi("output", "buffer")
+@out_wrapper("output", "buffer")
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
