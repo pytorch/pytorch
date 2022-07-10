@@ -64,15 +64,11 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
             )
 
     if len(sig.parameters) < input_col_size:
-        var_pos_args = [p for p in sig.parameters.values() if
-                        p.kind == inspect.Parameter.VAR_POSITIONAL]
-        if len(var_pos_args) > 0:
-            # *args present means that this check isn't useful
-            return
-        raise ValueError(
-            f"The function {fn_name} takes {len(sig.parameters)} "
-            f"parameters, but {input_col_size} are required."
-        )
+        if inspect.Parameter.VAR_POSITIONAL not in [p.kind for p in sig.parameters.values()]:
+            raise ValueError(
+                f"The function {fn_name} takes {len(sig.parameters)} "
+                f"parameters, but {input_col_size} are required."
+            )
 
 
 def _is_local_fn(fn):
