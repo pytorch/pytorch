@@ -13,8 +13,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.experimental.proxy_tensor import (
     ProxyTensor,
     ProxyTorchDispatchMode,
-    wrap_output,
-    unwrap_proxy,
     PythonKeyTracer,
 )
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
@@ -100,153 +98,51 @@ class CudaGraphModule(Module):
             return r
 
 
-class FindInputMutations(torch.fx.Interpreter):
-    def __init__(self, gm):
-        super().__init__(gm)
-        self.inputs = defaultdict(set)
-        self.input_idx = 0
-        self.mutated_inputs = set()
-
-    def placeholder(self, target, args, kwargs):
-        r = super().placeholder(target, args, kwargs)
-        # NB: inputs could be aliased
-        self.inputs[StorageWeakRef(r.storage())].add(self.input_idx)
-        self.input_idx += 1
-        return r
-
-    def call_function(self, target, args, kwargs):
-        schema = target._schema
-        for i, arg in enumerate(schema.arguments):
-            if i < len(args):
-                argument = args[i]
-            else:
-                if arg.name not in kwargs:
-                    continue
-                argument = kwargs[arg.name]
-            mut_arg = False
-            if arg.alias_info:
-                if arg.alias_info.is_write:
-                    mut_arg = True
-            if mut_arg:
-                self.mutated_inputs |= self.inputs[StorageWeakRef(argument.storage())]
-        return super().call_function(target, args, kwargs)
-
-    def __call__(self, *args):
-        super().run(*args)
-        return self.mutated_inputs
+def find_input_mutations(g):
+    FK = 'fake_result'
+    inputs = defaultdict(set)
+    input_idx = 0
+    mutated_inputs = set()
+    for n in g.nodes:
+        if n.op == 'placeholder':
+            inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
+            input_idx += 1
+        elif n.op == 'call_function':
+            schema = n.target._schema
+            for i, arg in enumerate(schema.arguments):
+                if i < len(n.args):
+                    argument = n.args[i]
+                else:
+                    if arg.name not in n.kwargs:
+                        continue
+                    argument = n.kwargs[arg.name]
+                mut_arg = False
+                if arg.alias_info:
+                    if arg.alias_info.is_write:
+                        mut_arg = True
+                if mut_arg:
+                    # TODO: not correct for args that contain tensors in a struct
+                    # like list
+                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK].storage())]
+        # TODO: error on unrecognized nodes
+    return mutated_inputs
 
 
-class ProxyTensorInterpreter(torch.fx.Interpreter):
-    def __init__(self, module: torch.fx.GraphModule, **kwargs):
-        super().__init__(module, **kwargs)
-        self.new_graph = torch.fx.Graph()
-        self.new_module = torch.fx.GraphModule(module, self.new_graph)
-        self.tracer = torch.fx.proxy.GraphAppendingTracer(self.new_graph)
-
-    def placeholder(self, target, args, kwargs):
-        out = super().placeholder(target, args, kwargs)
-        return ProxyTensor(
-            out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer)
-        )
-
-    def get_attr(self, target, args, kwargs):
-        out = super().get_attr(target, args, kwargs)
-        self.new_module.register_buffer(target, self.module.get_buffer(target))
-        return ProxyTensor(
-            out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
-        )
-
-    # Use the mode in case the function call doesn't have any tensor arguments
-    def call_function(self, target, args, kwargs):
-        with ProxyTorchDispatchMode(self.tracer):
-            return super().call_function(target, args, kwargs)
-
-    def call_method(self, target, args, kwargs):
-        with ProxyTorchDispatchMode(self.tracer):
-            return super().call_method(target, args, kwargs)
-
-    # Can't do call_module because the interpreter not reentrant
-
-    def output(self, target, args, kwargs):
-        out = super().output(target, args, kwargs)
-
-        def unwrap(e):
-            return e.proxy.node if isinstance(e, ProxyTensor) else e
-
-        self.new_graph.output(tree_map(unwrap, out))
-        return out
-
-
-def unwrap_elem(e):
-    return e.elem if isinstance(e, ProxyTensor) else e
-
-
-def unwrap_proxy_node(e):
-    return e.proxy.node if isinstance(e, ProxyTensor) else e
-
-
-class ApplyCudaGraphs(torch.fx.Interpreter):
-    # All module calls are assumed to be fusion groups, since
-    # this is post AOTAutograd which would have squashed all the modules.
-    # Module assumed to be called only once.
-    def call_module(self, target, args, kwargs):
-        if hasattr(self, 'proxy_mode'):
-            proxy_mode = self.proxy_mode
-        else:
-            from torch._C import _get_torch_dispatch_mode
-            proxy_mode = _get_torch_dispatch_mode()
-            assert isinstance(proxy_mode, ProxyTorchDispatchMode)
-        with enable_torch_dispatch_mode(proxy_mode.inner, replace=proxy_mode):
-            assert not kwargs
-            # Don't trace the module, but do run the module to get the correct
-            # out result
-            out = super().call_module(target, tree_map(unwrap_elem, args), kwargs)
-            submod = self.module.get_submodule(target)
-            mutated_inputs = FindInputMutations(submod)(*map(unwrap_elem, args))
-            proxy_mode.tracer.root.add_module(target, CudaGraphModule(submod, mutated_inputs))
-            return wrap_output(
-                out,
-                proxy_mode.tracer.create_proxy(
-                    "call_module",
-                    target,
-                    tree_map(unwrap_proxy, args),
-                    tree_map(unwrap_proxy, kwargs)
-                )
-            )
-
-def trace_interp(interp, inputs):
-    new_graph = torch.fx.Graph()
-    new_module = torch.fx.GraphModule(interp.module, new_graph)
-    tracer = PythonKeyTracer()
-    tracer.graph = new_graph
-    tracer.root = new_module
-    tracer.tensor_attrs = {}
-    fake_mode = FakeTensorMode()
-    args = [
-        ProxyTensor(fake_mode.from_tensor(i), tracer.create_proxy("placeholder", n.target, n.args, n.kwargs))
-        for i, n in zip(inputs, filter(lambda n: n.op == "placeholder", interp.module.graph.nodes))
-    ]
-    proxy_mode = ProxyTorchDispatchMode(tracer)
-    interp.proxy_mode = proxy_mode
-    with fake_mode, proxy_mode:
-        outs = interp.run(*args)
-    new_graph.output(tree_map(unwrap_proxy_node, outs))
-    new_module.recompile()
-    return new_module
-
-def fake_signature(fn, nargs):
-    """FX gets confused by varargs, de-confuse it"""
-    argnames = ",".join(f"arg{i}" for i in range(nargs))
-    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
-
-def trace_interp2(interp, inputs):
-    # this looks cool but it mutates the original module
-    return torch.fx.experimental.proxy_tensor.make_fx(fake_signature(interp.run, len(inputs)), use_fake=True)(*inputs)
+# Mutates input graph
+def apply_cuda_graphs(gm):
+    for n in gm.graph.nodes:
+        if n.op == 'call_module':
+            assert not n.kwargs
+            submod = gm.get_submodule(n.target)
+            gm.delete_submodule(n.target)
+            mutated_inputs = find_input_mutations(submod.graph)
+            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
+    # NB: we didn't actually change the graph, no need for recompile
 
 
 def cudagraphs(model, inputs):
     model = partition_cudagraphs(model, inputs)
-    model = trace_interp2(ApplyCudaGraphs(model), inputs)
+    apply_cuda_graphs(model)
     return model
 
 

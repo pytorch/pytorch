@@ -59,13 +59,6 @@ def wrap_output(inner_res, proxy_res, **kwargs):
     else:
         return inner_res
 
-def unwrap_proxy(e):
-    return e.proxy if isinstance(e, ProxyTensor) else e
-
-def unwrap_elem(e):
-    if isinstance(e, ProxyTensor):
-        return e.elem
-    return e
 
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
@@ -81,6 +74,14 @@ def proxy_call(func_overload, args, kwargs=None):
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
+
+    def unwrap_proxy(e):
+        return e.proxy if isinstance(e, ProxyTensor) else e
+
+    def unwrap_elem(e):
+        if isinstance(e, ProxyTensor):
+            return e.elem
+        return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
@@ -195,7 +196,7 @@ def wrap_key(f, inps):
         assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                with no_dispatch(), torch.utils._python_dispatch.enable_torch_dispatch_mode(torch.utils._python_dispatch.BaseTorchDispatchMode(), ignore_preexisting=True):
+                with no_dispatch():
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
@@ -220,9 +221,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
-        if func_overload is torch.ops.prim.device.default:
-            import traceback
-            traceback.print_stack()
         func = func_overload.overloadpacket
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
