@@ -135,3 +135,7 @@ class RelaxedBernoulli(TransformedDistribution):
     @property
     def probs(self):
         return self.base_dist.probs
+
+    @property
+    def mean(self):
+        return self.probs
