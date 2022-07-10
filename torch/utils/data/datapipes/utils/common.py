@@ -31,7 +31,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Returns:
         None.
     Raises:
-        TypeError: If the function is not compatible with the input column.
+        ValueError: If the function is not compatible with the input column.
     """
     sig = inspect.signature(fn)
     if isinstance(input_col, (list, tuple)):
