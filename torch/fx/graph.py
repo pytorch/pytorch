@@ -542,8 +542,10 @@ class _PyTreeCodeGen(CodeGen):
             free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
+            # Strip type annotations, if present. `name1: type1, name2: type2` style syntax is not valid.
+            free_vars = [free_var.split(":")[0] for free_var in free_vars]
             function_definition += f"""
-    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
+    {', '.join(free_vars)} = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
         return function_definition
 
     def generate_output(self, output_args):
