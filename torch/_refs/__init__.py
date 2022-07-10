@@ -925,6 +925,30 @@ eq = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _pow(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+
+    if isinstance(b, Number):
+        if b == 1.0:
+            return a.clone()  # type: ignore[return-value,union-attr]
+        elif b == 2.0:
+            return a * a  # type: ignore[return-value]
+        elif b == 0.5:
+            return torch.sqrt(a)  # type: ignore[arg-type]
+    return prims.pow(a, b)
+
+
+# TODO: add docstring
+pow = _make_elementwise_binary_reference(
+    _pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=torch.ops.aten.pow,
+)
+
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
@@ -955,7 +979,7 @@ def float_power(
         b = prims.to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    return prims.pow(a, b)
+    return pow(a, b)
 
 
 # >>> a = torch.tensor(-0.2500, dtype=torch.float64)
@@ -1306,12 +1330,6 @@ nextafter = _make_elementwise_binary_reference(
 )
 
 # TODO: add docstring
-pow = _make_elementwise_binary_reference(
-    prims.pow,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-)
-
-# TODO: add docstring
 remainder = _make_elementwise_binary_reference(
     prims.remainder,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1334,7 +1352,7 @@ def sub(
     alpha: Optional[NumberType] = None,
 ):
     """
-    Reference implementation of torch.add
+    Reference implementation of torch.sub
     """
 
     if isinstance(a, Number) and isinstance(b, Number):
@@ -2538,7 +2556,7 @@ def tensor_split(
 
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
-        if indices_or_sections.device != torch.device("cpu"):
+        if not indices_or_sections.device.type == "cpu":
             msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
                 indices_or_sections.device
             )
