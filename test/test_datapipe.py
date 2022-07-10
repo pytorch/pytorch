@@ -1218,6 +1218,17 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+
         def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
@@ -1231,14 +1242,20 @@ class TestFunctionalIterDataPipe(TestCase):
                     self.assertEqual(list(res_dp), list(ref_dp))
                     # Reset
                     self.assertEqual(list(res_dp), list(ref_dp))
+        _helper(lambda data: data, fn_n1_def, 0, 1)
+        _helper(lambda data: data, p_fn_n1, 0, 1)
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
+        _helper(lambda data: (data[0], data[1], 1 + data[1]), p_fn_n1, 1, 2)
         # The index of input column is out of range
         _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, 1, error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
+        _helper(None, fn_n1_pos, 1, error=ValueError)
+        _helper(None, fn_n1_kwargs, 1, error=ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
