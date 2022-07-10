@@ -6,12 +6,14 @@ import random
 import torch
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
-from torch.ao.sparsity import BaseDataSparsifier, DataNormSparsifier
+
 from typing import Tuple
 from torch import nn
 import itertools
 import math
 import copy
+
+from torch.ao.sparsity._experimental.data_sparsifier import BaseDataSparsifier, DataNormSparsifier
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
