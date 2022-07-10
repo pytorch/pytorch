@@ -5,3 +5,11 @@ from .parametrization import (
     PruningParametrization,
     ZeroesParametrization,
 )
+
+__all__ = [
+    "ActivationReconstruction",
+    "BasePruner",
+    "BiasHook",
+    "PruningParametrization",
+    "ZeroesParametrization",
+]
