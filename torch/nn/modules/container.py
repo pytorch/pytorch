@@ -150,6 +150,10 @@ class Sequential(Module):
         self.add_module(str(len(self)), module)
         return self
 
+    def extend(self, sequential) -> 'Sequential':
+        for layer in sequential:
+            self.append(layer)
+
 
 class ModuleList(Module):
     r"""Holds submodules in a list.
