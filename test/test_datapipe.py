@@ -1295,6 +1295,26 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_kwonly(*, d0, d1):
+            return d0 + d1
+
+        def fn_has_nondefault_kwonly(d0, *, d1):
+            return d0 + d1
+
+        def fn_has_nondefault_var_p_kw(d0, /, d1):
+            return d0 + d1
+
         # Prevent modification in-place to support resetting
         def _dict_update(data, newdata, remove_idx=None):
             _data = dict(data)
@@ -1320,6 +1340,18 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertEqual(list(res_dp), list(ref_dp))
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
+
+        _helper(lambda data: data, fn_n1_def, 'x', 'y')
+        _helper(lambda data: data, p_fn_n1, 'x', 'y')
+
+        _helper(lambda data: data, fn_n1_def, 'x', 'y')
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_has_nondefault_var_p_kw, ['x', 'y'], 'z')
+
+        _helper(None, fn_n1_pos, 'x', error=ValueError)
+        _helper(None, fn_n1_kwargs, 'x', error=ValueError)
+        _helper(None, fn_kwonly, ['x', 'y'], error=ValueError)
+        _helper(None, fn_has_nondefault_kwonly, ['x', 'y'], error=ValueError)
 
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
