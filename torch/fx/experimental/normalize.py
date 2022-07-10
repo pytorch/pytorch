@@ -14,11 +14,6 @@ from torch.fx.operator_schemas import (
 
 from .schema_type_annotation import AnnotateTypesWithSchema
 
-__all__ = [
-    "NormalizeArgs",
-    "NormalizeOperators",
-]
-
 
 class NormalizeArgs(Transformer):
     """
