@@ -25,8 +25,8 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    make_nccl_premul_sum,  # noqa: F401
 )
+from torch._C._distributed_c10d import make_nccl_premul_sum  # noqa: F401
 from torch._six import string_classes
 
 from .constants import default_pg_timeout
