@@ -60,7 +60,7 @@ template <typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_first_cidx_is_zero(const index_t& cidx, const index_t& zero) {
   const bool invariant = cidx == zero;
-  constexpr auto message = "`c{row|col}_indices[..., 0] == 0` is not satisfied.";
+  static constexpr auto message = "`c{row|col}_indices[..., 0] == 0` is not satisfied.";
   _assert(invariant, message);
 }
 
@@ -70,7 +70,7 @@ template <typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_last_cidx_is_nnz(const index_t& cidx, const index_t& nnz) {
   const bool invariant = cidx == nnz;
-  constexpr auto message = "`c{row|col}_indices[..., -1] == nnz` is not satisfied.";
+  static constexpr auto message = "`c{row|col}_indices[..., -1] == nnz` is not satisfied.";
   _assert(invariant, message);
 }
 
@@ -86,7 +86,7 @@ _check_cidx_nondecreasing_locally_bounded_sequence(
     const index_t& dim) {
   const auto s_cidx = cidx_next - cidx;
   const bool invariant = zero <= s_cidx && s_cidx <= dim;
-  constexpr auto message = "`0 <= c{row|col}_indices[..., 1:] - c{row|col}_indices[..., :-1] <= dim` is not satisfied.";
+  static constexpr auto message = "`0 <= c{row|col}_indices[..., 1:] - c{row|col}_indices[..., :-1] <= dim` is not satisfied.";
   _assert(invariant, message);
 }
 
@@ -100,7 +100,7 @@ _check_idx_bounds(
     const index_t& zero,
     const index_t& dim) {
   const bool invariant = zero <= idx && idx < dim;
-  constexpr auto message = "`0 <= {row|col}_indices < dim` is not satisfied.";
+  static constexpr auto message = "`0 <= {row|col}_indices < dim` is not satisfied.";
   _assert(invariant, message);
 }
 
@@ -114,7 +114,7 @@ _check_idx_sorted_distinct_vals_slices_with_cidx(
     const index_t* RESTRICT ptr_idx_batch,
     const index_t cidx,
     const index_t cidx_next) {
-  constexpr auto message = "`{col|row}_indices[..., c{row|col}_indices[..., i - 1]:c{row|col}_indices[..., i]] "
+  static constexpr auto message = "`{col|row}_indices[..., c{row|col}_indices[..., i - 1]:c{row|col}_indices[..., i]] "
                        "for all i = 1, ..., cdim "
                        "are sorted and distinct along the last dimension values` "
                        "is not satisfied.";
