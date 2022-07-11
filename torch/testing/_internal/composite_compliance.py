@@ -418,11 +418,6 @@ def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
-        # Hack: tree_flatten doesn't handle torch.return_types yet,
-        # so we're gonna convert them to tuple.
-        # TODO: https://github.com/pytorch/pytorch/issues/74624
-        if isinstance(results, tuple):
-            results = tuple(results)
         flat_results, _ = tree_flatten(results)
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
