@@ -973,6 +973,8 @@ class OutlierDetector(DetectorBase):
     REF_PERCENTILE_KEY = "reference_percentile"
     CHANNEL_AXIS_KEY = "channel_axis"
     MAX_VALS_KEY = "per_channel_max"
+    CONSTANT_CHANNEL_KEY = "constant_channels"
+    CONSTANT_COUNTS_KEY = "constant_batch_counts"
 
     def __init__(
         self,
@@ -1067,7 +1069,11 @@ class OutlierDetector(DetectorBase):
         return obs_fqn_to_info
 
     def _calculate_outlier_info(
-            self, percentile_ratios: torch.Tensor, counted_batches: torch.Tensor, total_batches: int
+        self,
+        percentile_ratios: torch.Tensor,
+        counted_batches: torch.Tensor,
+        total_batches: int,
+        constant_channels: torch.Tensor,
     ) -> Dict[str, List[bool]]:
         r"""
         Gives info on whether the percentile ratios cacluated would be considered outliers
@@ -1077,11 +1083,13 @@ class OutlierDetector(DetectorBase):
             percentile_ratios (torch.Tensor): The average percentile_ratios per channel calculated by the observer
             counted_batches (torch.Tensor): The number of batches used for average calculation per tensor
             total_batches (int): The total number of batches that passed through observer in this epoch
+            constant_channels (torch.Tensor): The counts for constant batches per channel
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
             "above_sample_threshold_count": if o_r was >= statistical_threshold:
                 where o_r = counted_batches / total_batches
+            "constant_channels": if non_constant_per_channel != total_batches for each channel
         """
         outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
 
@@ -1095,9 +1103,15 @@ class OutlierDetector(DetectorBase):
         ]
         outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
 
+        # calculate whether there were constant batches through channels
+        constant_channels = [
+            True if channel_batch_count != 0 else False for channel_batch_count in constant_channels
+        ]
+
         # calculate for each channel whether it's an outlier or not based on ratio
         outlier_detected = [True if ratio > self.ratio_threshold else False for ratio in ratios_list]
         outlier_dict[self.OUTLIER_KEY] = outlier_detected
+        outlier_dict[self.CONSTANT_CHANNEL_KEY] = constant_channels
 
         # return the dictionary with the two lists
         return outlier_dict
@@ -1118,6 +1132,8 @@ class OutlierDetector(DetectorBase):
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
             the channel axis used to determine individual channels
+            whether each channel had any constant value batches
+            the constant batch counts per channel
             the per channel max values
         """
         # return dictionary mapping observer fqns to desired info
@@ -1132,6 +1148,7 @@ class OutlierDetector(DetectorBase):
                 # get the number of batches and calculated ratio thresholds
                 num_batches: torch.Tensor = pre_obs.percentile_batches_tracked
                 average_ratios: torch.Tensor = pre_obs.average_percentile_ratio
+                channel_batch_cnts: torch.Tensor = pre_obs.constant_channels
                 total_batches: int = pre_obs.num_batches_tracked
 
                 # also get the max values
@@ -1148,7 +1165,7 @@ class OutlierDetector(DetectorBase):
                         # if it's less than 1 we have the flip it as well
                         average_ratios[index] = 1 / ratio_val
 
-                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches, total_batches)
+                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches, total_batches, channel_batch_cnts)
 
                 # calculate whether ratios were outliers
                 info_dict[fqn] = {
@@ -1159,6 +1176,8 @@ class OutlierDetector(DetectorBase):
                     self.NUM_BATCHES_KEY: num_batches,
                     self.OUTLIER_KEY: outlier_calcs[self.OUTLIER_KEY],
                     self.SUFFICIENT_BATCHES_KEY: outlier_calcs[self.SUFFICIENT_BATCHES_KEY],
+                    self.CONSTANT_CHANNEL_KEY: outlier_calcs[self.CONSTANT_CHANNEL_KEY],
+                    self.CONSTANT_COUNTS_KEY: channel_batch_cnts,
                     self.MAX_VALS_KEY: max_vals
                 }
 
@@ -1183,6 +1202,8 @@ class OutlierDetector(DetectorBase):
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
                 the channel axis used to determine individual channels
+                whether each channel had any constant value batches
+                the constant batch counts per channel
                 the per channel max values
         """
         # generate the information dictionary of outlier information
@@ -1201,6 +1222,10 @@ class OutlierDetector(DetectorBase):
         note_string = "Note: outlier detection is only reliable for {}. We recommend {} to ensure the most accurate results."
         note_distribution = "stationary distributions"
         note_rec = "running the static vs. dynamic detector to ensure activation data before modules above is stationary"
+
+        # suggestion for constant batch check since that can make it no outliers
+        constant_str = "\tFor channel {}, we found {} constant value batches. {}\n"
+        constant_suggestion = "We recommend taking a look at the dict and data to see how frequent this occured and why."
 
         # compile the suggestion string
         for module_fqn in info_dict:
@@ -1222,6 +1247,20 @@ class OutlierDetector(DetectorBase):
                     max_value_found_str = channel_max_value_str.format(mod_info[self.MAX_VALS_KEY][index])
                     channel_str = channel_suggestion_str.format(index, max_value_found_str)
                     outlier_string += channel_str
+
+                # also check if we found constant batch
+                if mod_info[self.CONSTANT_CHANNEL_KEY][index]:
+                    # make sure we add a module level highlight.
+                    if not added_model_desc:
+                        # add the module level description
+                        outlier_string += module_suggestion_str.format(module_fqn, self.ch_axis)
+                        added_model_desc = True
+
+                    constant_values_for_channel = mod_info[self.CONSTANT_COUNTS_KEY]
+                    formatted_str = constant_str.format(index,constant_values_for_channel ,constant_suggestion)
+                    outlier_string += formatted_str
+                    # we also added at least one thing to description
+                    added_module = True
 
 
         # if found outlier, give suggestion, else give default response
