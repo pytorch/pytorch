@@ -211,7 +211,8 @@ def cumsum_inference_rule(n: Node, symbols, constraints, counter):
     We should verify that the index is valid
     """
     assert isinstance(n.args[0], Node)
-    assert isinstance(n.args[1], int)
+    arg_1 = n.args[1] if len(n.args) > 1 else n.kwargs["dim"]
+    assert isinstance(arg_1, int)
 
     output, counter = gen_tvar(counter)
     symbols[n] = output
@@ -228,7 +229,7 @@ def cumsum_inference_rule(n: Node, symbols, constraints, counter):
 
         c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims), op_eq),
                            BinConstraintT(output, TensorType(new_dims), op_eq)] +
-                          [range_check(n.args[1], i)] + nat_constraints)
+                          [range_check(arg_1, i)] + nat_constraints)
 
         c2.append(c_tensor_i)
     dyn_or_tensor = Disj([c1, Disj(c2)])
