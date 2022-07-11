@@ -117,7 +117,7 @@ def backshift_permutation(dim0, dim1, ndim):
 
 
 def inverse_permutation(perm):
-    # Given a permutation, retunrs its inverse. It's equivalent to argsort on an array
+    # Given a permutation, returns its inverse. It's equivalent to argsort on an array
     return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
 
 
@@ -136,10 +136,10 @@ def matrix_norm(
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, int):
         dim = (dim,)  # type: ignore[assignment]
-    check(len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple of ints")
+    check(len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}")
     check(
         dim[0] != dim[1],
-        lambda: "linalg.matrix_norm: Expected dims to be different. Got ({dim[0]}, {dim[1]})",
+        lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
     check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
