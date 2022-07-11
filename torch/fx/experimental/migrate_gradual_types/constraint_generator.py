@@ -359,21 +359,6 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     else:
         raise RuntimeError('Method not yet implemented')
 
-# @register_inference_rule(operator.mul)
-# def mul_inference_rule(n: Node, symbols, constraints, counter):
-#
-#     my_mul, counter = gen_tvar(counter)
-#     symbols[n] = my_mul
-#
-#     # since in this case, we have scalar multiplication
-#     # the input shape should be the same as the output shape
-#     if isinstance(n.args[0], Node) and isinstance(n.args[1], float):
-#         # retrieve arg variables
-#         e1 = symbols[n.args[0]]
-#         return [BinConstraintT(my_mul, e1, op_eq)], counter
-#     else:
-#         raise NotImplementedError('Case not yet implemented')
-
 
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
@@ -558,7 +543,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
             my_output, counter = gen_tvar(counter)
             symbols[n] = my_output
             e2 = symbols[n.args[1]]
-            return [BinConstraintT(my_output, e1, op_eq)], counter
+            return [BinConstraintT(my_output, e2, op_eq)], counter
         elif isinstance(symbols[n.args[1]], DVar):
             my_output, counter = gen_dvar(counter)
             symbols[n] = my_output
