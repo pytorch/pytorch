@@ -200,34 +200,12 @@ static void validate_compressed_sparse_indices_kernel(
     });
   }
 
-  // Invariants 5.1 and 5.2
+  Tensor cidx_curr, cidx_next;
+
+  // Invariants 5.1, 5.2, 5.3
   {
     const auto cidx_first = cidx.slice(-1, 0, 1);
     const auto cidx_last = cidx.slice(-1, cdim, cdim + 1);
-
-    auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)
-      .add_owned_output(dummy.expand_as(cidx_first))
-      .add_input(cidx_first)
-      .add_input(cidx_last)
-      .build();
-
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, nnz] () {
-        const auto zero = index_t {0};
-        KernelLauncher::launch(iter,
-            [zero, nnz] FUNCAPI (index_t cidx_first, index_t cidx_last) -> index_t {
-              _check_first_cidx_is_zero<index_t>(cidx_first, zero);
-              _check_last_cidx_is_nnz<index_t>(cidx_last, nnz);
-              return 0;
-            }
-        );
-    });
-  }
-
-  Tensor cidx_curr, cidx_next;
-
-  // Invariant 5.3
-  {
     // These are reused for Invariant 5.6
     cidx_curr = cidx.slice(-1, 0, cdim);
     cidx_next = cidx.slice(-1, 1, cdim + 1);
@@ -235,14 +213,22 @@ static void validate_compressed_sparse_indices_kernel(
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(cidx_curr))
+      .add_input(cidx_first)
+      .add_input(cidx_last)
       .add_input(cidx_curr)
       .add_input(cidx_next)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, dim] () {
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, dim, nnz] () {
         const auto zero = index_t {0};
         KernelLauncher::launch(iter,
-            [zero, dim] FUNCAPI (index_t cidx_curr, index_t cidx_next) -> index_t {
+            [zero, dim, nnz] FUNCAPI (
+              index_t cidx_first,
+              index_t cidx_last,
+              index_t cidx_curr,
+              index_t cidx_next) -> index_t {
+              _check_first_cidx_is_zero<index_t>(cidx_first, zero);
+              _check_last_cidx_is_nnz<index_t>(cidx_last, nnz);
               _check_cidx_nondecreasing_locally_bounded_sequence<index_t>(cidx_curr, cidx_next, zero, dim);
               return 0;
             }
