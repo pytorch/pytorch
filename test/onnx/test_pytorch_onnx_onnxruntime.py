@@ -11764,7 +11764,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
         self.run_test(FlattenModel(), x)
 
-    @unittest.skip("onnx runtime does not support quantized support as of 07/11/2022")
+    @unittest.skip(
+        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
+    )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat(self):
@@ -11773,7 +11775,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 return torch.nn.quantized.QFunctional().cat((x, x), dim=1)
 
         q_input = torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8)
-        self.run_test(QuantizedConcatenationModel(), q_input, verbose=True)
+        self.run_test(QuantizedConcatenationModel(), q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
