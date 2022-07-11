@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    upload_to_rockset,
+    upload_to_s3,
     unzip,
 )
 
@@ -52,4 +52,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     stats = get_sccache_stats(args.workflow_run_id, args.workflow_run_attempt)
-    upload_to_rockset("sccache_stats", stats)
+    upload_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "sccache_stats",
+        stats,
+    )
