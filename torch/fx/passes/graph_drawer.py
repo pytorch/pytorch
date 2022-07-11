@@ -9,6 +9,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
 from itertools import chain
 
+__all__ = ['FxGraphDrawer']
 try:
     import pydot
     HAS_PYDOT = True
