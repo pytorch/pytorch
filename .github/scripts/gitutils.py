@@ -259,7 +259,6 @@ class GitRepo:
         return self._run_git("remote", "get-url", self.remote)
 
     def gh_owner_and_name(self) -> Tuple[str, str]:
-        return ['pytorch', 'pytorch']
         url = os.getenv("GIT_REMOTE_URL", None)
         if url is None:
             url = self.remote_url()

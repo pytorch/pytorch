@@ -422,7 +422,7 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], rc)
 
 
-def gh_get_pr_info(org: str, proj: str, pr_no: int, commit: str) -> Any:
+def gh_get_pr_info(org: str, proj: str, pr_no: int, commit: Optional[str] = None) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no, commit=commit)
     return rc
 
@@ -607,37 +607,6 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
 
-
-    def add_conclusions(edges: List[Dict[str, Dict[str, Any]]],
-                        get_next_check_run) -> None:
-        conclusions = {}
-        for edge_idx, edge in enumerate(edges):
-            node = edge["node"],
-            workflow_run = node["workflowRun"]
-            checkruns = node["checkRuns"]
-            if workflow_run is not None:
-                conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-            has_failing_check = False
-            while checkruns is not None:
-                for checkrun_node in checkruns["nodes"]:
-                    if checkrun_node["conclusion"] == 'FAILURE':
-                        has_failing_check = True
-                    conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
-                if bool(checkruns["pageInfo"]["hasNextPage"]):
-                    rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
-                                    name=self.project,
-                                    owner=self.org,
-                                    cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
-                                    cr_cursor=checkruns["pageInfo"]["endCursor"],
-                                    commit = self.land_check_commit)
-                    checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
-                else:
-                    checkruns = None
-            # Github doesn't set conclusion to failure if a job is still pending
-            if workflow_run is not None and has_failing_check:
-                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
-        return conclusions
-
     def get_land_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
         if self.land_check_conclusions is not None:
             return self.land_check_conclusions
@@ -662,7 +631,7 @@ class GitHubPR:
                                         owner=self.org,
                                         cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
                                         cr_cursor=checkruns["pageInfo"]["endCursor"],
-                                        commit = self.land_check_commit)
+                                        commit=self.land_check_commit)
                         checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
                     else:
                         checkruns = None
@@ -691,9 +660,6 @@ class GitHubPR:
         orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
         checksuites = orig_last_commit["checkSuites"]
         conclusions = {}
-
-
-
         def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
             for edge_idx, edge in enumerate(edges):
                 node = edge["node"]
