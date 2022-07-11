@@ -617,7 +617,6 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   int64_t weight_num = weight_.numel();
   Tensor result = at::empty_like(self, self.suggest_memory_format());
-  TORCH_INTERNAL_ASSERT(weight_.defined());
 
   if (weight_num != 1) {
     int64_t input_ndim = self.dim();
@@ -637,12 +636,10 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   // All elements go into the channel dimension
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
-    TORCH_CHECK(
-      t.dim() == 1 || t.dim() == 0,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ", t.dim());
+    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
     if (ndim >= 2) {
-      sizes[1] = t.dim() == 1 ? t.size(0) : 1;
-      strides[1] = t.dim() == 1 ? t.stride(0) : 0;
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
       return t.as_strided(sizes, strides);
     }
     return t.as_strided(sizes, strides);
@@ -651,9 +648,11 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   if (self.scalar_type() == ScalarType::BFloat16) {
     auto w_bf16 = at::empty(weight_.sizes(), weight_.options().dtype(ScalarType::BFloat16));
     w_bf16.copy_(weight_);
-    w = as_nd(w_bf16);
+    w = weight_.defined() ? as_nd(w_bf16) :
+        at::detail::scalar_tensor_static(1, self.scalar_type(), kCPU);
   } else {
-    w = as_nd(weight_);
+    w = weight_.defined() ? as_nd(weight_) :
+        at::detail::scalar_tensor_static(1, self.scalar_type(), kCPU);
   }
 
   auto iter = TensorIteratorConfig()

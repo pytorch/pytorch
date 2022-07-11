@@ -7,24 +7,6 @@ namespace vulkan {
 namespace api {
 
 //
-// Utility Functions
-//
-
-VkFormat vk_format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
-    case kFloat:
-    #ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-    #else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-    #endif /* USE_VULKAN_FP16_INFERENCE */
-
-    default:
-      return VK_FORMAT_UNDEFINED;
-  }
-}
-
-//
 // MemoryBarrier
 //
 
@@ -341,7 +323,7 @@ VulkanImage::VulkanImage(
       allocator_, &image_create_info, &alloc_create_info,
       &(handles_.image), &allocation_, nullptr));
 
-  // Image View
+  // Image vTensorStorage
 
   const VkComponentMapping component_mapping{
     VK_COMPONENT_SWIZZLE_IDENTITY,  // r

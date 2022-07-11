@@ -2,13 +2,10 @@ import argparse
 from common import run, topics, get_features
 from collections import defaultdict
 import os
-from pathlib import Path
 import csv
 import pprint
-from common import get_commit_data_cache, features_to_dict
+from common import CommitDataCache
 import re
-import dataclasses
-from typing import List
 
 
 """
@@ -24,30 +21,28 @@ Update the existing commitlist to commit bfcb687b9c.
     python commitlist.py --update_to bfcb687b9c
 
 """
-@dataclasses.dataclass(frozen=True)
+
 class Commit:
-    commit_hash: str
-    category: str
-    topic: str
-    title: str
-    pr_link: str
-    author: str
+    def __init__(self, commit_hash, category, topic, title):
+        self.commit_hash = commit_hash
+        self.category = category
+        self.topic = topic
+        self.title = title
 
-    # This is not a list so that it is easier to put in a spreadsheet
-    accepter_1: str
-    accepter_2: str
-    accepter_3: str
-
-    merge_into: str = None
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.commit_hash == other.commit_hash and \
+            self.category == other.category and \
+            self.topic == other.topic and \
+            self.title == other.title
 
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
-commit_fields = tuple(f.name for f in dataclasses.fields(Commit))
-
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
-    def __init__(self, path: str, commits: List[Commit]):
+    def __init__(self, path, commits):
         self.path = path
         self.commits = commits
 
@@ -64,28 +59,20 @@ class CommitList:
         return CommitList(path, commits)
 
     @staticmethod
-    def read_from_disk(path) -> List[Commit]:
+    def read_from_disk(path):
         with open(path) as csvfile:
-            reader = csv.DictReader(csvfile)
-            rows = []
-            for row in reader:
-                if row.get("new_title", "") != "":
-                    row["title"] = row["new_title"]
-                filtered_rows = {k: row.get(k, "") for k in commit_fields}
-                rows.append(Commit(**filtered_rows))
-        return rows
+            reader = csv.reader(csvfile)
+            rows = list(row for row in reader)
+        assert all(len(row) >= 4 for row in rows)
+        return [Commit(*row[:4]) for row in rows]
 
-    def write_result(self):
-        self.write_to_disk_static(self.path, self.commits)
-
-    @staticmethod
-    def write_to_disk_static(path, commit_list):
-        os.makedirs(Path(path).parent, exist_ok=True)
+    def write_to_disk(self):
+        path = self.path
+        rows = self.commits
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(commit_fields)
-            for commit in commit_list:
-                writer.writerow(dataclasses.astuple(commit))
+            for commit in rows:
+                writer.writerow([commit.commit_hash, commit.category, commit.topic, commit.title])
 
     def keywordInFile(file, keywords):
         for key in keywords:
@@ -94,25 +81,12 @@ class CommitList:
         return False
 
     @staticmethod
-    def gen_commit(commit_hash):
-        feature_item = get_commit_data_cache().get(commit_hash)
-        features = features_to_dict(feature_item)
-        category, topic = CommitList.categorize(features)
-        a1, a2, a3 = (features["accepters"] + ("", "", ""))[:3]
-        if features["pr_number"] is not None:
-            pr_link = f"https://github.com/pytorch/pytorch/pull/{features['pr_number']}"
-        else:
-            pr_link = None
-
-        return Commit(commit_hash, category, topic, features["title"], pr_link, features["author"], a1, a2, a3)
-
-    @staticmethod
-    def categorize(features):
+    def categorize(commit_hash, title):
+        features = get_features(commit_hash, return_dict=True)
         title = features['title']
         labels = features['labels']
         category = 'Uncategorized'
         topic = 'Untopiced'
-
 
         # We ask contributors to label their PR's appropriately
         # when they're first landed.
@@ -126,15 +100,15 @@ class CommitList:
                 topic = label.split('topic: ', 1)[1]
                 already_topiced = True
         if already_categorized and already_topiced:
-            return category, topic
+            return Commit(commit_hash, category, topic, title)
 
         # update this to check if each file starts with caffe2
         if 'caffe2' in title:
-            return 'caffe2', topic
+            return Commit(commit_hash, 'caffe2', topic, title)
         if '[codemod]' in title.lower():
-            return 'skip', topic
+            return Commit(commit_hash, 'skip', topic, title)
         if 'Reverted' in labels:
-            return 'skip', topic
+            return Commit(commit_hash, 'skip', topic, title)
         if 'bc_breaking' in labels:
             topic = 'bc-breaking'
         if 'module: deprecation' in labels:
@@ -211,7 +185,7 @@ class CommitList:
                 category = 'python_frontend'
 
 
-        return category, topic
+        return Commit(commit_hash, category, topic, title)
 
     @staticmethod
     def get_commits_between(base_version, new_version):
@@ -227,7 +201,7 @@ class CommitList:
 
         log_lines = commits.split('\n')
         hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
-        return [CommitList.gen_commit(commit_hash) for commit_hash in hashes]
+        return [CommitList.categorize(commit_hash, title) for commit_hash, title in zip(hashes, titles)]
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
@@ -251,12 +225,12 @@ class CommitList:
 
 def create_new(path, base_version, new_version):
     commits = CommitList.create_new(path, base_version, new_version)
-    commits.write_result()
+    commits.write_to_disk()
 
 def update_existing(path, new_version):
     commits = CommitList.from_existing(path)
     commits.update_to(new_version)
-    commits.write_result()
+    commits.write_to_disk()
 
 def rerun_with_new_filters(path):
     current_commits = CommitList.from_existing(path)
@@ -264,44 +238,27 @@ def rerun_with_new_filters(path):
         c = current_commits.commits[i]
         if 'Uncategorized' in str(c):
             current_commits.commits[i] = CommitList.categorize(c.commit_hash, c.title)
-    current_commits.write_result()
+    current_commits.write_to_disk()
 
-def get_hash_or_pr_url(commit: Commit):
-    # cdc = get_commit_data_cache()
-    pr_link = commit.pr_link
-    if pr_link is None:
-        return commit.commit_hash
-    else:
-        regex = r'https://github.com/pytorch/pytorch/pull/([0-9]+)'
-        matches = re.findall(regex, pr_link)
-        if len(matches) == 0:
-            return commit.commit_hash
-
-        return f'[#{matches[0]}]({pr_link})'
-
-def to_markdown(commit_list: CommitList, category):
+def to_markdown(commit_list, category):
     def cleanup_title(commit):
         match = re.match(r'(.*) \(#\d+\)', commit.title)
         if match is None:
             return commit.title
         return match.group(1)
 
-    merge_mapping = defaultdict(list)
-    for commit in commit_list.commits:
-        if commit.merge_into:
-            merge_mapping[commit.merge_into].append(commit)
-
-    cdc = get_commit_data_cache()
+    cdc = CommitDataCache()
     lines = [f'\n## {category}\n']
     for topic in topics:
         lines.append(f'### {topic}\n')
         commits = commit_list.filter(category=category, topic=topic)
         for commit in commits:
-            if commit.merge_into:
-                continue
-            all_related_commits = merge_mapping[commit.commit_hash] + [commit]
-            commit_list_md = ", ".join(get_hash_or_pr_url(c) for c in all_related_commits)
-            result = f'- {cleanup_title(commit)} ({commit_list_md})\n'
+            result = cleanup_title(commit)
+            maybe_pr_number = cdc.get(commit.commit_hash).pr_number
+            if maybe_pr_number is None:
+                result = f'- {result} ({commit.commit_hash})\n'
+            else:
+                result = f'- {result} ([#{maybe_pr_number}](https://github.com/pytorch/pytorch/pull/{maybe_pr_number}))\n'
             lines.append(result)
     return lines
 
@@ -344,7 +301,7 @@ def main():
     group.add_argument('--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
     group.add_argument('--export_markdown', action='store_true')
-    group.add_argument('--export_csv_categories', action='store_true')
+
     parser.add_argument('--path', default='results/commitlist.csv')
     args = parser.parse_args()
 
@@ -362,16 +319,6 @@ def main():
         stats = commits.stat()
         pprint.pprint(stats)
         return
-
-    if args.export_csv_categories:
-        commits = CommitList.from_existing(args.path)
-        categories = list(commits.stat().keys())
-        for category in categories:
-            print(f"Exporting {category}...")
-            filename = f'results/export/result_{category}.csv'
-            CommitList.write_to_disk_static(filename, commits.filter(category=category))
-        return
-
     if args.export_markdown:
         commits = CommitList.from_existing(args.path)
         categories = list(commits.stat().keys())
@@ -384,7 +331,7 @@ def main():
             with open(filename, 'w') as f:
                 f.writelines(lines)
         return
-    raise AssertionError()
+    assert False
 
 if __name__ == '__main__':
     main()

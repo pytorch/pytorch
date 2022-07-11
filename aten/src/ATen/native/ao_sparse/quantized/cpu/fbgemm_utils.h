@@ -63,11 +63,6 @@ struct TORCH_API PackedLinearWeight
 
   LinearPackedSerializationType unpack() override;
 
-  BCSRSerializationType serialize() override;
-
-  static c10::intrusive_ptr<LinearPackedParamsBase> deserialize(
-      const BCSRSerializationType& serialized);
-
   c10::optional<at::Tensor> bias() override {
     return bias_;
   }

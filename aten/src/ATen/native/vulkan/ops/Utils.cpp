@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
@@ -52,7 +53,7 @@ void pack_buffer_to_vtensor(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE,
+          api::PipelineStage::Compute,
           api::MemoryAccessType::WRITE),
       buffer,
       // params buffer
@@ -109,7 +110,7 @@ void pack_vtensor_to_staging(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+          api::PipelineStage::Compute),
       staging,
       // params buffer
       params.buffer());

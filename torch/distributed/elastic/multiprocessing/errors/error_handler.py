@@ -14,7 +14,6 @@ import traceback
 import warnings
 from typing import Optional
 
-__all__ = ['ErrorHandler']
 
 log = logging.getLogger(__name__)
 
