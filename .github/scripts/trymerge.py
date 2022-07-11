@@ -612,6 +612,7 @@ class GitHubPR:
             return self.land_check_conclusions
         checksuites = self.land_check_info["checkSuites"]
         conclusions = {}
+
         def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
             for edge_idx, edge in enumerate(edges):
                 node = edge["node"]
@@ -660,6 +661,7 @@ class GitHubPR:
         orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
         checksuites = orig_last_commit["checkSuites"]
         conclusions = {}
+
         def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
             for edge_idx, edge in enumerate(edges):
                 node = edge["node"]
