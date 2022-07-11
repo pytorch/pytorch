@@ -10,6 +10,7 @@ from torch._prims.utils import (
 from torch._prims.wrappers import (
     out_wrapper,
 )
+from torch._decomp import register_decomposition
 
 from typing import Union, Tuple, Optional, Iterable, Sequence, NamedTuple, List
 from typing_extensions import Literal
@@ -180,6 +181,7 @@ def _fft_c2c(
     return _apply_norm(ret, norm, input.shape[dim], forward)
 
 
+@register_decomposition(torch.ops.aten.fft_fft)
 @out_wrapper()
 def fft(
     input: TensorLikeType,
@@ -193,6 +195,7 @@ def fft(
         return _fft_r2c("fft", input, n, dim, norm, forward=True, onesided=False)
 
 
+@register_decomposition(torch.ops.aten.fft_ifft)
 @out_wrapper()
 def ifft(
     input: TensorLikeType,
@@ -206,6 +209,7 @@ def ifft(
         return _fft_r2c("ifft", input, n, dim, norm, forward=False, onesided=False)
 
 
+@register_decomposition(torch.ops.aten.fft_rfft)
 @out_wrapper()
 def rfft(
     input: TensorLikeType,
@@ -216,6 +220,7 @@ def rfft(
     return _fft_r2c("rfft", input, n, dim, norm, forward=True, onesided=True)
 
 
+@register_decomposition(torch.ops.aten.fft_irfft)
 @out_wrapper()
 def irfft(
     input: TensorLikeType,
@@ -226,6 +231,7 @@ def irfft(
     return _fft_c2r("irfft", input, n, dim, norm, forward=False)
 
 
+@register_decomposition(torch.ops.aten.fft_hfft)
 @out_wrapper()
 def hfft(
     input: TensorLikeType,
@@ -236,6 +242,7 @@ def hfft(
     return _fft_c2r("hfft", input, n, dim, norm, forward=True)
 
 
+@register_decomposition(torch.ops.aten.fft_ihfft)
 @out_wrapper()
 def ihfft(
     input: TensorLikeType,
@@ -332,6 +339,7 @@ def _fftn_c2c(
     return _apply_norm(output, norm=norm, signal_numel=_prod(shape), forward=forward)
 
 
+@register_decomposition(torch.ops.aten.fft_fftn)
 @out_wrapper()
 def fftn(
     input: TensorLikeType,
@@ -344,6 +352,7 @@ def fftn(
     return _fftn_c2c("fftn", x, shape, dim, norm, forward=True)
 
 
+@register_decomposition(torch.ops.aten.fft_ifftn)
 @out_wrapper()
 def ifftn(
     input: TensorLikeType,
@@ -356,6 +365,7 @@ def ifftn(
     return _fftn_c2c("ifftn", x, shape, dim, norm, forward=False)
 
 
+@register_decomposition(torch.ops.aten.fft_rfftn)
 @out_wrapper()
 def rfftn(
     input: TensorLikeType,
@@ -374,6 +384,7 @@ def rfftn(
     return _apply_norm(out, norm=norm, signal_numel=_prod(shape), forward=True)
 
 
+@register_decomposition(torch.ops.aten.fft_ihfftn)
 @out_wrapper()
 def ihfftn(
     input: TensorLikeType,
@@ -435,6 +446,7 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     )
 
 
+@register_decomposition(torch.ops.aten.fft_irfftn)
 @out_wrapper()
 def irfftn(
     input: TensorLikeType,
@@ -451,6 +463,7 @@ def irfftn(
     return _apply_norm(out, norm, _prod(out.shape[d] for d in dim), forward=False)
 
 
+@register_decomposition(torch.ops.aten.fft_hfftn)
 @out_wrapper()
 def hfftn(
     input: TensorLikeType,
@@ -471,6 +484,7 @@ def hfftn(
     return _apply_norm(out, norm, last_dim_size, forward=True)
 
 
+@register_decomposition(torch.ops.aten.fft_fft2)
 @out_wrapper()
 def fft2(
     input: TensorLikeType,
@@ -481,6 +495,7 @@ def fft2(
     return torch.fft.fftn(input, s=s, dim=dim, norm=norm)
 
 
+@register_decomposition(torch.ops.aten.fft_ifft2)
 @out_wrapper()
 def ifft2(
     input: TensorLikeType,
@@ -491,6 +506,7 @@ def ifft2(
     return torch.fft.ifftn(input, s=s, dim=dim, norm=norm)
 
 
+@register_decomposition(torch.ops.aten.fft_rfft2)
 @out_wrapper()
 def rfft2(
     input: TensorLikeType,
@@ -501,6 +517,7 @@ def rfft2(
     return torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
 
 
+@register_decomposition(torch.ops.aten.fft_irfft2)
 @out_wrapper()
 def irfft2(
     input: TensorLikeType,
@@ -511,6 +528,7 @@ def irfft2(
     return torch.fft.irfftn(input, s=s, dim=dim, norm=norm)
 
 
+@register_decomposition(torch.ops.aten.fft_hfft2)
 @out_wrapper()
 def hfft2(
     input: TensorLikeType,
@@ -521,6 +539,7 @@ def hfft2(
     return torch.fft.hfftn(input, s=s, dim=dim, norm=norm)
 
 
+@register_decomposition(torch.ops.aten.fft_ihfft2)
 @out_wrapper()
 def ihfft2(
     input: TensorLikeType,
@@ -541,12 +560,14 @@ def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
         return list(dim)
 
 
+@register_decomposition(torch.ops.aten.fft_fftshift)
 def fftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [input.shape[d] // 2 for d in dims]
     return torch.roll(input, shift, dims)
 
 
+@register_decomposition(torch.ops.aten.fft_ifftshift)
 def ifftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [(input.shape[d] + 1) // 2 for d in dims]
