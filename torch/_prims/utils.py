@@ -1339,8 +1339,8 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
-def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
-    ndim = len(shape)
+def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    ndim = len(shape) if isinstance(shape, Sequence) else 1
     if ndim == 4:
         return make_channels_last_2d_strides_for(shape)
     elif ndim == 5:

@@ -8,6 +8,7 @@ from torch._prims.utils import (
 from torch._prims.wrappers import (
     out_wrapper,
 )
+from torch._decomp import register_decomposition
 
 from typing import Union, Tuple, Optional
 from typing_extensions import Literal
@@ -157,6 +158,7 @@ def _fft_c2c(
     return _apply_norm(ret, norm, input.shape[dim], forward)
 
 
+@register_decomposition(torch.ops.aten.fft_fft)
 @out_wrapper()
 def fft(
     input: TensorLikeType,
@@ -170,6 +172,7 @@ def fft(
         return _fft_r2c("fft", input, n, dim, norm, forward=True, onesided=False)
 
 
+@register_decomposition(torch.ops.aten.fft_ifft)
 @out_wrapper()
 def ifft(
     input: TensorLikeType,
@@ -183,6 +186,7 @@ def ifft(
         return _fft_r2c("ifft", input, n, dim, norm, forward=False, onesided=False)
 
 
+@register_decomposition(torch.ops.aten.fft_rfft)
 @out_wrapper()
 def rfft(
     input: TensorLikeType,
@@ -193,6 +197,7 @@ def rfft(
     return _fft_r2c("rfft", input, n, dim, norm, forward=True, onesided=True)
 
 
+@register_decomposition(torch.ops.aten.fft_irfft)
 @out_wrapper()
 def irfft(
     input: TensorLikeType,
@@ -203,6 +208,7 @@ def irfft(
     return _fft_c2r("irfft", input, n, dim, norm, forward=False)
 
 
+@register_decomposition(torch.ops.aten.fft_hfft)
 @out_wrapper()
 def hfft(
     input: TensorLikeType,
@@ -213,6 +219,7 @@ def hfft(
     return _fft_c2r("hfft", input, n, dim, norm, forward=True)
 
 
+@register_decomposition(torch.ops.aten.fft_ihfft)
 @out_wrapper()
 def ihfft(
     input: TensorLikeType,
