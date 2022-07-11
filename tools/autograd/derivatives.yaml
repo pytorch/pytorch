@@ -1710,7 +1710,7 @@
 - name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
   # TODO: add proper double backward for view.SymInt
   # by SymIntizing `reshape`
-  self: grad.reshape(c10::asIntArrayRefSlow(self.sizes()))
+  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
