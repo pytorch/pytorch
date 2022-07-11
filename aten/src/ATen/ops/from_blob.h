@@ -127,12 +127,10 @@ inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {},
-    const c10::optional<Device> target_device = c10::nullopt) {
+    const TensorOptions& options = {}) {
   return for_blob(data, sizes)
       .deleter(deleter)
       .options(options)
-      .target_device(target_device)
       .make_tensor();
 }
 
