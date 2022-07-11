@@ -346,19 +346,20 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             )
 
         # Premul Sum
-        for dtype in torch.half, torch.float, torch.double:
-            for factor in (3.0,
-                           (torch.tensor([5.0], device=local_device_id, dtype=dtype),)):
-                tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)]
+        if torch.cuda.nccl.version() >= (2, 11, 1):
+            for dtype in torch.half, torch.float, torch.double:
+                for factor in (3.0,
+                               (torch.tensor([5.0], device=local_device_id, dtype=dtype),)):
+                    tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)]
 
-                allreduce(tensors, c10d.make_nccl_premul_sum(factor))
+                    allreduce(tensors, c10d.make_nccl_premul_sum(factor))
 
-                f = factor if isinstance(factor, float) else factor[0]
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    f * torch.tensor([float(self.world_size * (self.world_size + 1) / 2)], device=local_device_id),
-                    tensors[0],
-                )
+                    f = factor if isinstance(factor, float) else factor[0]
+                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                    self.assertEqualIgnoreType(
+                        f * torch.tensor([float(self.world_size * (self.world_size + 1) / 2)], device=local_device_id),
+                        tensors[0],
+                    )
 
         # Product
         tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
