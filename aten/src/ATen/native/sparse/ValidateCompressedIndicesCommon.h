@@ -121,7 +121,7 @@ _check_idx_sorted_distinct_vals_slices_with_cidx(
   // Note that ptr_idx_batch = &idx[batch_idx] and is contiguous.
   const auto* RESTRICT slice_begin = ptr_idx_batch + cidx;
   const auto* RESTRICT slice_end = ptr_idx_batch + cidx_next;
-  for (auto* RESTRICT curr = slice_begin + 1; curr != slice_end; ++curr) {
+  for (auto* RESTRICT curr = slice_begin + 1; curr < slice_end; ++curr) {
     const auto invariant = *(curr - 1) < *curr;
     _assert(invariant, message);
   }
@@ -200,15 +200,17 @@ static void validate_compressed_sparse_indices_kernel(
     });
   }
 
-  Tensor cidx_curr, cidx_next;
-
-  // Invariants 5.1, 5.2, 5.3
+  // Invariants 5.1, 5.2, 5.3, 5.6
   {
     const auto cidx_first = cidx.slice(-1, 0, 1);
     const auto cidx_last = cidx.slice(-1, cdim, cdim + 1);
     // These are reused for Invariant 5.6
-    cidx_curr = cidx.slice(-1, 0, cdim);
-    cidx_next = cidx.slice(-1, 1, cdim + 1);
+    const auto cidx_curr = cidx.slice(-1, 0, cdim);
+    const auto cidx_next = cidx.slice(-1, 1, cdim + 1);
+
+    const auto batch_dims = cidx.sizes().slice(0, cidx.dim() - 1);
+    const auto batch_count = numel(batch_dims);
+    const auto batch_idx = at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -217,45 +219,28 @@ static void validate_compressed_sparse_indices_kernel(
       .add_input(cidx_last)
       .add_input(cidx_curr)
       .add_input(cidx_next)
-      .build();
-
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, dim, nnz] () {
-        const auto zero = index_t {0};
-        KernelLauncher::launch(iter,
-            [zero, dim, nnz] FUNCAPI (
-              index_t cidx_first,
-              index_t cidx_last,
-              index_t cidx_curr,
-              index_t cidx_next) -> index_t {
-              _check_first_cidx_is_zero<index_t>(cidx_first, zero);
-              _check_last_cidx_is_nnz<index_t>(cidx_last, nnz);
-              _check_cidx_nondecreasing_locally_bounded_sequence<index_t>(cidx_curr, cidx_next, zero, dim);
-              return 0;
-            }
-        );
-    });
-  }
-
-  // Invariant 5.6
-  // NOTE: the implementation below is sync-less, but, unfortunately,
-  // work is not guaranteed to be well-balanced between different threads.
-  {
-    const auto batch_dims = cidx.sizes().slice(0, cidx.dim() - 1);
-    const auto batch_count = numel(batch_dims);
-    const auto batch_idx = at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
-
-    auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)
-      .add_owned_output(dummy.expand_as(cidx_curr))
-      .add_input(cidx_curr)
-      .add_input(cidx_next)
       .add_input(batch_idx)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, &idx, nnz] () {
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, &idx, dim, nnz] () {
         const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
+        const auto zero = index_t {0};
         KernelLauncher::launch(iter,
-            [ptr_idx, nnz] FUNCAPI (index_t cidx_curr, index_t cidx_next, index_t batch_idx) -> index_t {
+            [zero, dim, nnz, ptr_idx] FUNCAPI (
+              index_t cidx_first,
+              index_t cidx_last,
+              index_t cidx_curr,
+              index_t cidx_next,
+              index_t batch_idx) -> index_t {
+              // Invariant 5.1
+              _check_first_cidx_is_zero<index_t>(cidx_first, zero);
+              // Invariant 5.2
+              _check_last_cidx_is_nnz<index_t>(cidx_last, nnz);
+              // Invariant 5.3
+              _check_cidx_nondecreasing_locally_bounded_sequence<index_t>(cidx_curr, cidx_next, zero, dim);
+              // Invariant 5.6
+              // NOTE: the implementation below is sync-less, but, unfortunately,
+              // work is not guaranteed to be well-balanced between different threads.
               // idx is contiguous and of shape (..., nnz), so batches are multiples of nnz apart.
               const auto* RESTRICT ptr_idx_batch = ptr_idx + batch_idx * nnz;
               _check_idx_sorted_distinct_vals_slices_with_cidx<index_t>(ptr_idx_batch, cidx_curr, cidx_next);
