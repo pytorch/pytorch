@@ -498,7 +498,7 @@ test_forward_backward_compatibility() {
   else
     git reset --hard "${BASE_SHA}"
     pip install -r requirements.txt
-    # shellcheck source=./common-build.sh --> set up sccache
+    # shellcheck source=./common-build.sh
     source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
     python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
     python -mpip install base_dist/*.whl
@@ -521,7 +521,7 @@ test_forward_backward_compatibility() {
   fi
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
-  rm -r venv
+  rm -r "${REPO_DIR}/venv"
   echo "NOW EXITING VENV"
   ls "${REPO_DIR}/base_dist" || true
   ls "${REPO_DIR}/dist" || true
