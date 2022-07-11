@@ -165,7 +165,7 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
-    empty_1 = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.SymInt([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
@@ -186,8 +186,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    empty_1 = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
@@ -237,13 +237,13 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    _fused_moving_avg_obs_fq_helper_functional = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0);  a_1 = None
-    getitem = _fused_moving_avg_obs_fq_helper_functional[0]
-    getitem_1 = _fused_moving_avg_obs_fq_helper_functional[1]
-    getitem_2 = _fused_moving_avg_obs_fq_helper_functional[2]
-    getitem_3 = _fused_moving_avg_obs_fq_helper_functional[3]
-    getitem_4 = _fused_moving_avg_obs_fq_helper_functional[4]
-    getitem_5 = _fused_moving_avg_obs_fq_helper_functional[5];  _fused_moving_avg_obs_fq_helper_functional = None
+    _fused_moving_avg_obs_fq_helper_functional_default = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0);  a_1 = None
+    getitem = _fused_moving_avg_obs_fq_helper_functional_default[0]
+    getitem_1 = _fused_moving_avg_obs_fq_helper_functional_default[1]
+    getitem_2 = _fused_moving_avg_obs_fq_helper_functional_default[2]
+    getitem_3 = _fused_moving_avg_obs_fq_helper_functional_default[3]
+    getitem_4 = _fused_moving_avg_obs_fq_helper_functional_default[4]
+    getitem_5 = _fused_moving_avg_obs_fq_helper_functional_default[5];  _fused_moving_avg_obs_fq_helper_functional_default = None
     return (getitem, getitem_1)
     """)  # noqa: B950
 
@@ -293,7 +293,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
     """)
@@ -599,9 +599,9 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_functional = torch.ops.aten.zero.functional(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_functional)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
+    zero_default = torch.ops.aten.zero.default(empty);  empty = None
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
+    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
@@ -616,9 +616,9 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_functional = torch.ops.aten.zero.functional(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_functional)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
+    zero_default = torch.ops.aten.zero.default(empty);  empty = None
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
+    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
@@ -633,9 +633,9 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_functional = torch.ops.aten.zero.functional(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_functional)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
+    zero_default = torch.ops.aten.zero.default(empty);  empty = None
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
+    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
@@ -650,9 +650,9 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    zero_functional = torch.ops.aten.zero.functional(empty);  empty = None
-    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_functional)
-    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
+    zero_default = torch.ops.aten.zero.default(empty);  empty = None
+    diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
+    diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
     return add_tensor
@@ -714,20 +714,20 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    add_tensor = torch._ops.aten.add.Tensor(a_1, 1);  a_1 = None
-    view_copy_default = torch._ops.aten.view_copy.default(add_tensor, [4, 4])
-    resize_functional = torch._ops.aten.resize.functional(view_copy_default, [3, 3])
-    as_strided_copy_default = torch._ops.aten.as_strided_copy.default(view_copy_default, [3, 3], [3, 1]);  view_copy_default = None
-    view_copy_default_1 = torch._ops.aten.view_copy.default(as_strided_copy_default, [-1]);  as_strided_copy_default = None
-    add_tensor_1 = torch._ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
-    view_copy_default_2 = torch._ops.aten.view_copy.default(add_tensor, [4, 4]);  add_tensor = None
-    as_strided_copy_default_1 = torch._ops.aten.as_strided_copy.default(view_copy_default_2, [3, 3], [3, 1])
-    view_copy_default_3 = torch._ops.aten.view_copy.default(add_tensor_1, [3, 3]);  add_tensor_1 = None
-    as_strided_scatter_default = torch._ops.aten.as_strided_scatter.default(view_copy_default_2, view_copy_default_3, [3, 3], [3, 1]);  view_copy_default_2 = view_copy_default_3 = None
-    view_copy_default_4 = torch._ops.aten.view_copy.default(as_strided_scatter_default, [8, 2]);  as_strided_scatter_default = None
-    view_copy_default_5 = torch._ops.aten.view_copy.default(view_copy_default_4, [4, 4]);  view_copy_default_4 = None
-    as_strided_copy_default_2 = torch._ops.aten.as_strided_copy.default(view_copy_default_5, [3, 3], [3, 1]);  view_copy_default_5 = None
-    add_tensor_2 = torch._ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
+    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4, 4])
+    resize_default = torch.ops.aten.resize.default(view_copy_default, [3, 3])
+    as_strided_copy_default = torch.ops.aten.as_strided_copy.default(view_copy_default, [3, 3], [3, 1]);  view_copy_default = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(as_strided_copy_default, [-1]);  as_strided_copy_default = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
+    view_copy_default_2 = torch.ops.aten.view_copy.default(add_tensor, [4, 4]);  add_tensor = None
+    as_strided_copy_default_1 = torch.ops.aten.as_strided_copy.default(view_copy_default_2, [3, 3], [3, 1])
+    view_copy_default_3 = torch.ops.aten.view_copy.default(add_tensor_1, [3, 3]);  add_tensor_1 = None
+    as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(view_copy_default_2, view_copy_default_3, [3, 3], [3, 1]);  view_copy_default_2 = view_copy_default_3 = None
+    view_copy_default_4 = torch.ops.aten.view_copy.default(as_strided_scatter_default, [8, 2]);  as_strided_scatter_default = None
+    view_copy_default_5 = torch.ops.aten.view_copy.default(view_copy_default_4, [4, 4]);  view_copy_default_4 = None
+    as_strided_copy_default_2 = torch.ops.aten.as_strided_copy.default(view_copy_default_5, [3, 3], [3, 1]);  view_copy_default_5 = None
+    add_tensor_2 = torch.ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
     return add_tensor_2
     """)  # noqa: B950
 
@@ -755,12 +755,12 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    add_tensor = torch._ops.aten.add.Tensor(a_1, 1);  a_1 = None
-    resize_functional = torch._ops.aten.resize.functional(add_tensor, [5, 5]);  add_tensor = None
-    view_copy_default = torch._ops.aten.view_copy.default(resize_functional, [25]);  resize_functional = None
-    fill_scalar = torch._ops.aten.fill.Scalar(view_copy_default, 1);  view_copy_default = None
-    view_copy_default_1 = torch._ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
-    add_tensor_1 = torch._ops.aten.add.Tensor(view_copy_default_1, 1)
+    add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+    resize_default = torch.ops.aten.resize.default(add_tensor, [5, 5]);  add_tensor = None
+    view_copy_default = torch.ops.aten.view_copy.default(resize_default, [25]);  resize_default = None
+    fill_scalar = torch.ops.aten.fill.Scalar(view_copy_default, 1);  view_copy_default = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1)
     return (view_copy_default_1, add_tensor_1)
     """)
 
