@@ -200,6 +200,7 @@ __all__ = [
     "instance_norm",
     "narrow",
     "native_batch_norm",
+    "native_group_norm",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -2231,10 +2232,9 @@ def _normalize(
 
 # squeeze backwards from ndims-1 to 0
 def _squeeze_multiple(a: Tensor, dims: List[int]) -> Tensor:
-    ndim = a.dim()
-    wrapped_dims = utils.canonicalize_dims(ndim, dims)
+    wrapped_dims = utils.canonicalize_dims(a.ndim, dims)
     assert isinstance(wrapped_dims, tuple)
-    for idx in range(ndim - 1, -1, -1):
+    for idx in range(a.ndim - 1, -1, -1):
         if idx in wrapped_dims:
             a = a.squeeze(idx)
     return a
@@ -2342,6 +2342,57 @@ def native_batch_norm(
         save_rstd = prims.convert_element_type(save_rstd, input.dtype)
 
     return (out, save_mean, save_rstd)
+
+
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    utils.check(
+        input.ndim >= 2,
+        lambda: "Expected at least 2 dimensions for input tensor but recieved "
+        + str(input.ndim),
+    )
+    utils.check(
+        C % group == 0,
+        lambda: "Expected number of channels in input to be divisible by num_groups, but got input of shape "
+        + str(input.shape)
+        + " and num_groups="
+        + str(group),
+    )
+    reduction_dims = [2, 3]
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+
+    input_reshaped = torch.reshape(input, [N, group, C // group, HxW])
+    out, mean, rstd, _ = _normalize(input_reshaped, reduction_dims, eps)
+    out = out.view(input.shape)
+
+    if weight is None and bias is not None:
+        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+        out = out + unsqueeze_bias
+    elif weight is not None and bias is None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+        out = out * unsqueeze_weight
+    elif weight is not None and bias is not None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+        out = out * unsqueeze_weight + unsqueeze_bias
+
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == "cpu":
+        mean = prims.convert_element_type(mean, input.dtype)
+        rstd = prims.convert_element_type(rstd, input.dtype)
+
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+
+    return (out, mean, rstd)
 
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
