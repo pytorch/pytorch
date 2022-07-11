@@ -22,63 +22,69 @@ class ActivationSparsifier:
         The sparsification mask is computed on the input **before it goes through the attached layer**.
 
     Args:
-        model (nn.Module)
+        model (nn.Module):
             The model whose layers will be sparsified. The layers that needs to be
             sparsified should be added separately using the register_layer() function
-
-        aggregate_fn (Optional, function type)
+        aggregate_fn (Optional, Callable):
             default aggregate_fn that is used if not specified while registering the layer.
-            specifies how inputs should be aggreagated over time.
-
-        reduce_fn (Optional, function type)
+            specifies how inputs should be aggregated over time.
+            The aggregate_fn should usually take 2 torch tensors and return the aggregated tensor.
+            Example
+                >>> def add_agg_fn(tensor1, tensor2):  return tensor1 + tensor2
+        reduce_fn (Optional, Callable):
             default reduce_fn that is used if not specified while registering the layer.
-            reduce_fn will be applied on the aggregated input
-
-        mask_fn (Optional, function type)
-            default mask_fn that is used to create the sparsification mask (based on the
-            aggregated & reduced input). This is used if not specified while registering the layer
-
-        features (Optional, list)
+            reduce_fn will be called on the aggregated tensor i.e. the tensor obtained after
+            calling agg_fn() on all inputs.
+            Example
+                >>> def mean_reduce_fn(agg_tensor):    return agg_tensor.mean(dim=0)
+        mask_fn (Optional, Callable):
+            default mask_fn that is used to create the sparsification mask using the tensor obtained after
+            calling the reduce_fn(). This is used by default if a custom one is passed in the
+            register_layer().
+            Note that the mask_fn() definition should contain the sparse arguments that is passed in sparse_config
+            arguments.
+        features (Optional, list):
             default selected features to sparsify.
             If this is non-empty, then the mask_fn will be applied for each feature of the input.
             For example,
-            >>> mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
-
-        feature_dim (Optional, int)
+                >>> mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
+        feature_dim (Optional, int):
             default dimension of input features. Again, features along this dim will be chosen
             for sparsification.
-
-        sparse_config (Dict)
+        sparse_config (Dict):
             Default configuration for the mask_fn. This config will be passed
             with the mask_fn()
 
-    Expected Usage:
+    Example:
         >>> model = SomeModel()
         >>> act_sparsifier = ActivationSparsifier(...)  # init activation sparsifier
-
         >>> # Initialize aggregate_fn
         >>> def agg_fn(x, y):
         >>>     return x + y
-
+        >>>
         >>> # Initialize reduce_fn
         >>> def reduce_fn(x):
         >>>     return torch.mean(x, dim=0)
-
+        >>>
         >>> # Initialize mask_fn
         >>> def mask_fn(data):
         >>>     return torch.eye(data.shape).to(data.device)
-
-
+        >>>
+        >>>
         >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
-
+        >>>
         >>> # start training process
-            >>> # epoch starts
-                >>> # model.forward(), compute_loss() and model.backwards()
-            >>> # epoch ends
-            >>> act_sparsifier.step()
+        >>>     # epoch starts
+        >>>         # model.forward(), compute_loss() and model.backwards()
+        >>>     # epoch ends
+        >>>     act_sparsifier.step()
         >>> # end training process
+<<<<<<< HEAD
+        >>> sparsifier.squash_mask()
+=======
 
         >>> act_sparsifier.squash_mask()
+>>>>>>> f229dda582... [ao][sparsity] Implementation of step() and update_mask()
     """
     def __init__(self, model: nn.Module, aggregate_fn=None, reduce_fn=None, mask_fn=None,
                  features=None, feature_dim=None, **sparse_config):
@@ -100,7 +106,7 @@ class ActivationSparsifier:
         self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
     @staticmethod
-    def __safe_rail_checks(args):
+    def _safe_rail_checks(args):
         """Makes sure that some of the functions and attributes are not passed incorrectly
         """
 
@@ -109,7 +115,7 @@ class ActivationSparsifier:
         if features is not None:
             assert feature_dim is not None, "need feature dim to select features"
 
-        # all the *_fns should be a function
+        # all the *_fns should be callable
         fn_keys = ['aggregate_fn', 'reduce_fn', 'mask_fn']
         for key in fn_keys:
             fn = args[key]
@@ -188,7 +194,7 @@ class ActivationSparsifier:
         local_args.update((arg, val) for arg, val in update_dict.items() if val is not None)
         local_args['sparse_config'].update(sparse_config)
 
-        self.__safe_rail_checks(local_args)
+        self._safe_rail_checks(local_args)
 
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self.__aggregate_hook(name=name))
