@@ -8,7 +8,7 @@ void SchemaInfo::addArgumentValue(
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
-  value_map_[name] = flattenZeroDimIValue(value);
+  value_map_[name] = value;
   updated_ = false;
 }
 
@@ -16,8 +16,7 @@ void SchemaInfo::addArgumentValues(
     const std::vector<c10::optional<at::IValue>>& value_list) {
   for (size_t i = 0; i < value_list.size(); i++) {
     if (i < schema_.arguments().size() && value_list[i] != c10::nullopt) {
-      value_map_[schema_.arguments()[i].name()] =
-          flattenZeroDimIValue(*(value_list[i]));
+      value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
       updated_ = false;
     }
   }
@@ -57,16 +56,6 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
       index != c10::nullopt, "Schema has no argument named ", name);
 
   return is_mutable(*index);
-}
-
-at::IValue SchemaInfo::flattenZeroDimIValue(const at::IValue& value) const {
-  if (value.isList()) {
-    c10::List<at::IValue> value_list = value.toList();
-    if (value_list.size() == 1) {
-      return value_list[0];
-    }
-  }
-  return value;
 }
 
 void SchemaInfo::generateAliasMaps() {
