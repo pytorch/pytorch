@@ -869,6 +869,9 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+      OP_PAIR(
+          "torcharrow::inference_wrapper_run_flat",
+          "static_runtime::fused_inference_wrapper_run_flat"),
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
