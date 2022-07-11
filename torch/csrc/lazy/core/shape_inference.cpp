@@ -499,6 +499,16 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_kl_div_backward(
+    const at::Tensor& grad_output,
+    const at::Tensor& self,
+    const at::Tensor& target,
+    int64_t reduction,
+    bool log_target) {
+  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   // TODO(whc) support cat in codegen and move this to compute_*_cat functions
   std::vector<int64_t> out_shape(
@@ -770,19 +780,20 @@ std::vector<Shape> compute_shape_slogdet(const at::Tensor& self) {
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_and(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
       c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
-std::vector<torch::lazy::Shape> compute_shape_logical_not(at::Tensor& self) {
+std::vector<torch::lazy::Shape> compute_shape_logical_not(
+    const at::Tensor& self) {
   return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_or(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(
@@ -790,7 +801,7 @@ std::vector<torch::lazy::Shape> compute_shape_logical_or(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_logical_xor(
-    at::Tensor& self,
+    const at::Tensor& self,
     const at::Tensor& other) {
   TORCH_INTERNAL_ASSERT(at::are_expandable(self.sizes(), other.sizes()));
   return {Shape(

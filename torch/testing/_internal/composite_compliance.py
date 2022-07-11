@@ -8,6 +8,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
+from typing import Callable
 import re
 
 
@@ -142,12 +143,18 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                 device=elem.device, requires_grad=elem.requires_grad,
                 strides=elem.stride(), storage_offset=elem.storage_offset())
 
-            # CompositeCompliantTensor steals the "requires_grad"-ness.
             if elem.requires_grad:
-                # Why clone? Because sometimes OpInfo shares inputs between tests...
-                r.elem = elem.detach().clone()
+                # CompositeCompliantTensor steals the "requires_grad"-ness.
+                # Why a new copy of `elem`? Because sometimes OpInfo shares inputs between tests...
+                tmp = torch.empty_strided(elem.shape, elem.stride(), dtype=elem.dtype,
+                                          device=elem.device, layout=elem.layout,
+                                          requires_grad=False)
+                tmp.copy_(elem.detach())
+                r.elem = tmp
             else:
                 r.elem = elem
+
+            assert r.stride() == r.elem.stride()
 
             # Propagate conjugate bits to the wrapper tensor
             # Ref: https://github.com/albanD/subclass_zoo/issues/24
@@ -166,6 +173,12 @@ def generate_cct(enable_recursive_torch_dispatch=False,
 
             def wrap(e):
                 return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
+
+            if func == torch.ops.aten._local_scalar_dense.default:
+                raise RuntimeError(
+                    ".item() is not allowed to be called inside of composite "
+                    "functions in the PyTorch library because not all backends "
+                    "and/or Tensor subclasses (e.g. vmap, ProxyTensor) support them.")
 
             if func.overloadpacket.__name__ in ('set_', 'resize_'):
                 raise RuntimeError(
@@ -392,8 +405,13 @@ def gather_leaf_tensors(args, kwargs):
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
-def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
-    assert op.supports_autograd
+#
+# NB: it is important that op is accepted as a Callable and not an OpInfo,
+# this means we can apply check_backward_formula to things that aren't OpInfos
+# while debugging.
+def check_backward_formula(op: Callable, args, kwargs,
+                           output_process_fn_grad=None,
+                           gradcheck_wrapper=None):
     CCT = generate_cct()
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
@@ -401,7 +419,10 @@ def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
         assert len(leaf_tensors) > 0
 
         try:
-            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
+            if gradcheck_wrapper is None:
+                results = op(*new_args, **new_kwargs)
+            else:
+                results = gradcheck_wrapper(op, *new_args, **new_kwargs)
             if output_process_fn_grad is not None:
                 results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
@@ -412,11 +433,6 @@ def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
-        # Hack: tree_flatten doesn't handle torch.return_types yet,
-        # so we're gonna convert them to tuple.
-        # TODO: https://github.com/pytorch/pytorch/issues/74624
-        if isinstance(results, tuple):
-            results = tuple(results)
         flat_results, _ = tree_flatten(results)
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
