@@ -948,9 +948,11 @@ class OutlierDetector(DetectorBase):
         The p_r value (average ratio of 100th percentile/reference_percentile) is compared to ratio_threshold
         If it is significantly greater, then we consider it an outlier
         This threshold was calculated based on the ratio of the percentiles in a normal distribution
+        The calculations behind value choice: https://drive.google.com/file/d/1N2wdtXWI-kOH8S7HH4-PYB_NmqzZil4p/view?usp=sharing
 
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
         Should be between 0 and 1
+        The calculations behind value choice: https://drive.google.com/file/d/1N2wdtXWI-kOH8S7HH4-PYB_NmqzZil4p/view?usp=sharing
 
     * :attr:`statistical_threshold`: The fraction of batches to determine outliers for each channel should be above this
         Some batches may not be used because of 0-based errors, so this is to ensure a good amount of the total batches are used
