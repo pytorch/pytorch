@@ -3772,7 +3772,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
-            its length has to match `input.dim()`.
+            its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``

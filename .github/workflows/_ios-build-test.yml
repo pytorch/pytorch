@@ -15,6 +15,13 @@ on:
         required: true
         type: string
         description: Which iOS arch to build for.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       IOS_CERT_KEY_2022:
@@ -107,6 +114,7 @@ jobs:
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
+          bundle update fastlane
           # install certificates
           echo "${IOS_CERT_KEY_2022}" >> cert.txt
           base64 --decode cert.txt -o Certificates.p12
@@ -171,13 +179,13 @@ jobs:
             ruby setup.rb
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp"
-          instruments -s -devices
+          # instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
             else
-              fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
             fi
           else
-            fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi

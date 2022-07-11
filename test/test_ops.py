@@ -529,7 +529,7 @@ class TestCommon(TestCase):
             skip_zero_dim = True
 
         # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp"]
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax"]
         if executor == "nvfuser" and op.name in normalization_ops:
             skip_zero_dim = True
 
@@ -1513,6 +1513,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
+        '_refs.scalar_tensor',
+        '_refs.trunc_divide',
         '_refs.zeros',
         '_refs.zeros_like'
     }
