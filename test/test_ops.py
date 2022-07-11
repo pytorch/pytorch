@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import os
 from collections.abc import Sequence
 from functools import partial
 import warnings
@@ -96,6 +97,8 @@ _ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -1251,6 +1254,8 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_forward_ad_formula(op, args, kwargs)
 
 
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1460,6 +1465,8 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1472,6 +1479,8 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1491,6 +1500,8 @@ class TestTags(TestCase):
                 test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
@@ -1519,11 +1530,83 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros_like'
     }
 
+    not_in_decomp_table = {
+        # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
+        '_refs.nn.functional.mse_loss',
+        '_refs.masked_fill',
+        '_refs.transpose',
+        '_refs.var',
+        # these are not aten ops?
+        '_refs.broadcast_shapes',
+        '_refs.broadcast_tensors',
+        '_refs.nn.functional.tanhshrink',
+        '_refs.swap_axes',
+        # CompositeImplicitAutograd
+        '_refs.atleast_1d',
+        '_refs.atleast_2d',
+        '_refs.atleast_3d',
+        '_refs.broadcast_to',
+        '_refs.chunk',
+        '_refs.column_stack',
+        '_refs.dsplit',
+        '_refs.dstack',
+        '_refs.fill',
+        '_refs.flatten',
+        '_refs.fliplr',
+        '_refs.flipud',
+        '_refs.float_power',
+        '_refs.hsplit',
+        '_refs.hstack',
+        '_refs.isclose',
+        '_refs.isfinite',
+        '_refs.narrow',
+        '_refs.positive',
+        '_refs.ravel',
+        '_refs.reshape',
+        '_refs.square',
+        '_refs.tensor_split',
+        '_refs.true_divide',
+        '_refs.trunc_divide',
+        '_refs.vsplit',
+        '_refs.vstack',
+        # ref implementation missing kwargs
+        '_refs.empty',  # missing "pin_memory"
+        '_refs.empty_like',  # missing "layout"
+        '_refs.full',  # missing "layout"
+        '_refs.full_like',  # missing "layout"
+        '_refs.ones',  # missing "layout"
+        '_refs.ones_like',  # missing "layout"
+        '_refs.round',  # missing "decimals"
+        '_refs.scalar_tensor',  # missing "layout"
+        '_refs.zeros',  # missing "layout"
+        '_refs.zeros_like',  # missing "layout"
+        # other
+        '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
+        '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
+        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
+        '_refs.equal',  # 'bool' object has no attribute 'dtype'
+    }
+
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_python_ref_db(self, op):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         self.assertIn(op, self.ref_db_names)
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_decomp_table(self, op):
+        path = op.split('.')
+        module_path = '.'.join(path[:-1])
+        op_name = path[-1]
+        op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+
+        if op in self.not_in_decomp_table:
+            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
+                             f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
+        else:
+            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
+                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (
@@ -1578,6 +1661,9 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)

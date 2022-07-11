@@ -150,12 +150,12 @@ at::Tensor rad2deg_backward(const at::Tensor& grad);
 at::Tensor deg2rad_backward(const at::Tensor& grad);
 at::Tensor unsqueeze_multiple(
     const at::Tensor& t,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     at::IntArrayRef sizes,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef opt_dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
@@ -495,15 +495,19 @@ at::Tensor softplus_double_backward(
     const at::Tensor& input,
     const at::Scalar& beta,
     const at::Scalar& threshold);
-at::Tensor logdet_backward(
-    const at::Tensor& grad,
-    const at::Tensor& self,
-    const at::Tensor& logdet);
+std::tuple<at::Tensor, at::Tensor> slogdet_jvp(
+    const at::Tensor& LU,
+    const at::Tensor& pivots,
+    const at::Tensor& dA,
+    const at::Tensor& sign,
+    const bool use_A_T);
 at::Tensor slogdet_backward(
+    const at::Tensor& grad_sign,
     const at::Tensor& grad_logabsdet,
-    const at::Tensor& self,
+    const at::Tensor& A,
     const at::Tensor& signdet,
-    const at::Tensor& logabsdet);
+    const at::Tensor& LU,
+    const at::Tensor& pivots);
 at::Tensor log1p_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(

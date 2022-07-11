@@ -1,5 +1,6 @@
 # Owner(s): ["module: primTorch"]
 
+import os
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
@@ -325,6 +326,8 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
+@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
+                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
 class TestDecomp(TestCase):
     longMessage = True
 
