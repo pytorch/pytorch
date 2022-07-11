@@ -1312,9 +1312,6 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_has_nondefault_kwonly(d0, *, d1):
             return d0 + d1
 
-        def fn_has_nondefault_var_p_kw(d0, /, d1):
-            return d0 + d1
-
         # Prevent modification in-place to support resetting
         def _dict_update(data, newdata, remove_idx=None):
             _data = dict(data)
@@ -1346,7 +1343,6 @@ class TestFunctionalIterDataPipe(TestCase):
 
         _helper(lambda data: data, fn_n1_def, 'x', 'y')
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
-        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_has_nondefault_var_p_kw, ['x', 'y'], 'z')
 
         _helper(None, fn_n1_pos, 'x', error=ValueError)
         _helper(None, fn_n1_kwargs, 'x', error=ValueError)
