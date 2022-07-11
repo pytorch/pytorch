@@ -8,7 +8,7 @@ void SchemaInfo::addArgumentValue(
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
-  value_map_[name] = flattenZeroDimIValue(value);
+  value_map_[name] = value;
   updated_ = false;
 }
 
@@ -16,8 +16,7 @@ void SchemaInfo::addArgumentValues(
     const std::vector<c10::optional<at::IValue>>& value_list) {
   for (size_t i = 0; i < value_list.size(); i++) {
     if (i < schema_.arguments().size() && value_list[i] != c10::nullopt) {
-      value_map_[schema_.arguments()[i].name()] =
-          flattenZeroDimIValue(*(value_list[i]));
+      value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
       updated_ = false;
     }
   }
@@ -64,21 +63,23 @@ bool SchemaInfo::is_mutable(size_t index) {
   if (!updated_) {
     generateAliasMaps();
   }
+
+  static const c10::FunctionSchema batch_norm_schema = torch::jit::parseSchema(
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor");
+  static const c10::FunctionSchema instance_norm_schema = torch::jit::parseSchema(
+      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor");
+
   return std::any_of(
       input_alias_map_[index].begin(),
       input_alias_map_[index].end(),
       [this](size_t index) {
-        static const char* batch_norm_literal =
-            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor";
-        static const char* instance_norm_literal =
-            "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor";
-        if (torch::jit::parseSchema(batch_norm_literal) == this->schema_ &&
+        if (batch_norm_schema == this->schema_ &&
             (this->schema_.arguments()[index].name() == "running_mean" ||
              this->schema_.arguments()[index].name() == "running_var")) {
           return value_map_.count("training") &&
               value_map_.at("training").toBool();
         } else if (
-            torch::jit::parseSchema(instance_norm_literal) == this->schema_ &&
+            instance_norm_schema == this->schema_ &&
             (this->schema_.arguments()[index].name() == "running_mean" ||
              this->schema_.arguments()[index].name() == "running_var")) {
           return value_map_.count("use_input_stats") &&
@@ -97,15 +98,57 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   return is_mutable(*index);
 }
 
-bool SchemaInfo::is_non_deterministic() const {
-  if (torch::jit::parseSchema(
-          "aten::dropout(Tensor input, float p, bool train) -> Tensor") ==
-          this->schema_ &&
-      value_map_.count("train") && !value_map_.at("train").toBool()) {
+bool SchemaInfo::is_nondeterministic() const {
+  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
+      getNonDeterministicOps();
+  static const c10::FunctionSchema detach_schema = torch::jit::parseSchema(
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor");
+  if (detach_schema == this->schema_ && value_map_.count("train") &&
+      !value_map_.at("train").toBool()) {
     return false;
   }
+  return std::any_of(
+      nondeterministic_ops.begin(),
+      nondeterministic_ops.end(),
+      [this](const c10 ::FunctionSchema& nondeterministic_op) {
+        return nondeterministic_op == this->schema_;
+      });
+}
 
-  static const std::vector<const char*> nondeterministic_ops = {
+bool SchemaInfo::may_alias(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs) {
+  bool basic_check = schema_.may_alias(lhs, rhs);
+  if (basic_check) {
+    return true;
+  }
+  if (!updated_) {
+    generateAliasMaps();
+  }
+  if (lhs.type == c10::SchemaArgType::input &&
+      rhs.type == c10::SchemaArgType::input) {
+    return input_alias_map_[lhs.index].count(rhs.index);
+  } else if (
+      lhs.type == c10::SchemaArgType::output &&
+      rhs.type == c10::SchemaArgType::output) {
+    for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
+      for (size_t rhs_alias_input : output_alias_map_[rhs.index]) {
+        if (lhs_alias_input == rhs_alias_input) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } else if (lhs.type == c10::SchemaArgType::output) {
+    return output_alias_map_[lhs.index].count(rhs.index);
+  } else {
+    return output_alias_map_[rhs.index].count(lhs.index);
+  }
+}
+
+std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
+  // This list of nondeterministic ops is copied from JIT ir.cpp.
+  static const std::vector<std::string> nondeterministic_op_strings = {
       "aten::dropout(Tensor input, float p, bool train) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
       "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
@@ -129,50 +172,14 @@ bool SchemaInfo::is_non_deterministic() const {
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
-  return std::any_of(
-      nondeterministic_ops.begin(),
-      nondeterministic_ops.end(),
-      [this](const char* nondeterministic_op) {
-        return torch::jit::parseSchema(nondeterministic_op) == this->schema_;
-      });
-}
 
-bool SchemaInfo::may_alias(
-    const c10::SchemaArgument& lhs,
-    const c10::SchemaArgument& rhs) {
-  bool basic_check = schema_.may_alias(lhs, rhs);
-  if (!updated_) {
-    generateAliasMaps();
+  std::vector<c10::FunctionSchema> nondeterministic_ops;
+  nondeterministic_ops.reserve(nondeterministic_op_strings.size());
+  for (const std::string& signature : nondeterministic_op_strings) {
+    nondeterministic_ops.push_back(torch::jit::parseSchema(signature));
   }
-  if (lhs.type == c10::SchemaArgType::input &&
-      rhs.type == c10::SchemaArgType::input) {
-    return input_alias_map_[lhs.index].count(rhs.index) || basic_check;
-  } else if (
-      lhs.type == c10::SchemaArgType::output &&
-      rhs.type == c10::SchemaArgType::output) {
-    for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
-      for (size_t rhs_alias_input : output_alias_map_[rhs.index]) {
-        if (lhs_alias_input == rhs_alias_input) {
-          return true;
-        }
-      }
-    }
-    return basic_check;
-  } else if (lhs.type == c10::SchemaArgType::output) {
-    return output_alias_map_[lhs.index].count(rhs.index) || basic_check;
-  } else {
-    return output_alias_map_[rhs.index].count(lhs.index) || basic_check;
-  }
-}
 
-at::IValue SchemaInfo::flattenZeroDimIValue(const at::IValue& value) const {
-  if (value.isList()) {
-    c10::List<at::IValue> value_list = value.toList();
-    if (value_list.size() == 1) {
-      return value_list[0];
-    }
-  }
-  return value;
+  return nondeterministic_ops;
 }
 
 void SchemaInfo::generateAliasMaps() {
