@@ -189,8 +189,10 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "contiguous",
     "dsplit",
     "dstack",
+    "expand",
     "flatten",
     "flip",
     "fliplr",
@@ -1493,12 +1495,14 @@ def where(
 #
 # Data Movement References
 #
-# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
-
-    return prims.clone(a, memory_format=memory_format)
+    result = torch.empty_like(
+        a, requires_grad=a.requires_grad, memory_format=memory_format
+    )
+    copy_to(result, a)
+    return result
 
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
@@ -2062,7 +2066,20 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-# CompositeImplicitAutograd - don't register decomp
+def contiguous(
+    a: Tensor, *, memory_format: torch.memory_format = torch.contiguous_format
+) -> Tensor:
+    check(
+        memory_format != torch.preserve_format,
+        lambda: "preserve memory format is unsupported by the contiguous operator",
+    )
+
+    if utils.is_contiguous_for_memory_format(a, memory_format=memory_format):
+        return a
+
+    return torch.clone(a, memory_format=memory_format)
+
+
 @out_wrapper()
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
@@ -2070,7 +2087,39 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-# CompositeImplicitAutograd - don't register decomp
+@register_decomposition(torch.ops.aten.expand)
+def expand(a: Tensor, *shape) -> Tensor:
+    # NOTE: cannot use utils.extract_shape_from_varargs here
+    # because that also validates the shape, but the shape
+    # given to expand may be "invalid"
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        shape = tuple(shape[0])
+
+    check(
+        len(shape) >= len(a.shape),
+        lambda: "expand: the requested shape has too few dimensions!",
+    )
+
+    offset = len(shape) - len(a.shape)
+    shape_ = list(shape)
+    for idx, x in enumerate(a.shape):
+        offset_idx = idx + offset
+        requested_length = shape[offset_idx]
+        check(
+            requested_length == x or x == 1 or requested_length == -1,
+            lambda: f"expand: attempting to expand a dimension of length {x}!",
+        )
+
+        shape_[offset_idx] = requested_length if requested_length != -1 else x
+
+    # At this point shape must be valid
+    utils.validate_shape(shape_)
+
+    return prims.broadcast_in_dim(
+        a, shape_, tuple(range(offset, len(a.shape) + offset))
+    )
+
+
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -2777,10 +2826,27 @@ def empty(
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.contiguous_format,
 ) -> TensorLikeType:
+    check(
+        memory_format != torch.preserve_format,
+        lambda: "torch.empty: the Preserve memory format is not supported",
+    )
+
     shape = utils.extract_shape_from_varargs(shape)
-    strides = utils.make_contiguous_strides_for(shape)
-    return empty_strided(
+
+    if memory_format == torch.contiguous_format:
+        strides = utils.make_contiguous_strides_for(shape)
+    elif memory_format == torch.channels_last_3d:
+        strides = utils.make_channels_last_3d_strides_for(shape)
+    else:  # memory_format == torch.channels_last
+        check(
+            memory_format == torch.channels_last,
+            lambda: f"torch.empty: received an unknown memory format {memory_format}!",
+        )
+        strides = utils.make_channels_last_2d_strides_for(shape)
+
+    return torch.empty_strided(
         shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
@@ -2792,18 +2858,26 @@ def empty_like(
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
 
     dtype = a.dtype if dtype is None else dtype
     device = a.device if device is None else device
 
     strides: Tuple[int, ...]
-    if a.numel() == 0:
-        strides = a.stride()
-    else:
-        strides = utils.compute_elementwise_output_strides(a)
 
-    return empty_strided(
+    if memory_format != torch.preserve_format:
+        return torch.empty(
+            a.shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
+
+    # memory_format == torch.preserve_format
+    strides = utils.compute_elementwise_output_strides(a)
+    return torch.empty_strided(
         a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
