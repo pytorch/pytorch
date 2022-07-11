@@ -35,8 +35,6 @@ struct TORCH_API SchemaInfo {
       const std::unordered_map<std::string, at::IValue>& values);
 
  private:
-  at::IValue flattenZeroDimIValue(const at::IValue& value) const;
-
   void generateAliasMaps();
 
   // Map of argument IValues
