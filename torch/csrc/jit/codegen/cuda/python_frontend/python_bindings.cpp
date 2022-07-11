@@ -214,7 +214,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::UnaryOpRecord<NvfTensorView>(                           \
+          new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*>(               \
             {input->index}, {output->index},                                   \
             static_cast<NvfTensorView*(*)(NvfTensorView*)>(                    \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -229,7 +229,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Scalar(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::UnaryOpRecord<NvfVal>(                                  \
+          new nvfuser::OpRecord<NvfVal*, NvfVal*>(                             \
             {input->index}, {output->index},                                   \
             static_cast<NvfVal*(*)(NvfVal*)>(                                  \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -290,8 +290,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryOpRecord<                                         \
-              NvfTensorView, NvfTensorView, NvfTensorView>(                    \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfTensorView*, NvfTensorView*>(                 \
             {arg1->index, arg2->index}, {output->index},                       \
             static_cast<NvfTensorView*(*)(NvfTensorView*, NvfTensorView*)>(    \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -307,8 +307,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryOpRecord<                                         \
-              NvfTensorView, NvfTensorView, NvfVal>(                           \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfTensorView*, NvfVal*>(                        \
             {arg1->index, arg2->index}, {output->index},                       \
             static_cast<NvfTensorView*(*)(NvfTensorView*, NvfVal*)>(           \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -324,8 +324,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryOpRecord<                                         \
-              NvfTensorView, NvfVal, NvfTensorView>(                           \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfVal*, NvfTensorView*>(                        \
             {arg1->index, arg2->index}, {output->index},                       \
             static_cast<NvfTensorView*(*)(NvfVal*, NvfTensorView*)>(           \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -341,8 +341,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Scalar(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryOpRecord<                                         \
-              NvfVal, NvfVal, NvfVal>(                                         \
+          new nvfuser::OpRecord<                                               \
+              NvfVal*, NvfVal*, NvfVal*>(                                      \
             {arg1->index, arg2->index}, {output->index},                       \
             static_cast<NvfVal*(*)(NvfVal*, NvfVal*)>(                         \
                 torch::jit::fuser::cuda::op_name)));                           \
@@ -382,8 +382,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryWithAlphaOpRecord<                                \
-              NvfTensorView, NvfTensorView, NvfTensorView>(                    \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfTensorView*, NvfTensorView*, NvfVal*>(        \
             {arg1->index, arg2->index, arg3->index}, {output->index},          \
             static_cast<NvfTensorView*(*)(                                     \
                 NvfTensorView*, NvfTensorView*, NvfVal*)>(                     \
@@ -400,8 +400,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryWithAlphaOpRecord<                                \
-              NvfTensorView, NvfTensorView, NvfVal>(                           \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(               \
             {arg1->index, arg2->index, arg3->index}, {output->index},          \
             static_cast<NvfTensorView*(*)(                                     \
                 NvfTensorView*, NvfVal*, NvfVal*)>(                            \
@@ -418,8 +418,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryWithAlphaOpRecord<                                \
-              NvfTensorView, NvfVal, NvfTensorView>(                           \
+          new nvfuser::OpRecord<                                               \
+              NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*>(               \
             {arg1->index, arg2->index, arg3->index}, {output->index},          \
             static_cast<NvfTensorView*(*)(                                     \
                 NvfVal*, NvfTensorView*, NvfVal*)>(                            \
@@ -436,8 +436,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           new nvfuser::Scalar(self.fusion_definition->recording_state.size()); \
         self.fusion_definition->recording_state.emplace_back(output);          \
         self.fusion_definition->recording.emplace_back(                        \
-          new nvfuser::BinaryWithAlphaOpRecord<                                \
-              NvfVal, NvfVal, NvfVal>(                                         \
+          new nvfuser::OpRecord<                                               \
+              NvfVal*, NvfVal*, NvfVal*, NvfVal*>(                             \
             {arg1->index, arg2->index, arg3->index}, {output->index},          \
             static_cast<NvfVal*(*)(                                            \
                 NvfVal*, NvfVal*, NvfVal*)>(                                   \
@@ -448,7 +448,7 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("add_alpha", add_alpha)
   NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP("sub_alpha", sub_alpha)
-#undef NVFUSER_PYTHON_BINDING_TERNARY_ABRV2_OP
+#undef NVFUSER_PYTHON_BINDING_BINARY_WITH_ALPHA_OP
 
 /*
 #define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                   \

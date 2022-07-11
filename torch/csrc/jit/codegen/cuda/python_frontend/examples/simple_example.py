@@ -1,4 +1,4 @@
-#import torch
+import torch
 from torch import ones
 from torch._C._nvfuser import Fusion, FusionDefinition, DataType
 
@@ -13,7 +13,8 @@ with FusionDefinition(fusion) as fd :
 fusion.print_ir()
 
 # Execute Fusion
-input1 = ones(5, device='cuda')
+#input1 = ones(5, device='cuda')
+input1 = torch.tensor([-1.0, -1.0, -1.0, -1.0, -1.0], dtype=torch.float, device='cuda')
 
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape

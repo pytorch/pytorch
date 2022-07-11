@@ -12,88 +12,6 @@ struct RecordFunctor {
   std::vector<size_t> outputs;
 };
 
-// With C++17, this template specialization could be replaced by
-// "if constexpr" statement in the operator() function.
-template<class O, class A1, class A2>
-O* binary_op_func(std::function<O*(A1*, A2*)> func, NvfVal* arg1, NvfVal* arg2) {
-  return func(arg1, arg2);
-}
-template<>
-NvfTensorView* binary_op_func<NvfTensorView, NvfTensorView, NvfTensorView>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2) {
-  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>());
-}
-template<>
-NvfTensorView* binary_op_func<NvfTensorView, NvfTensorView, NvfVal>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2) {
-  return func(arg1->as<NvfTensorView>(), arg2);
-}
-template<>
-NvfTensorView* binary_op_func<NvfTensorView, NvfVal, NvfTensorView>(
-    std::function<NvfTensorView*(NvfVal*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2) {
-  return func(arg1, arg2->as<NvfTensorView>());
-}
-
-template<class OutType, class Arg1Type, class Arg2Type>
-struct BinaryOpRecord : RecordFunctor {
-  BinaryOpRecord(std::vector<size_t> _args,
-                std::vector<size_t> _outputs,
-                std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op) :
-    RecordFunctor(std::move(_args), std::move(_outputs)),
-    fusion_op_(fusion_op) {}
-
-  void operator()(FusionDefinition& fd) final {
-    auto arg1 = fd.fusion_state.at(args.at(0));
-    auto arg2 = fd.fusion_state.at(args.at(1));
-    auto output = binary_op_func<OutType, Arg1Type, Arg2Type>(
-                     fusion_op_, arg1, arg2);
-    fd.fusion_state.at(outputs.at(0)) = output;
-  }
-
- private:
-  std::function<OutType*(Arg1Type*, Arg2Type*)> fusion_op_;
-};
-
-// With C++17, this template specialization could be replaced by
-// "if constexpr" statement in the operator() function.
-template<class O, class A1, class A2>
-O* binary_with_alpha_op_func(std::function<O*(A1*, A2*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2, arg3);
-}
-template<>
-NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfTensorView, NvfTensorView>(std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>(), arg3);
-}
-template<>
-NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfTensorView, NvfVal>(std::function<NvfTensorView*(NvfTensorView*, NvfVal*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2, arg3);
-}
-template<>
-NvfTensorView* binary_with_alpha_op_func<NvfTensorView, NvfVal, NvfTensorView>(std::function<NvfTensorView*(NvfVal*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2->as<NvfTensorView>(), arg3);
-}
-
-template<class OutType, class Arg1Type, class Arg2Type>
-struct BinaryWithAlphaOpRecord : RecordFunctor {
-  BinaryWithAlphaOpRecord(std::vector<size_t> _args,
-                std::vector<size_t> _outputs,
-                std::function<OutType*(Arg1Type*, Arg2Type*, NvfVal*)> fusion_op) :
-    RecordFunctor(std::move(_args), std::move(_outputs)),
-    fusion_op_(fusion_op) {}
-
-  void operator()(FusionDefinition& fd) final {
-    auto arg1 = fd.fusion_state.at(args.at(0));
-    auto arg2 = fd.fusion_state.at(args.at(1));
-    auto arg3 = fd.fusion_state.at(args.at(2));
-    auto output = binary_with_alpha_op_func<OutType, Arg1Type, Arg2Type>(
-                     fusion_op_, arg1, arg2, arg3);
-    fd.fusion_state.at(outputs.at(0)) = output;
-  }
-
- private:
-  std::function<OutType*(Arg1Type*, Arg2Type*, NvfVal*)> fusion_op_;
-};
-
 struct InputTensorRecord : RecordFunctor {
   InputTensorRecord(std::vector<size_t> _outputs, 
                     std::vector<int64_t> _symbolic_sizes,
@@ -137,97 +55,29 @@ struct OutputRecord : RecordFunctor {
   }
 };
 
-// With C++17, this template specialization could be replaced by
-// "if constexpr" statement in the operator() function.
-template<class O, class A1, class A2, class A3>
-O* ternary_op_func(std::function<O*(A1*, A2*, A3*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2, arg3);
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfTensorView, NvfTensorView, NvfTensorView>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>(), arg3->as<NvfTensorView>());
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfTensorView, NvfTensorView, NvfVal>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2->as<NvfTensorView>(), arg3);
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfTensorView, NvfVal, NvfTensorView>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfVal*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2, arg3->as<NvfTensorView>());
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfVal, NvfTensorView, NvfTensorView>(
-    std::function<NvfTensorView*(NvfVal*, NvfTensorView*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2->as<NvfTensorView>(), arg3->as<NvfTensorView>());
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfTensorView, NvfVal, NvfVal>(
-    std::function<NvfTensorView*(NvfTensorView*, NvfVal*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1->as<NvfTensorView>(), arg2, arg3);
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfVal, NvfVal, NvfTensorView>(
-    std::function<NvfTensorView*(NvfVal*, NvfVal*, NvfTensorView*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2, arg3->as<NvfTensorView>());
-}
-template<>
-NvfTensorView* ternary_op_func<NvfTensorView, NvfVal, NvfTensorView, NvfVal>(
-    std::function<NvfTensorView*(NvfVal*, NvfTensorView*, NvfVal*)> func, NvfVal* arg1, NvfVal* arg2, NvfVal* arg3) {
-  return func(arg1, arg2->as<NvfTensorView>(), arg3);
-}
-
-template<class OutType, class Arg1Type, class Arg2Type, class Arg3Type>
-struct TernaryOpRecord : RecordFunctor {
-  TernaryOpRecord(std::vector<size_t> _args,
-                std::vector<size_t> _outputs,
-                std::function<OutType*(Arg1Type*, Arg2Type*, Arg3Type*)> fusion_op) :
+template<class OutType, class... ArgTypes>
+struct OpRecord : RecordFunctor {
+  OpRecord(std::vector<size_t> _args,
+           std::vector<size_t> _outputs,
+           std::function<OutType(ArgTypes...)> fusion_op) :
     RecordFunctor(std::move(_args), std::move(_outputs)),
     fusion_op_(fusion_op) {}
 
+  template<class TupleType, std::size_t... Is>
+  OutType opFunc(FusionDefinition& fd, TupleType& tp, std::index_sequence<Is...>) {
+    return fusion_op_(dynamic_cast<typename std::tuple_element<Is, TupleType>::type>(fd.fusion_state.at(args.at(Is))) ...);
+  }
+
   void operator()(FusionDefinition& fd) final {
-    auto arg1 = fd.fusion_state.at(args.at(0));
-    auto arg2 = fd.fusion_state.at(args.at(1));
-    auto arg3 = fd.fusion_state.at(args.at(3));
-    auto output = ternary_op_func<OutType, Arg1Type, Arg2Type, Arg3Type>(
-                     fusion_op_, arg1, arg2, arg3);
+    using arg_tuple_t = std::tuple<ArgTypes...>;
+    auto indices= std::make_index_sequence<std::tuple_size<arg_tuple_t>::value>();
+    arg_tuple_t inputs;
+    auto output = opFunc(fd, inputs, indices);
     fd.fusion_state.at(outputs.at(0)) = output;
   }
 
  private:
-  std::function<OutType*(Arg1Type*, Arg2Type*, Arg3Type*)> fusion_op_;
-};
-
-// With C++17, this template specialization could be replaced by
-// "if constexpr" statement in the operator() function.
-template<class T>
-T* unary_op_func(std::function<T*(T*)> func, NvfVal* arg) {
-  return func(arg);
-}
-template<>
-NvfTensorView* unary_op_func<NvfTensorView>(
-    std::function<NvfTensorView*(NvfTensorView*)> func, NvfVal* arg) {
-  return func(arg->as<NvfTensorView>());
-}
-
-template<class ArgType>
-struct UnaryOpRecord : RecordFunctor {
-  UnaryOpRecord(std::vector<size_t> _args,
-                std::vector<size_t> _outputs,
-                std::function<ArgType*(ArgType*)> fusion_op) :
-    RecordFunctor(std::move(_args), std::move(_outputs)),
-    fusion_op_(fusion_op) {}
-
-  void operator()(FusionDefinition& fd) final {
-    auto arg = fd.fusion_state.at(args.at(0));
-    auto output = unary_op_func<ArgType>(fusion_op_, arg);
-    fd.fusion_state.at(outputs.at(0)) = output;
-  }
-
- private:
-  std::function<ArgType*(ArgType*)> fusion_op_;
+  std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
 } // nvfuser namespace
