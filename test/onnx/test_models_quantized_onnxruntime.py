@@ -9,7 +9,6 @@ import test_onnx_common
 import torchvision
 
 import torch
-import torch.testing._internal.common_utils
 from torch import nn
 
 
