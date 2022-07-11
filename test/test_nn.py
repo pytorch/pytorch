@@ -1598,7 +1598,7 @@ class TestNN(NNTestCase):
         l4 = nn.Linear(40, 50)
         n1 = nn.Sequential(l1, l2)
         n2 = nn.Sequential(l3, l4)
-        n3 = n1
+        n3 = nn.Sequential(l1, l2)
         for l in n2:
             n1.append(l)
         n3.extend(n2)
