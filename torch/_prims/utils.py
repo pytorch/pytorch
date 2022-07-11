@@ -477,7 +477,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
-def canonicalize_device(device: DeviceLikeType) -> torch.device:
+def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
     if isinstance(device, torch.device):
         return device
 
@@ -573,7 +573,6 @@ def extract_shape_from_varargs(
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -586,11 +585,6 @@ def is_boolean_dtype(dtype: torch.dtype) -> bool:
 def is_integer_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
     return dtype in _integer_dtypes
-
-
-def is_low_precision_dtype(dtype: torch.dtype) -> bool:
-    assert isinstance(dtype, torch.dtype)
-    return dtype in _low_precision_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
@@ -671,30 +665,6 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
 
 _ordered_types = (bool, int, float, complex)
-
-
-def check_fp_or_complex(
-    dtype: torch.dtype, fn_name: str, allow_low_precision_dtypes: bool = True
-):
-    """
-    Checks whether the input is floating point or complex.
-    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
-    """
-    check(
-        is_float_dtype(dtype) or is_complex_dtype(dtype),
-        lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
-    )
-    check(
-        allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
-        lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
-    )
-
-
-def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
-    check(
-        len(A.shape) >= 2,
-        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
-    )
 
 
 def get_higher_type(a: type, b: type) -> type:
@@ -1123,14 +1093,21 @@ def reduction_dtypes(
     return computation_dtype, result_dtype
 
 
-def make_contiguous_strides_for(
-    shape: ShapeType, row_major: bool = True
-) -> Tuple[int, ...]:
+def wrap_device(d: Union[str, torch.device]) -> torch.device:
     """
-    Returns the strides of a contriguous tensor if row_major
-    If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
-    This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
+    Wraps strings into torch.device objects.
+
+    Given torch.device objects are returned unmodified.
     """
+
+    assert isinstance(d, (str, torch.device))
+    if isinstance(d, str):
+        return torch.device(d)
+
+    return d
+
+
+def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
@@ -1138,18 +1115,14 @@ def make_contiguous_strides_for(
     multiplier = 1
     strides = []
     for l in reversed(shape):
-        strides.append(multiplier)
         if l != 0:
-            multiplier *= l
+            strides.append(multiplier)
+            multiplier = l * multiplier
+        else:
+            strides.append(multiplier)
 
     result = tuple(reversed(strides))
-
-    if row_major:
-        return result
-    else:
-        if len(shape) < 2:
-            return result
-        return result[:-2] + (1, max(shape[-2], 1))
+    return result
 
 
 def compute_reduction_output_shape(

@@ -98,7 +98,7 @@ function get_pinned_commit() {
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
@@ -144,7 +144,8 @@ function print_sccache_stats() {
   sccache --show-stats
 
   if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then
-    sccache --show-stats --stats-format json | jq .stats \
+    sccache --show-stats \
+      | python -m tools.stats.sccache_stats_to_json \
       > "sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
   else
     echo "env var OUR_GITHUB_JOB_ID not set, will not write sccache stats to json"

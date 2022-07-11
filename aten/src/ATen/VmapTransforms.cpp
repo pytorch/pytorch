@@ -55,20 +55,13 @@ int64_t VmapPhysicalView::numLogicalDims() const {
   return /*physical*/tensor_.dim() - numBatchDims();
 }
 
-VmapDimVector VmapPhysicalView::getPhysicalDims(OptionalIntArrayRef opt_logical_dims) const {
+VmapDimVector VmapPhysicalView::getPhysicalDims(IntArrayRef logical_dims) const {
   auto logical_ndim = numLogicalDims();
   // NB: fmap doesn't have a SmallVector variant, so we don't use it here.
   VmapDimVector result;
   result.reserve(logical_ndim);
-  if (opt_logical_dims.has_value()) {
-    auto logical_dims = opt_logical_dims.value();
-    for (auto dim : logical_dims) {
-      result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
-    }
-  } else {
-    for (int64_t dim = 0; dim < logical_ndim; dim++) {
-      result.push_back(dim + numBatchDims());
-    }
+  for (auto dim : logical_dims) {
+    result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
   }
   return result;
 }

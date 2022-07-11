@@ -4563,7 +4563,7 @@
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
 
-- func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4572,7 +4572,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: sum.IntList_out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -5756,7 +5756,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
-    SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5772,7 +5771,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
-    SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -6333,12 +6331,30 @@
     MPS: set_mps_
   autogen: set, set.out
 
+# Not making it CompositeImplicitAutograd because lift
+# should be a primitive w.r.t. functorch
+
+# TODO: this should have a view annotation
+# TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
   variants: method
   dispatch:
-    # Not making it CompositeImplicitAutograd because lift
-    # should be a primitive w.r.t. functorch
     CompositeExplicitAutograd: lift
+
+# lift_fresh is called with an argument that is guaranteed to be
+# fresh (i.e., newly allocated).  This is ONLY called from a
+# torch.tensor call; if you FX trace a lift_fresh, you are obligated
+# to convert this into a lift_fresh_copy (because FX will violate the
+# freshness invariant when tracing).
+- func: lift_fresh(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh
+
+# Like lift, but it clones the input.
+- func: lift_fresh_copy(Tensor self) -> Tensor
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh_copy
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method

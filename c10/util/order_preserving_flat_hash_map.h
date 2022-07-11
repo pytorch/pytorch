@@ -33,6 +33,11 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
+
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__
 #else
@@ -638,8 +643,8 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     deallocate_data(new_buckets, num_buckets, old_max_lookups);
   }
 
-  void reserve(uint64_t num_elements_) {
-    uint64_t required_buckets = num_buckets_for_reserve(num_elements_);
+  void reserve(uint64_t num_elements) {
+    uint64_t required_buckets = num_buckets_for_reserve(num_elements);
     if (required_buckets > bucket_count())
       rehash(required_buckets);
   }
@@ -822,9 +827,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     return std::max(detailv3::min_lookups, desired);
   }
 
-  uint64_t num_buckets_for_reserve(uint64_t num_elements_) const {
+  uint64_t num_buckets_for_reserve(uint64_t num_elements) const {
     return static_cast<uint64_t>(std::ceil(
-        num_elements_ / std::min(0.5, static_cast<double>(_max_load_factor))));
+        num_elements / std::min(0.5, static_cast<double>(_max_load_factor))));
   }
   void rehash_for_other_container(const sherwood_v3_table& other) {
     rehash(
@@ -978,10 +983,10 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
 
   void deallocate_data(
       EntryPointer begin,
-      uint64_t num_slots_minus_one_,
-      int8_t max_lookups_) {
+      uint64_t num_slots_minus_one,
+      int8_t max_lookups) {
     AllocatorTraits::deallocate(
-        *this, begin, num_slots_minus_one_ + max_lookups_ + 1);
+        *this, begin, num_slots_minus_one + max_lookups + 1);
   }
 
   void reset_to_empty_state() {
@@ -2028,8 +2033,8 @@ struct fibonacci_hash_policy {
     size = std::max(uint64_t(2), detailv3::next_power_of_two(size));
     return 64 - detailv3::log2(size);
   }
-  void commit(int8_t shift_) {
-    shift = shift_;
+  void commit(int8_t shift) {
+    this->shift = shift;
   }
   void reset() {
     shift = 63;
@@ -2228,5 +2233,9 @@ struct power_of_two_std_hash : std::hash<T> {
 };
 
 } // namespace ska_ordered
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif
 
 C10_CLANG_DIAGNOSTIC_POP()

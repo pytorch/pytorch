@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Context.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/vulkan/Context.h>
 
@@ -9,9 +10,11 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Context::Context(size_t adapter_i, const ContextConfig& config)
+Context::Context(
+    const VkInstance instance, size_t adapter_i, const ContextConfig config)
     : config_(config),
       // Important handles
+      instance_(instance),
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
@@ -19,12 +22,10 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
       descriptor_pool_(device_, config_.descriptorPoolConfig),
       fences_(device_),
-      // Diagnostics
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
       querypool_(
         device_,
-        config_.queryPoolConfig),
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+        adapter_p_->timestamp_compute_and_graphics(),
+        adapter_p_->timestamp_period()),
       // Command buffer submission
       cmd_mutex_{},
       cmd_(VK_NULL_HANDLE),
@@ -85,37 +86,25 @@ void Context::submit_texture_copy(
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
     const VkFence fence_handle) {
-  // Serialize recording to the shared command buffer. Do not initialize with a
-  // mutex just yet, since in some cases it will be externally managed.
-  std::unique_lock<std::mutex> cmd_lock;
-  // Refer to comments in submit_compute_job for explanation.
-  if (fence_handle == VK_NULL_HANDLE) {
-    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
-  }
+  // Serialize recording to the shared command buffer
+  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
 
   set_cmd();
-
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_,
-      "copy_texture_to_texture",
-      create_extent3d({0, 0, 0}),
-      create_extent3d({0, 0, 0}));
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   cmd_.insert_barrier(pipeline_barrier);
 
   cmd_.copy_texture_to_texture(
       source, destination, copy_range, src_offset, dst_offset);
 
-#ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
-#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
-
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+  }
+
+  // Refer to comments in submit_compute_job for explanation
+  if (fence_handle != VK_NULL_HANDLE) {
+    cmd_lock.release();
   }
 }
 
@@ -129,6 +118,13 @@ void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
 }
 
 void Context::flush() {
+  // Refer to comments in submit_compute_job. When this function is called, the
+  // previous call to submit_compute_job did not unlock cmd_mutex_ before returning.
+  // Therefore, we use std::adopt_lock when constructing the unique_lock as we
+  // assume the calling thread already has ownership of cmd_mutex_. The unique_lock
+  // will then unlock the mutex in its destructor.
+  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_, std::adopt_lock);
+
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();
@@ -147,8 +143,6 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
-      const uint32_t submit_frequency = 16u;
-
       const CommandPoolConfig cmd_config{
         32u,  // cmdPoolInitialSize
         8u,  // cmdPoolBatchSize
@@ -163,19 +157,13 @@ Context* context() {
         32u,  // descriptorPileSizes
       };
 
-      const QueryPoolConfig query_pool_config{
-        4096u,  // maxQueryCount
-        256u,  //initialReserveSize
-      };
-
       const ContextConfig config{
-        submit_frequency,  // cmdSubmitFrequency
+        16u,  // cmdSubmitFrequency
         cmd_config,  // cmdPoolConfig
         descriptor_pool_config,  // descriptorPoolConfig
-        query_pool_config,  // queryPoolConfig
       };
-
-      return new Context(runtime()->default_adapter_i(), config);
+      return new Context(
+          runtime()->instance(), runtime()->default_adapter_i(), config);
     }
     catch (const std::exception& e) {
       TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());

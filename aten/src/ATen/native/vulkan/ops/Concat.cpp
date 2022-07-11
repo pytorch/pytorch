@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -78,11 +79,11 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
         // shader arguments
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::COMPUTE,
+            api::PipelineStage::Compute,
             api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
         v_self.image(
             pipeline_barrier,
-            api::PipelineStage::COMPUTE),
+            api::PipelineStage::Compute),
         // params buffer
         params.buffer());
   }
@@ -129,10 +130,10 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
         // images
         v_self.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER),
+            api::PipelineStage::Transfer),
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER,
+            api::PipelineStage::Transfer,
             api::MemoryAccessType::WRITE),
         // copy details
         copy_extents,
@@ -169,10 +170,10 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
         // images
         v_self.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER),
+            api::PipelineStage::Transfer),
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::TRANSFER,
+            api::PipelineStage::Transfer,
             api::MemoryAccessType::WRITE),
         // copy details
         v_self.extents(),

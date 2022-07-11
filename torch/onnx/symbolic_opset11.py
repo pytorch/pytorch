@@ -487,14 +487,6 @@ def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
-@symbolic_helper.parse_args("v", "i", "i", "none")
-def argsort(g, self, dim, decending, out=None):
-    _, indices = symbolic_helper._sort_helper(
-        g, self, dim, decending=decending, out=out
-    )
-    return indices
-
-
 def round(g, self):
     return g.op("Round", self)
 

@@ -1,7 +1,7 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
-
-#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
@@ -513,17 +513,17 @@ void conv2d_sliding_window(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE,
+          api::PipelineStage::Compute,
           api::MemoryAccessType::WRITE),
       v_input.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+          api::PipelineStage::Compute),
       packed_v_weight.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+          api::PipelineStage::Compute),
       packed_v_bias.image(
           pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+          api::PipelineStage::Compute),
       // params buffer
       params.buffer());
 }
