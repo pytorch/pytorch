@@ -1230,7 +1230,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs, sample.output_process_fn_grad)
+            composite_compliance.check_backward_formula(
+                op.get_op(), args, kwargs,
+                sample.output_process_fn_grad,
+                op.gradcheck_wrapper)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"

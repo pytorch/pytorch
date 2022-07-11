@@ -8,6 +8,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
+from typing import Callable
 import re
 
 
@@ -398,8 +399,13 @@ def gather_leaf_tensors(args, kwargs):
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
-def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
-    assert op.supports_autograd
+#
+# NB: it is important that op is accepted as a Callable and not an OpInfo,
+# this means we can apply check_backward_formula to things that aren't OpInfos
+# while debugging.
+def check_backward_formula(op: Callable, args, kwargs,
+                           output_process_fn_grad=None,
+                           gradcheck_wrapper=None):
     CCT = generate_cct()
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
@@ -407,7 +413,10 @@ def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
         assert len(leaf_tensors) > 0
 
         try:
-            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
+            if gradcheck_wrapper is None:
+                results = op(*new_args, **new_kwargs)
+            else:
+                results = gradcheck_wrapper(op, *new_args, **new_kwargs)
             if output_process_fn_grad is not None:
                 results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
