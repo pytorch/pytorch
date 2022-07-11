@@ -35,7 +35,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
-      {DebugDumpOption::PerfDebugVerbose, false}};
+      {DebugDumpOption::PerfDebugVerbose, false},
+      {DebugDumpOption::TransformPropagator, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -82,6 +83,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
+      } else if (token == "transform_propagator") {
+        options_map[DebugDumpOption::TransformPropagator] = true;
       } else {
         TORCH_CHECK(
             false,
