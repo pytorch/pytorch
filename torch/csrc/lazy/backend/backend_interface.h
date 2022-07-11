@@ -98,8 +98,7 @@ class TORCH_API BackendImplInterface {
   // For backends used with virtual c10::Devices, this configures what real
   // device type the backend should use, and matters if the backend supports
   // more than one type of real device.
-  virtual std::shared_ptr<BackendDeviceType>
-  GetDefaultDeviceType() const = 0;
+  virtual std::shared_ptr<BackendDeviceType> GetDefaultDeviceType() const = 0;
   virtual void SetDefaultDeviceType(int8_t type) = 0;
 
   // Set or get the default device ordinal.

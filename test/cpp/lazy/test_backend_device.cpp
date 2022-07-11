@@ -55,11 +55,12 @@ TEST(BackendDeviceTest, Basic3) {
 }
 
 TEST(BackendDeviceTest, Basic4) {
-  // Seems weird to have setters in BackendImplInterface given getBackend() returns
-  // a const pointer.
+  // Seems weird to have setters in BackendImplInterface given getBackend()
+  // returns a const pointer.
   auto default_type = getBackend()->GetDefaultDeviceType();
   auto default_ordinal = getBackend()->GetDefaultDeviceOrdinal();
-  const_cast<BackendImplInterface*>(getBackend())->SetDefaultDeviceType(static_cast<int8_t>(c10::kCUDA));
+  const_cast<BackendImplInterface*>(getBackend())
+      ->SetDefaultDeviceType(static_cast<int8_t>(c10::kCUDA));
   const_cast<BackendImplInterface*>(getBackend())->SetDefaultDeviceOrdinal(1);
 
   auto device = BackendDevice();
@@ -68,8 +69,10 @@ TEST(BackendDeviceTest, Basic4) {
   EXPECT_EQ(device.ordinal(), 1);
   EXPECT_STREQ(device.toString().c_str(), "CUDA1");
 
-  const_cast<BackendImplInterface*>(getBackend())->SetDefaultDeviceType(default_type->type);
-  const_cast<BackendImplInterface*>(getBackend())->SetDefaultDeviceOrdinal(default_ordinal);
+  const_cast<BackendImplInterface*>(getBackend())
+      ->SetDefaultDeviceType(default_type->type);
+  const_cast<BackendImplInterface*>(getBackend())
+      ->SetDefaultDeviceOrdinal(default_ordinal);
 }
 
 TEST(BackendDeviceTest, Compare) {
