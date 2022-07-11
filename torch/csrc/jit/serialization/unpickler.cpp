@@ -505,11 +505,11 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu() || device.is_meta()) {
+      if (device.is_cuda() || device.is_xpu() || device.is_meta() || device.is_hpu()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU and CUDA, however got ",
+            "supported devices include CPU, CUDA and HPU, however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
