@@ -295,13 +295,12 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   // NB: THIS WAS CHANGED FROM THE ORIGINAL
   Tensor noise;
   if (feature_dropout) {
-    auto prob = make_feature_noise(input);
-    prob.fill_(1 - p);
-    noise = at::bernoulli(prob);
+    auto empty = make_feature_noise(input);
+    noise = at::bernoulli(empty, 1 - p);
   } else {
-    // NB: it is important that this is at::full and not at::full_like
-    auto prob = at::full({}, 1 - p, input.options()).expand(input.sizes());
-    noise = at::bernoulli(prob);
+    // NB: it is important that this is at::empty and not at::empty_like
+    auto empty = at::empty({}, input.options()).expand(input.sizes());
+    noise = at::bernoulli(empty, 1 - p);
   }
 
   if (alpha_dropout) {
