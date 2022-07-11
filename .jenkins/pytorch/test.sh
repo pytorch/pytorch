@@ -493,20 +493,22 @@ test_forward_backward_compatibility() {
   # shellcheck disable=SC1091
   . venv/bin/activate
   if [[ "${BASE_SHA}" = "${SHA1}" ]]; then
-    # should we even run anything for this check on trunk?
-    echo "huh"
+    echo "On trunk, we should compare with parent commit"
+    SHA_TO_COMPARE="$(git rev-parse ${SHA1}^)"
   else
-    git reset --hard "${BASE_SHA}"
-    pip install -r requirements.txt
-    # shellcheck source=./common-build.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-    python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
-    python -mpip install base_dist/*.whl
-    pushd test/forward_backward_compatibility
-    pip show torch
-    python dump_all_function_schemas.py --filename nightly_schemas.txt
-    git reset --hard "${SHA1}"
+    SHA_TO_COMPARE="${BASE_SHA}"
   fi
+  export SHA_TO_COMPARE
+  git reset --hard "${SHA_TO_COMPARE}"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -mpip install base_dist/*.whl
+  pushd test/forward_backward_compatibility
+  pip show torch
+  python dump_all_function_schemas.py --filename nightly_schemas.txt
+  git reset --hard "${SHA1}"
   # install the nightly before the base commit -- fallback to most recent nightly in case of error
   # VERSION=$(cat "${REPO_DIR}/version.txt")
   # DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
