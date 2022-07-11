@@ -22,63 +22,64 @@ class ActivationSparsifier:
         The sparsification mask is computed on the input **before it goes through the attached layer**.
 
     Args:
-        model (nn.Module)
+        model (nn.Module):
             The model whose layers will be sparsified. The layers that needs to be
             sparsified should be added separately using the register_layer() function
-
-        aggregate_fn (Optional, function type)
+        aggregate_fn (Optional, Callable):
             default aggregate_fn that is used if not specified while registering the layer.
-            specifies how inputs should be aggreagated over time.
-
-        reduce_fn (Optional, function type)
+            specifies how inputs should be aggregated over time.
+            The aggregate_fn should usually take 2 torch tensors and return the aggregated tensor.
+            Example
+                >>> def add_agg_fn(tensor1, tensor2):  return tensor1 + tensor2
+        reduce_fn (Optional, Callable):
             default reduce_fn that is used if not specified while registering the layer.
-            reduce_fn will be applied on the aggregated input
-
-        mask_fn (Optional, function type)
-            default mask_fn that is used to create the sparsification mask (based on the
-            aggregated & reduced input). This is used if not specified while registering the layer
-
-        features (Optional, list)
+            reduce_fn will be called on the aggregated tensor i.e. the tensor obtained after
+            calling agg_fn() on all inputs.
+            Example
+                >>> def mean_reduce_fn(agg_tensor):    return agg_tensor.mean(dim=0)
+        mask_fn (Optional, Callable):
+            default mask_fn that is used to create the sparsification mask using the tensor obtained after
+            calling the reduce_fn(). This is used by default if a custom one is passed in the
+            register_layer().
+            Note that the mask_fn() definition should contain the sparse arguments that is passed in sparse_config
+            arguments.
+        features (Optional, list):
             default selected features to sparsify.
             If this is non-empty, then the mask_fn will be applied for each feature of the input.
             For example,
-            >>> mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
-
-        feature_dim (Optional, int)
+                >>> mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
+        feature_dim (Optional, int):
             default dimension of input features. Again, features along this dim will be chosen
             for sparsification.
-
-        sparse_config (Dict)
+        sparse_config (Dict):
             Default configuration for the mask_fn. This config will be passed
             with the mask_fn()
 
-    Expected Usage:
+    Example:
         >>> model = SomeModel()
         >>> act_sparsifier = ActivationSparsifier(...)  # init activation sparsifier
-
         >>> # Initialize aggregate_fn
         >>> def agg_fn(x, y):
         >>>     return x + y
-
+        >>>
         >>> # Initialize reduce_fn
         >>> def reduce_fn(x):
         >>>     return torch.mean(x, dim=0)
-
+        >>>
         >>> # Initialize mask_fn
         >>> def mask_fn(data):
         >>>     return torch.eye(data.shape).to(data.device)
-
-
+        >>>
+        >>>
         >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
-
+        >>>
         >>> # start training process
-            >>> # epoch starts
-                >>> # model.forward(), compute_loss() and model.backwards()
-            >>> # epoch ends
-            >>> act_sparsifier.step()
+        >>>     # epoch starts
+        >>>         # model.forward(), compute_loss() and model.backwards()
+        >>>     # epoch ends
+        >>>     act_sparsifier.step()
         >>> # end training process
-
-        >>> act_sparsifier.squash_mask()
+        >>> sparsifier.squash_mask()
     """
     def __init__(self, model: nn.Module, aggregate_fn=None, reduce_fn=None, mask_fn=None,
                  features=None, feature_dim=None, **sparse_config):
@@ -100,7 +101,7 @@ class ActivationSparsifier:
         self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
     @staticmethod
-    def __safe_rail_checks(args):
+    def _safe_rail_checks(args):
         """Makes sure that some of the functions and attributes are not passed incorrectly
         """
 
@@ -109,7 +110,7 @@ class ActivationSparsifier:
         if features is not None:
             assert feature_dim is not None, "need feature dim to select features"
 
-        # all the *_fns should be a function
+        # all the *_fns should be callable
         fn_keys = ['aggregate_fn', 'reduce_fn', 'mask_fn']
         for key in fn_keys:
             fn = args[key]
@@ -188,7 +189,7 @@ class ActivationSparsifier:
         local_args.update((arg, val) for arg, val in update_dict.items() if val is not None)
         local_args['sparse_config'].update(sparse_config)
 
-        self.__safe_rail_checks(local_args)
+        self._safe_rail_checks(local_args)
 
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self.__aggregate_hook(name=name))
@@ -198,7 +199,7 @@ class ActivationSparsifier:
 
         # for serialization purposes, we know whether aggregate_hook is attached
         # or sparsify_hook()
-        self.data_groups[name]['aggregate_mode'] = True
+        self.data_groups[name]['hook_state'] = "aggregate"  # aggregate hook is attached
 
     def get_mask(self, name: str = None, layer: nn.Module = None):
         """
@@ -274,7 +275,7 @@ class ActivationSparsifier:
                 data_feature = reduce_fn(data[feature_idx])
                 mask[feature_idx].data = mask_fn(data_feature, **sparse_config)
 
-    def __sparsify_hook(self, name):
+    def _sparsify_hook(self, name):
         """Returns hook that applies sparsification mask to input entering the attached layer
         """
         mask = self.get_mask(name)
@@ -295,19 +296,21 @@ class ActivationSparsifier:
                 return input_data
         return hook
 
-    def squash_mask(self, **kwargs):
+    def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
-        Unregisters aggreagate hook that was applied earlier and registers sparsification hooks.
-        The sparsification hook will apply the mask to the activations before it is fed into the
-        attached layer.
+        Unregisters aggreagate hook that was applied earlier and registers sparsification hooks if
+        attach_sparsify_hook = True.
         """
         for name, configs in self.data_groups.items():
             # unhook agg hook
             configs['hook'].remove()
-            configs['hook'] = configs['layer'].register_forward_pre_hook(self.__sparsify_hook(name))
-            configs['agg_mode'] = False  # signals that sparsify hook is now attached
+            configs.pop('hook')
+            self.data_groups[name]['hook_state'] = "None"
+            if attach_sparsify_hook:
+                configs['hook'] = configs['layer'].register_forward_pre_hook(self._sparsify_hook(name))
+            configs['hook_state'] = "sparsify"  # signals that sparsify hook is now attached
 
-    def __get_serializable_data_groups(self):
+    def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing
 
         TODO: Might have to treat functions (reduce_fn, mask_fn etc) in a different manner while serializing.
@@ -328,7 +331,7 @@ class ActivationSparsifier:
             layer
         * defaults - the default config while creating the constructor
         """
-        data_groups = self.__get_serializable_data_groups()
+        data_groups = self._get_serializable_data_groups()
 
         return {
             'state': self.state,
@@ -349,7 +352,7 @@ class ActivationSparsifier:
 
     def __get_state__(self) -> Dict[str, Any]:
 
-        data_groups = self.__get_serializable_data_groups()
+        data_groups = self._get_serializable_data_groups()
         return {
             'defaults': self.defaults,
             'state': self.state,
@@ -366,11 +369,11 @@ class ActivationSparsifier:
             assert layer is not None  # satisfy mypy
 
             # if agg_mode is True, then layer in aggregate mode
-            if config['aggregate_mode']:
+            if "hook_state" in config and config['hook_state'] == "aggregate":
                 hook = layer.register_forward_pre_hook(self.__aggregate_hook(name))
 
-            else:
-                hook = layer.register_forward_pre_hook(self.__sparsify_hook(name))
+            elif "hook_state" in config and config["hook_state"] == "sparsify":
+                hook = layer.register_forward_pre_hook(self._sparsify_hook(name))
 
             config['layer'] = layer
             config['hook'] = hook
