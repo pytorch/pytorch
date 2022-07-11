@@ -682,6 +682,9 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
+        # See Note [Functionalization <> torch.Tensor constructor]
+        if str(g.view.func.name) == "lift_fresh":
+            return []
         view_str = [emit_registration_helper(g.view)]
         if g.view_inplace is not None:
             assert g.view_inplace.is_view_op
@@ -697,11 +700,7 @@ def gen_functionalization_registration(
 
     registrations = []
     for f in fns:
-        if (
-            str(f.func.name) == "lift"
-            or str(f.func.name) == "lift_fresh"
-            or str(f.func.name) == "lift_fresh_copy"
-        ):
+        if str(f.func.name) == "lift":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
         if str(f.func.name) == "resize_":
