@@ -32,11 +32,11 @@ class APoTQuantizer():
     def quantize(self, tensor2quantize: Tensor):
         result = torch.tensor([])
 
-        # clip tensor2quantize values based on alpha qparam
-        tensor2quantize = torch.clamp(tensor2quantize, -self.alpha, self.alpha)
-
         # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+        tensor2quantize = tensor2quantize.apply_(lambda x: float_to_apot(x,
+                                                                         self.quantization_levels,
+                                                                         self.level_indices,
+                                                                         self.alpha))
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 

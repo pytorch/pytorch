@@ -28,6 +28,186 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
+class HFOperations(unittest.TestCase):
+
+    def test_embedding(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embedding = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([2, 4])):
+                return self.embedding(x)
+
+        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long)).size()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        embedding_result = z3.Const(2, tensor_type)
+
+        assert s.model()[embedding_result].arg(0).arg(1) == B[0]
+        assert s.model()[embedding_result].arg(1).arg(1) == B[1]
+        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
+
+        # change the type. This should still be satisfiable
+        for n in traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn])
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        assert s.model()[embedding_result].arg(0).arg(0) == 0
+        assert s.model()[embedding_result].arg(1).arg(0) == 0
+        assert s.model()[embedding_result].arg(2).arg(1) == B[2]
+
+        # change the type to Dyn. Here, we will get an arbitirary migration
+        for n in traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        self.assertEquals(s.check(), z3.sat)
+
+    def test_size_two_args(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 2, Dyn])):
+                size = x.size(-1)
+                return size
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        d1, d2 = z3.Int(39), z3.Int(2)
+        d4, d5 = z3.Int('input_d1'), z3.Int('input_d2')
+
+        # migrate the third dimension
+        s.add(d1 != 0)
+
+        self.assertEqual(s.check(), z3.sat)
+        input = z3.Const(1, tensor_type)
+        s.add(input == tensor_type.tensor3(D(3, 39), D(1, 2), D(d4, d5)))
+
+        # check if the item we got is the right one
+        self.assertEqual(s.check(), z3.sat)
+        self.assertEqual(s.model()[d5], s.model()[d2])
+        self.assertEqual(s.model()[d1], s.model()[d4])
+
+    def test_size_getitem(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                size = x.size()
+                getitem = size[-1]
+                return getitem
+
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        self.assertEquals(s.check(), z3.sat)
+
+        # force the input to be of size 4
+
+        s1, s2, s3, s4 = z3.Ints('x1 x2 x3 x4')
+        s11, s22, s33, s44 = z3.Ints('x11 x22 x33 x44')
+        d1, d2, d3, d4 = D(s11, s1), D(s22, s2), D(s33, s3), D(s44, s4),
+
+        input = z3.Const(1, tensor_type)
+        s.add(input == tensor_type.tensor4(d1, d2, d3, d4))
+
+        # check if the model is still SAT
+        self.assertEquals(s.check(), z3.sat)
+
+        s1, s2 = z3.Int(23), z3.Int(3)
+
+        # check that the item is correct
+        self.assertEquals(s.model()[s1], s.model()[s2])
+
+        # invalid index
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                size = x.size()
+                getitem = size[-10]
+                return getitem
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        self.assertEquals(s.check(), z3.unsat)
+
+
+    def test_view_mul(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                return mul
+
+        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long)).size()
+
+        # print(B)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        # print(traced)
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        embedding_result = z3.Const(5, tensor_type)
+
+        # note that the view output will be: tensor3(dim(0, 0), dim(1, 4), dim(1, 1024))
+        # this is due to the reshape constraints. This can be lifted
+        # but would require revising the type rules accordingly so we leave it for now
+        assert (s.model()[embedding_result].arg(1).arg(1)) == 4
+        assert (s.model()[embedding_result].arg(2).arg(1)) == 1024
+
+        mul_result = z3.Const(12, tensor_type)
+        assert s.model()[mul_result] == s.model()[embedding_result]
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):

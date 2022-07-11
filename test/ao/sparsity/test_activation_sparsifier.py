@@ -4,7 +4,7 @@
 from torch.testing._internal.common_utils import TestCase
 import logging
 import torch
-from torch.ao.sparsity.experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
+from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
 import torch.nn as nn
 import torch.nn.functional as F
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -41,9 +41,6 @@ class TestActivationSparsifier(TestCase):
         sparsifier_defaults = activation_sparsifier.defaults
         combined_defaults = {**defaults, 'sparse_config': sparse_config}
 
-        # check model
-        assert activation_sparsifier.model == model
-
         # more keys are populated in activation sparsifier (eventhough they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
 
@@ -76,7 +73,6 @@ class TestActivationSparsifier(TestCase):
 
         # simulate the workflow
         # STEP 1: make data and activation sparsifier object
-        defaults, sparse_config = _ActivationSparsifierUtils._get_defaults()
         model = Model()  # create model
         activation_sparsifier = ActivationSparsifier(model, **defaults, **sparse_config)
 
