@@ -5906,7 +5906,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
     auto var_t = var_backward(input_t, input_p, dims, /*correction=*/false, /*keepdim=*/true).sum(dims, /*keepdim=*/false);
     auto mean_t = input_t.mean(dims, /*keepdim=*/false);
     auto invstd_t = -0.5 * at::pow(invstd_p.view_as(var_t), 3) * var_t;
-    return std::make_tuple(out_jvp, std::move(mean_t, std::move(invstd_t));
+    return std::make_tuple(out_jvp, std::move(mean_t), std::move(invstd_t));
   } else {
     return std::make_tuple(out_jvp, Tensor(), Tensor());
   }
