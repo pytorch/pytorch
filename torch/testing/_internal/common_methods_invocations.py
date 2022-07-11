@@ -19155,9 +19155,6 @@ op_db: List[OpInfo] = [
             # FIXME: mean reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: mean does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
