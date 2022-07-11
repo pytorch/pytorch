@@ -12,6 +12,7 @@ struct _SupplementBase {
   virtual ~_SupplementBase() {}
 };
 
+#if defined(USE_NCCL) && defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
@@ -20,6 +21,7 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
   NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
 };
+#endif
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
@@ -49,14 +51,10 @@ struct ReduceOp {
     if (optional_supplement.get()) {
       op_ = op;
     } else {
-#ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+#if defined(USE_NCCL) && defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
       TORCH_INTERNAL_ASSERT(op == PREMUL_SUM, "Only PREMUL_SUM supports supplement");
       op_ = ReduceOp::PREMUL_SUM;
       supplement_ = optional_supplement;
-#else
-      AT_ERROR("Invalid");
-#endif
 #else
       AT_ERROR("Invalid");
 #endif  // USE_NCCL
@@ -93,10 +91,14 @@ struct ReduceOp {
 };
 
 template<typename T> ReduceOp makeNCCLPreMulSum(const T& factor) {
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
   ReduceOp rop;
   rop.op_ = ReduceOp::PREMUL_SUM;
   rop.supplement_ = std::make_shared<NCCLPreMulSumSupplement>(factor);
   return rop;
+#else
+  AT_ERROR("PreMulSum is available from 2.11.0 or later");
+#endif
 }
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);

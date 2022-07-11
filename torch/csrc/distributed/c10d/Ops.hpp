@@ -6,7 +6,6 @@
 namespace c10d {
 namespace ops {
 
-<<<<<<< HEAD
 // Below are essentially ProcessGroup's corresponding ops but routed to the
 // dispatcher. To be noted, it's a convention to use at::TensorList to represent
 // const std::vector<at::Tensor>&. However, const std::vector<at::Tensor>& is
@@ -73,11 +72,12 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> recv(
     int64_t srcRank,
     int64_t tag);
 
-// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+#if defined(USE_NCCL)
 TORCH_API c10::intrusive_ptr<ProcessGroup::Work>
-nccl_premulsum_allreduce(const c10::intrusive_ptr<ProcessGroup>& process_group,
-                         at::TensorList tensors, const AllreduceOptions& opts);
-// #endif
+nccl_premulsum_allreduce(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors, const AllreduceOptions& opts);
+#endif
 
 } // namespace ops
 } // namespace c10d

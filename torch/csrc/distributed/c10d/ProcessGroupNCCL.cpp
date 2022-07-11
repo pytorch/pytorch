@@ -74,6 +74,7 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
   return it->second;
 }
 
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template<typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(const ReduceOp& reduceOp,
                               const ncclComm_t& comm,
@@ -92,6 +93,7 @@ ncclRedOpRAII unpackPreMulSum(const ReduceOp& reduceOp,
                            comm);
   return ncclRedOpRAII(preMulSum, comm);
 }
+#endif
 
 ncclRedOpRAII getNcclReduceOp(const ReduceOp& reduceOp,
                             at::Tensor& input,
@@ -112,6 +114,7 @@ ncclRedOpRAII getNcclReduceOp(const ReduceOp& reduceOp,
       }
 #endif
     }
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
     if (reduceOp == ReduceOp::PREMUL_SUM) {
       switch (dataType) {
         case ncclHalf:
@@ -126,6 +129,7 @@ ncclRedOpRAII getNcclReduceOp(const ReduceOp& reduceOp,
           return unused;
       }
     }
+#endif
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {

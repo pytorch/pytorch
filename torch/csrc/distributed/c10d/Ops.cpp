@@ -2,9 +2,7 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
 #include <torch/csrc/distributed/c10d/Types.hpp>
-#endif
 
 namespace c10d {
 namespace {
@@ -431,7 +429,7 @@ c10::intrusive_ptr<ProcessGroup::Work> recv(
   return op.call(tensors, process_group, srcRank, tag);
 }
 
-// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+#if defined(USE_NCCL)
 c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
@@ -463,7 +461,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
     return op.call(tensors, process_group, static_cast<int64_t>(opts.reduceOp), double_factor, opts.timeout.count());
   }
 }
-// #endif
+#endif
 
 } // namespace ops
 } // namespace c10d
