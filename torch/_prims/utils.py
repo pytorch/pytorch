@@ -1339,6 +1339,19 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
+def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
+    ndim = len(shape)
+    if ndim == 4:
+        return make_channels_last_2d_strides_for(shape)
+    elif ndim == 5:
+        return make_channels_last_3d_strides_for(shape)
+        dim_order = [1, 4, 3, 2, 0]
+    else:
+        raise RuntimeError(
+            f"no channels last format strides exist in {ndim} dimensions"
+        )
+
+
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
 ) -> Tuple[int, ...]:
@@ -1406,25 +1419,6 @@ def check(
     """
     if not b:
         raise exc_type(s())
-
-
-def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
-    ndim = len(shape)
-    if ndim == 4:
-        dim_order = [1, 3, 2, 0]
-    elif ndim == 5:
-        dim_order = [1, 4, 3, 2, 0]
-    else:
-        raise RuntimeError(
-            f"no channels last format strides exist in {ndim} dimensions"
-        )
-
-    strides = [0] * ndim
-    cur_stride = 1
-    for d in dim_order:
-        strides[d] = cur_stride
-        cur_stride *= shape[d]
-    return strides
 
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
