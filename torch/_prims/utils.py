@@ -1335,7 +1335,6 @@ def make_channels_last_strides_for(shape: Sequence[int]) -> List[int]:
         return make_channels_last_2d_strides_for(shape)
     elif ndim == 5:
         return make_channels_last_3d_strides_for(shape)
-        dim_order = [1, 4, 3, 2, 0]
     else:
         raise RuntimeError(
             f"no channels last format strides exist in {ndim} dimensions"
