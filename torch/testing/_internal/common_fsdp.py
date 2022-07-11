@@ -13,12 +13,12 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
 from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -30,11 +30,6 @@ class FSDPInitMode(Enum):
     # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
-def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with FullyShardedDataParallel.summon_full_params(fsdp_model):
-        params = list(p.clone().detach_() for p in fsdp_model.parameters())
-
-    return params
 
 def _validate(model, process_group, assert_fn):
     module_states = [param.detach().cpu() for param in model.parameters()]
@@ -273,6 +268,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         **kwargs
@@ -284,6 +280,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             ),
@@ -392,6 +389,9 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
         self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
+
+    def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
+        self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -531,6 +531,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         save_model=True,
@@ -566,6 +567,7 @@ class FSDPTest(MultiProcessTestCase):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             )
@@ -577,6 +579,7 @@ class FSDPTest(MultiProcessTestCase):
             model,
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
+            forward_prefetch=forward_prefetch,
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
         )

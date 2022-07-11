@@ -214,7 +214,7 @@ Tensor& copy_(
       if (!self.is_same_size(src_fw_grad)) {
         new_fw_grad = src_fw_grad.broadcast_to(self.sizes());
       } else {
-        new_fw_grad = src_fw_grad;
+        new_fw_grad = src_fw_grad.clone();
       }
     }
     self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);

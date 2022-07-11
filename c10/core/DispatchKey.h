@@ -217,7 +217,6 @@ enum class DispatchKey : uint16_t {
   // Out-of-core key for Fake Tensor in torchdistx.
   // See https://pytorch.org/torchdistx/latest/fake_tensor.html
   Fake,
-
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
@@ -532,11 +531,14 @@ enum class DispatchKey : uint16_t {
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   CompositeExplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
+  // See Note [CompositeExplicitAutogradNonFunctional Key]
+  CompositeExplicitAutogradNonFunctional, // registered at
+  // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
   StartOfAliasKeys = Autograd,
-  EndOfAliasKeys = CompositeExplicitAutograd, //
+  EndOfAliasKeys = CompositeExplicitAutogradNonFunctional, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
