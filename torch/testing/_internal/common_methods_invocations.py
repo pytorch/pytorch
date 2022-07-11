@@ -21141,6 +21141,11 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
+    PythonRefInfo(
+        "_refs.unflatten",
+        torch_opinfo_name="unflatten",
+        supports_nvfuser=False,
+    ),
     #
     # Reduction Reference OpInfos
     #

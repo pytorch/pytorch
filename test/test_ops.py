@@ -1531,6 +1531,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
+        '_refs.unflatten',
         # CompositeImplicitAutograd
         '_refs.atleast_1d',
         '_refs.atleast_2d',

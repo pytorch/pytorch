@@ -215,6 +215,7 @@ __all__ = [
     "view",
     "vsplit",
     "vstack",
+    "unflatten",
     #
     # Tensor Creation
     #
@@ -2521,6 +2522,13 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
     aligned_tensors = atleast_2d(*tensors)
     return cat(aligned_tensors, 0)
+
+
+# This not an op, just a method on tensor, so we don't register decomp
+def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
+    return reshape(a, out_shape)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
