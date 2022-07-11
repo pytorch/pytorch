@@ -51,6 +51,27 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
+def post_pass_hook(fn: Callable, *post_hooks) -> Callable:
+    """
+    Wrapper to add hooks for passes. 
+    Note that these hooks should have type Callable[Module, None]
+
+    Args:
+        fn (Callable[Module, Any]): Pass that we want to add hooks to
+        post_hooks: Hooks to be run after the pass
+
+    Returns:
+        new_pass (Callable[Module, PassResult])
+    """
+    @wraps(fn)
+    def new_pass(gm):
+        res = fn(gm)
+        for hook in post_hooks:
+            hook(res.graph_module)
+        return res
+
+    return new_pass
+
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
 ) -> None:

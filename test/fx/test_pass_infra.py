@@ -9,6 +9,7 @@ from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
     topological_sort_passes,
+    post_pass_hook,
 )
 
 def replace_add_with_mul_pass(gm):
@@ -99,6 +100,28 @@ class TestPassManager(TestCase):
 
         pm = PassManager()
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
+
+    def test_pass_manager_hooks(self):
+        """
+        Tests that hooks are added correctly
+        """
+        num_call_func = 0
+
+        def count_num_call_func(graph_module):
+            nonlocal num_call_func
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function":
+                    num_call_func += 1
+
+        m = AddModule()
+        traced_m = fx.symbolic_trace(m)
+        PassManager(passes=[
+            post_pass_hook(replace_add_with_mul_pass, *(count_num_call_func,)), 
+            post_pass_hook(replace_mul_with_div_pass, *(count_num_call_func,)), 
+        ])(traced_m)
+
+        self.assertEqual(num_call_func, 4)
+
 
     def test_topological_sort(self):
         """
