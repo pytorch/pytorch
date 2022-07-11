@@ -1,10 +1,12 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
+from itertools import product
+import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -14,6 +16,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+import torch._refs as refs
+
+
+if TEST_SCIPY:
+    import scipy.special
 
 
 class TestPrims(TestCase):
@@ -106,6 +113,30 @@ class TestPrims(TestCase):
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
 
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float64, torch.long)
+    def test_cbrt_prim(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        batches = [(), (1,), (2,), (0, 1), (1, 1), (2, 2)]
+        shapes = [(), (0,), (1,), (5,)]
+
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+
+            # Tested here, as this OP is not currently exposed or tested in ATen
+            for b, s in product(batches, shapes):
+                x = make_arg(b + s)
+                y = prims.cbrt(x)
+
+                x_np = x.cpu().numpy()
+                y_np = scipy.special.cbrt(x_np)
+
+                self.assertEqual(y, y_np, exact_device=False)
+        finally:
+            torch.set_default_dtype(cur_default)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_impl_is_used(self, device):
@@ -189,6 +220,69 @@ class TestPrims(TestCase):
         result_aten = fn(a, b_dict, executor="aten")
         result_nvfuser = fn(a, b_dict, executor="nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
+
+    @dtypes(torch.float32)
+    def test_memory_format_strides(self, device, dtype):
+        shapes = (
+            (),
+            (0,),
+            (1,),
+            (5),
+            (1, 0),
+            (1, 1),
+            (3, 7),
+            (3, 0, 2),
+            (1, 1, 2),
+            (4, 1, 1),
+            (7, 8, 9),
+        )
+
+        channels_last_shapes = (
+            (0, 0, 0, 0),
+            (1, 0, 3, 0),
+            (0, 2, 3, 5),
+            (2, 2, 2, 0),
+            (5, 4, 3, 2),
+            (8, 8, 7, 2),
+            (9, 1, 3, 1),
+            (4, 5, 8, 7)
+        )
+
+        channels_last_3d_shapes = (
+            (0, 8, 7, 9, 2),
+            (5, 0, 7, 9, 2),
+            (5, 0, 7, 9, 0),
+            (5, 8, 7, 9, 2),
+            (5, 1, 7, 9, 2),
+            (5, 1, 7, 9, 1),
+        )
+
+        pairs = (
+            (shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.contiguous_format),
+            (channels_last_3d_shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.channels_last),
+            (channels_last_3d_shapes, torch.channels_last_3d),
+        )
+
+        for shapes, memory_format in pairs:
+            for shape in shapes:
+                # tests empty
+                expected = torch.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                actual = refs.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests clone
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype)
+                expected = torch.clone(a, memory_format=memory_format)
+                actual = torch.clone(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests contiguous
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype, noncontiguous=True)
+                expected = a.contiguous(memory_format=memory_format)
+                actual = refs.contiguous(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
 
 
 class TestPrimsBasic(TestCase):
