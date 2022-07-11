@@ -122,6 +122,8 @@ def proxy_call(func_overload, args, kwargs=None):
         return args[0].fake_device
     if func_overload == aten.sym_size.default:
         return None
+    if func_overload == aten.stride.default:
+        return None
     if func_overload == aten.size.default:
         return None
     if func_overload == aten.dim.default:
@@ -293,8 +295,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
-        # if func == torch.ops.aten.stride:
-        #     return
         func = func_overload.overloadpacket
         if func_overload == torch.ops.prim.device.default:
             return args[0].device

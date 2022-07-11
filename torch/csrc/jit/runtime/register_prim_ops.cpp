@@ -419,6 +419,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
+        stride,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
         sym_size,
         aliasAnalysisFromSchema()),

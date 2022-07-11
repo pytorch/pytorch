@@ -471,6 +471,8 @@ class FakeTensorMode(TorchDispatchMode):
                 return None
             if func == torch.ops.aten.size.default:
                 return args[0].shape
+            if func == torch.ops.aten.stride.default:
+                return args[0].stride()
             if func == torch.ops.aten.dim.default:
                 return len(args[0].shape)
             if func == torch.ops.aten.is_contiguous.default:
