@@ -27,7 +27,7 @@ struct ComputeAt {
   static void runAt(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int consumer_position,
+      int64_t consumer_position,
       ComputeAtMode mode = ComputeAtMode::Standard);
 
   // Runs the compute with pass making consumer look like producer, computing
@@ -35,7 +35,7 @@ struct ComputeAt {
   static void runWith(
       TensorView* producer,
       TensorView* consumer,
-      unsigned int producer_position,
+      int64_t producer_position,
       ComputeAtMode mode = ComputeAtMode::Standard);
 };
 

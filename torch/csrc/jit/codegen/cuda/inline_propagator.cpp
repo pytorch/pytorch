@@ -178,7 +178,6 @@ InlinePropagator::InlinePropagator(
     : max_pos_calc(mode),
       selected_(std::move(selected)),
       reference_(reference),
-      reference_pos_(reference_pos),
       mode_(mode) {
   if (reference_pos < 0) {
     reference_pos += int64_t(reference->nDims()) + 1;
@@ -192,6 +191,7 @@ InlinePropagator::InlinePropagator(
       " and <= ",
       reference->nDims(),
       ".");
+  reference_pos_ = reference_pos;
 }
 
 void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {

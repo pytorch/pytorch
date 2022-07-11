@@ -163,7 +163,7 @@ std::unordered_set<TensorView*> getPropagationSubgraph(
 void ComputeAt::runAt(
     TensorView* producer,
     TensorView* consumer,
-    unsigned int consumer_position,
+    int64_t consumer_position,
     ComputeAtMode mode) {
   FUSER_PERF_SCOPE("ComputeAt::runAt");
 
@@ -176,7 +176,7 @@ void ComputeAt::runAt(
       " are not in the same fusion.");
 
   if (mode == ComputeAtMode::MostInlined) {
-    consumer_position = consumer->nDims();
+    consumer_position = -1;
   }
 
   FusionGuard fg(producer->fusion());
@@ -205,7 +205,7 @@ void ComputeAt::runAt(
 void ComputeAt::runWith(
     TensorView* producer,
     TensorView* consumer,
-    unsigned int producer_position,
+    int64_t producer_position,
     ComputeAtMode mode) {
   FUSER_PERF_SCOPE("ComputeAt::runWith");
 
@@ -218,7 +218,7 @@ void ComputeAt::runWith(
       " are not in the same fusion.");
 
   if (mode == ComputeAtMode::MostInlined) {
-    producer_position = producer->nDims();
+    producer_position = -1;
   }
 
   FusionGuard fg(producer->fusion());
