@@ -89,6 +89,7 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     missing_workflows = [x for x in regex.keys() if not regex[x]]
     if len(missing_workflows) > 0:
         return (False, "missing required workflows: " + ", ".join(missing_workflows))
+        
     return (True, "")
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
