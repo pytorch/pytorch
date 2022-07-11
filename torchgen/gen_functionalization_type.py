@@ -697,7 +697,7 @@ def gen_functionalization_registration(
 
     registrations = []
     for f in fns:
-        if str(f.func.name) == "lift":
+        if str(f.func.name) == "lift" or str(f.func.name) == "lift_fresh" or str(f.func.name) == "lift_fresh_copy":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
         if str(f.func.name) == "resize_":
