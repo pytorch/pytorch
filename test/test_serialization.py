@@ -898,6 +898,10 @@ class TestGetStateSubclass(torch.Tensor):
         self.reloaded = True
 
 
+class TestEmptySubclass(torch.Tensor):
+    ...
+
+
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
@@ -956,6 +960,25 @@ class TestSubclassSerialization(TestCase):
 
         self.assertEqual(new_tensor.requires_grad, my_tensor.requires_grad)
 
+    def test_empty_class_serialization(self):
+        tensor = TestEmptySubclass([1.])
+        # Ensures it runs fine
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
+
+        tensor = TestEmptySubclass()
+        # Ensures it runs fine
+        # Note that tensor.data_ptr() == 0 here
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())
