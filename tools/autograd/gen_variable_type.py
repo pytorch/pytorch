@@ -141,6 +141,8 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
+    # This function returns nested_tensor shape as a tensor that is non-differentiable
+    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -236,6 +238,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
+    "std_mean",
+    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
@@ -257,7 +261,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "index_add_",
     "linalg_inv",
     "linalg_inv_ex",
-    "l1_loss_backward",
     "baddbmm",
     "addbmm",
     "addmm",
@@ -321,7 +324,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_det_lu_based_helper",
+    "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -337,7 +340,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pixel_shuffle",
     "pixel_unshuffle",
     "linalg_lu_solve",
-    "_linalg_solve",
+    "_linalg_slogdet",
+    "_linalg_solve_ex",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -510,6 +514,9 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -517,8 +524,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
-    # lift() should never actually be called with a requires_grad=True tensor,
-    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
@@ -634,7 +639,7 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate(
     """\
-if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined() && ${out_arg}.defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
   ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
@@ -643,7 +648,8 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate(
     """\
-if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()) {
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()
+    && ${out_arg}.defined()) {
   ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
 }
 """
@@ -655,7 +661,7 @@ if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
-    if (${out_arg}_new_fw_grad[i].defined()) {
+    if (${out_arg}_new_fw_grad[i].defined() && ${out_arg}[i].defined()) {
       // The hardcoded 0 here will need to be updated once we support multiple levels.
       ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
     }
@@ -1402,6 +1408,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 is_inplace_str = "false"
 
+            requires_fw_grad = get_any_has_forward_grad_name(derivative.var_names)
+
             if all(
                 (isinstance(var_type, BaseType) and var_type.is_tensor_like())
                 for var_type in derivative.var_types
@@ -1414,6 +1422,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                             out_arg=res[0], is_inplace=is_inplace_str
                         )
                     )
+                    requires_fw_grad += f" && ({derivative.var_names[0]}.defined())"
                 else:
                     tuple_type = TupleCType(
                         [BaseCType(tensorT)] * len(derivative.var_types)
@@ -1451,9 +1460,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             content.append(
                 FW_DERIVATIVE_TEMPLATE.substitute(
                     fw_grad_opt_definition=fw_grad_opt_definition,
-                    requires_fw_grad=get_any_has_forward_grad_name(
-                        derivative.var_names
-                    ),
+                    requires_fw_grad=requires_fw_grad,
                     formula=derivative.formula,
                     out_arg="_".join(res),
                     unpacked_arguments=unpacked_arguments,

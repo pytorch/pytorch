@@ -21,6 +21,7 @@ from torch.ao.quantization.fake_quantize import (
 )
 
 from .observer import (
+    _PartialWrapper,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -335,52 +336,17 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
-    return {
-        "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig),
-                        (torch.nn.Conv1d, qconfig),
-                        (torch.nn.Conv2d, qconfig),
-                        (torch.nn.Conv3d, qconfig),
-                        (torch.nn.ConvTranspose1d, qconfig_transpose),
-                        (torch.nn.ConvTranspose2d, qconfig_transpose),
-                        (torch.nn.ConvTranspose3d, qconfig_transpose),
-                        (torch.nn.Linear, qconfig),
-                        (torch.nn.functional.conv1d, qconfig),
-                        (torch.nn.functional.conv2d, qconfig),
-                        (torch.nn.functional.conv3d, qconfig),
-                        (torch.nn.functional.conv_transpose1d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose2d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose3d, qconfig_transpose),
-                        (torch.nn.functional.linear, qconfig),
-                        (torch.nn.ReLU, qconfig),
-                        (torch.nn.functional.relu, qconfig),
-                        (torch.relu, qconfig),
-                        (torch.nn.BatchNorm1d, qconfig),
-                        (torch.nn.BatchNorm2d, qconfig),
-                        (torch.nn.BatchNorm3d, qconfig)]}
-
 def get_default_qconfig_dict(backend='fbgemm', version=0):
-    qconfig = get_default_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer.
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
-    qconfig = get_default_qat_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_fake_quant)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
@@ -450,16 +416,17 @@ def add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
+def _partial_wrapper_equals(obs1: _PartialWrapper, obs2: _PartialWrapper):
+    """
+    Return whether the two partial wrappers are equal,
+    """
+    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
+    return obs1.p.func == obs2.p.func and obs1.p.args == obs2.p.args and obs1.p.keywords == obs2.p.keywords
+
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     """
     Returns `True` if `q1` equals `q2`, and `False` otherwise.
     """
-    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
-    def partial_equals(p1, p2):
-        same = p1.func == p2.func
-        same = same and p1.args == p2.args
-        return same and p1.keywords == p2.keywords
-
     if q1 is None or q2 is None:
         return q1 == q2
     else:
@@ -468,12 +435,12 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
             # comparing partial wrappers.
-            if(isinstance(q1.activation, torch.ao.quantization.observer._PartialWrapper)):
-                activation_same = partial_equals(q1.activation.p, q2.activation.p)
+            if(isinstance(q1.activation, _PartialWrapper)):
+                activation_same = _partial_wrapper_equals(q1.activation, q2.activation)
             else:
                 activation_same = q1.activation == q2.activation
-            if(isinstance(q1.weight, torch.ao.quantization.observer._PartialWrapper)):
-                weight_same = partial_equals(q1.weight.p, q2.weight.p)
+            if(isinstance(q1.weight, _PartialWrapper)):
+                weight_same = _partial_wrapper_equals(q1.weight, q2.weight)
             else:
                 weight_same = q1.weight == q2.weight
 

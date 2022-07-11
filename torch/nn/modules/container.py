@@ -10,6 +10,8 @@ from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 
+__all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
+
 T = TypeVar('T', bound=Module)
 
 
@@ -119,6 +121,19 @@ class Sequential(Module):
     @_copy_to_script_wrapper
     def __len__(self) -> int:
         return len(self._modules)
+
+    def __add__(self, other) -> 'Sequential':
+        if isinstance(other, Sequential):
+            ret = Sequential()
+            for layer in self:
+                ret.append(layer)
+            for layer in other:
+                ret.append(layer)
+            return ret
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
 
     @_copy_to_script_wrapper
     def __dir__(self):
