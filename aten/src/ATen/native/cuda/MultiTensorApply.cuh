@@ -24,6 +24,7 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
+// TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};

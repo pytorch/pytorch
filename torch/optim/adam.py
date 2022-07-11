@@ -114,8 +114,12 @@ class Adam(Optimizer):
 
         if fused:
             self._step_supports_amp_scaling = True
-            # TODO(crcrpar): Relax the condition by e.g. a logic which accordingly groups tensors
-            # under the hood of fused optimizer kernels.
+            # TODO(crcrpar): Relax the condition by e.g. implementing a logic which accordingly
+            # groups tensors inside fused optimizer kernels.
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
             if not all(p.is_cuda for pg in self.param_groups for p in pg['params']):
                 raise RuntimeError("WIP FusedAdam requires all the params to be hosted on CUDA device")
 
