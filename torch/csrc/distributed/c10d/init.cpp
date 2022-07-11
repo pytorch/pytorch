@@ -1056,15 +1056,13 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  const ::c10d::AllreduceOptions& opts) {
-// #ifdef USE_C10D_NCCL
-// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && ((NCCL_MAJOR * 100 + NCCL_MINOR) >= 211)
+#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                 if (self->getBackendName() == "nccl") {
                   if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
                     return ::c10d::ops::nccl_premulsum_allreduce(self, tensors, opts);
                   }
                 }
-// #endif
-// #endif
+#endif
                 return ::c10d::ops::allreduce(self, tensors, opts);
               },
               py::arg("tensors"),
