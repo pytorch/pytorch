@@ -65,8 +65,6 @@ from typing import Optional, Sequence, Union, List, Set
 
 def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
-    if func.is_functional_fn():
-        name += "_functional"
     if func.is_symint_fn():
         name += "_symint"
     if func.is_out_fn():
