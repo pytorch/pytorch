@@ -19,6 +19,7 @@ __all__ = [
     "add",
     "append",
     "arange",
+    "argsort",
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
