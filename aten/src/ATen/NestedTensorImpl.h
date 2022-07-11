@@ -97,6 +97,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   //    && nesting in ascending order
   std::vector<int64_t> offsets_;
   // NOTE: -1 here means the size is missing
+  // TODO: maybe we can remove this metadata since
+  //       we can compute it from `nested_size_tensor_`
   std::vector<int64_t> opt_sizes_;
 };
 
