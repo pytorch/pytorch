@@ -547,8 +547,7 @@ class TestOptim(TestCase):
             ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=False)),
             ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=True)),
             ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.Adam, optim_fused.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim_fused.Adam), dict(weight_decay=0., amsgrad=True)),
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags)
 
