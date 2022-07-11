@@ -2,16 +2,18 @@ import json
 import os
 import subprocess
 
-from tools.stats.s3_stat_parser import (
-    get_previous_reports_for_branch,
-    Report,
-    Version2Report,
-    HAVE_BOTO3,
-)
+from typing import Any, cast, Dict, List, Optional, Tuple
+
+from typing_extensions import TypedDict
+
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
-from typing import Any, Dict, List, Optional, Tuple, cast
-from typing_extensions import TypedDict
+from tools.stats.s3_stat_parser import (
+    get_previous_reports_for_branch,
+    HAVE_BOTO3,
+    Report,
+    Version2Report,
+)
 
 
 class JobTimeJSON(TypedDict):

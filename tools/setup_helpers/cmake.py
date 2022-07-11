@@ -5,15 +5,15 @@ import multiprocessing
 import os
 import platform
 import re
-from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
 from distutils.version import LooseVersion
-from typing import IO, Any, Dict, List, Optional, Union, cast
+from subprocess import CalledProcessError, check_call, check_output
+from typing import Any, cast, Dict, IO, List, Optional, Union
 
 from . import which
-from .env import BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag
-from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
+from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
 
 
 def _mkdir_p(d: str) -> None:

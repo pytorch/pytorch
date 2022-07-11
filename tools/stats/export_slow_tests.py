@@ -5,13 +5,14 @@ import json
 import os
 import statistics
 from collections import defaultdict
+from typing import Any, cast, DefaultDict, Dict, List
+from urllib.request import urlopen
+
 from tools.stats.s3_stat_parser import (
     get_previous_reports_for_branch,
     Report,
     Version2Report,
 )
-from typing import cast, DefaultDict, Dict, List, Any
-from urllib.request import urlopen
 
 SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 SLOW_TEST_CASE_THRESHOLD_SEC = 60.0

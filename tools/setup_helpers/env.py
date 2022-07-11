@@ -3,7 +3,7 @@ import platform
 import struct
 import sys
 from itertools import chain
-from typing import Iterable, List, Optional, cast
+from typing import cast, Iterable, List, Optional
 
 
 IS_WINDOWS = platform.system() == "Windows"
