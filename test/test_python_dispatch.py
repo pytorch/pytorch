@@ -397,12 +397,10 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch.Tensor):
+            class A(torch._C._TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-                __torch_function__ = torch._C._disabled_torch_function_impl
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1158,6 +1156,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with PoliteMode():
                 a.abs()
 
+    def test_disable_mode(self):
+        class FailEverythingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise RuntimeError("arf")
+
+        with FailEverythingMode().push() as m:
+            self.assertRaises(RuntimeError, lambda: torch.ones([2, 3]))
+            with enable_torch_dispatch_mode(None, replace=m):
+                torch.ones([2, 3])
+
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
             def __new__(cls, elem, mode):
@@ -1796,7 +1804,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.sym_size:
+                    if func.overloadpacket == torch.ops.aten.size:
                         return (5, 3)
                     return NotImplemented
 
@@ -1809,13 +1817,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.sym_size:
+                    if func.overloadpacket == torch.ops.aten.size:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
+            err_msg = "no implementation found for 'torch.ops.aten.size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(RuntimeError, err_msg):
+            with self.assertRaisesRegex(TypeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)

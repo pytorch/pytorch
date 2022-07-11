@@ -12,7 +12,6 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
-from torch.utils._pytree import tree_map
 
 # Copied from functorch
 def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
@@ -61,45 +60,40 @@ except ImportError:
                   UserWarning)
 
 
-def _create_new_input(x):
-    if not isinstance(x, torch.Tensor):
-        return x
-    if x.dtype != torch.float:
-        return x + 1
-    if x.is_leaf:
-        return torch.rand_like(x, requires_grad=True)
-    else:
-        return torch.rand_like(x)
-
 class TestProxyTensor(TestCase):
-    def _test(self, f, inps):
-        fx_f = make_fx(f)(*inps)
-        new_inps = tree_map(_create_new_input, inps)
-        self.assertEqual(fx_f(*new_inps), f(*new_inps))
-
     def test_make_fx_simple(self, device):
         def f(x):
             return torch.sin(x)
-        self._test(f, (torch.randn(3),))
+        inp = torch.randn(3)
+        fx_f = make_fx(f)(inp)
+
+        new_inp = torch.randn(3)
+        self.assertEqual(fx_f(new_inp), f(new_inp))
 
     def test_scalar_device(self, device):
         def f(a, b):
             return a + b
-        self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
+        inps = [torch.randn(3, device=device), torch.tensor(5)]
+        fx_f = make_fx(f)(*inps)
+        self.assertEqual(fx_f(*inps), f(*inps))
+
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
         mod = torchvision.models.resnet18()
 
         def f(x):
-            for a in mod.parameters():
-                a.grad = None
             out = mod(x)
             out.sum().backward()
             return [a.grad for a in mod.parameters()]
 
         inp = torch.randn(3, 3, 250, 250, requires_grad=True)
-        self._test(f, [inp])
+        grads = f(inp)
+
+        mod.zero_grad()
+        mod(inp).sum().backward()
+        grads2 = [a.grad for a in mod.parameters()]
+        self.assertEqual(grads, grads2)
 
     def test_proxy_tensor(self):
         def f_grad(x):
@@ -112,7 +106,11 @@ class TestProxyTensor(TestCase):
             return x.grad
 
         for f in [f_grad, f_backward]:
-            self._test(f, [torch.randn(3, requires_grad=True)])
+            traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
+            inp = torch.randn(3, requires_grad=True)
+            traced_graph_out = traced_graph(inp)
+            assert inp.grad is None
+            torch.testing.assert_close(traced_graph_out, f(inp))
 
     def test_inplace_metadata(self):
         def f(x):
@@ -121,7 +119,9 @@ class TestProxyTensor(TestCase):
             assert x.shape[-1] == 1
             return x
 
-        self._test(f, [torch.randn(5)])
+        inps = [torch.randn(5)]
+        fx_f = make_fx(f)(*inps)
+        self.assertEqual(fx_f(*inps), f(*inps))
 
     def test_mode_tracing_factory_function(self):
         def f(x):
@@ -157,12 +157,42 @@ class TestProxyTensor(TestCase):
         self.assertTrue(all([isinstance(node.target, torch._ops.OpOverload)
                              for node in traced.graph.nodes if node.op == 'call_function']))
 
-    def test_tensor_constants(self):
+    def test_constant_proxy_tensor(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
         def f():
             val = torch.tensor(float('inf'))
             return torch.full((100, 100), val)
 
-        self._test(f, [])
+        g = make_fx(f)()
+        self.assertEqual(g(), f())
+
+    def test_constant_proxy_tensor_mut(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f():
+            val = torch.tensor(float(1))
+            val.add_(2)
+            return torch.full((100, 100), val)
+
+        g = make_fx(f)()
+        self.assertEqual(g(), f())
+        # In case we mutated shared state in the g graph!
+        self.assertEqual(g(), f())
+
+        g = make_fx(f, use_fake=True)()
+        self.assertEqual(g(), f())
+        # In case we mutated shared state in the g graph!
+        self.assertEqual(g(), f())
+
+    def test_use_fake_and_tensor(self):
+        def f(x, y):
+            z = torch.tensor([2.0, 3.0])
+            return x + y + z
+
+        g = make_fx(f, use_fake=True)(torch.randn(2), torch.randn(2))
+        x, y = torch.randn(2), torch.randn(2)
+        self.assertEqual(g(x, y), f(x, y))
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -247,28 +277,6 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
-    # Masked failures (creating a scalar tensor just to call `.item` on it)
-    xfail('_masked.amax'),
-    xfail('_masked.amax'),
-    xfail('_masked.amin'),
-    xfail('_masked.argmax'),
-    xfail('_masked.argmin'),
-    xfail('_masked.cumprod'),
-    xfail('_masked.cumsum'),
-    xfail('_masked.log_softmax'),
-    xfail('_masked.logaddexp'),
-    xfail('_masked.logsumexp'),
-    xfail('_masked.mean'),
-    xfail('_masked.median'),
-    xfail('_masked.norm'),
-    xfail('_masked.prod'),
-    xfail('_masked.softmax'),
-    xfail('_masked.softmin'),
-    xfail('_masked.std'),
-    xfail('_masked.sum'),
-    xfail('_masked.var'),
-    # Same as masked failures - preventing torch.tensor constants from turning into proxytensors causes issues with faketensors
-    xfail('__getitem__'),
 }
 
 

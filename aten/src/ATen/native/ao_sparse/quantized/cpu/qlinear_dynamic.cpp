@@ -36,7 +36,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   const auto rows_input = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
   const auto cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
   TORCH_CHECK(
-      cols_input == input_channels_,
+      cols_input == orig_weight_.size(1),
       "quantized_sparse_lienar: Input tensor's last and weight tensor's"
       " second dimension must match.");
 
@@ -71,8 +71,8 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
     pytorch_qnnp_operator_t sparse_linear_op{nullptr};
     pytorch_qnnp_status status =
         pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
-            input_channels_,
-            output_channels_,
+            orig_weight_.size(1),
+            orig_weight_.size(0),
             q_input_contig.q_zero_point(),
             w_zero_points_.data(),
             bcsr_matrix_->col_indices.data(),
@@ -111,7 +111,8 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       requantization_scales_.data();
 
   std::vector<int64_t> out_sizes = input.sizes().vec();
-  out_sizes.back() = output_channels_;
+  size_t rows_w = orig_weight_.size(0);
+  out_sizes.back() = rows_w;
 
   auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
 
@@ -123,7 +124,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
           cols_input, /* num input channels */
           bias_.data_ptr<float>(),
           output.data_ptr<float>(),
-          output_channels_);
+          rows_w /* num output channels */);
   TORCH_CHECK(
       status == pytorch_qnnp_status_success,
       "Failed to setup sparse linear operator on"

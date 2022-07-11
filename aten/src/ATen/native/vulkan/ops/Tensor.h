@@ -17,7 +17,7 @@ struct LastAccess {
   api::MemoryAccessFlags access;
 
   LastAccess()
-    : stage{api::PipelineStage::NO_STAGE},
+    : stage{api::PipelineStage::None},
       access{api::MemoryAccessType::NONE} {
   }
 

@@ -1,12 +1,12 @@
 import argparse
 import os
 import textwrap
-from common import categories, topics, get_commit_data_cache
+from common import categories, topics, CommitDataCache
 from commitlist import CommitList
 
 class Categorizer:
     def __init__(self, path, category='Uncategorized'):
-        self.cache = get_commit_data_cache()
+        self.cache = CommitDataCache()
         self.commits = CommitList.from_existing(path)
 
         # Special categories: 'Uncategorized'

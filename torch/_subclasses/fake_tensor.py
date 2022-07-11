@@ -334,7 +334,12 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
-        if any(not issubclass(t, FakeTensor) and not t is torch.Tensor for t in types):
+        # Because fake mode can return NotImplemented (if it sees a subclass
+        # it doesn't know how to deal with), this test here is important
+        # because the next dispatch after a fake mode will attempt to use
+        # subclasses of tensors to dispatch, and any FakeTensor arguments
+        # will be considered eligible.
+        if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
             return NotImplemented
 
         fake_mode = None
@@ -429,8 +434,6 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
-        super().__init__()
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -476,6 +479,20 @@ class FakeTensorMode(TorchDispatchMode):
             tree_map(check_non_fake_tensor, args)
             tree_map(check_non_fake_tensor, kwargs)
 
+            # Suppose we enable fake tensor mode.  This means that fake tensor
+            # mode will run first.  But what if we do an operation that
+            # involves a tensor subclass that will desugar into normal tensor
+            # operations?  Without this line, fake tensor mode will run first,
+            # decide that a conversion was made (since there was a non fake
+            # tensor argument), and report an error that converting non
+            # fake tensor is not supported.  What we actually wanted to happen
+            # was to give the subclass a chance to figure out what it wants to
+            # before erroring out.  Returning NotImplemented here allows this.
+            #
+            # NB: If you're seeing a mysterious infinite loop involving fake
+            # tensor, it might be related to this line.  Though I'm not sure
+            # how you'll know to read this comment, as this line won't show up
+            # in the stack trace.
             if subclass_seen:
                 return NotImplemented
 
