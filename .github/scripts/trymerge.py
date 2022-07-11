@@ -424,8 +424,7 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
 
 def gh_get_pr_info(org: str, proj: str, pr_no: int, commit: Optional[str] = None) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no, commit=commit)
-    return rc
-
+    return (rc["data"]['repository']["object"], rc["data"]["repository"]["pullRequest"])
 
 @lru_cache(maxsize=None)
 def gh_get_team_members(org: str, name: str) -> List[str]:
@@ -481,9 +480,7 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.land_check_commit = land_check_commit
-        gh_info = gh_get_pr_info(org, project, pr_num, land_check_commit)
-        self.land_check_info = gh_info["data"]['repository']["object"]
-        self.info = gh_info["data"]["repository"]["pullRequest"]
+        [self.land_check_info, self.info] = gh_get_pr_info(org, project, pr_num, land_check_commit)
         self.changed_files: Optional[List[str]] = None
         self.land_check_conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
@@ -640,6 +637,7 @@ class GitHubPR:
                 if workflow_run is not None and has_failing_check:
                     conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
 
+        add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
             rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECKSUITES,
                             name=self.project,
@@ -1081,19 +1079,8 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
                 )
     return
 
-def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[str, str]]:
-    [owner, name] = repo.gh_owner_and_name()
-    checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
-    check_run_conclusions = {}
-    if len(checks['check_runs']) == 0:
-        raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
-    for check_run in checks['check_runs']:
-        check_run_conclusions[check_run['name']] = (check_run['conclusion'],
-                                                    check_run['html_url'])
-    return check_run_conclusions
-
-def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
-    checks = fetch_check_run_conclusions(repo, commit)
+def validate_land_time_checks(pr: GitHubPR) -> None:
+    checks = pr.get_land_checkrun_conclusions()
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
@@ -1110,7 +1097,9 @@ def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
             pending_checks.append((checkname, None))
         elif check_runs[checkname][0] is None:
             pending_checks.append((checkname, check_runs[checkname][1]))
-        elif check_runs[checkname][0].upper() != 'SUCCESS' and check_runs[checkname][0].upper() != 'SKIPPED':
+        elif check_runs[checkname][0].upper() != 'SUCCESS' \
+             and check_runs[checkname][0].upper() != 'SKIPPED' \
+             and check_runs[checkname][0].upper() != 'NEUTRAL':
             failed_checks.append((checkname, check_runs[checkname][1]))
     return (pending_checks, failed_checks)
 
@@ -1145,7 +1134,7 @@ def merge(pr_num: int, repo: GitRepo,
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
-        pr = GitHubPR(org, project, pr_num)
+        pr = GitHubPR(org, project, pr_num, commit)
         if initial_commit_sha != pr.last_commit()['oid']:
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
@@ -1160,7 +1149,7 @@ def merge(pr_num: int, repo: GitRepo,
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             if land_checks:
-                validate_land_time_checks(repo, commit)
+                validate_land_time_checks(pr)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:

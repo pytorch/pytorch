@@ -12,6 +12,7 @@ import os
 from hashlib import sha256
 
 from trymerge import (find_matching_merge_rule,
+                      validate_land_time_checks,
                       gh_graphql,
                       gh_get_team_members,
                       read_merge_rules,
@@ -97,7 +98,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
     pass
 
 def mock_gh_get_info() -> Any:
-    return {"closed": False, "isCrossRepository": False}
+    return ({}, {"closed": False, "isCrossRepository": False})
 
 
 def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
@@ -256,6 +257,24 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched for a commit
+        """
+        pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
+        conclusions = pr.get_land_checkrun_conclusions()
+        self.assertGreater(len(conclusions), 100)
+        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_pending_status_check(self, mocked_gql: Any) -> None:
+        """ Tests that PR with nonexistent/pending status checks fails with the right reason.
+        """
+        pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
+        self.assertRaisesRegex(RuntimeError,
+                               ".*Failed to merge; some land checks failed.*",
+                               lambda: validate_land_time_checks(pr))
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
