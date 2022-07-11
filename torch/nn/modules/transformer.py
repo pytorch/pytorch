@@ -410,11 +410,11 @@ class TransformerEncoderLayer(Module):
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
         if (src.dim() == 3 and not self.norm_first and not self.training and
-            self.self_attn.batch_first and
-            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
-            self.norm1.eps == self.norm2.eps and
-            src_mask is None and
-            not (src.is_nested and src_key_padding_mask is not None)):
+                self.self_attn.batch_first and
+                self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
+                self.norm1.eps == self.norm2.eps and
+                src_mask is None and
+                not (src.is_nested and src_key_padding_mask is not None)):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
