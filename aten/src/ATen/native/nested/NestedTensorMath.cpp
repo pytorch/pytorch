@@ -800,26 +800,14 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-// utility supporting transpose
-namespace {
-// Args: same to transpose
-// Returns:
-//     whether the input dimensions are the same (so no transpose)
-//     size matrix after transpose
-//     stride matrix after transpose
-inline std::tuple<bool, Tensor, Tensor>
-NestedTensor_transpose_size_stride(const Tensor& self, const int64_t& dim0, const int64_t& dim1) {
-  // create output variables
-  bool no_transpose = false;
-  Tensor sizemat_transposed, stridemat_transposed;
-  // check input dimensions
+Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_ptr = get_nested_tensor_impl(self);
+  // check input dimensions
   int64_t ndims = self_ptr->dim();
   int64_t positive_dim0 = at::maybe_wrap_dim(dim0, ndims),
       positive_dim1 = at::maybe_wrap_dim(dim1, ndims);
   if (positive_dim0 == positive_dim1) {
-    no_transpose = true;
-    return std::make_tuple(no_transpose, sizemat_transposed, stridemat_transposed);
+    return self;
   }
   TORCH_CHECK(positive_dim0 > 0, "Nested tensor dimension 0 cannot be transposed");
   TORCH_CHECK(positive_dim1 > 0, "Nested tensor dimension 0 cannot be transposed");
@@ -835,36 +823,10 @@ NestedTensor_transpose_size_stride(const Tensor& self, const int64_t& dim0, cons
   std::iota(column_indices_ptr, column_indices_ptr + ndims, 0);
   column_indices_ptr[positive_dim0] = positive_dim1;
   column_indices_ptr[positive_dim1] = positive_dim0;
-  sizemat_transposed = at::index_select(sizemat, 1, column_indices);
-  stridemat_transposed = at::index_select(stridemat, 1, column_indices);
-  return std::make_tuple(no_transpose, sizemat_transposed, stridemat_transposed);
-}
-}
-
-Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
-  bool no_transpose;
-  Tensor sizemat_transposed, stridemat_transposed;
-  std::tie(no_transpose, sizemat_transposed, stridemat_transposed) =
-      NestedTensor_transpose_size_stride(self, dim0, dim1);
-  if (no_transpose) {
-    return self;
-  }
-  auto self_ptr = get_nested_tensor_impl(self);
+  // create transposed `sizemat` and `stridemat`
+  Tensor sizemat_transposed = at::index_select(sizemat, 1, column_indices),
+      stridemat_transposed = at::index_select(stridemat, 1, column_indices);
   return wrap_buffer(self_ptr->get_buffer(), sizemat_transposed, stridemat_transposed, self_ptr->get_offsets());
-}
-
-Tensor& transpose_nested_(Tensor& self, int64_t dim0, int64_t dim1) {
-  bool no_transpose;
-  Tensor sizemat_transposed, stridemat_transposed;
-  std::tie(no_transpose, sizemat_transposed, stridemat_transposed) =
-      NestedTensor_transpose_size_stride(self, dim0, dim1);
-  if (no_transpose) {
-    return self;
-  }
-  auto self_ptr = get_nested_tensor_impl(self);
-  self_ptr->get_nested_size_tensor().copy_(sizemat_transposed);
-  self_ptr->get_nested_stride_tensor().copy_(stridemat_transposed);
-  return self;
 }
 
 // utilities supporting `reshape`

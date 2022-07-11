@@ -4856,7 +4856,6 @@
   tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: transpose_
-    NestedTensorCPU, NestedTensorCUDA: transpose_nested_
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_check: NoCheck
