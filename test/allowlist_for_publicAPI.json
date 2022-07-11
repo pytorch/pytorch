@@ -1148,7 +1148,6 @@
     "tensorinv",
     "tensorsolve",
     "vander",
-    "vecdot",
     "vector_norm"
   ],
   "torch.multiprocessing": [

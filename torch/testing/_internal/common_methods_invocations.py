@@ -44,6 +44,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.linalg
 
 import torch._prims as prims  # noqa: F401
 
@@ -1350,7 +1351,7 @@ class ReductionOpInfo(OpInfo):
     the optional keyword parameters of the ReductionOpInfo constructor.
 
     If a reduction operator does not yet implement the full required API of
-    reduction operators, this should be documented by xfailing the failing
+    reduction operators, this should be documented by skipping the failing
     tests rather than adding optional parameters to ReductionOpInfo.
 
     NOTE
@@ -3042,17 +3043,6 @@ def error_inputs_isclose(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_float_arg(()), args=(make_float_arg(()),), kwargs={'atol': -0.4}),
                      error_type=RuntimeError,
                      error_regex='atol must be greater than or equal to zero')
-
-
-def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    batches = ((), (0,), (1,), (5,))
-    ns = (0, 1, 3, 5)
-    for b, n in product(batches, ns):
-        shape = b + (n,)
-        yield SampleInput(make_arg(shape), args=(make_arg(shape),))
-        for i in range(len(shape)):
-            yield SampleInput(make_arg(shape), args=(make_arg(shape),), kwargs=dict(dim=i))
 
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
@@ -7214,7 +7204,7 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    is_linalg_svd = (op_info.name == "linalg.svd")
+    is_linalg_svd = ("linalg.svd" in op_info.name)
     batches = [(), (0, ), (3, )]
     ns = [0, 3, 5]
 
@@ -12443,15 +12433,6 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
-    OpInfo('linalg.vecdot',
-           aten_name='linalg_vecdot',
-           ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_linalg_vecdot,
-           check_batched_forward_grad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
@@ -18798,9 +18779,6 @@ op_db: List[OpInfo] = [
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: sum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
@@ -20496,8 +20474,18 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.softplus",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.l1_loss",
+        torch_opinfo_name="nn.functional.l1_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.mse_loss",
+        torch_opinfo_name="nn.functional.mse_loss",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -20787,6 +20775,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        supports_nvfuser=False,  # clone default
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -21189,6 +21178,27 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        supports_nvfuser=False,  # clone_default
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svd",
+        torch_opinfo_name="linalg.svd",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svdvals",
+        torch_opinfo_name="linalg.svdvals",
+        supports_out=True,
+        supports_nvfuser=False,
     ),
     #
     # Tensor Creation Reference OpInfos
