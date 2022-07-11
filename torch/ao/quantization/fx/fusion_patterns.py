@@ -5,7 +5,15 @@ from torch.ao.quantization.quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
+from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
+
+
+__all__ = [
+    "DefaultFuseHandler",
+    "FuseHandler",
+]
+
 
 # ----------------------------
 # Fusion Pattern Registrations
@@ -26,7 +34,7 @@ class FuseHandler(ABC):
              root_node: Node,
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
-             fuse_custom_config_dict: Dict[str, Any],
+             fuse_custom_config: FuseCustomConfig,
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
              is_qat: bool) -> Node:
         pass
@@ -45,7 +53,7 @@ class DefaultFuseHandler(FuseHandler):
              root_node: Node,
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
-             fuse_custom_config_dict: Dict[str, Any],
+             fuse_custom_config: FuseCustomConfig,
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
              is_qat: bool) -> Node:
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"

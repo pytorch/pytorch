@@ -2,7 +2,6 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
 
-
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.

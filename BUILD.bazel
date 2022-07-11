@@ -6,9 +6,10 @@ load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
 load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
 
@@ -47,12 +48,15 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
     "aten/src/ATen/CPUFunctions_inl.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
     "aten/src/ATen/CompositeViewCopyKernels.cpp",
@@ -1353,7 +1357,7 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.0.8",
+        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1420,7 +1424,7 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         ":caffe2_protos",
-        "//third_party/miniz-2.0.8:miniz",
+        "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
@@ -1641,7 +1645,8 @@ cc_library(
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
     ],
     copts = TORCH_COPTS,
     defines = [

@@ -13,6 +13,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/QScheme.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 namespace at {
 namespace meta {
@@ -250,7 +251,16 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // Computes equality closeness
   Tensor close = self == other;
   if (equal_nan && (self.is_floating_point() || self.is_complex())) {
+    // For CompositeCompliance, if `other` is a CCT and `self` is a regular Tensor,
+    // then we can't perform inplace op into `self` with `other`.
+    // NOTE: Inplacing into `close` is fine because it is generated from
+    // out-of-place with args `self` and `other`. So if either of them is
+    // a CCT then `close` will also be a `CCT`.
+    if (isTensorSubclassLike(other)) {
+      close.__ior__(self.isnan().bitwise_and(other.isnan()));
+    } else {
       close.__ior__(self.isnan().__iand__(other.isnan()));
+    }
   }
 
   // In case of zero tolerances the closeness inequality degenerates to an equality check.

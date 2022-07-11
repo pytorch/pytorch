@@ -31,7 +31,8 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
     }); // logical_and_string
 #else
     AT_DISPATCH_COMPLEX_TYPES(dtype, "logical_and_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+          iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
         return a && b;
       });
     });
@@ -39,7 +40,8 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, ScalarType::BFloat16,
                                dtype, "logical_and_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+          iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
         return a && b;
       });
    });
@@ -49,7 +51,8 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
 void logical_or_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
                                          iter.common_dtype(), "logical_or_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+    opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+        iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a || b;
     });
   });
@@ -58,7 +61,8 @@ void logical_or_kernel_cuda(TensorIterator& iter) {
 void logical_xor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
                                          iter.common_dtype(), "logical_xor_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+    opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+        iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return bool(a) != bool(b);
     });
   });

@@ -57,15 +57,20 @@ struct BoundHash {
 //     Contains: All elements in the Bound B are in the Bound B.
 //     PartialOverlap: Any elements in the Bound B are in the Bound A.
 //     NoOverlap: No elements in the Bound A are in the bound B.
-enum OverlapKind { ContainedOrEqual, Contains, PartialOverlap, NoOverlap };
+enum class OverlapKind {
+  ContainedOrEqual,
+  Contains,
+  PartialOverlap,
+  NoOverlap
+};
 
 // The Bound comparison result.
-//     TRUE: Every Bound element always satifies the given comparison operator
-//     FALSE: Every Bound element always does NOT satify the given comparison
+//     True: Every Bound element always satisfies the given comparison operator
+//     False: Every Bound element always does NOT satisfy the given comparison
 //     operator
-//     NOT_DETERMINED: Some elements satify the given comparison operator and
+//     NotDetermined: Some elements satisfy the given comparison operator and
 //     some elements not
-enum CmpEvalResult { TRUE, FALSE, NOT_DETERMINED };
+enum class CmpEvalResult { True, False, NotDetermined };
 
 // Returns the kind of overlap between Bound A and Bound A in a single
 // dimension.
