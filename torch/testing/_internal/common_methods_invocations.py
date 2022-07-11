@@ -7287,12 +7287,41 @@ def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **
     for batch, m, n in product(batches, ns, ns):
         yield SampleInput(make_arg(batch + (m, n)))
 
+def error_inputs_softshrink(op, device, **kwargs):
+    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"lambd": -0.5}),
+                     error_regex="lambda must be greater or equal to 0, but found to be -0.5")
 
-def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
-    N = 10
-    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
-               requires_grad=requires_grad)) for _ in range(1, N)]
-    return tensors
+def sample_inputs_softshrink(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # The additional sample is to check additional values of lambd beyond the default
+    # value (what is already checked by sample_inputs_elementwise_unary)
+    for lbda in (0., 0.5):
+        yield SampleInput(make_arg(S, S), kwargs={"lambd": lbda})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
+
+def sample_inputs_hardshrink(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # The additional sample is to check additional values of lambd beyond the default
+    # value (what is already checked by sample_inputs_elementwise_unary)
+    # Note that unlike softshrink, lambd is allowed to be negative for hardshrink
+    for lbda in (-0.5, 0., 0.5):
+        yield SampleInput(make_arg(S, S), kwargs={"lambd": lbda})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
+
+
+def sample_inputs_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # The additional sample is to check additional values of min_val and max_val beyond the default
+    # value (what is already checked by sample_inputs_elementwise_unary)
+    for max_val, min_val in ((-0.5, 0.5), (0.5, -0.5), (0., 0.)):
+        yield SampleInput(make_arg(S, S), kwargs={"min_val": min_val, "max_val": max_val})
+
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
 
 def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     eigvecs = make_tensor((S, S), device=device, dtype=dtype,
@@ -14992,46 +15021,43 @@ op_db: List[OpInfo] = [
     #                     # TypeError: igammac(): argument 'input' (position 1) must be Tensor, not float
     #                     DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
     #                 )),
-    OpInfo('nn.functional.softshrink',
-           aten_name="softshrink",
-           aten_backward_name='softshrink_backward',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_autodiffed=False,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
-           supports_gradgrad=True,
-           ),
-    OpInfo('nn.functional.hardshrink',
-           aten_name="hardshrink",
-           aten_backward_name='hardshrink_backward',
-           dtypes=floating_types_and(torch.bfloat16,),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=True,
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
-           supports_gradgrad=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           autodiff_nonfusible_nodes=["aten::hardshrink"]),
-    OpInfo('nn.functional.hardtanh',
-           aten_name="hardtanh",
-           aten_backward_name='hardtanh_backward',
-           dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
-           backward_dtypes=all_types(),
-           dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16),
-           supports_autograd=True,
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
-           supports_gradgrad=True,
-           supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           autodiff_nonfusible_nodes=["aten::hardtanh"],
-           ),
+    UnaryUfuncInfo('nn.functional.softshrink',
+                   ref=_NOTHING,
+                   aten_name="softshrink",
+                   aten_backward_name='softshrink_backward',
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   assert_autodiffed=False,
+                   sample_inputs_func=sample_inputs_softshrink,
+                   error_inputs_func=error_inputs_softshrink),
+    UnaryUfuncInfo('nn.functional.hardshrink',
+                   ref=_NOTHING,
+                   aten_name="hardshrink",
+                   aten_backward_name='hardshrink_backward',
+                   dtypes=floating_types_and(torch.bfloat16,),
+                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   assert_autodiffed=True,
+                   sample_inputs_func=sample_inputs_hardshrink,
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   autodiff_nonfusible_nodes=["aten::hardshrink"]),
+    UnaryUfuncInfo('nn.functional.hardtanh',
+                   ref=_NOTHING,
+                   aten_name="hardtanh",
+                   aten_backward_name='hardtanh_backward',
+                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
+                   backward_dtypes=all_types(),
+                   dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
+                                                   torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   assert_autodiffed=True,
+                   sample_inputs_func=sample_inputs_hardtanh,
+                   supports_out=False,
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   autodiff_nonfusible_nodes=["aten::hardtanh"]),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
            aten_backward_name='gelu_backward',
@@ -15050,20 +15076,18 @@ op_db: List[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                # May not replicate in CI
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
-    OpInfo('nn.functional.relu6',
-           aten_name="relu6",
-           dtypes=all_types_and(torch.bfloat16),
-           backward_dtypes=floating_types(),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16),
-           supports_autograd=True,
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_softshrink_hardshrink_hardtanh,
-           supports_gradgrad=True,
-           supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           autodiff_nonfusible_nodes=["aten::relu6"]),
+    UnaryUfuncInfo('nn.functional.relu6',
+                   ref=_NOTHING,
+                   aten_name="relu6",
+                   dtypes=all_types_and(torch.bfloat16),
+                   backward_dtypes=floating_types(),
+                   dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   assert_autodiffed=True,
+                   supports_out=False,
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   autodiff_nonfusible_nodes=["aten::relu6"]),
     OpInfo('mm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
@@ -20512,7 +20536,7 @@ python_ref_db = [
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
         supports_nvfuser=False,
@@ -20543,6 +20567,10 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.relu6",
+        torch_opinfo_name="nn.functional.relu6",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
@@ -20580,12 +20608,12 @@ python_ref_db = [
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardshrink",
         torch_opinfo_name="nn.functional.hardshrink",
         supports_nvfuser=False,
     ),
-    PythonRefInfo(
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
         supports_nvfuser=False,
