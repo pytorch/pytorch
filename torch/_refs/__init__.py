@@ -406,6 +406,7 @@ def ceil(a):
     return prims.ceil(a)
 
 
+@register_decomposition(torch.ops.aten.conj_physical)
 @out_wrapper()
 def conj_physical(input: TensorLikeType):
     if not input.dtype.is_complex:
@@ -2075,6 +2076,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+@register_decomposition(torch.ops.aten.conj)
 def conj(input: TensorLikeType) -> TensorLikeType:
     if not input.dtype.is_complex:
         return input
