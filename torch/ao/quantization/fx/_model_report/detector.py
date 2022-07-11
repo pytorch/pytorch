@@ -1104,14 +1104,14 @@ class OutlierDetector(DetectorBase):
         outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate whether there were constant batches through channels
-        constant_channels = [
+        is_constant_channel = [
             True if channel_batch_count != 0 else False for channel_batch_count in constant_channels
         ]
 
         # calculate for each channel whether it's an outlier or not based on ratio
         outlier_detected = [True if ratio > self.ratio_threshold else False for ratio in ratios_list]
         outlier_dict[self.OUTLIER_KEY] = outlier_detected
-        outlier_dict[self.CONSTANT_CHANNEL_KEY] = constant_channels
+        outlier_dict[self.CONSTANT_CHANNEL_KEY] = is_constant_channel
 
         # return the dictionary with the two lists
         return outlier_dict
@@ -1257,7 +1257,7 @@ class OutlierDetector(DetectorBase):
                         added_model_desc = True
 
                     constant_values_for_channel = mod_info[self.CONSTANT_COUNTS_KEY]
-                    formatted_str = constant_str.format(index,constant_values_for_channel ,constant_suggestion)
+                    formatted_str = constant_str.format(index, constant_values_for_channel, constant_suggestion)
                     outlier_string += formatted_str
                     # we also added at least one thing to description
                     added_module = True
