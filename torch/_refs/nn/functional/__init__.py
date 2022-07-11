@@ -551,4 +551,7 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     if inplace:
         raise NotImplementedError
 
+    # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
+    # It may be better to use clamp here, but we use hardtanh to replicate
+    # the behavior of the existing implementation
     return refs.nn.functional.hardtanh(a, 0, 6)
