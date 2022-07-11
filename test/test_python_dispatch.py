@@ -397,10 +397,12 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch._C._TensorBase):
+            class A(torch.Tensor):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+                __torch_function__ = torch._C._disabled_torch_function_impl
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -762,6 +764,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
 
+    def test_nested_push_regular(self):
+        with LoggingTensorMode.push() as mode:
+            # This previously errored
+            with LoggingTensorMode():
+                pass
+
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
         y = torch.randn([])
@@ -1099,6 +1107,56 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertIsInstance(z, ModeTensor)
 
         assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
+
+    def test_notimplemented_mode(self):
+        sub_count = 0
+
+        class PoliteMode(TorchDispatchMode):
+            def __init__(self):
+                self.pre_count = 0
+                self.post_count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.pre_count += 1
+                if any(t is not torch.Tensor for t in types):
+                    return NotImplemented
+                self.post_count += 1
+                return func(*args, **kwargs)
+
+        class SubTensor(torch.Tensor):
+            def __new__(cls, elem):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal sub_count
+                sub_count += 1
+
+                def unwrap(t):
+                    if isinstance(t, SubTensor):
+                        return t.elem
+                    else:
+                        return t
+
+                return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        a = SubTensor(torch.randn(2))
+        mode = PoliteMode()
+        with mode:
+            a.abs()
+
+        self.assertEqual(mode.pre_count, 2)
+        self.assertEqual(mode.post_count, 1)
+        self.assertEqual(sub_count, 1)
+
+        # make sure this doesn't error
+        with PoliteMode():
+            with PoliteMode():
+                a.abs()
 
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
@@ -1738,7 +1796,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return (5, 3)
                     return NotImplemented
 
@@ -1751,13 +1809,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
