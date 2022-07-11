@@ -704,8 +704,13 @@ class {module_name}(torch.nn.Module):
         return GraphModule(self, self.graph)
 
     def __str__(self) -> str:
+        submodules_str_list = []
+        for submodule in self.children():
+            indent_submodule_str = [' ' * 4 + line for line in submodule.__str__().split('\n')]
+            submodules_str_list.extend(indent_submodule_str)
+        submodules_str = '\n'.join(submodules_str_list)
+
         orig_str = super().__str__()
-        submodules_str = '\n'.join([submodule.__str__() for submodule in self.children()])
         return '\n'.join([orig_str, self._code, submodules_str])
 
     def _replicate_for_data_parallel(self):

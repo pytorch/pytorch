@@ -109,25 +109,11 @@ struct MPSCachedGraph
    [_object release];
    _object = nullptr;
   }
-
-  template<typename T>
-  inline T* as() {
-    return static_cast<T*>(this);
-  }
-
   MPSGraph *graph() const { return (MPSGraph *)_object; }
   NSObject *object() const { return _object; }
 private:
   NSObject *_object = nullptr;
 };
-
-struct MPSUnaryCachedGraph : public MPSCachedGraph
-{
-  MPSUnaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *inputTensor_ = nil;
-  MPSGraphTensor *outputTensor_ = nil;
-};
-
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
@@ -204,11 +190,6 @@ struct MPSGraphCache
       }
     });
     return result;
-  }
-
-  template<typename T>
-  inline T* LookUpAs(const std::string& key) const {
-    return static_cast<T *>(LookUp(key));
   }
 
   void FindAndRemoveViewEntry(void* ptr) {

@@ -18,8 +18,8 @@ struct PipelineBarrier final {
     VkPipelineStageFlags dst;
   } stage;
 
-  c10::SmallVector<BufferMemoryBarrier, 4u> buffers;
-  c10::SmallVector<ImageMemoryBarrier, 4u> images;
+  c10::SmallVector<api::BufferMemoryBarrier, 4u> buffers;
+  c10::SmallVector<api::ImageMemoryBarrier, 4u> images;
 
   inline operator bool() const {
     return (0u != stage.src) ||
@@ -32,15 +32,11 @@ struct PipelineBarrier final {
 using PipelineStageFlags = uint8_t;
 
 enum PipelineStage : PipelineStageFlags {
-  NO_STAGE = 0u << 0u,
-  COMPUTE = 1u << 0u,
-  HOST = 1u << 1u,
-  TRANSFER = 1u << 2u,
+  None = 0u << 0u,
+  Compute = 1u << 0u,
+  Host = 1u << 1u,
+  Transfer = 1u << 2u,
 };
-
-VkAccessFlags vk_access(const PipelineStageFlags, const MemoryAccessFlags);
-VkPipelineStageFlags vk_stage(const PipelineStageFlags);
-VkImageLayout vk_layout(const PipelineStageFlags, const MemoryAccessFlags);
 
 class PipelineLayout final {
  public:

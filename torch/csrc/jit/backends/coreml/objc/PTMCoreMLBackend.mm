@@ -121,14 +121,23 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       TORCH_CHECK(false, "Compiling model failed, only float type tensors supported");
     }
 
-    NSURL *modelURL = [PTMCoreMLCompiler compileModel:model modelID:sha256];
-    MLModel *cpuModel = modelURL ? [PTMCoreMLCompiler loadCPUModelAtURL:modelURL] : nil;
+    MLModel *compiledModel =
+      [PTMCoreMLCompiler
+       compileMLModel:model
+       identifier:sha256
+       backend:config.backend
+       allowLowPrecision:config.allow_low_precision];
 
-    if (!cpuModel) {
+    if (!compiledModel) {
       if (observer) {
         observer->onExitCompileModel(instance_key, false, true);
       }
-      TORCH_CHECK(false, "Compiling MLModel for CPU failed!");
+      TORCH_CHECK(false, "Compiling MLModel failed!");
+    }
+
+    if (observer) {
+      bool should_log = load_id < kSampleThreshold;
+      observer->onExitCompileModel(instance_key, true, should_log);
     }
 
     NSMutableArray *orderedFeatures = [NSMutableArray array];
@@ -137,19 +146,8 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       [orderedFeatures addObject:name];
     }
 
-    PTMCoreMLExecutor *executor = [[PTMCoreMLExecutor alloc] initWithFeatureNames:orderedFeatures];
-    executor.model = cpuModel;
+    PTMCoreMLExecutor *executor = [[PTMCoreMLExecutor alloc] initWithModel:compiledModel featureNames:orderedFeatures];
     [executor autorelease];
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-      MLModel *configuredModel = [PTMCoreMLCompiler loadModelAtURL:modelURL backend:config.backend allowLowPrecision:config.allow_low_precision];
-      executor.model = configuredModel ?: cpuModel;
-    });
-
-    if (observer) {
-      bool should_log = load_id < kSampleThreshold;
-      observer->onExitCompileModel(instance_key, true, should_log);
-    }
 
     MLModelWrapper model_wrapper = MLModelWrapper(executor);
     model_wrapper.outputs = output_specs;

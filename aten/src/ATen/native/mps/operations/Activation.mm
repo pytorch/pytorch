@@ -18,10 +18,16 @@ namespace native {
 
 Tensor relu_mps(const Tensor& self) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   Tensor output = at::empty_like(self);
   resize_tensor(&output);
   TORCH_CHECK(output.is_mps());
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -29,7 +35,7 @@ Tensor relu_mps(const Tensor& self) {
 
   @autoreleasepool {
     string key = "relu" + getTensorsStringKey({self});
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
@@ -73,10 +79,16 @@ Tensor relu_mps(const Tensor& self) {
 
 Tensor & relu_mps_(Tensor & self) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   // Inplace relu
   Tensor &output = self;
   TORCH_CHECK(output.is_mps());
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -84,7 +96,7 @@ Tensor & relu_mps_(Tensor & self) {
 
   @autoreleasepool {
     string key = "relu_" + getTensorsStringKey({self});
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
@@ -129,8 +141,14 @@ Tensor & relu_mps_(Tensor & self) {
 TORCH_IMPL_FUNC(leaky_relu_out_mps) (
   const Tensor& self, const Scalar& negative_slope, const Tensor& output) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -139,7 +157,7 @@ TORCH_IMPL_FUNC(leaky_relu_out_mps) (
   @autoreleasepool {
 
     string key = "leaky_relu" + getTensorsStringKey({self}) + ":" + to_string(negative_slope.to<double>());
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -167,7 +185,7 @@ TORCH_IMPL_FUNC(leaky_relu_out_mps) (
         }
         return newCachedGraph;
       });
-      cachedGraph = tmpCachedGraph->as<CachedGraph>();
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
@@ -278,11 +296,17 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
   const bool half_to_float,
   const Tensor &out) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
 
   if (self.numel() == 0) {
     return;
   }
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -290,7 +314,7 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
 
   @autoreleasepool {
     string key = "log_softmax_mps_out" + getTensorsStringKey({self}) + ":" + to_string(dim);
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -414,8 +438,14 @@ TORCH_IMPL_FUNC(sigmoid_out_mps)(
   const Tensor& self,
   const Tensor& output) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -423,7 +453,7 @@ TORCH_IMPL_FUNC(sigmoid_out_mps)(
 
   @autoreleasepool {
     string key = "sigmoid_out_mps" + getTensorsStringKey({self});
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
@@ -621,8 +651,14 @@ TORCH_IMPL_FUNC(threshold_out_mps)(
   const Scalar& value,
   const Tensor& result) {
   using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(self.is_mps());
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -633,7 +669,7 @@ TORCH_IMPL_FUNC(threshold_out_mps)(
                                        to_string(threshold.to<double>()) + ":" +
                                        to_string(value.to<double>());
 
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 

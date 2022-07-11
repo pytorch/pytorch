@@ -114,8 +114,8 @@ __all__ = [
     "gcd",
     "ge",
     "gt",
-    "heaviside",
-    "hypot",
+    # 'heaviside',
+    # 'hypot',
     "igamma",
     "igammac",
     "isclose",
@@ -1039,8 +1039,6 @@ fmax = _make_elementwise_binary_reference(
     prims.fmax,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -1048,8 +1046,6 @@ fmin = _make_elementwise_binary_reference(
     prims.fmin,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -1057,8 +1053,6 @@ fmod = _make_elementwise_binary_reference(
     prims.fmod,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=True,
 )
 
 # TODO: add docstring
@@ -1082,30 +1076,6 @@ gt = _make_elementwise_binary_reference(
     prims.gt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
-)
-
-
-def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
-    input_eq_zero = eq(input, 0)
-    input_lt_zero = logical_or(lt(input, 0), isnan(input))
-    zeros_and_ones = where(input_lt_zero, 0, 1)
-    output = where(input_eq_zero, values, zeros_and_ones)
-    return output
-
-
-heaviside = _make_elementwise_binary_reference(
-    _heaviside,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
-    aten_op=torch.ops.aten.heaviside,
-)
-
-hypot = _make_elementwise_binary_reference(
-    prims.hypot,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    supports_lhs_python_scalar=False,
-    supports_rhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(

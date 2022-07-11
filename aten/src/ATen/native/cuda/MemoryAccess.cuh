@@ -382,4 +382,19 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
+// jitted version of the above
+// See Note [Jiterator], this relies on the assumptions enumerated there
+template<typename result_type, typename common_type, int arity, typename array_t>
+inline int jitted_can_vectorize_up_to(array_t pointers) {
+  // Deals with output
+  int result = can_vectorize_up_to<result_type>(pointers[0]);
+
+  // Incorporates input(s)
+  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
+    result = std::min<int>(result, can_vectorize_up_to<common_type>(pointers[i]));
+  }
+
+  return result;
+}
+
 }}} // namespace at::native::memory
