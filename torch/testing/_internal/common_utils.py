@@ -293,12 +293,14 @@ class parametrize(_TestParametrizer):
 
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
-        arg_values (iterable): Iterable of arg values (e.g. range(10)) or
+        arg_values (iterable): Non exhaustable iterable of arg values (e.g. range(10)) or
             tuples of arg values (e.g. [(1, 2), (3, 4)]).
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
         self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        if inspect.isgenerator(arg_values):
+            raise ValueError("arg_values is a generator which is exhaustive. Non exhaustive iterable is supposed to be passed.")
         self.arg_values = arg_values
         self.name_fn = name_fn
 
