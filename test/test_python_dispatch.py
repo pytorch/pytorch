@@ -397,10 +397,12 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch._C._TensorBase):
+            class A(torch.Tensor):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+                __torch_function__ = torch._C._disabled_torch_function_impl
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1794,7 +1796,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return (5, 3)
                     return NotImplemented
 
@@ -1807,13 +1809,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
