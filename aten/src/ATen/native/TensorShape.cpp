@@ -3105,6 +3105,11 @@ Tensor view(const Tensor& self,
   return view_impl(self, size);
 }
 
+Tensor view_symint(const Tensor& self,
+            c10::SymIntArrayRef size) {
+  return view(self, c10::asIntArrayRefSlow(size));
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }

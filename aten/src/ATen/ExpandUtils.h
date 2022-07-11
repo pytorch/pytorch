@@ -437,6 +437,17 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
+static inline Tensor functionalize_sum(int64_t leading_dims, const Tensor& tensor, IntArrayRef shape, bool always_return_non_view) {
+  if (always_return_non_view) {
+    // This is only actually used by the functionalization pass.
+    // We want to be able to guarantee that this function doesn't return a view
+    // of the input.
+    return leading_dims > 0 ? at::view_copy(tensor, shape) : tensor.clone();
+  } else {
+    return leading_dims > 0 ? tensor.view(shape) : tensor;
+  }
+}
+
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
 static inline Tensor sum_to(
@@ -460,14 +471,9 @@ static inline Tensor sum_to(
   if (!reduce_dims.empty()) {
     tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
-  if (always_return_non_view) {
-    // This is only actually used by the functionalization pass.
-    // We want to be able to guarantee that this function doesn't return a view
-    // of the input.
-    return leading_dims > 0 ? at::view_copy(tensor, shape) : tensor.clone();
-  } else {
-    return leading_dims > 0 ? tensor.view(shape) : tensor;
-  }
+
+  return functionalize_sum(leading_dims, tensor, shape, always_return_non_view);
+
 }
 
 static inline Tensor sum_to(
@@ -491,34 +497,11 @@ static inline Tensor sum_to(
   if (!reduce_dims.empty()) {
     tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
   }
-  if (always_return_non_view) {
-    // This is only actually used by the functionalization pass.
-    // We want to be able to guarantee that this function doesn't return a view
-    // of the input.
-    return leading_dims > 0 ? at::view_copy(tensor, c10::asIntArrayRefSlow(shape)) : tensor.clone();
-  } else {
-    return leading_dims > 0 ? tensor.view(c10::asIntArrayRefSlow(shape)) : tensor;
-  }
-}
 
-// True if `shape` can be broadcasted to `desired`
-static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
-  size_t ndim = shape.size();
-  size_t target_dim = desired.size();
-  if (ndim > target_dim) {
-    return false;
-  }
-  for (const auto i : c10::irange(ndim)) {
-    int64_t size = shape[ndim - i - 1];
-    int64_t target = desired[target_dim - i - 1];
-    if (size != target && size != 1) {
-      return false;
-    }
-  }
-  return true;
+  return functionalize_sum(leading_dims, tensor, c10::asIntArrayRefSlow(shape), always_return_non_view);
 }
-
-static inline bool is_expandable_to(SymIntArrayRef shape, c10::SymIntArrayRef desired) {
+template <typename T>
+static bool is_expandable_to_(T shape, T desired) {
   size_t ndim = shape.size();
   size_t target_dim = desired.size();
   if (ndim > target_dim) {
@@ -532,6 +515,15 @@ static inline bool is_expandable_to(SymIntArrayRef shape, c10::SymIntArrayRef de
     }
   }
   return true;
+}
+
+static inline bool is_expandable_to(SymIntArrayRef shape, c10::SymIntArrayRef desired) {
+  return is_expandable_to_(shape, desired);
+}
+
+// TODO: maybe it's better to templatize the int and symint versions
+static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+  return is_expandable_to_(shape, desired);
 }
 
 } // namespace at
