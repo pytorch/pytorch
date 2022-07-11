@@ -85,6 +85,35 @@ class HFOperations(unittest.TestCase):
         self.assertNotEqual(s.model()[result].arg(2).arg(0).as_long(), 0)
         self.assertNotEqual(s.model()[result].arg(3).arg(0).as_long(), 0)
 
+
+    def test_cumsum_kwargs(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4, 3])):
+                t = torch.cumsum(x, dim=3)
+                return t
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        # should be unsat since the index is not valid for this annotation
+        self.assertEqual(s.check(), z3.unsat)
+
+        # modify the annotation to Dyn which should give sat
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+
     def test_arange(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
