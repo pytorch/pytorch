@@ -91,6 +91,7 @@ __all__ = [
     "tan",
     "tanh",
     "trace",
+    "trunc",
     #
     # Elementwise Binary References
     #
@@ -102,19 +103,19 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     # "complex",
-    # 'copysign', # where
-    # 'div', # need to implement all rounding modes first
+    "copysign",
+    "div",
     "eq",
     "float_power",
-    # 'floor_divide', # requires floor
+    "floor_divide",
     "fmax",
     "fmin",
     "fmod",
     "gcd",
     "ge",
     "gt",
-    # 'heaviside',
-    # 'hypot',
+    "heaviside",
+    "hypot",
     "igamma",
     "igammac",
     "isclose",
@@ -141,6 +142,7 @@ __all__ = [
     # # special.zeta
     "sub",
     "true_divide",
+    "trunc_divide",
     # 'xlogy', # where?, log, mul
     #
     # Elementwise Ternary References
@@ -224,6 +226,7 @@ __all__ = [
     "full_like",
     "ones",
     "ones_like",
+    "scalar_tensor",
     "zeros",
     "zeros_like",
     #
@@ -328,7 +331,7 @@ def _make_elementwise_unary_reference(
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper
+        @out_wrapper()
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -446,7 +449,8 @@ def exp2(a):
 
 
 # Fill has its own implementation because it has a value parameter
-@out_wrapper
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -477,6 +481,15 @@ def frac(x: TensorLikeType) -> TensorLikeType:
     return sub(x, trunc_x)
 
 
+# imag does not use _make_elementwise_unary_reference because it does not support out
+def imag(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    utils.check(
+        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    )
+    return prims.imag(a)
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -490,14 +503,30 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
-    # TODO Add complex tensor support to remove is_infinite prim
-    # if utils.is_complex_dtype(a):
-    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
-    # else:
-    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_infinite(a)
+    if utils.is_complex_dtype(a.dtype):
+        return logical_or(isinf(real(a)), isinf(imag(a)))
+    return logical_not(logical_or(isnan(a), isfinite(a)))
 
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isposinf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("inf"))
+    return zeros_like(a, dtype=torch.bool)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isneginf(a: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
+    )
+    if utils.is_float_dtype(a.dtype):
+        return eq(a, float("-inf"))
     return zeros_like(a, dtype=torch.bool)
 
 
@@ -539,7 +568,7 @@ def log10(a):
     return prims.log10(a)
 
 
-@out_wrapper
+@out_wrapper()
 def log_softmax(
     a: TensorLikeType,
     dim: int,
@@ -552,7 +581,7 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
-@out_wrapper
+@out_wrapper()
 def logsumexp(
     a: TensorLikeType,
     dim: DimsType,
@@ -575,7 +604,7 @@ def logsumexp(
 
 
 @register_decomposition(torch.ops.aten.nan_to_num)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -623,11 +652,20 @@ def neg(a):
 
 
 # positive does not use _make_elementwise_unary_reference because it does not support out
+# CompositeImplicitAutograd - don't register decomp
 def positive(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
+    return a
+
+
+# real does not use _make_elementwise_unary_reference because it does not support out
+def real(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if utils.is_complex_dtype(a.dtype):
+        return prims.real(a)
     return a
 
 
@@ -698,6 +736,11 @@ def tanh(a):
     return prims.tanh(a)
 
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def trunc(a):
+    return prims.trunc(a)
+
+
 def _make_elementwise_binary_reference(
     prim: Callable,
     *,
@@ -736,7 +779,7 @@ def _make_elementwise_binary_reference(
         return prim(a, b)
 
     if has_out:
-        _ref = out_wrapper(_ref)
+        _ref = out_wrapper()(_ref)
 
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
@@ -748,7 +791,7 @@ def _make_elementwise_binary_reference(
 
 # Add has its own implementation because it has an alpha argument
 @register_decomposition(torch.ops.aten.add)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -825,8 +868,56 @@ bitwise_xor = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _copysign(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    if isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            a.device, b.device
+        )
+        raise RuntimeError(msg)
+    return where(signbit(b), neg(abs(a)), abs(a))
+
+
+# TODO: add docstring
+copysign = _make_elementwise_binary_reference(
+    _copysign,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    aten_op=torch.ops.aten.copysign,
+)
+
 # TODO: add docstring
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+
+
+@register_decomposition(torch.ops.aten.div)
+@out_wrapper()
+def div(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    *,
+    rounding_mode: Optional[str] = None,
+):
+    """
+    Reference implementation of torch.div
+    """
+    if rounding_mode is None:
+        return true_divide(a, b)
+    elif rounding_mode == "trunc":
+        return trunc_divide(a, b)
+    elif rounding_mode == "floor":
+        return floor_divide(a, b)
+    else:
+        msg = (
+            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+            "but found {0}.".format(rounding_mode)
+        )
+        raise ValueError(msg)
+
 
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
@@ -835,10 +926,34 @@ eq = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _pow(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+
+    if isinstance(b, Number):
+        if b == 1.0:
+            return a.clone()  # type: ignore[return-value,union-attr]
+        elif b == 2.0:
+            return a * a  # type: ignore[return-value]
+        elif b == 0.5:
+            return torch.sqrt(a)  # type: ignore[arg-type]
+    return prims.pow(a, b)
+
+
+# TODO: add docstring
+pow = _make_elementwise_binary_reference(
+    _pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=torch.ops.aten.pow,
+)
+
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
-@out_wrapper
+@out_wrapper()
 def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
@@ -865,7 +980,85 @@ def float_power(
         b = prims.to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    return prims.pow(a, b)
+    return pow(a, b)
+
+
+# >>> a = torch.tensor(-0.2500, dtype=torch.float64)
+# tensor(-0.250000000000000, dtype=torch.float64)
+#
+# >>> b = torch.tensor(-0.0010, dtype=torch.float64)
+# tensor(-0.001000000000000, dtype=torch.float64)
+#
+# Note: In this case, casting float to double will expand the float mantissa with zeros,
+# while creating a double generates a distinct mantissa.
+# >>> torch.tensor(-0.001).to(dtype=torch.float64)
+# tensor(-0.001000000047497, dtype=torch.float64)
+#
+# Floor Division
+# The difference is caused because torch.remainder(a, b) = -0.001.
+#
+# >>> torch.floor(torch.true_divide(a, b))
+# tensor(250., dtype=torch.float64)
+#
+# >>> torch.div(a, b, rounding_mode='floor')
+# tensor(249., dtype=torch.float64)
+#
+# Definition: a // b = (a - remainder(a, b)) / b
+# >>> torch.true_divide(torch.sub(a, torch.remainder(a, b)), b)
+# tensor(249., dtype=torch.float64)
+#
+# For reference, see CPython's implementation:
+# https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+def _floor_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    # Wrap scalars because some references only accept tensor arguments.
+    if isinstance(a, Number) and isinstance(b, Number):
+        a = scalar_tensor(a)
+        b = scalar_tensor(b)
+    elif isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Number) and isinstance(b, Tensor):
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device == torch.device("cpu"):
+            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+                a.device, b.device
+            )
+            raise RuntimeError(msg)
+        else:
+            b = prims.device_put(b, device=a.device)
+
+    mod = fmod(a, b)
+    div = true_divide(sub(a, mod), b)
+
+    # Ensure that the remainder has the same sign as denominator
+    different_signed_inputs = bitwise_xor(lt(a, 0), lt(b, 0))
+    non_zero_remainder = ne(mod, 0)
+    mask = bitwise_and(non_zero_remainder, different_signed_inputs)
+    div = where(mask, sub(div, 1), div)
+
+    # Map quotient to nearest integer value
+    floor_div = floor(div)
+    mask = gt(sub(div, floor_div), 0.5)
+    floor_div = where(mask, add(floor_div, 1), floor_div)
+
+    basic_div = true_divide(a, b)
+    zero_tensor = scalar_tensor(0, dtype=basic_div.dtype, device=basic_div.device)
+
+    # If quotient is zero, copy signbit from true_divide quotient
+    floor_div = where(ne(div, 0), floor_div, copysign(zero_tensor, basic_div))
+
+    # If denominator is zero, then follow true_divide behavior
+    return where(ne(b, 0), floor_div, basic_div)
+
+
+# TODO: add docstring
+floor_divide = _make_elementwise_binary_reference(
+    _floor_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.floor_divide,
+)
 
 
 # TODO: add docstring
@@ -873,6 +1066,8 @@ fmax = _make_elementwise_binary_reference(
     prims.fmax,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -880,6 +1075,8 @@ fmin = _make_elementwise_binary_reference(
     prims.fmin,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 # TODO: add docstring
@@ -887,6 +1084,8 @@ fmod = _make_elementwise_binary_reference(
     prims.fmod,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=True,
 )
 
 # TODO: add docstring
@@ -912,6 +1111,30 @@ gt = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
+    input_eq_zero = eq(input, 0)
+    input_lt_zero = logical_or(lt(input, 0), isnan(input))
+    zeros_and_ones = where(input_lt_zero, 0, 1)
+    output = where(input_eq_zero, values, zeros_and_ones)
+    return output
+
+
+heaviside = _make_elementwise_binary_reference(
+    _heaviside,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+    aten_op=torch.ops.aten.heaviside,
+)
+
+hypot = _make_elementwise_binary_reference(
+    prims.hypot,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+
 igamma = _make_elementwise_binary_reference(
     prims.igamma,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -927,6 +1150,7 @@ igammac = _make_elementwise_binary_reference(
 )
 
 
+# CompositeImplicitAutograd - don't register decomp
 def isclose(
     a: TensorLikeType,
     b: TensorLikeType,
@@ -1040,7 +1264,7 @@ def _logical_or(a: TensorLikeType, b: TensorLikeType):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
         b = b != 0
-    return a | b
+    return bitwise_or(a, b)
 
 
 logical_or = _make_elementwise_binary_reference(
@@ -1107,12 +1331,6 @@ nextafter = _make_elementwise_binary_reference(
 )
 
 # TODO: add docstring
-pow = _make_elementwise_binary_reference(
-    prims.pow,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
-)
-
-# TODO: add docstring
 remainder = _make_elementwise_binary_reference(
     prims.remainder,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1123,7 +1341,7 @@ remainder = _make_elementwise_binary_reference(
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
 @register_decomposition(torch.ops.aten.sub)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1135,7 +1353,7 @@ def sub(
     alpha: Optional[NumberType] = None,
 ):
     """
-    Reference implementation of torch.add
+    Reference implementation of torch.sub
     """
 
     if isinstance(a, Number) and isinstance(b, Number):
@@ -1167,6 +1385,20 @@ true_divide = _make_elementwise_binary_reference(
     aten_op=None,  # CompositeImplicitAutograd
 )
 
+
+def _trunc_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return trunc(true_divide(a, b))
+
+
+# TODO: add docstring
+trunc_divide = _make_elementwise_binary_reference(
+    _trunc_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=None,  # CompositeImplicitAutograd
+)
+
 #
 # Elementwise Ternary References
 #
@@ -1185,7 +1417,8 @@ def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
         return self + int(value) * tensor1 * tensor2
 
 
-@out_wrapper
+@register_decomposition(torch.ops.aten.clamp)
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "min", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1197,15 +1430,49 @@ def clamp(
 ) -> TensorLikeType:
     a, min, max = _maybe_broadcast(a, min, max)
 
-    if min is not None and max is not None:
-        return minimum(maximum(a, min), max)
+    # NOTE: grad behavior with implementation `where` is not consistent on `nan`
+    if min is None and max is None:
+        msg = "clamp called but both min and max are none!"
+        raise ValueError(msg)
     if min is not None:
-        return maximum(a, min)
+        a_isnan = isnan(a)
+        condition = bitwise_or(ge(a, min), a_isnan)
+        # we should also propagate `nan` coming from boundaries. However, that's
+        # not necessary since `ge` would already `False` when either operands has
+        # a `nan`. So this line below is redundant
+        #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
+        a = prims.where(condition, a, min)
     if max is not None:
-        return minimum(a, max)
+        a_isnan = isnan(a)
+        # same as above, no need to adjust `nan` from `max`
+        condition = bitwise_or(le(a, max), a_isnan)
+        a = prims.where(condition, a, max)
 
-    msg = "clamp called but both min and max are none!"
-    raise ValueError(msg)
+    return a
+
+
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "min"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def clamp_min(
+    self: TensorLikeType,
+    min: Optional[TensorOrNumberLikeType] = None,
+) -> TensorLikeType:
+    return clamp(self, min=min)
+
+
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "max"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def clamp_max(
+    self: TensorLikeType,
+    max: Optional[TensorOrNumberLikeType] = None,
+) -> TensorLikeType:
+    return clamp(self, max=max)
 
 
 #
@@ -1215,7 +1482,7 @@ def clamp(
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
 @register_decomposition(torch.ops.aten.where)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -1258,6 +1525,7 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     return prims.copy_to(a, b)
 
 
+@register_decomposition(torch.ops.aten.item)
 def item(a: TensorLikeType) -> NumberType:
     if a.numel() != 1:
         msg = f"Can't convert a tensor with {a.numel()} elements to a number!"
@@ -1343,7 +1611,8 @@ def _reduction(
 py_all = all
 
 
-@out_wrapper
+@register_decomposition(torch.ops.aten.all)
+@out_wrapper()
 def all(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1365,7 +1634,8 @@ def all(
     return result
 
 
-@out_wrapper
+@register_decomposition(torch.ops.aten.any)
+@out_wrapper()
 def any(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1437,6 +1707,7 @@ def prod(
     )
 
 
+@register_decomposition(torch.ops.aten.amin)
 def amin(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1460,6 +1731,7 @@ def amin(
     )
 
 
+@register_decomposition(torch.ops.aten.amax)
 def amax(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1500,7 +1772,7 @@ def _set_correction(
     return correction
 
 
-@out_wrapper
+@out_wrapper()
 def var(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1527,7 +1799,7 @@ def var(
     return result
 
 
-@out_wrapper
+@out_wrapper()
 def std(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -1559,6 +1831,7 @@ def std(
     return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
+@register_decomposition(torch.ops.aten.mean)
 def mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1614,6 +1887,7 @@ def std_mean(
     return s, m
 
 
+@register_decomposition(torch.ops.aten.var_mean)
 def var_mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -1628,7 +1902,7 @@ def var_mean(
 
 
 @register_decomposition(torch.ops.aten.addr)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "vec1", "vec2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1682,6 +1956,7 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1705,6 +1980,7 @@ def _unsqueeze_atleast(
     return unsqueeze(arg_, dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1719,6 +1995,7 @@ def atleast_2d(
     return res if len(res) > 1 else res[0]
 
 
+# CompositeImplicitAutograd - don't register decomp
 def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1747,6 +2024,7 @@ def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
+# CompositeImplicitAutograd - don't register decomp
 def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     start = len(size) - len(a.shape)
     dims = tuple(range(start, len(a.shape) + start))
@@ -1754,7 +2032,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.cat)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -1788,7 +2066,8 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.cat(filtered, dim)
 
 
-@out_wrapper
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = tuple(
         x if x.ndim > 1 else prims.expand_dims(x, list(range(x.ndim, 2)))
@@ -1797,13 +2076,15 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-@out_wrapper
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
     aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -1828,6 +2109,7 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
 # Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
 # Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
 # a 0D tensor is flattened, in which case it's returned in 1D)
+# CompositeImplicitAutograd - don't register decomp
 def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
     start_dim = utils.canonicalize_dim(a.ndim, start_dim)
     end_dim = utils.canonicalize_dim(a.ndim, end_dim)
@@ -1855,6 +2137,7 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.rev(a, dims)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def fliplr(a: TensorLikeType) -> TensorLikeType:
     if a.ndim < 2:
         raise RuntimeError("Input must be >= 2-d.")
@@ -1862,6 +2145,7 @@ def fliplr(a: TensorLikeType) -> TensorLikeType:
     return flip(a, (1,))
 
 
+# CompositeImplicitAutograd - don't register decomp
 def flipud(a: TensorLikeType) -> TensorLikeType:
     if a.ndim < 1:
         raise RuntimeError("Input must be >= 1-d.")
@@ -1869,6 +2153,7 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
     return flip(a, (0,))
 
 
+# CompositeImplicitAutograd - don't register decomp
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
@@ -2109,6 +2394,7 @@ def _reshape_view_helper(
 
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
+# CompositeImplicitAutograd - don't register decomp
 def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
@@ -2199,7 +2485,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
 
 
 @register_decomposition(torch.ops.aten.stack)
-@out_wrapper
+@out_wrapper()
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     assert len(tensors) > 0, "stack expects a non-empty TensorList"
     wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
@@ -2215,7 +2501,7 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
-@out_wrapper
+@out_wrapper()
 def softmax(
     a: TensorLikeType,
     dim: int,
@@ -2233,7 +2519,8 @@ def softmax(
     )  # type: ignore[return-value]
 
 
-@out_wrapper
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
     aligned_tensors = atleast_1d(*tensors)
@@ -2242,7 +2529,8 @@ def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-@out_wrapper
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
 def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
     aligned_tensors = atleast_2d(*tensors)
@@ -2250,6 +2538,7 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
+@register_decomposition(torch.ops.aten.squeeze)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
         dim = utils.canonicalize_dim(a.ndim, dim)
@@ -2268,6 +2557,7 @@ def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
+# CompositeImplicitAutograd - don't register decomp
 def tensor_split(
     a: TensorLikeType,
     indices_or_sections: Union[Tensor, DimsType],
@@ -2280,7 +2570,7 @@ def tensor_split(
 
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
-        if indices_or_sections.device != torch.device("cpu"):
+        if not indices_or_sections.device.type == "cpu":
             msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
                 indices_or_sections.device
             )
@@ -2344,6 +2634,7 @@ def tensor_split(
         return tuple(splits)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def hsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
@@ -2386,6 +2677,7 @@ def hsplit(
     return tensor_split(a, split_sizes, dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
@@ -2426,6 +2718,7 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
         raise RuntimeError(
@@ -2482,15 +2775,17 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
+@register_decomposition(torch.ops.aten.view)
 def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@out_wrapper
+@out_wrapper()
 def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
@@ -2504,6 +2799,7 @@ def empty(
     )
 
 
+# TODO: missing kwargs (e.g. layout)
 def empty_like(
     a: TensorLikeType,
     *,
@@ -2527,6 +2823,7 @@ def empty_like(
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
+@register_decomposition(torch.ops.aten.empty_strided)
 def empty_strided(
     shape: Union[ShapeType, Tuple[ShapeType]],
     strides: StrideType,
@@ -2545,7 +2842,8 @@ def empty_strided(
     )
 
 
-@out_wrapper
+# TODO: missing kwargs (e.g. layout)
+@out_wrapper()
 def full(
     shape: ShapeType,
     fill_value: NumberType,
@@ -2574,11 +2872,25 @@ ones = partial(full, fill_value=True)
 
 ones_like = partial(full_like, fill_value=True)
 
+
+# TODO: missing kwargs (e.g. layout)
+def scalar_tensor(
+    a: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+) -> TensorLikeType:
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
+    device = device if device is not None else torch.device("cpu")
+    return prims.scalar_tensor(a, dtype=dtype, device=device)
+
+
 zeros = partial(full, fill_value=False)
 
 zeros_like = partial(full_like, fill_value=False)
 
 
+@register_decomposition(torch.ops.aten.uniform)
 def uniform(
     shape: ShapeType,
     low: Union[bool, int, float] = 0.0,
