@@ -45,8 +45,7 @@ class TestPassManager(TestCase):
         pm.validate_constraints()
         self.assertEqual(len(pm.passes), 2)
 
-        pass_res = pm(traced_m)
-        modified_m = pass_res.graph_module
+        modified_m = pm(traced_m)
         assert isinstance(modified_m, fx.GraphModule)
 
         # Check that all call_function nodes are divs
@@ -138,14 +137,14 @@ class TestPassManager(TestCase):
             this_before_that_pass_constraint(passes[3], passes[1]),
         ]
         sorted = topological_sort_passes(passes, constraints)
-        print(sorted)
-        self.assertEqual(sorted, ([pass4, pass5, pass0, pass2, pass3, pass1], False))
+        self.assertEqual(sorted, ([pass4, pass5, pass2, pass3, pass1, pass0], False))
 
         # Circular dependency should result in the circular_dep flag being set
-        passes = [pass0, pass1]
+        passes = [pass0, pass1, pass2]
         constraints = [
             this_before_that_pass_constraint(passes[0], passes[1]),
-            this_before_that_pass_constraint(passes[1], passes[0]),
+            this_before_that_pass_constraint(passes[1], passes[2]),
+            this_before_that_pass_constraint(passes[2], passes[0]),
         ]
         sorted = topological_sort_passes(passes, constraints)
-        self.assertEqual(sorted, ([pass0, pass1], True))
+        self.assertEqual(sorted, ([pass2, pass0, pass1], True))

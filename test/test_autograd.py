@@ -4636,6 +4636,18 @@ for shape in [(1,), ()]:
             nn.Linear(nz_bottleneck, nz_inp)
         )
 
+        # Module holder for testing activation checkpointing with no_reentrant
+        # supports kwargs.
+        class MyModule(nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.module = mod
+
+            def forward(self, data):
+                return self.module(data)
+
+        module = MyModule(mod=module)
+
         # Run model with and without checkpointing and verify gradients are
         # equivalent, regardless of if inputs require grads or not.
         module_copy = deepcopy(module)
@@ -4647,7 +4659,7 @@ for shape in [(1,), ()]:
             data_r.uniform_()
             data_r.requires_grad = input_requires_grad
             data_r_copy = data_r.clone()
-            feat_r = checkpoint(module, data_r, use_reentrant=False)
+            feat_r = checkpoint(module, data=data_r, use_reentrant=False)
             feat_combined.append(feat_r)
             feat_r_no_checkpoint = module_copy(data_r)
             feat_combined_no_checkpoint.append(feat_r_no_checkpoint)
@@ -6826,6 +6838,23 @@ class TestAutogradForwardMode(TestCase):
                     torch.real(dual)
                     torch.imag(dual)
 
+    def test_metadata_check_ignore_storage_offset_for_zero_numel_tensor(self):
+        # See https://github.com/pytorch/pytorch/issues/80507
+        a = torch.tensor([1.]).as_strided((0,), (1,), 1)
+        b = torch.tensor([1.]).as_strided((0,), (1,), 2)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(a, b)
+            # Check that no copy is made
+            self.assertIs(fwAD.unpack_dual(dual_input).tangent, b)
+
+        a = torch.tensor([1.]).as_strided((1,), (2,), 0)
+        b = torch.tensor([1.]).as_strided((1,), (1,), 0)
+
+        with fwAD.dual_level():
+            dual_input = fwAD.make_dual(a, b)
+            dual_input[1:]
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
@@ -6836,6 +6865,7 @@ class TestAutogradForwardMode(TestCase):
     #     - For backward AD (regular ops)
     #   - Ensure that view + inplace for both modes work fine
     #   - Ensure we do proper cleanup on exit of a level
+
 
     def test_default_level(self):
         foo = torch.rand(2)
@@ -6871,6 +6901,24 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, bar)
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
+
+    def test_codegen_ignores_undefined_outputs(self):
+        # This test checks that codegen silently ignores undefined outputs
+        # Below, grad_input is specified as False in grad_output_mask, so
+        # convolution backward will return a undefined tensor in that position.
+        # Note that for this test to work we need to make sure either grad_output
+        # or weight to be a dual tensor, so grad_input requires forward grad
+        weight = torch.randn(6, 1, 30, 30)
+        inp = torch.rand((1, 1, 32, 32))
+        out = torch.nn.functional.conv2d(inp, weight)
+        grad_out = torch.ones_like(out)
+
+        with fwAD.dual_level():
+            dual_weight = fwAD.make_dual(weight, torch.ones_like(weight))
+            grad_input, _, _ = torch.ops.aten.convolution_backward(
+                grad_out, inp, dual_weight, (0,),
+                (1, 1), (0, 0), (1, 1), False, (0, 0), 1, (False, True, False))
+        self.assertIsNone(grad_input)
 
     def test_make_dual_inference_tensor_in_inference_mode(self):
         with torch.inference_mode():
