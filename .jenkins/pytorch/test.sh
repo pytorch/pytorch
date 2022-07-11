@@ -657,8 +657,7 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   install_torchdynamo
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  # TODO: re-enable vulkan test
-  echo "no-op at the moment"
+  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
