@@ -1504,11 +1504,17 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
-    raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
-        getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:
-            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    if slow_tests_dict is not None:
+        for slow_test in slow_tests_dict.keys():
+            slow_test_parts = slow_test.split()
+            # this should always be true
+            if len(slow_test_parts) > 1:
+                slow_test_name = slow_test_parts[0]
+                slow_test_suite = slow_test_parts[1][1:-1]
+                if test._testMethodName == slow_test_name and slow_test_suite in test_suite:
+                    getattr(test, test._testMethodName).__dict__['slow_test'] = True
+                    if not TEST_WITH_SLOW:
+                        raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
