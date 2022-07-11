@@ -4,6 +4,8 @@ from typing import Callable, List, Dict, Any, Optional
 from torch.fx._compatibility import compatibility
 import inspect
 
+__all__ = ['Partition', 'split_module']
+
 @compatibility(is_backward_compatible=True)
 class Partition:
     def __init__(self, name: str):
