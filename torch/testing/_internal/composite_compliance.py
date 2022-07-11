@@ -174,6 +174,12 @@ def generate_cct(enable_recursive_torch_dispatch=False,
             def wrap(e):
                 return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
 
+            if func == torch.ops.aten._local_scalar_dense.default:
+                raise RuntimeError(
+                    ".item() is not allowed to be called inside of composite "
+                    "functions in the PyTorch library because not all backends "
+                    "and/or Tensor subclasses (e.g. vmap, ProxyTensor) support them.")
+
             if func.overloadpacket.__name__ in ('set_', 'resize_'):
                 raise RuntimeError(
                     f"{func.__name__} is not allowed to be called inside of "
