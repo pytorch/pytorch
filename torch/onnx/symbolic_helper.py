@@ -1288,11 +1288,13 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":
+    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
+        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):
+    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
+        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
