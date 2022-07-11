@@ -210,6 +210,34 @@ class CanReshape(Constraint):
             return False
 
 
+class GetItem(Constraint):
+
+    def __init__(self, tensor_size, index, res, input_var):
+        """
+        Constraint for getting item given a tensor size
+        :param tensor_size: actual number
+        :param index: actual number representing the index
+        :param res: variable to carry the item we get
+        :param input_var: a tensor variable from which we will get item
+        """
+        self.res = res
+        self.tensor_size = tensor_size
+        self.index = index
+        self.input_var = input_var
+
+    def __repr__(self):
+        return f' {self.res} = GetItem({self.input_var}, tensor_size: {self.tensor_size}, {self.index})'
+
+    def __eq__(self, other):
+        if isinstance(other, GetItem):
+            return self.res == other.res and \
+                self.tensor_size == other.tensor_size and\
+                self.index == other.index and\
+                self.input_var == other.input_var
+        else:
+            return False
+
+
 class CalcConv(Constraint):
 
     def __init__(self, conv_result, input_var, c_out, kernel, padding, stride, dilation, matching_constraint_vars):
