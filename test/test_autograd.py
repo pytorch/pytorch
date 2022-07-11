@@ -6791,6 +6791,24 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
 
+    def test_codegen_ignores_undefined_outputs(self):
+        # This test checks that codegen silently ignores undefined outputs
+        # Below, grad_input is specified as False in grad_output_mask, so
+        # convolution backward will return a undefined tensor in that position.
+        # Note that for this test to work we need to make sure either grad_output
+        # or weight to be a dual tensor, so grad_input requires forward grad
+        weight = torch.randn(6, 1, 30, 30)
+        inp = torch.rand((1, 1, 32, 32))
+        out = torch.nn.functional.conv2d(inp, weight)
+        grad_out = torch.ones_like(out)
+
+        with fwAD.dual_level():
+            dual_weight = fwAD.make_dual(weight, torch.ones_like(weight))
+            grad_input, _, _ = torch.ops.aten.convolution_backward(
+                grad_out, inp, dual_weight, (0,),
+                (1, 1), (0, 0), (1, 1), False, (0, 0), 1, (False, True, False))
+        self.assertIsNone(grad_input)
+
     def test_make_dual_inference_tensor_in_inference_mode(self):
         with torch.inference_mode():
             foo = torch.rand(2)
