@@ -18,12 +18,12 @@ def _iter_constructors():
     # yield as_nested_tensor
     yield nested_tensor
 
-# Helper functions for testing discontinuous memory
-# can be replaced once to_padded_tensor supports discontinuous memory
-def discontinuity_to_padded_tensor(input, shape=None):
+# Helper functions for testing noncontiguous memory
+# can be replaced once to_padded_tensor supports noncontiguous memory
+def noncontiguous_to_padded_tensor(input, shape=None):
     if shape is None:
         # for now to_padded_tensor gives the correct sizes
-        # but wrong entries when the buffer memory is discontinuous
+        # but wrong entries when the buffer memory is noncontiguous
         continuous_to_padded_tensor = input.to_padded_tensor(0.0)
         shape = continuous_to_padded_tensor.shape
     tensors = input.unbind()
@@ -85,7 +85,7 @@ class TestNestedTensor(TestCase):
         )
 
     @torch.inference_mode()
-    def test_unbind_discontinuous(self):
+    def test_unbind_noncontiguous(self):
         nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))])
         pt = nt.to_padded_tensor(0.0)
         # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
@@ -400,18 +400,18 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
-    # actually, this tests discontinuity_to_padded_tensor
-    # since to_padded_tensor does not support discontinuous buffer yet
+    # actually, this tests noncontiguous_to_padded_tensor
+    # since to_padded_tensor does not support noncontiguous buffer yet
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
-    def test_to_padded_tensor_discontinuous(self, device, dtype):
+    def test_to_padded_tensor_noncontiguous(self, device, dtype):
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
         pt = nt.to_padded_tensor(0.0)
         nt_mh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
         pt_mh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
-        pt_mh_from_nt_mh = discontinuity_to_padded_tensor(nt_mh)
+        pt_mh_from_nt_mh = noncontiguous_to_padded_tensor(nt_mh)
         self.assertEqual(pt_mh, pt_mh_from_nt_mh)
 
     @skipMeta
@@ -454,7 +454,7 @@ class TestNestedTensorDeviceType(TestCase):
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
-    def test_nested_tensor_indexing_discontinuous(self, device, dtype):
+    def test_nested_tensor_indexing_noncontiguous(self, device, dtype):
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
@@ -729,8 +729,8 @@ class TestNestedTensorDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double)
     @torch.inference_mode()
-    def test_softmax_discontinuous(self, device, dtype):
-        ''' create discontinuous input '''
+    def test_softmax_noncontiguous(self, device, dtype):
+        ''' create noncontiguous input '''
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
@@ -747,7 +747,7 @@ class TestNestedTensorDeviceType(TestCase):
         # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
         ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
         ''' perform test computation '''
-        actual = discontinuity_to_padded_tensor(torch.nn.functional.softmax(ntmh, -1))
+        actual = noncontiguous_to_padded_tensor(torch.nn.functional.softmax(ntmh, -1))
         expect = torch.nn.functional.softmax(ptmh, -1).nan_to_num_(0.0)
         self.assertEqual(actual, expect)
 
@@ -796,8 +796,8 @@ class TestNestedTensorDeviceType(TestCase):
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     @torch.inference_mode()
-    def test_bmm_discontinuous(self, device, dtype):
-        ''' create discontinuous input '''
+    def test_bmm_noncontiguous(self, device, dtype):
+        ''' create noncontiguous input '''
         q0 = torch.randn((2, 20), device=device, dtype=dtype)
         q1 = torch.randn((3, 20), device=device, dtype=dtype)
         q = torch.nested_tensor([q0, q1])
@@ -890,7 +890,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(IndexError, lambda: nt.transpose(-4, -1))
         # normal case
         ntT = nt.transpose(-1, -2)
-        ptT_from_ntT = discontinuity_to_padded_tensor(ntT)
+        ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
         pt = nt.to_padded_tensor(0.0)
         ptT = pt.transpose(-1, -2)
         self.assertEqual(ptT, ptT_from_ntT)
@@ -985,7 +985,7 @@ class TestNestedTensorDeviceType(TestCase):
         ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
         # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
         ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
-        self.assertEqual(discontinuity_to_padded_tensor(ntmh), ptmh)
+        self.assertEqual(noncontiguous_to_padded_tensor(ntmh), ptmh)
 
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
