@@ -19,8 +19,6 @@ WATCHOS = "watchos"
 
 MACOSX = "macosx"
 
-APPLETVOS = "appletvos"
-
 xplat_platforms = struct(
     ANDROID = ANDROID,
     APPLE = APPLE,
@@ -34,5 +32,4 @@ apple_sdks = struct(
     IOS = IOS,
     WATCHOS = WATCHOS,
     MACOSX = MACOSX,
-    APPLETVOS = APPLETVOS,
 )
