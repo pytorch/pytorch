@@ -185,7 +185,7 @@ jobs:
             popd
 
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 

@@ -89,7 +89,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: !{{ config["container_image"] }}
       !{{ common.teardown_rocm_linux() }}

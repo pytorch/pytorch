@@ -379,7 +379,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -517,7 +517,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.1.1
       - name: Kill containers, clean up images
@@ -892,7 +892,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -1030,7 +1030,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.1.1
       - name: Kill containers, clean up images
@@ -1405,7 +1405,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -1543,7 +1543,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.1.1
       - name: Kill containers, clean up images
@@ -1918,7 +1918,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -2056,7 +2056,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Test Pytorchi binary
-        uses: ././github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         with:
           docker-image: pytorch/manylinux-builder:rocm5.1.1
       - name: Kill containers, clean up images
