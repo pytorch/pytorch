@@ -44,6 +44,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.linalg
 
 import torch._prims as prims  # noqa: F401
 
@@ -7203,7 +7204,7 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    is_linalg_svd = (op_info.name == "linalg.svd")
+    is_linalg_svd = ("linalg.svd" in op_info.name)
     batches = [(), (0, ), (3, )]
     ns = [0, 3, 5]
 
@@ -7506,39 +7507,6 @@ def _clamp_numpy(a, min=None, max=None):
         return np.maximum(a, min)
 
     return np.minimum(max, np.maximum(a, min))
-
-
-def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = (
-        make_tensor((2, 3, 2), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((2, 0, 3), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-    )
-
-    if dtype is torch.uint8:
-        min_max_vals = ((2, 5), (3, 7))
-    else:
-        min_max_vals = ((0, 1), (-1, 1))
-
-    output = [SampleInput(
-        tensor.clone().requires_grad_(requires_grad),
-        args=vals) for tensor, vals in product(tensors, min_max_vals)]
-    output += [
-        SampleInput(tensors[0].clone().requires_grad_(requires_grad),
-                    args=(0.5, None)),
-        SampleInput(tensors[0].clone().requires_grad_(requires_grad),
-                    args=(None, 0.5))]
-    empty_tensor = make_tensor((), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad)
-    output.append(SampleInput(empty_tensor, args=(0.0, 1.0)))
-    return output
-
-def sample_kwargs_clamp_scalar(device, dtype, input):
-    if dtype is torch.uint8:
-        min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
-    elif dtype.is_floating_point:
-        min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore[assignment]
-    else:
-        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))
-    return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
 
 def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
     sample0 = SampleInput(make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
@@ -8495,14 +8463,16 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=args)
 
 
-def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     yield SampleInput(make_arg((S, M, S)))
     yield SampleInput(make_arg(()))
 
-def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
-    yield from sample_inputs_clone(op, device, dtype, requires_grad, **kwargs)
+def reference_inputs_clone_contiguous(op, device, dtype, requires_grad, **kwargs):
+    # NOTE: the default memory format for clone is torch.preserve_format, for contiguous it's torch.contiguous_format
+    # This exploits that default to test torch.preserve_format for clone, without causing an error when testing contiguous
+    yield from sample_inputs_clone_contiguous(op, device, dtype, requires_grad, **kwargs)
 
     shapes = (
         (3, 5, 6),
@@ -8520,6 +8490,11 @@ def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape, noncontiguous=True))
         yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1))
 
+        yield SampleInput(make_arg(shape), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape).transpose(0, -1), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape, noncontiguous=True), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1), kwargs={'memory_format': torch.contiguous_format})
+
     # shape, strides, offset
     strided_cases = (
         ((5, 6, 2), (1, 1, 7), 2),
@@ -8532,11 +8507,17 @@ def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
 
     for shape, strides, offset in strided_cases:
         yield SampleInput(make_arg(500,).as_strided(shape, strides, offset))
+        yield SampleInput(make_arg(500,).as_strided(shape, strides, offset), kwargs={'memory_format': torch.contiguous_format})
 
+    # channels last 2D
+    yield SampleInput(make_arg((2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last})
+    a = make_arg((2, 2, 2, 2)).permute(0, 3, 1, 2)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last})
 
-def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    yield SampleInput(make_arg((S, S)))
+    # channels last 3D
+    yield SampleInput(make_arg((2, 2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last_3d})
+    a = make_arg((2, 2, 2, 2, 2)).permute(0, 4, 1, 2, 3)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last_3d})
 
 
 def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
@@ -11183,15 +11164,21 @@ op_db: List[OpInfo] = [
     OpInfo('clone',
            ref=np.copy,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_clone,
-           reference_inputs_func=reference_inputs_clone,
+           sample_inputs_func=sample_inputs_clone_contiguous,
+           reference_inputs_func=reference_inputs_clone_contiguous,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # TypeError: _copy_dispatcher() got an unexpected keyword argument 'memory_format'
+               # (NumPy reference needs to be extended with memory_format)
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref'),
+           ),),
     OpInfo('contiguous',
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_contiguous,
+           sample_inputs_func=sample_inputs_clone_contiguous,
+           reference_inputs_func=reference_inputs_clone_contiguous,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            autodiff_fusible_nodes=['aten::contiguous'],
@@ -11226,7 +11213,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
            ),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off]),
-    # NOTE: clamp has separate opinfos for scalar min/max (unary op) vs. tensors
     OpInfo('clamp',
            aliases=('clip',),
            ref=_clamp_numpy,
@@ -18275,7 +18261,6 @@ op_db: List[OpInfo] = [
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
-        gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
@@ -18294,20 +18279,34 @@ op_db: List[OpInfo] = [
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
-            # vmap: We do not yet support calling random operations inside of vmap.
-            # Please perform random operations outside of vmap as a workaround
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
-        gradcheck_wrapper=wrapper_set_seed,
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
+        check_batched_forward_grad=False,
         # As per the docs, valid input dims are (3, 4)
         sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(3, 4)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "nn.functional.dropout3d",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # lambda impl
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        check_batched_forward_grad=False,
+        # As per the docs, valid input dims are (4, 5)
+        sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(4, 5)),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs, inplace=True)),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
     OpInfo(
@@ -18327,7 +18326,6 @@ op_db: List[OpInfo] = [
             # Please perform random operations outside of vmap as a workaround
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
-        gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -18766,9 +18764,6 @@ op_db: List[OpInfo] = [
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: sum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
@@ -20469,8 +20464,18 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.softplus",
     ),
     PythonRefInfo(
+        "_refs.nn.functional.l1_loss",
+        torch_opinfo_name="nn.functional.l1_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.mse_loss",
+        torch_opinfo_name="nn.functional.mse_loss",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -20612,25 +20617,19 @@ python_ref_db = [
         torch_opinfo_name="fmax",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmin",
         torch_opinfo_name="fmin",
         supports_rhs_python_scalar=False,
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
+        supports_rhs_python_scalar=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
@@ -20649,6 +20648,18 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.heaviside",
+        torch_opinfo_name="heaviside",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.hypot",
+        torch_opinfo_name="hypot",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
@@ -20754,6 +20765,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
+        supports_nvfuser=False,  # clone default
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -20945,6 +20957,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.contiguous",
+        torch_opinfo_name="contiguous",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
         supports_nvfuser=False,
@@ -20957,6 +20974,11 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/78613
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.expand",
+        torch_opinfo_name="expand",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.flatten",
@@ -21161,6 +21183,27 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    #
+    # torch.linalg
+    #
+    ReductionPythonRefInfo(
+        "_refs.linalg.vector_norm",
+        torch_opinfo_name="linalg.vector_norm",
+        supports_out=True,
+        supports_nvfuser=False,  # clone_default
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svd",
+        torch_opinfo_name="linalg.svd",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.svdvals",
+        torch_opinfo_name="linalg.svdvals",
+        supports_out=True,
+        supports_nvfuser=False,
     ),
     #
     # Tensor Creation Reference OpInfos
