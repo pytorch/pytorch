@@ -1,6 +1,6 @@
 import inspect
 from functools import wraps
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -77,14 +77,16 @@ def topological_sort_passes(
         A sorted list of callables and a boolean of if a circular dependency
         existed
     """
+    if len(constraints) == 0:
+        return passes, False
 
     # Construct a graph
-    graph: Dict[Callable, Set[Callable]] = {}
-    visited: Dict[Callable, bool] = {}
+    graph: Dict[Callable, List[Callable]] = {}
+    visited: Dict[Callable, Any] = {}
     res: List[Callable] = []
     for p in passes:
-        graph[p] = set()
-        visited[p] = False
+        graph[p] = []
+        visited[p] = None
 
     circular_dependency = False
     for i, a in enumerate(passes):
@@ -95,19 +97,28 @@ def topological_sort_passes(
             for constraint in constraints:
                 if not constraint(a, b):
                     if b in graph[a]:
-                        graph[a].remove(b)
                         circular_dependency = True
-                    graph[b].add(a)
+                    graph[b].append(a)
+
+    time = 1
 
     # Topologically sort the graph
     def topological_sort_util(graph, p):
-        visited[p] = True
+        nonlocal time
+        nonlocal circular_dependency
+
+        visited[p] = (time, 0)
+        time += 1
 
         for dep in graph[p]:
             if not visited[dep]:
                 topological_sort_util(graph, dep)
+            elif visited[dep][1] == 0:
+                circular_dependency = True
 
         res.append(p)
+        visited[p] = (visited[p][0], time)
+        time += 1
 
     for p in passes[::-1]:
         if not visited[p]:
