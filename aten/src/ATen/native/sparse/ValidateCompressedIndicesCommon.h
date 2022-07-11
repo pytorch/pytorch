@@ -163,7 +163,7 @@ template <
   template <typename func_t> class kernel_t,
   template <typename func_t, typename vec_func_t> class vec_kernel_t = EmptyVecKernel,
   template <typename scalar_t> class Vec = DummyVec>
-static void validate_compressed_sparse_indices_kernel(
+void validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
     const int64_t cdim,
