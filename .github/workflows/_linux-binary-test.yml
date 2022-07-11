@@ -184,8 +184,9 @@ jobs:
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
             popd
 
-      - name: Test Pytorchi binary
+      - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
+        working-directory: pytorch/
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 

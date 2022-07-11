@@ -1139,8 +1139,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorchi binary
+      - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
+        working-directory: pytorch/
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -1280,8 +1281,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorchi binary
+      - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
+        working-directory: pytorch/
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
       - name: Kill containers, clean up images
@@ -1421,8 +1423,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorchi binary
+      - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
+        working-directory: pytorch/
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
       - name: Kill containers, clean up images
@@ -1562,8 +1565,9 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Test Pytorchi binary
+      - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
+        working-directory: pytorch/
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
       - name: Kill containers, clean up images
