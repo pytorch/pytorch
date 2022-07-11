@@ -236,11 +236,13 @@ struct ncclRedOpRAII {
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
   }
+#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
   ~ncclRedOpRAII() {
     if (premul_sum_) {
       ncclRedOpDestroy(op_, comm_);
     }
   }
+#endif
   operator ncclRedOp_t() const { return op_; }
   ncclRedOp_t op_;
   ncclComm_t comm_;
