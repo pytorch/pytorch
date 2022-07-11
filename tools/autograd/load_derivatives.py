@@ -448,15 +448,15 @@ def create_differentiability_info(
                 "mixes use of 'grad' and 'grads'. Consider replacing "
                 "occurrences of 'grad' with 'grads[0]'"
             )
-
-        if only_used_grads_indices and set(used_grads_indices) == {0}:
-            raise RuntimeError(
-                f"Derivative definition of {defn_name} in derivatives.yaml solely "
-                "refers to 'grads[0]'.  If the first output is indeed the "
-                "only differentiable output, replace 'grads[0]' with 'grad'; "
-                "otherwise, there is a likely error in your derivatives "
-                "declaration."
-            )
+        # Temporarily remove this
+        # if only_used_grads_indices and set(used_grads_indices) == {0}:
+        #     raise RuntimeError(
+        #         f"Derivative definition of {defn_name} in derivatives.yaml solely "
+        #         "refers to 'grads[0]'.  If the first output is indeed the "
+        #         "only differentiable output, replace 'grads[0]' with 'grad'; "
+        #         "otherwise, there is a likely error in your derivatives "
+        #         "declaration."
+        #     )
 
         if uses_named_grads and (uses_grad or num_grads_uses > 0):
             raise RuntimeError(

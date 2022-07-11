@@ -1849,7 +1849,7 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((0,), {'training': False}),
         ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5}),
         ((3, 2, 3, 4), {'training': False, 'momentum': -1.0, 'eps': 0.5}),
-        ((2, 1), {}),
+        ((2, 2), {}),
     )
 
     for input_shape, kwargs in cases:
