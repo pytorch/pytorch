@@ -286,6 +286,23 @@ at::Tensor LazyNativeFunctions::empty_symint(
       memory_format);
 }
 
+at::Tensor LazyNativeFunctions::empty_strided_symint(
+    at::SymIntArrayRef size,
+    at::SymIntArrayRef stride,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory) {
+  // TODO: support SymIntNodes as well
+  return empty_strided(
+      c10::asIntArrayRefSlow(size),
+      c10::asIntArrayRefSlow(stride),
+      dtype,
+      layout,
+      device,
+      pin_memory);
+}
+
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size,
     c10::optional<at::ScalarType> dtype,

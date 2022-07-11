@@ -25,7 +25,10 @@ namespace functionalization {
 
 
 inline Tensor to_meta(const Tensor& t) {
-    return at::native::empty_strided_meta(t.sizes(), t.strides(),
+    // ...Should we just add a real sym_strides() method on TensorImpl?
+    auto sym_strides = c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(t.strides().data()), t.strides().size());
+    return at::native::empty_strided_symint_meta(t.sym_sizes(), sym_strides,
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
 }

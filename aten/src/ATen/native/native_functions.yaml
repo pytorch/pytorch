@@ -2066,6 +2066,14 @@
     Meta: empty_strided_meta
     QuantizedCPU, QuantizedCUDA: empty_strided_unknown_quantized
 
+- func: empty_strided.SymInt(SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CPU: empty_strided_symint_cpu
+    CUDA: empty_strided_symint_cuda
+    MPS: empty_strided_symint_mps
+    Meta: empty_strided_symint_meta
+    QuantizedCPU, QuantizedCUDA: empty_strided_symint_unknown_quantized
+
 - func: erf(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: erf.out

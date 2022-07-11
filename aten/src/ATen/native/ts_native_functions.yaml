@@ -175,6 +175,7 @@ supported:
   - empty.memory_format
   - empty.SymInt
   - empty_strided
+  - empty_strided.SymInt
   - fill_.Scalar
   - normal_
   - max_pool3d_with_indices

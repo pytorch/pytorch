@@ -57,6 +57,7 @@ namespace at {
   m.impl("empty.SymInt", torch::CppFunction::makeFallthrough()); \
   m.impl("empty.out", torch::CppFunction::makeFallthrough()); \
   m.impl("empty_strided", torch::CppFunction::makeFallthrough()); \
+  m.impl("empty_strided.SymInt", torch::CppFunction::makeFallthrough()); \
   m.impl("full_like", torch::CppFunction::makeFallthrough()); \
   m.impl("stride.int", torch::CppFunction::makeFallthrough()); \
   m.impl("stride.Dimname", torch::CppFunction::makeFallthrough()); \

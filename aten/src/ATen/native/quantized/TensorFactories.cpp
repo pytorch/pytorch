@@ -110,6 +110,16 @@ Tensor empty_strided_unknown_quantized(
 
 }
 
+Tensor empty_strided_symint_unknown_quantized(
+    SymIntArrayRef size,
+    SymIntArrayRef stride,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  return empty_strided_unknown_quantized(c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 // Provide better error message if dtype is wrong
 Tensor empty_affine_quantized_other_backends_stub(
     IntArrayRef,

@@ -89,10 +89,19 @@ bool Alias::apply_updates() {
   return any_updates;
 }
 
+// Should we just add a sym_numel() so we don't need to do this?
+c10::SymInt compute_nbytes(c10::SymIntArrayRef sym_sizes, caffe2::TypeMeta dtype) {
+  SymInt size_bytes = dtype.itemsize();
+  for (auto s : sym_sizes) {
+    size_bytes = size_bytes * s;
+  }
+  return size_bytes;
+}
+
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
   : c10::StorageImpl(
       c10::StorageImpl::use_byte_size_t(),
-      value.numel() * value.dtype().itemsize(),
+      compute_nbytes(value.sym_sizes(), value.dtype()),
       DataPtr{nullptr, value.device()},
       // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
       nullptr,

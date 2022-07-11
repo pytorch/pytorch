@@ -181,6 +181,7 @@ Tensor empty_symint_cpu(c10::SymIntArrayRef size, c10::optional<ScalarType> dtyp
   return at::native::empty_cpu(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
+
 Tensor empty(
     IntArrayRef size,
     c10::optional<DimnameList> names,
@@ -207,6 +208,11 @@ Tensor empty(
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
+Tensor empty_strided_symint_cpu(SymIntArrayRef size, SymIntArrayRef stride, c10::optional<ScalarType> dtype_opt,
+                         c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  return at::detail::empty_strided_cpu(c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor& empty_out(IntArrayRef size,
