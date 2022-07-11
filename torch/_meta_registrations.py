@@ -301,7 +301,12 @@ def meta_conv(
         out_channels = groups * weight.shape[1]
 
         shape_out = calc_conv_nd_return_shape(
-            dims, kernel_size, stride, padding, dilation, output_padding,
+            dims,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            output_padding,
         )
 
     else:
