@@ -23,9 +23,9 @@ namespace lazy {
 
 namespace {
 // This registers the torchscript backend, without which lazy device won't work.
-// FIXME: This registers the backend for the whole test binary. We should probably
-// do it and undo it in the test fixture below.
-static bool inline init_backend(){
+// FIXME: This registers the backend for the whole test binary. We should
+// probably do it and undo it in the test fixture below.
+static bool inline init_backend() {
   torch::lazy::InitTorchScriptBackend();
   return true;
 }

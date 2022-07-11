@@ -43,7 +43,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   TSBackendImpl() {
     // TODO(whc) unify how all our flags are set and parsed as envs
     static bool env_use_cuda = std::getenv("LTC_TS_CUDA") != nullptr;
-    auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
+    auto type =
+        (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = std::make_shared<TSBackendDeviceType>(type);
   }
 
@@ -148,8 +149,9 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 
   at::DeviceType EagerFallbackDeviceType() const override;
 
- void SetDefaultDeviceType(int8_t type) override {
-    default_device_type_ = std::make_shared<TSBackendDeviceType>(static_cast<c10::DeviceType>(type));
+  void SetDefaultDeviceType(int8_t type) override {
+    default_device_type_ = std::make_shared<TSBackendDeviceType>(
+        static_cast<c10::DeviceType>(type));
   }
 
   int64_t GetDefaultDeviceOrdinal() const {
@@ -179,7 +181,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 
  private:
   std::shared_ptr<TSBackendDeviceType> default_device_type_;
-  int64_t default_device_ordinal_ {0};
+  int64_t default_device_ordinal_{0};
 };
 
 torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
@@ -217,7 +219,8 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
       // TODO(whc) should this check be made more general? it's written somewhat
       // oddly
       CHECK(
-          static_cast<c10::DeviceType>(default_device_type_->type)!= at::kCUDA ||
+          static_cast<c10::DeviceType>(default_device_type_->type) !=
+              at::kCUDA ||
           ts_data->data().device().type() == at::kCUDA);
       stack.emplace_back(ts_data->data());
     }

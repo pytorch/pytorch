@@ -11,8 +11,8 @@ namespace torch {
 namespace lazy {
 
 BackendDevice::BackendDevice()
-  : type_(getBackend()->GetDefaultDeviceType())
-  , ordinal_(getBackend()->GetDefaultDeviceOrdinal()) {}
+    : type_(getBackend()->GetDefaultDeviceType()),
+      ordinal_(getBackend()->GetDefaultDeviceOrdinal()) {}
 
 BackendDevice::BackendDevice(
     std::shared_ptr<BackendDeviceType>&& type,
@@ -43,7 +43,9 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
 
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
-  int64_t ordinal = device.has_index() ? device.index() : getBackend()->GetDefaultDeviceOrdinal();
+  int64_t ordinal = device.has_index()
+      ? device.index()
+      : getBackend()->GetDefaultDeviceOrdinal();
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
