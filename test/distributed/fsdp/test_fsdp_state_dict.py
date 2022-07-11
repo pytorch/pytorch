@@ -286,13 +286,20 @@ class TestFSDPStateDict(FSDPTest):
                 self.assertEqual(params, params_new)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
+    # @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
+    @parametrize("state_dict_type", ["state_dict"])
+    # @parametrize(
+    #     "cpu_offload",
+    #     [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    # )
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+        [CPUOffload(offload_params=False)],
     )
-    @parametrize("fp16", [True, False])
-    @parametrize("state_dict_rank0_and_offload", [True, False])
+    # @parametrize("fp16", [True, False])
+    @parametrize("fp16", [False])
+    # @parametrize("state_dict_rank0_and_offload", [True, False])
+    @parametrize("state_dict_rank0_and_offload", [True])
     def test_basic_save_and_load_state_dict(
         self, state_dict_type, cpu_offload, fp16, state_dict_rank0_and_offload
     ):

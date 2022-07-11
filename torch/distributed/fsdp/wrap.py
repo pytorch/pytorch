@@ -5,6 +5,7 @@
 
 import contextlib
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import (
     Any,
     Callable,
@@ -20,7 +21,6 @@ from typing import (
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
-
 __all__ = [
     "always_wrap_policy",
     "lambda_auto_wrap_policy",
@@ -28,7 +28,7 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
-    "ParamExecOrderWrapPolicy",
+    "ParamExecOrderPolicy",
 ]
 
 
@@ -288,53 +288,54 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     return module
 
 
+class HandleInitMode(Enum):
+    """
+    This determines how :class:`FlatParameter` s are initially constructed for
+    the parameter execution order policy. This construction is temporary, and
+    the :class:`FlatParameter` s are reconstructed later.
+    MODULE_LEVEL: For each module or a list of modules, its immediately owned parameters
+                  are used to construct one :class:`FlatParameter`. In ``ParamExecOrderPolicy``,
+                  This construction is based on ``ParamExecOrderPolicy.module_level_group_policy``.
+    PARAM_LEVEL: Each original parameter is used to construct one
+                 :class:`FlatParameter`.
+    """
+    MODULE_LEVEL = auto()
+    PARAM_LEVEL = auto()
+
+
+class ParamExecOrderState(Enum):
+    UNINITIALIZED = auto()
+    INITIALIZED = auto()
+
+
 @dataclass
-class ParamExecOrderWrapPolicy:
+class ParamExecOrderPolicy:
     """
     This is the class used for the wrapping policy that wraps parameters and performs
     the communication scheduling based on the parameter execution order in the forward pass
     (also called non-recursive wrapping policy).
 
-    The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
-    and the wrap transfers these parameters into one ``FlattenParameter``. In both forward and the backward passes,
-    the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
-    These parameters will then be reshaded once they have been used.
-
-    TODO (linjianma): For now, the parameters contained in each wrap of ``ParamExecOrderWrapPolicy``
-    are the parameters in each wrap of the ``init_policy`` (a recursive wrapping policy).
-    Later we will wrap parameters based on bucket size.
+    The policy contains multiple ``FlatParamHandle``. Each ``FlatParamHandle`` is a bucket that contains original parameters
+    that will be executed together, and the ``FlatParamHandle`` transfers these parameters into one ``FlatParameter``.
+    In both forward and the backward passes, the sharded parameters in each ``FlatParamHandle`` will be gathered
+    just before these parameters are used in the passes. These parameters will then be resharded once they have been used.
 
     Args:
-        init_policy (Callable):
-            The initial recursive wrapping policy used to guide the wrapping of
-            this policy. If tracing_config is none, in the first forward and
-            backward iteration, ``init_policy`` is used to record parameter
-            execution order. Otherwise, init_policy is only used in FSDP
-            constructor for module level wrapping.
-
-            The default ``always_wrap_policy`` might not be the best choice for every model. For example, for
-            transformer based models, setting ``transformer_auto_wrap_policy`` as the ``init_policy`` will guarantee
+        handle_init_mode (HandleInitMode):
+            The initial mode used in the policy.
+        bucket_size (int):
+            Bucket size threshold in bytes.
+        module_level_group_policy (Callable):
+            The policy used to guide the wrapping that will be used only if ``handle_init_mode`` is ``HandleInitMode.MODULE_LEVEL``.
+            Modules in one wrap of ``module_level_group_policy`` will always be grouped in one bucket.
+            Note that the default ``always_wrap_policy`` might not be the best choice for every model. For example, for
+            transformer based models, setting ``transformer_auto_wrap_policy`` as the policy will guarantee
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
-
-        tracing_config (Optional[TracingConfig]):
-            The configuration used to perform symbolic tracing at FSDP
-            constructor to get the module and parameter execution order. The
-            type of ``tracing_config`` needs to be either ``None`` or
-            ``TracingConfig``. If set as ``None``, then symbolic tracing is not
-            enabled, and one forward as well as backward iteration are needed to
-            get the parameter execution order.
-
-    ..warning :: Note that not all modules can be successfully traced when
-    ``tracing_config`` is not None and symbolic tracing is enabled. The two
-    cases below may be unable to trace: 1. when there is a data-dependent
-    branch, 2. when the forward pass contains operators that don't support
-    ``torch.fx.Proxy`` as the input type (e.g. ``arange``, ``zeros``, ``ones``,
-    ``full``, ``full_like``, ``eye``, ``empty``, ``tensor``). For those cases,
-    users can set ``tracing_config = None`` to disable symbolic tracing.
     """
-    init_policy: Callable = always_wrap_policy
-    tracing_config: Any = None
+    handle_init_mode: HandleInitMode
+    bucket_size: int = 1
+    module_level_group_policy: Callable = always_wrap_policy
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
@@ -362,6 +363,7 @@ def _recursive_wrap(
     """
     Automatically wrap child modules of *module* that meet the given
     criteria with :func:`auto_wrap`. Does not rely on _ConfigAutoWrap.
+    `module` is wrapped based on a post-order traversal.
     Args:
         module (nn.Module):
             module to recursively wrap

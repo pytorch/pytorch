@@ -109,6 +109,10 @@ class FlatParameter(nn.Parameter):
             ``_numels``, ``_shapes``, and ``_prefixed_param_names``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
+        _modules (Set[nn.Module]): Modules that contain some parameter that is
+            flattened into the ``FlatParameter``.
+        _root_modules (Set[nn.Module]): Subset of ``_modules`` that are roots
+            (i.e. parent-less) with respect to ``_modules``.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -135,7 +139,7 @@ class FlatParameter(nn.Parameter):
             iterations for gradient accumulation without :meth:`no_sync`.
     """
 
-    def init_metadata(
+    def _init_metadata(
         self,
         param_infos: List[ParamInfo],
         numels: List[int],
@@ -169,6 +173,32 @@ class FlatParameter(nn.Parameter):
         self._shared_param_infos = tuple(shared_param_infos)
         self._is_sharded = False
         self._unsharded_size = self.size()
+        self._modules = (
+            set(pi.module for pi in self._param_infos).union(
+                set(spi.module for spi in self._shared_param_infos)
+            )
+        )
+        self._root_modules = self._get_root_modules(self._modules)
+
+    def _get_root_modules(self, modules: Set[nn.Module]) -> Set[nn.Module]:
+        """Returns the modules in ``modules`` that are root modules (i.e.
+        parent-less) with respect to the set ``modules``. In other words, these
+        are the modules in ``modules`` that are the not child of any other
+        module in ``modules``."""
+        root_modules: Set[nn.Module] = set()
+        module_to_modules = {module: set(module.modules()) for module in modules}
+        for candidate_module in modules:
+            is_root_module = True
+            for module, modules in module_to_modules.items():
+                is_child_module = (
+                    candidate_module is not module and candidate_module in modules
+                )
+                if is_child_module:
+                    is_root_module = False
+                    break
+            if is_root_module:
+                root_modules.add(candidate_module)
+        return root_modules
 
 
 class FlatParamHandle:
@@ -255,7 +285,7 @@ class FlatParamHandle:
                     prefixed_param_names.append(prefixed_param_name)
         assert requires_grad is not None
         self.flat_param = FlatParamHandle.flatten_params(params_to_flatten, requires_grad)
-        self.flat_param.init_metadata(
+        self.flat_param._init_metadata(
             param_infos, numels, shapes, prefixed_param_names, shared_param_infos,
         )
 
@@ -271,7 +301,7 @@ class FlatParamHandle:
 
         We expose this factory method for checkpointing (e.g. sharded state
         dict). The flattened parameter's metadata should only be initialized
-        once (see :meth:`init_metadata`), but its tensor data may be reloaded.
+        once (see :meth:`_init_metadata`), but its tensor data may be reloaded.
         """
         with torch.no_grad():
             flat_params = [
@@ -526,6 +556,11 @@ class FlatParamHandle:
         return set(pi.module for pi in self.flat_param._param_infos).union(
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
+
+    @property
+    def _is_unsharded(self) -> bool:
+        """Returns if the handle's ``FlatParameter`` is currently unsharded."""
+        return self.flat_param.size() == self.flat_param._unsharded_size
 
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
         shared_param_infos = [
