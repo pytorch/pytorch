@@ -38,6 +38,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
     }
   }
   CAFFE_ENFORCE_LE(correct, N);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   *(Y->template mutable_data<float>()) = static_cast<float>(correct) / N;
 
   return true;

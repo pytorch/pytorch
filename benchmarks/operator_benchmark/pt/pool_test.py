@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
@@ -46,13 +41,13 @@ pool_1d_ops_list = op_bench.op_list(
 
 class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, L, device, op_func):
-        self.input = torch.rand(N, C, L, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, L, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
-    def forward(self):
-        return self.op_func(self.input)
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_1d_ops_list,
@@ -74,7 +69,7 @@ pool_2d_configs_short = op_bench.config_list(
         [[3, 1], [2, 1], 1, 16, 32, 32],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -86,7 +81,7 @@ pool_2d_configs_long = op_bench.cross_product_configs(
     C=[32],
     H=[32, 64],
     W=[32, 64],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
@@ -95,19 +90,22 @@ pool_2d_ops_list = op_bench.op_list(
     attrs=[
         ['MaxPool2d', nn.MaxPool2d],
         ['AvgPool2d', nn.AvgPool2d],
+        ['AdaptiveMaxPool2d', lambda kernel, stride: nn.AdaptiveMaxPool2d(kernel)],
+        ['FractionalMaxPool2d', lambda kernel, stride: nn.FractionalMaxPool2d(kernel, output_size=2)],
     ],
 )
 
 
 class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, H, W, device, op_func):
-        self.input = torch.rand(N, C, H, W, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, H, W, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
-    def forward(self):
-        return self.op_func(self.input)
+
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_2d_ops_list,
@@ -129,7 +127,7 @@ pool_3d_configs_short = op_bench.config_list(
         [[3, 1, 3], [2, 1, 2], 1, 16, 16, 32, 32],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -142,7 +140,7 @@ pool_3d_configs_long = op_bench.cross_product_configs(
     D=[32],
     H=[32, 64],
     W=[32, 64],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
@@ -152,19 +150,21 @@ pool_3d_ops_list = op_bench.op_list(
     attrs=[
         ['MaxPool3d', nn.MaxPool3d],
         ['AvgPool3d', nn.AvgPool3d],
+        ['AdaptiveMaxPool3d', lambda kernel, stride: nn.AdaptiveMaxPool3d(kernel)],
+        ['FractionalMaxPool3d', lambda kernel, stride: nn.FractionalMaxPool3d(kernel, output_size=2)],
     ],
 )
 
 
 class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, D, H, W, device, op_func):
-        self.input = torch.rand(N, C, D, H, W, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, D, H, W, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
-    def forward(self):
-        return self.op_func(self.input)
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_3d_ops_list,

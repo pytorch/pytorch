@@ -1,38 +1,30 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <c10/util/hash.h>
 
 namespace c10 {
+namespace detail {
+inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  if (lhs.isTensor() && rhs.isTensor()) {
+    // for tensors, we compare only by identity (following how it's done in Python).
+    return lhs.is(rhs);
+  }
+  // Otherwise, we first compare by identity for efficiency, then by value (see:
+  // [container equality])
+  return _fastEqualsForContainer(lhs, rhs);
+}
+}
 
-template<class T> TypePtr getTypePtr();
-std::string toString(TypePtr typePtr);
+template<class T> decltype(auto) getTypePtr();
+std::string toString(const Type& type);
 
 namespace impl {
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isIntList()) {
-    return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
-  } else if (lhs.isTensor()) {
-    return lhs.toTensor().is_same(rhs.toTensor());
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
-  TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
-  TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes.valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(*dict.impl_->elementTypes.keyType), ", ", toString(*dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(*getTypePtr<Key>()), ", ", toString(*getTypePtr<Value>()), ">. Key types mismatch.");
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes.valueType, "Tried to cast a Dict<", toString(*dict.impl_->elementTypes.keyType), ", ", toString(*dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(*getTypePtr<Key>()), ", ", toString(*getTypePtr<Value>()), ">. Value types mismatch.");
 
   return Dict<Key, Value>(std::move(dict.impl_));
 }
@@ -47,15 +39,19 @@ namespace detail {
 
 inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   if (ivalue.isInt()) {
-    return std::hash<int>()(ivalue.toInt());
+    return std::hash<int64_t>()(ivalue.toInt());
   } else if (ivalue.isString()) {
-    return std::hash<std::string>()(ivalue.toStringRef());
+    return std::hash<c10::string_view>()(ivalue.toStringView());
   } else if (ivalue.isDouble()) {
     return std::hash<double>()(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return c10::hash<c10::complex<double>>()(ivalue.toComplexDouble());
   } else if (ivalue.isBool()) {
     return std::hash<bool>()(ivalue.toBool());
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
+  } else if (ivalue.isDevice()) {
+    return std::hash<Device>()(ivalue.toDevice());
   } else {
     throw std::runtime_error(
         "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
@@ -73,8 +69,8 @@ Dict<Key, Value>::Dict()
   :Dict(make_intrusive<detail::DictImpl>(
       detail::DictImpl::dict_map_type(),
       detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()})) {
-  static_assert(!std::is_same<Key, IValue>::value, "This constructor is not valid for Dict<IValue, _>. Please use c10::impl::GenericDict(keyType, valueType) instead, or if you absolutely have to, use c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()).");
-  static_assert(!std::is_same<Value, IValue>::value, "This constructor is not valid for Dict<_, IValue>. Please use c10::impl::GenericDict(keyType, valueType) instead, or if you absolutely have to, use c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()).");
+  static_assert(!std::is_same<Key, IValue>::value, "This constructor is not valid for Dict<IValue, _>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
+  static_assert(!std::is_same<Value, IValue>::value, "This constructor is not valid for Dict<_, IValue>. Please use c10::impl::GenericDict(keyType, valueType) instead.");
 }
 
 template<class Key, class Value>
@@ -87,19 +83,7 @@ Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 }
 
 template<class Key, class Value>
-Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
-}
-
-template<class Key, class Value>
 Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
-
-template<class Key, class Value>
-Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
-  impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
-  return *this;
-}
 
 template<class Key, class Value>
 Dict<Key, Value> Dict<Key, Value>::copy() const {
@@ -202,4 +186,24 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
   impl_->elementTypes.valueType = std::move(t);
 }
 
+template <class Key_, class Value_>
+bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  // Dicts with the same identity trivially compare equal.
+  if (lhs.impl_ == rhs.impl_) {
+    return true;
+  }
+
+  // Otherwise compare the values
+  return *lhs.impl_ == *rhs.impl_;
+}
+
+template <class Key_, class Value_>
+bool operator!=(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  return !(lhs == rhs);
+}
+
+template <class Key, class Value>
+bool Dict<Key, Value>::is(const Dict& rhs) const {
+  return this->impl_ == rhs.impl_;
+}
 }

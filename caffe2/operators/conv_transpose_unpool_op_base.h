@@ -120,7 +120,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
     }
 
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto dim : c10::irange(kernel_.size())) {
       CAFFE_ENFORCE_GT(kernel_[dim], 0);
       CAFFE_ENFORCE_GT(stride_[dim], 0);
       CAFFE_ENFORCE_GE(adj_[dim], 0);
@@ -136,7 +137,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   // Gets the output size. The output channel is manually specified.
   std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
     CAFFE_ENFORCE(4 == input.dim());
-    CAFFE_ENFORCE(input.numel() > 0);
+    CAFFE_ENFORCE_GT(input.size_from_dim(1), 0);
     int N = input.dim32(0);
     bool channel_first = false; // initialized to suppress compiler warning.
     int H = 0, W = 0; // initialized to suppress compiler warning.

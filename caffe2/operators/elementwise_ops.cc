@@ -84,10 +84,10 @@ void SRLHelper::RunWithBroadcast2(
     size_t n,
     size_t post,
     CPUContext*) {
-  for (int i = 0; i < n; ++i) {
+  for (auto i = 0U; i < n; ++i) {
     y[i] = 0;
-    for (int j = 0; j < pre; ++j) {
-      for (int k = 0; k < post; ++k) {
+    for (auto j = 0U; j < pre; ++j) {
+      for (auto k = 0U; k < post; ++k) {
         y[i] += a[(j * n + i) * post + k];
       }
     }
@@ -108,6 +108,7 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
     auto count = A.numel();
     SRLHelper::sum2one<T>(Adata, Cdata, count);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t pre, n, post;
     std::tie(pre, n, post) =
         elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);

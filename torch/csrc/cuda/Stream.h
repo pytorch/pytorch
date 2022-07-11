@@ -2,17 +2,16 @@
 #define THCP_STREAM_INC
 
 #include <c10/cuda/CUDAStream.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
-#include <THC/THC.h>
 
-struct THCPStream {
-  PyObject_HEAD
-  uint64_t cdata;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct THCPStream : THPStream {
   at::cuda::CUDAStream cuda_stream;
 };
-extern PyObject *THCPStreamClass;
+extern PyObject* THCPStreamClass;
 
-void THCPStream_init(PyObject *module);
+void THCPStream_init(PyObject* module);
 
 inline bool THCPStream_Check(PyObject* obj) {
   return THCPStreamClass && PyObject_IsInstance(obj, THCPStreamClass);

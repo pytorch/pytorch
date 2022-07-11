@@ -5,8 +5,10 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/Device.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/Backend.h>
+#include <c10/core/Layout.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 
 #include <memory>
 #include <string>
@@ -19,17 +21,17 @@ struct Storage;
 }
 
 namespace torch {
-// Register a PyTypeObject* with the given attributes
-void registerStoragePyTypeObject(
-    PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType);
-
-void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
-void registerLayoutObject(THPLayout *layout, at::Backend backend);
+void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType);
+void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
 PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
+at::Storage createStorageGetType(
+    PyObject* obj,
+    at::ScalarType& scalar_type,
+    bool& is_typed_storage);
 bool isStorage(PyObject* obj);
 
-THPDtype* getDtype(at::ScalarType scalarType);
-THPLayout* getLayout(at::Backend backend);
-}  // namespace torch
+THPDtype* getTHPDtype(at::ScalarType scalarType);
+THPLayout* getTHPLayout(at::Layout layout);
+} // namespace torch

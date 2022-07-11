@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Reduce.cuh>
 #include <c10/util/ArrayRef.h>
 
@@ -39,6 +40,11 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
     out << config.output_mult[i];
   }
   out << "], ";
+  out << "vectorize_input=" << config.vectorize_input << ", ";
+  out << "output_vec_size=" << config.output_vec_size << ", ";
+  out << "block_width=" << config.block_width << ", ";
+  out << "block_height=" << config.block_height << ", ";
+  out << "num_threads=" << config.num_threads << ", ";
   out << "values_per_thread=" << config.values_per_thread() << ", ";
   out << "block=" << config.block() << ", ";
   out << "grid=" << config.grid() << ", ";

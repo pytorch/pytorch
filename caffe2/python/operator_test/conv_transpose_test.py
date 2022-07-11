@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import assume, given, settings
@@ -20,7 +20,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
@@ -90,7 +90,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
@@ -166,7 +166,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            engine=st.sampled_from(["", "BLOCK"]),
            use_bias=st.booleans(),
            **hu.gcs)
@@ -235,13 +235,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
                                              size, input_channels,
                                              output_channels, batch_size,
@@ -303,13 +303,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "BLOCK"]),
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_separate_stride_pad_adj_gradient(
             self, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r, kernel,
             adj_h, adj_w, size, input_channels, output_channels, batch_size,
@@ -368,13 +368,14 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
            output_channels=st.integers(1, 8),
-           batch_size=st.integers(1, 4),
+           batch_size=st.integers(0, 4),
            group=st.integers(1, 4),
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(max_examples=2, deadline=None)
     def test_convolution_transpose_with_group(
             self, stride, pad, kernel, adj, size, input_channels,
             output_channels, batch_size, group, order, engine, shared_buffer,

@@ -17,12 +17,26 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
+    // using meta bit test to catch Fake Tensor as well until __torch__function defined
+    if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit))) {
+        AT_ERROR("Can not infer total number of classes from meta tensor.");
+    }
+
     // non-empty tensor
-    TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    if (self.device().type() != at::kCUDA) {
+      //for cuda, rely on device assert thrown by scatter
+      TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    }
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+        if (self.device().type() != at::kCUDA) {
+          //rely on device asserts from scatter to avoid sync here
+          TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+        } else {
+            //for cuda, assert that num_classes is at least 1
+            TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
+        }
     }
 
     shape.push_back(num_classes);

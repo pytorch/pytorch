@@ -1,13 +1,50 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-from caffe2.python import core, workspace, dyndep
+
+
+
+
+from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
 
 
 class TestFeatureMapsOps(TestCase):
+
+    def test_merge_dense_feature_tensors(self):
+        op = core.CreateOperator(
+            "MergeDenseFeatureTensors",
+            [
+                "in1", "in1_presence",
+            ],
+            [
+                "out_lengths", "out_keys", "out_values",
+            ],
+            feature_ids=[11, 12, 13, 14]
+        )
+        # Input 1.
+        workspace.FeedBlob(
+            "in1",
+            np.array([[11.1, 12.1, 13.1, 14.1], [11.2, 12.2, 13.2, 14.2]], dtype=np.float)
+        )
+        workspace.FeedBlob(
+            "in1_presence",
+            np.array([[True, False, False, True], [False, True, True, False]], dtype=np.bool)
+        )
+
+        workspace.RunOperatorOnce(op)
+
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("out_lengths"),
+            np.array([2, 2], dtype=np.int32)
+        )
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("out_keys"),
+            np.array([11, 14, 12, 13], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("out_values"),
+            np.array([11.1, 14.1, 12.2, 13.2], dtype=np.float)
+        )
+
 
     def test_merge_single_scalar_feature_tensors(self):
         op = core.CreateOperator(

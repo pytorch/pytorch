@@ -8,6 +8,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -29,7 +30,7 @@ class MeanOp final : public Operator<Context> {
     }
 
     // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(1, InputSize())) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->sizes() == Input(i).sizes().",
@@ -43,7 +44,7 @@ class MeanOp final : public Operator<Context> {
     }
 
     T* output_data = output->template mutable_data<T>();
-    for (int i = 1; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(1, InputSize())) {
       math::Add(
           output->numel(),
           output_data,
@@ -65,9 +66,11 @@ class MeanOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (Input(0).template IsType<float>()) {
       return DoRunWithType<float>();
+    } else if (Input(0).template IsType<double>()) {
+      return DoRunWithType<double>();
     } else {
       CAFFE_THROW(
-          "Mean operator only supports 32-bit float, but",
+          "Mean operator only supports 32-bit float or 64-bit double, but",
           " input was of type ",
           Input(0).dtype().name());
     }
@@ -99,7 +102,7 @@ class MeanGradientOp : public Operator<Context> {
         size, scale, dY_data, dX0->template mutable_data<T>(), &context_);
 
     // Copy the rest dX
-    for (int i = 1; i < num_inputs; i++) {
+    for (const auto i : c10::irange(1, num_inputs)) {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
       cur_dX->CopyFrom(*dX0, true /*async*/);
@@ -111,9 +114,11 @@ class MeanGradientOp : public Operator<Context> {
   bool RunOnDevice() override {
     if (Input(0).template IsType<float>()) {
       return DoRunWithType<float>();
+    } else if (Input(0).template IsType<double>()) {
+      return DoRunWithType<double>();
     } else {
       CAFFE_THROW(
-          "Mean operator only supports 32-bit float, but",
+          "Mean operator only supports 32-bit float or 64-bit double, but",
           " input was of type ",
           Input(0).dtype().name());
     }

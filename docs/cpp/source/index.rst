@@ -1,24 +1,24 @@
 PyTorch C++ API
 ===============
 
-These pages provide documentation for the public portions of the PyTorch C++
+These pages provide the documentation for the public portions of the PyTorch C++
 API.  This API can roughly be divided into five parts:
 
-- **ATen**: The foundational tensor and mathematical operation library on which all else is built;
-- **Autograd**: Augments ATen with automatic differentiation;
-- **C++ Frontend**: High level constructs for training and evaluation of machine learning models;
-- **TorchScript**: An interface to the TorchScript JIT compiler and interpreter;
+- **ATen**: The foundational tensor and mathematical operation library on which all else is built.
+- **Autograd**: Augments ATen with automatic differentiation.
+- **C++ Frontend**: High level constructs for training and evaluation of machine learning models.
+- **TorchScript**: An interface to the TorchScript JIT compiler and interpreter.
 - **C++ Extensions**: A means of extending the Python API with custom C++ and CUDA routines.
 
-Together, these building blocks form a research and
+Combining, these building blocks form a research and
 production ready C++ library for tensor computation and dynamic neural
 networks with strong emphasis on GPU acceleration as well as fast CPU
 performance. It is currently in use at Facebook in research and
-production; we look forward to welcoming more users of the PyTorch C++ API.
+production; we are looking forward to welcome more users of the PyTorch C++ API.
 
 .. warning::
 
-  At the moment, the C++ API should be considered "experimental"; we may
+  At the moment, the C++ API should be considered "beta" stability; we may
   make major breaking changes to the backend in order to improve the API,
   or in service of providing the Python interface to PyTorch, which is our
   most stable and best supported interface.
@@ -42,8 +42,7 @@ look as follows:
   auto c = a + b.to(at::kInt);
 
 This ``Tensor`` class and all other symbols in ATen are found in the ``at::``
-namespace, documented
-`here <https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at>`_.
+namespace.
 
 Autograd
 --------
@@ -76,7 +75,7 @@ C++ Frontend
 ------------
 
 The PyTorch C++ frontend provides a high level, pure C++ modeling interface for
-neural network and general machine learning research and production use cases,
+neural network and general ML(Machine Learning) research and production use cases,
 largely following the Python API in design and provided functionality. The C++
 frontend includes the following:
 
@@ -92,34 +91,24 @@ frontend includes the following:
 
 See `this document <https://pytorch.org/cppdocs/frontend.html>`_ for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
-namespace related to the C++ Frontend include `torch::nn
-<https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
-`torch::optim
-<https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim>`_,
-`torch::data
-<https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data>`_,
-`torch::serialize
-<https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize>`_,
-`torch::jit
-<https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit>`_
-and `torch::python
-<https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
+namespace related to the C++ Frontend include `torch::nn`,
+`torch::optim`, `torch::data`, `torch::serialize`, `torch::jit`, and `torch::python`.
 Examples of the C++ frontend can be found in `this repository
-<https://github.com/goldsborough/examples/tree/cpp/cpp>`_ which is being
+<https://github.com/pytorch/examples/tree/master/cpp>`_ which is being
 expanded on a continuous and active basis.
 
 .. note::
 
   Unless you have a particular reason to constrain yourself exclusively to ATen
   or the Autograd API, the C++ frontend is the recommended entry point to the
-  PyTorch C++ ecosystem. While it is still in experimental as we collect user feedback
+  PyTorch C++ ecosystem. While it is still in beta as we collect user feedback
   (from you!), it provides both more functionality and better stability
   guarantees than the ATen and Autograd APIs.
 
 TorchScript
 -----------
 
-TorchScript a representation of a PyTorch model that can be understood,
+TorchScript is a representation of a PyTorch model that can be understood,
 compiled and serialized by the TorchScript compiler. Fundamentally, TorchScript
 is a programming language in its own right. It is a subset of Python using
 the PyTorch API.  The C++ interface to TorchScript encompasses three primary pieces of
@@ -136,8 +125,7 @@ about this by following `this
 <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ link. The second
 API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
-invoked from C++ during inference. Lastly, the `torch::jit::compile
-<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a176d99fd5bf0233119a5f49c07a1d01d.html#exhale-function-namespacetorch-1-1jit-1a176d99fd5bf0233119a5f49c07a1d01d>`_
+invoked from C++ during inference. Lastly, the `torch::jit::compile`
 function may be used to access the TorchScript compiler directly from C++.
 
 C++ Extensions
@@ -150,7 +138,7 @@ CUDA to accelerate research in vanilla PyTorch setups. The C++ extension API
 does not add any new functionality to the PyTorch C++ API. Instead, it
 provides integration with Python setuptools as well as JIT compilation
 mechanisms that allow access to ATen, the autograd and other C++ APIs from
-Python. To learn more about the C++ extension API, see
+Python. To learn more about the C++ extension API, go through
 `this tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_.
 
 Contents
@@ -161,8 +149,6 @@ Contents
 
    installing
    frontend
-   contributing
-   api/library_root
 
 .. toctree::
   :glob:
@@ -171,17 +157,10 @@ Contents
 
   notes/*
 
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
 Acknowledgements
 ----------------
 
 This documentation website for the PyTorch C++ universe has been enabled by the
 `Exhale <https://github.com/svenevs/exhale/>`_ project and generous investment
 of time and effort by its maintainer, `svenevs <https://github.com/svenevs/>`_.
-We thank Stephen for his work and his help with the PyTorch C++ documentation.
+We thank Stephen for his work and his efforts providing help with the PyTorch C++ documentation.

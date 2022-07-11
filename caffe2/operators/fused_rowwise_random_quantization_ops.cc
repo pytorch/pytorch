@@ -51,6 +51,7 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
     random_buffer_.resize(input_columns);
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t row = 0; row < input_rows; ++row) {
     if (random_) {
 #ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
@@ -108,6 +109,7 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
       input_rows, static_cast<int64_t>(output_columns)};
   auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<float>());
   auto* output_data = output->template mutable_data<float>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t row = 0; row < input_rows; ++row) {
     math::decompress_and_dequantize(
         input_data + row * input_columns,
@@ -170,7 +172,7 @@ In Advances in Neural Information Processing Systems, pp. 1508-1518. 2017.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused bitwidth, tail, min, max and quantized data")
-    .Arg("bitwidth", "How many bits to quantiz per data (defaults to 8).")
+    .Arg("bitwidth", "How many bits to quantize per data (defaults to 8).")
     .Arg("random", "random or not (True). False is set up for unittest.");
 NO_GRADIENT(FloatToFusedRandRowwiseQuantized);
 

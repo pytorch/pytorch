@@ -5,7 +5,7 @@
 #include <c10/util/Registry.h>
 
 // Note: we use a different namespace to test if the macros defined in
-// Registry.h actuall works with a different namespace from c10.
+// Registry.h actually works with a different namespace from c10.
 namespace c10_test {
 
 class Foo {
@@ -13,7 +13,7 @@ class Foo {
   explicit Foo(int x) {
     // LOG(INFO) << "Foo " << x;
   }
-  virtual ~Foo() {}
+  virtual ~Foo() = default;
 };
 
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
@@ -73,6 +73,7 @@ TEST(RegistryTest, RegistryPriorities) {
   RegisterFooDefault();
 
   // throws because Foo is already registered with default priority
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(RegisterFooDefaultAgain(), std::runtime_error);
 
 #ifdef __GXX_RTTI

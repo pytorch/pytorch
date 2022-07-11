@@ -3,50 +3,69 @@ package org.pytorch.torchvision;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.media.Image;
-
-import org.pytorch.Tensor;
-
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.Locale;
+import org.pytorch.MemoryFormat;
+import org.pytorch.Tensor;
 
 /**
- * Contains utility functions for {@link org.pytorch.Tensor} creation from
- * {@link android.graphics.Bitmap} or {@link android.media.Image} source.
+ * Contains utility functions for {@link org.pytorch.Tensor} creation from {@link
+ * android.graphics.Bitmap} or {@link android.media.Image} source.
  */
 public final class TensorImageUtils {
 
-  public static float[] TORCHVISION_NORM_MEAN_RGB = new float[]{0.485f, 0.456f, 0.406f};
-  public static float[] TORCHVISION_NORM_STD_RGB = new float[]{0.229f, 0.224f, 0.225f};
+  public static float[] TORCHVISION_NORM_MEAN_RGB = new float[] {0.485f, 0.456f, 0.406f};
+  public static float[] TORCHVISION_NORM_STD_RGB = new float[] {0.229f, 0.224f, 0.225f};
 
   /**
    * Creates new {@link org.pytorch.Tensor} from full {@link android.graphics.Bitmap}, normalized
    * with specified in parameters mean and std.
    *
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
+      final Bitmap bitmap,
+      final float[] normMeanRGB,
+      final float normStdRGB[],
+      final MemoryFormat memoryFormat) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
     return bitmapToFloat32Tensor(
-        bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB);
+        bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB, memoryFormat);
+  }
+
+  public static Tensor bitmapToFloat32Tensor(
+      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
+    return bitmapToFloat32Tensor(
+        bitmap,
+        0,
+        0,
+        bitmap.getWidth(),
+        bitmap.getHeight(),
+        normMeanRGB,
+        normStdRGB,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
-   * Writes tensor content from specified {@link android.graphics.Bitmap},
-   * normalized with specified in parameters mean and std to specified {@link java.nio.FloatBuffer}
-   * with specified offset.
+   * Writes tensor content from specified {@link android.graphics.Bitmap}, normalized with specified
+   * in parameters mean and std to specified {@link java.nio.FloatBuffer} with specified offset.
    *
-   * @param bitmap      {@link android.graphics.Bitmap} as a source for Tensor data
-   * @param x           - x coordinate of top left corner of bitmap's area
-   * @param y           - y coordinate of top left corner of bitmap's area
-   * @param width       - width of bitmap's area
-   * @param height      - height of bitmap's area
+   * @param bitmap {@link android.graphics.Bitmap} as a source for Tensor data
+   * @param x - x coordinate of top left corner of bitmap's area
+   * @param y - y coordinate of top left corner of bitmap's area
+   * @param width - width of bitmap's area
+   * @param height - height of bitmap's area
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static void bitmapToFloatBuffer(
       final Bitmap bitmap,
@@ -57,41 +76,78 @@ public final class TensorImageUtils {
       final float[] normMeanRGB,
       final float[] normStdRGB,
       final FloatBuffer outBuffer,
-      final int outBufferOffset) {
+      final int outBufferOffset,
+      final MemoryFormat memoryFormat) {
     checkOutBufferCapacity(outBuffer, outBufferOffset, width, height);
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
+    if (memoryFormat != MemoryFormat.CONTIGUOUS && memoryFormat != MemoryFormat.CHANNELS_LAST) {
+      throw new IllegalArgumentException("Unsupported memory format " + memoryFormat);
+    }
 
     final int pixelsCount = height * width;
     final int[] pixels = new int[pixelsCount];
     bitmap.getPixels(pixels, 0, width, x, y, width, height);
-    final int offset_g = pixelsCount;
-    final int offset_b = 2 * pixelsCount;
-    for (int i = 0; i < pixelsCount; i++) {
-      final int c = pixels[i];
-      float r = ((c >> 16) & 0xff) / 255.0f;
-      float g = ((c >> 8) & 0xff) / 255.0f;
-      float b = ((c) & 0xff) / 255.0f;
-      float rF = (r - normMeanRGB[0]) / normStdRGB[0];
-      float gF = (g - normMeanRGB[1]) / normStdRGB[1];
-      float bF = (b - normMeanRGB[2]) / normStdRGB[2];
-      outBuffer.put(outBufferOffset + i, rF);
-      outBuffer.put(outBufferOffset + offset_g + i, gF);
-      outBuffer.put(outBufferOffset + offset_b + i, bF);
+    if (MemoryFormat.CONTIGUOUS == memoryFormat) {
+      final int offset_g = pixelsCount;
+      final int offset_b = 2 * pixelsCount;
+      for (int i = 0; i < pixelsCount; i++) {
+        final int c = pixels[i];
+        float r = ((c >> 16) & 0xff) / 255.0f;
+        float g = ((c >> 8) & 0xff) / 255.0f;
+        float b = ((c) & 0xff) / 255.0f;
+        outBuffer.put(outBufferOffset + i, (r - normMeanRGB[0]) / normStdRGB[0]);
+        outBuffer.put(outBufferOffset + offset_g + i, (g - normMeanRGB[1]) / normStdRGB[1]);
+        outBuffer.put(outBufferOffset + offset_b + i, (b - normMeanRGB[2]) / normStdRGB[2]);
+      }
+    } else {
+      for (int i = 0; i < pixelsCount; i++) {
+        final int c = pixels[i];
+        float r = ((c >> 16) & 0xff) / 255.0f;
+        float g = ((c >> 8) & 0xff) / 255.0f;
+        float b = ((c) & 0xff) / 255.0f;
+        outBuffer.put(outBufferOffset + 3 * i + 0, (r - normMeanRGB[0]) / normStdRGB[0]);
+        outBuffer.put(outBufferOffset + 3 * i + 1, (g - normMeanRGB[1]) / normStdRGB[1]);
+        outBuffer.put(outBufferOffset + 3 * i + 2, (b - normMeanRGB[2]) / normStdRGB[2]);
+      }
     }
+  }
+
+  public static void bitmapToFloatBuffer(
+      final Bitmap bitmap,
+      final int x,
+      final int y,
+      final int width,
+      final int height,
+      final float[] normMeanRGB,
+      final float[] normStdRGB,
+      final FloatBuffer outBuffer,
+      final int outBufferOffset) {
+    bitmapToFloatBuffer(
+        bitmap,
+        x,
+        y,
+        width,
+        height,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
    * Creates new {@link org.pytorch.Tensor} from specified area of {@link android.graphics.Bitmap},
    * normalized with specified in parameters mean and std.
    *
-   * @param bitmap      {@link android.graphics.Bitmap} as a source for Tensor data
-   * @param x           - x coordinate of top left corner of bitmap's area
-   * @param y           - y coordinate of top left corner of bitmap's area
-   * @param width       - width of bitmap's area
-   * @param height      - height of bitmap's area
+   * @param bitmap {@link android.graphics.Bitmap} as a source for Tensor data
+   * @param x - x coordinate of top left corner of bitmap's area
+   * @param y - y coordinate of top left corner of bitmap's area
+   * @param width - width of bitmap's area
+   * @param height - height of bitmap's area
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor bitmapToFloat32Tensor(
       final Bitmap bitmap,
@@ -100,26 +156,41 @@ public final class TensorImageUtils {
       int width,
       int height,
       float[] normMeanRGB,
-      float[] normStdRGB) {
+      float[] normStdRGB,
+      MemoryFormat memoryFormat) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
-    bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, height, width});
+    bitmapToFloatBuffer(
+        bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0, memoryFormat);
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, height, width}, memoryFormat);
+  }
+
+  public static Tensor bitmapToFloat32Tensor(
+      final Bitmap bitmap,
+      int x,
+      int y,
+      int width,
+      int height,
+      float[] normMeanRGB,
+      float[] normStdRGB) {
+    return bitmapToFloat32Tensor(
+        bitmap, x, y, width, height, normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
   }
 
   /**
    * Creates new {@link org.pytorch.Tensor} from specified area of {@link android.media.Image},
    * doing optional rotation, scaling (nearest) and center cropping.
    *
-   * @param image           {@link android.media.Image} as a source for Tensor data
+   * @param image {@link android.media.Image} as a source for Tensor data
    * @param rotateCWDegrees Clockwise angle through which the input image needs to be rotated to be
-   *                        upright. Range of valid values: 0, 90, 180, 270
-   * @param tensorWidth     return tensor width, must be positive
-   * @param tensorHeight    return tensor height, must be positive
-   * @param normMeanRGB     means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB      standard deviation for RGB channels normalization, length must equal 3, RGB order
+   *     upright. Range of valid values: 0, 90, 180, 270
+   * @param tensorWidth return tensor width, must be positive
+   * @param tensorHeight return tensor height, must be positive
+   * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor imageYUV420CenterCropToFloat32Tensor(
       final Image image,
@@ -127,7 +198,8 @@ public final class TensorImageUtils {
       final int tensorWidth,
       final int tensorHeight,
       float[] normMeanRGB,
-      float[] normStdRGB) {
+      float[] normStdRGB,
+      MemoryFormat memoryFormat) {
     if (image.getFormat() != ImageFormat.YUV_420_888) {
       throw new IllegalArgumentException(
           String.format(
@@ -145,22 +217,45 @@ public final class TensorImageUtils {
         rotateCWDegrees,
         tensorWidth,
         tensorHeight,
-        normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, tensorHeight, tensorWidth});
+        normMeanRGB,
+        normStdRGB,
+        floatBuffer,
+        0,
+        memoryFormat);
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, tensorHeight, tensorWidth}, memoryFormat);
+  }
+
+  public static Tensor imageYUV420CenterCropToFloat32Tensor(
+      final Image image,
+      int rotateCWDegrees,
+      final int tensorWidth,
+      final int tensorHeight,
+      float[] normMeanRGB,
+      float[] normStdRGB) {
+    return imageYUV420CenterCropToFloat32Tensor(
+        image,
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
    * Writes tensor content from specified {@link android.media.Image}, doing optional rotation,
-   * scaling (nearest) and center cropping to specified {@link java.nio.FloatBuffer} with specified offset.
+   * scaling (nearest) and center cropping to specified {@link java.nio.FloatBuffer} with specified
+   * offset.
    *
-   * @param image           {@link android.media.Image} as a source for Tensor data
+   * @param image {@link android.media.Image} as a source for Tensor data
    * @param rotateCWDegrees Clockwise angle through which the input image needs to be rotated to be
-   *                        upright. Range of valid values: 0, 90, 180, 270
-   * @param tensorWidth     return tensor width, must be positive
-   * @param tensorHeight    return tensor height, must be positive
-   * @param normMeanRGB     means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB      standard deviation for RGB channels normalization, length must equal 3, RGB order
-   * @param outBuffer       Output buffer, where tensor content will be written
+   *     upright. Range of valid values: 0, 90, 180, 270
+   * @param tensorWidth return tensor width, must be positive
+   * @param tensorHeight return tensor height, must be positive
+   * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
+   * @param outBuffer Output buffer, where tensor content will be written
    * @param outBufferOffset Output buffer offset with which tensor content will be written
    */
   public static void imageYUV420CenterCropToFloatBuffer(
@@ -171,7 +266,8 @@ public final class TensorImageUtils {
       float[] normMeanRGB,
       float[] normStdRGB,
       final FloatBuffer outBuffer,
-      final int outBufferOffset) {
+      final int outBufferOffset,
+      final MemoryFormat memoryFormat) {
     checkOutBufferCapacity(outBuffer, outBufferOffset, tensorWidth, tensorHeight);
 
     if (image.getFormat() != ImageFormat.YUV_420_888) {
@@ -185,111 +281,89 @@ public final class TensorImageUtils {
     checkRotateCWDegrees(rotateCWDegrees);
     checkTensorSize(tensorWidth, tensorHeight);
 
-    final int widthBeforeRotation = image.getWidth();
-    final int heightBeforeRotation = image.getHeight();
+    Image.Plane[] planes = image.getPlanes();
+    Image.Plane Y = planes[0];
+    Image.Plane U = planes[1];
+    Image.Plane V = planes[2];
 
-    int widthAfterRotation = widthBeforeRotation;
-    int heightAfterRotation = heightBeforeRotation;
-    if (rotateCWDegrees == 90 || rotateCWDegrees == 270) {
-      widthAfterRotation = heightBeforeRotation;
-      heightAfterRotation = widthBeforeRotation;
+    int memoryFormatJniCode = 0;
+    if (MemoryFormat.CONTIGUOUS == memoryFormat) {
+      memoryFormatJniCode = 1;
+    } else if (MemoryFormat.CHANNELS_LAST == memoryFormat) {
+      memoryFormatJniCode = 2;
     }
 
-    int centerCropWidthAfterRotation = widthAfterRotation;
-    int centerCropHeightAfterRotation = heightAfterRotation;
-
-    if (tensorWidth * heightAfterRotation <= tensorHeight * widthAfterRotation) {
-      centerCropWidthAfterRotation =
-          (int) Math.floor((float) tensorWidth * heightAfterRotation / tensorHeight);
-    } else {
-      centerCropHeightAfterRotation =
-          (int) Math.floor((float) tensorHeight * widthAfterRotation / tensorWidth);
-    }
-
-    int centerCropWidthBeforeRotation = centerCropWidthAfterRotation;
-    int centerCropHeightBeforeRotation = centerCropHeightAfterRotation;
-    if (rotateCWDegrees == 90 || rotateCWDegrees == 270) {
-      centerCropHeightBeforeRotation = centerCropWidthAfterRotation;
-      centerCropWidthBeforeRotation = centerCropHeightAfterRotation;
-    }
-
-    final int offsetX =
-        (int) Math.floor((widthBeforeRotation - centerCropWidthBeforeRotation) / 2.f);
-    final int offsetY =
-        (int) Math.floor((heightBeforeRotation - centerCropHeightBeforeRotation) / 2.f);
-
-    final Image.Plane yPlane = image.getPlanes()[0];
-    final Image.Plane uPlane = image.getPlanes()[1];
-    final Image.Plane vPlane = image.getPlanes()[2];
-
-    final ByteBuffer yBuffer = yPlane.getBuffer();
-    final ByteBuffer uBuffer = uPlane.getBuffer();
-    final ByteBuffer vBuffer = vPlane.getBuffer();
-
-    final int yRowStride = yPlane.getRowStride();
-    final int uRowStride = uPlane.getRowStride();
-
-    final int yPixelStride = yPlane.getPixelStride();
-    final int uPixelStride = uPlane.getPixelStride();
-
-    final float scale = (float) centerCropWidthAfterRotation / tensorWidth;
-    final int uvRowStride = uRowStride >> 1;
-
-    final int channelSize = tensorHeight * tensorWidth;
-    final int tensorInputOffsetG = channelSize;
-    final int tensorInputOffsetB = 2 * channelSize;
-    for (int x = 0; x < tensorWidth; x++) {
-      for (int y = 0; y < tensorHeight; y++) {
-
-        final int centerCropXAfterRotation = (int) Math.floor(x * scale);
-        final int centerCropYAfterRotation = (int) Math.floor(y * scale);
-
-        int xBeforeRotation = offsetX + centerCropXAfterRotation;
-        int yBeforeRotation = offsetY + centerCropYAfterRotation;
-        if (rotateCWDegrees == 90) {
-          xBeforeRotation = offsetX + centerCropYAfterRotation;
-          yBeforeRotation =
-              offsetY + (centerCropHeightBeforeRotation - 1) - centerCropXAfterRotation;
-        } else if (rotateCWDegrees == 180) {
-          xBeforeRotation =
-              offsetX + (centerCropWidthBeforeRotation - 1) - centerCropXAfterRotation;
-          yBeforeRotation =
-              offsetY + (centerCropHeightBeforeRotation - 1) - centerCropYAfterRotation;
-        } else if (rotateCWDegrees == 270) {
-          xBeforeRotation =
-              offsetX + (centerCropWidthBeforeRotation - 1) - centerCropYAfterRotation;
-          yBeforeRotation = offsetY + centerCropXAfterRotation;
-        }
-
-        final int yIdx = yBeforeRotation * yRowStride + xBeforeRotation * yPixelStride;
-        final int uvIdx = (yBeforeRotation >> 1) * uvRowStride + xBeforeRotation * uPixelStride;
-
-        int Yi = yBuffer.get(yIdx) & 0xff;
-        int Ui = uBuffer.get(uvIdx) & 0xff;
-        int Vi = vBuffer.get(uvIdx) & 0xff;
-
-        int a0 = 1192 * (Yi - 16);
-        int a1 = 1634 * (Vi - 128);
-        int a2 = 832 * (Vi - 128);
-        int a3 = 400 * (Ui - 128);
-        int a4 = 2066 * (Ui - 128);
-
-        int r = clamp((a0 + a1) >> 10, 0, 255);
-        int g = clamp((a0 - a2 - a3) >> 10, 0, 255);
-        int b = clamp((a0 + a4) >> 10, 0, 255);
-        final int offset = outBufferOffset + y * tensorWidth + x;
-        float rF = ((r / 255.f) - normMeanRGB[0]) / normStdRGB[0];
-        float gF = ((g / 255.f) - normMeanRGB[1]) / normStdRGB[1];
-        float bF = ((b / 255.f) - normMeanRGB[2]) / normStdRGB[2];
-
-        outBuffer.put(offset, rF);
-        outBuffer.put(offset + tensorInputOffsetG, gF);
-        outBuffer.put(offset + tensorInputOffsetB, bF);
-      }
-    }
+    NativePeer.imageYUV420CenterCropToFloatBuffer(
+        Y.getBuffer(),
+        Y.getRowStride(),
+        Y.getPixelStride(),
+        U.getBuffer(),
+        V.getBuffer(),
+        U.getRowStride(),
+        U.getPixelStride(),
+        image.getWidth(),
+        image.getHeight(),
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset,
+        memoryFormatJniCode);
   }
 
-  private static void checkOutBufferCapacity(FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
+  public static void imageYUV420CenterCropToFloatBuffer(
+      final Image image,
+      int rotateCWDegrees,
+      final int tensorWidth,
+      final int tensorHeight,
+      float[] normMeanRGB,
+      float[] normStdRGB,
+      final FloatBuffer outBuffer,
+      final int outBufferOffset) {
+    imageYUV420CenterCropToFloatBuffer(
+        image,
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset,
+        MemoryFormat.CONTIGUOUS);
+  }
+
+  private static class NativePeer {
+    static {
+      if (!NativeLoader.isInitialized()) {
+        NativeLoader.init(new SystemDelegate());
+      }
+      NativeLoader.loadLibrary("pytorch_vision_jni");
+    }
+
+    private static native void imageYUV420CenterCropToFloatBuffer(
+        ByteBuffer yBuffer,
+        int yRowStride,
+        int yPixelStride,
+        ByteBuffer uBuffer,
+        ByteBuffer vBuffer,
+        int uvRowStride,
+        int uvPixelStride,
+        int imageWidth,
+        int imageHeight,
+        int rotateCWDegrees,
+        int tensorWidth,
+        int tensorHeight,
+        float[] normMeanRgb,
+        float[] normStdRgb,
+        Buffer outBuffer,
+        int outBufferOffset,
+        int memoryFormatJniCode);
+  }
+
+  private static void checkOutBufferCapacity(
+      FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
     if (outBufferOffset + 3 * tensorWidth * tensorHeight > outBuffer.capacity()) {
       throw new IllegalStateException("Buffer underflow");
     }
@@ -308,10 +382,6 @@ public final class TensorImageUtils {
         && rotateCWDegrees != 270) {
       throw new IllegalArgumentException("rotateCWDegrees must be one of 0, 90, 180, 270");
     }
-  }
-
-  private static final int clamp(int c, int min, int max) {
-    return c < min ? min : c > max ? max : c;
   }
 
   private static void checkNormStdArg(float[] normStdRGB) {

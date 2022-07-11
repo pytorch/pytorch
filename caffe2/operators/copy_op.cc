@@ -16,6 +16,7 @@ OPERATOR_SCHEMA(Copy)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
+    .InheritOnnxSchema("Identity")
     .SetDoc(R"DOC(
 Copy input tensor into output, potentially across devices.
 
@@ -196,3 +197,13 @@ struct GetCPUToGPUGradient : public GradientMakerBase {
 REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(
+    CopyGPUToCPU,
+    "_caffe2::CopyGPUToCPU(Tensor input) -> Tensor",
+    /*optional_alias_analysis_kind=*/c10::nullopt);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(
+    CopyCPUToGPU,
+    "_caffe2::CopyCPUToGPU(Tensor input) -> Tensor",
+    /*optional_alias_analysis_kind=*/c10::nullopt);

@@ -15,8 +15,7 @@ __device__ T bilinear_interpolate(
     const int height,
     const int width,
     T y,
-    T x,
-    const int index /* index for debug only*/) {
+    T x) {
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     // empty
@@ -136,7 +135,7 @@ __global__ void RoIAlignForward(
                 static_cast<T>(roi_bin_grid_w);
 
         T val = bilinear_interpolate(
-            offset_bottom_data, height, width, y, x, index);
+            offset_bottom_data, height, width, y, x);
         output_val += val;
       }
     }
@@ -149,24 +148,21 @@ __global__ void RoIAlignForward(
 } // namespace
 
 template <>
-bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
                       // RoI pooled data
 
   if (R.numel() == 0) {
     // Handle empty rois
-    Output(
-        0, {0, X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
+    Output(0, {0, X.dim32(1), pooled_h_, pooled_w_}, at::dtype<float>());
     return true;
   }
 
   assert(sampling_ratio_ >= 0);
 
   auto* Y = Output(
-      0,
-      {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
-      at::dtype<float>());
+      0, {R.dim32(0), X.dim32(1), pooled_h_, pooled_w_}, at::dtype<float>());
   int output_size = Y->numel();
   RoIAlignForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -179,13 +175,15 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
-          pooled_height_,
-          pooled_width_,
+          pooled_h_,
+          pooled_w_,
           sampling_ratio_,
           R.data<float>(),
           R.dim32(1),
           Y->mutable_data<float>(),
           aligned_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

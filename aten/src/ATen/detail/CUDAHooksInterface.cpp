@@ -1,6 +1,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/CallOnce.h>
 
 #include <cstddef>
 #include <memory>
@@ -34,13 +35,19 @@ const CUDAHooksInterface& getCUDAHooks() {
   // for an example where we relax this restriction (but if you try to avoid
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
-  static std::once_flag once;
-  std::call_once(once, [] {
+#if !defined C10_MOBILE
+  static c10::once_flag once;
+  c10::call_once(once, [] {
     cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
     if (!cuda_hooks) {
       cuda_hooks = new CUDAHooksInterface();
     }
   });
+#else
+  if (cuda_hooks == nullptr) {
+    cuda_hooks = new CUDAHooksInterface();
+  }
+#endif
   return *cuda_hooks;
 }
 } // namespace detail

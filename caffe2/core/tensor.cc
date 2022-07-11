@@ -3,11 +3,18 @@
 
 #include "caffe2/core/blob_stats.h"
 
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <ATen/core/grad_mode.h>
+#include "ATen/core/Tensor.h"
+#endif
+
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(Tensor);
 
 TensorPrinter::TensorPrinter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::string& tensor_name,
     const std::string& file_name,
     int limit)
@@ -17,6 +24,7 @@ TensorPrinter::TensorPrinter(
   if (to_file_) {
     // We will output to file instead of printing on screen.
     // We will write each individual tensor to its individual file.
+    // NOLINTNEXTLINE(modernize-make-unique)
     log_file_.reset(new std::ofstream(
         file_name, std::ofstream::out | std::ofstream::trunc));
     CAFFE_ENFORCE(
@@ -28,6 +36,7 @@ TensorPrinter::TensorPrinter(
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 TensorPrinter::~TensorPrinter() {
   if (log_file_.get()) {
     log_file_->close();
@@ -84,16 +93,15 @@ void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
 
 int GetGPUIDForPointer(const void* ptr);
 
-vector<int64_t> GetTensorInfo(
-    const void* c,
-    size_t* capacity,
-    DeviceOption* device) {
+vector<int64_t>
+GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
   CHECK(tc);
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
-  *capacity = tc->storage().capacity();
+  *capacity = tc->storage().nbytes();
   ExtractDeviceOption(device, tc->GetDevice());
   return tc->sizes().vec();
 }
@@ -150,8 +158,8 @@ void ReinitializeTensor(
   if (*tensor) {
     // Note: we don't compare device_id here because of the purpose of
     // ReinitializeTensor: https://github.com/pytorch/pytorch/pull/13147
-    // In the original code, we don't have device_id defined, therefore, we should not
-    // include device_id in the comparison
+    // In the original code, we don't have device_id defined, therefore, we
+    // should not include device_id in the comparison
     if (tensor->GetDeviceType() == options.device().type()) {
       if (tensor->sizes() != dims) {
         // Resize when the dims doesn't match
@@ -160,10 +168,12 @@ void ReinitializeTensor(
       if (tensor->dtype() == options.dtype()) {
         tensor->raw_mutable_data();
       } else {
-        C10_LOG_FIRST_N(WARNING, 1)
-            << "Changing the data type of Tensor is discouraged."
-            << " Attempt to change data type from: " << tensor->dtype()
-            << " to: " << options.dtype();
+        // This C10 logging API is not thread-safe, and should not be called here
+        // This can lead to a memory corruption in glog.
+        // C10_LOG_FIRST_N(WARNING, 1)
+        //     << "Changing the data type of Tensor is discouraged."
+        //     << " Attempt to change data type from: " << tensor->dtype()
+        //     << " to: " << options.dtype();
         // create a new Tensor when the data_type doesn't match
         *tensor = caffe2::empty(dims, options);
       }
@@ -201,11 +211,12 @@ void Tensor::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
   }
-  // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+  // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are
+  // merged
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   CAFFE_ENFORCE(
-    !(impl_->requires_grad() && at::GradMode::is_enabled()),
-    "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
+      !(impl_->requires_grad() && at::GradMode::is_enabled()),
+      "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
 #endif
   CAFFE_ENFORCE_EQ(
       impl_->layout(),
@@ -215,6 +226,91 @@ void Tensor::enforce_invariants() {
       impl_->is_contiguous(),
       "Caffe2 tensor wrapper supports only contiguous tensors");
 }
+
+void Tensor::CopyFrom(const Tensor& src, bool async) {
+  // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are
+  // merged
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  AT_ASSERT(!(impl_->requires_grad() && at::GradMode::is_enabled()));
+#endif
+  AT_ASSERTM(
+      src.impl_->is_contiguous(),
+      "Right now only copy of contiguous source Tensor is supported.");
+  AT_ASSERTM(
+      src.impl_->storage_initialized(),
+      "Cannot copy from an uninitialized Tensor");
+
+  if (src.impl_.get() == impl_.get()) {
+    return;
+  }
+
+  // Test if we need to allocate a new storage
+  // Uninitialized storages are guaranteed to be uniquely owned,
+  // so we don't need to swap in dst case.
+  // If the dtype changed, we need to reallocate storage.
+  if (impl_->dtype() != src.impl_->dtype()) {
+    // NB: copy preserves device_type
+    // This storage will get initialized by the mutable_data call below.
+    impl_->set_storage_and_dtype(
+        at::Storage::create_legacy(impl_->device_type()), src.impl_->dtype());
+  }
+  impl_->Resize(src.impl_->sizes());
+
+  if (impl_->numel() > 0) {
+    if (impl_->dtype().copy()) {
+      AT_ASSERTM(
+          impl_->device_type() == ::at::DeviceType::CPU,
+          "In CopyFrom source and dest tensors must both be CPU for "
+          "non-POD copy, but dest tensor was ",
+          impl_->device_type());
+      AT_ASSERTM(
+          src.impl_->device_type() == ::at::DeviceType::CPU,
+          "In CopyFrom source and dest tensors must both be CPU for "
+          "non-POD copy, but src tensor was ",
+          src.impl_->device_type());
+      impl_->dtype().copy()(
+          src.impl_->data(),
+          impl_->raw_mutable_data(impl_->dtype()),
+          impl_->numel());
+    } else {
+      // The following copy uses the current (thread local) stream for copying
+      // and also takes the GPU id from the device() field passed in.
+      //
+      // TODO: Potentially more enforcements are necessary to avoid accidental
+      // switch to sync copy if the currently set device is wrong.
+      //
+      // Specifically, we might need to switch to a different context device
+      // here explicitly to avoid relying on user synchronizing things
+      // properly.
+      //
+      // note: raw_mutable_data initializes device here
+      void* new_data = impl_->raw_mutable_data(impl_->dtype());
+      at::CopyBytes(
+          impl_->numel() * impl_->itemsize(),
+          src.impl_->data(),
+          src.impl_->device(),
+          new_data,
+          impl_->device(),
+          async);
+    }
+  }
+}
+
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+Tensor::Tensor(at::Tensor tensor) : impl_(tensor.unsafeReleaseIntrusivePtr()) {
+  enforce_invariants();
+}
+
+Tensor::operator at::Tensor() const& {
+  return at::Tensor::wrap_tensor_impl(impl_);
+}
+
+Tensor::operator at::Tensor() && {
+  return at::Tensor::wrap_tensor_impl(std::move(impl_));
+}
+#endif
 
 namespace {
 
@@ -232,6 +328,6 @@ struct TensorStatGetter : BlobStatGetter {
   }
 };
 REGISTER_BLOB_STAT_GETTER(Tensor, TensorStatGetter);
-}
+} // namespace
 
 } // namespace caffe2

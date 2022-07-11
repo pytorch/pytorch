@@ -5,10 +5,9 @@ from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, euler_constant
 
-euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
-
+__all__ = ['Gumbel']
 
 class Gumbel(TransformedDistribution):
     r"""
@@ -55,6 +54,10 @@ class Gumbel(TransformedDistribution):
     @property
     def mean(self):
         return self.loc + self.scale * euler_constant
+
+    @property
+    def mode(self):
+        return self.loc
 
     @property
     def stddev(self):

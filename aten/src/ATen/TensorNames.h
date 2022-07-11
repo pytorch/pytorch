@@ -2,15 +2,15 @@
 
 #include <ATen/WrapDimUtils.h>
 
-namespace at { namespace namedinference {
-
+namespace at {
+namespace namedinference {
 
 // TensorName and TensorNames are wrappers around Dimname and DimnameList
 // that contain helper functions to make writing name inference rules easier.
 //
-// A TensorName represents a Dimname associated with some DimnameList (from a Tensor).
-// This encapsulates all the information that is needed to check if names *match*
-// and to *unify* names.
+// A TensorName represents a Dimname associated with some DimnameList (from a
+// Tensor). This encapsulates all the information that is needed to check if
+// names *match* and to *unify* names.
 //
 // Definition: Two names in two tensors *match* if they are equal, or if at
 // least one of them is a wildcard that can be *refined* to the other name.
@@ -26,11 +26,11 @@ namespace at { namespace namedinference {
 // None (in tensor) cannot match A (in other) because if the None were refined
 // to A, `tensor` would have duplicate names [A, A]. Therefore we need to check
 // tensor.names [A, None] for the existence of A.
-struct CAFFE2_API TensorName {
+struct TORCH_API TensorName {
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
-    : origin_(origin),
-      name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
-      origin_idx_(origin_idx) {}
+      : origin_(origin),
+        name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
+        origin_idx_(origin_idx) {}
 
   // op_name is only used for error reporting.
   const TensorName& unify(const TensorName& other, const char* op_name) const;
@@ -41,18 +41,19 @@ struct CAFFE2_API TensorName {
   Dimname name_;
   int origin_idx_; // A named tensor can have at most 64 dims.
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const TensorName& tensorname);
 };
 
 using TensorNameVec = SmallVector<TensorName, 10>;
 
-struct CAFFE2_API TensorNames {
+struct TORCH_API TensorNames {
   explicit TensorNames(ArrayRef<Dimname> names);
 
   // Create TensorNames from names[start:end]. Each individual TensorName stores
-  // `names`, NOT names[start:end], because the original tensor's names are `names`.
+  // `names`, NOT names[start:end], because the original tensor's names are
+  // `names`.
   explicit TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end);
 
   // op_name is only used for error reporting.
@@ -65,10 +66,10 @@ struct CAFFE2_API TensorNames {
   std::vector<Dimname> toDimnameVec() const;
 
  private:
-  explicit TensorNames(TensorNameVec&& names) : names_(names) {};
+  explicit TensorNames(TensorNameVec&& names) : names_(names){};
 
   TensorNameVec names_;
 };
 
-
-}} // namespace at::namedinference
+} // namespace namedinference
+} // namespace at

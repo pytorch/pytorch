@@ -1,17 +1,15 @@
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 
 namespace c10 {
 
-struct CAFFE2_API InternedStrings {
+struct TORCH_API InternedStrings {
   InternedStrings();
   Symbol symbol(const std::string& s);
   std::pair<const char*, const char*> string(Symbol sym);

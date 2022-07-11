@@ -39,19 +39,21 @@ bool ReciprocalGradientFunctor<CUDAContext>::Forward(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(size, dY, Y, dX);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
 REGISTER_CUDA_OPERATOR(
     Reciprocal,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CUDAContext,
         ReciprocalFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReciprocalGradient,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CUDAContext,
         ReciprocalGradientFunctor<CUDAContext>>);
 

@@ -146,9 +146,7 @@ allowed values for these axes at the moment are:
 .. tip::
 
         There exist "Rust-style" shorthands for dtypes, like ``kF32`` instead of
-        ``kFloat32``. See `here
-        <https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/types.h>`_
-        for the full list.
+        ``kFloat32``.
 
 
 An instance of ``TensorOptions`` stores a concrete value for each of these
@@ -281,7 +279,9 @@ change one property, this is quite practical.
 In conclusion, we can now compare how ``TensorOptions`` defaults, together with
 the abbreviated API for creating ``TensorOptions`` using free functions, allow
 tensor creation in C++ with the same convenience as in Python. Compare this
-call in Python::
+call in Python:
+
+.. code-block:: python
 
   torch.randn(3, 4, dtype=torch.float32, device=torch.device('cuda', 1), requires_grad=True)
 

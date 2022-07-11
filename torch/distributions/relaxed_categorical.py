@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 
+__all__ = ['ExpRelaxedCategorical', 'RelaxedOneHotCategorical']
 
 class ExpRelaxedCategorical(Distribution):
     r"""
@@ -21,7 +22,7 @@ class ExpRelaxedCategorical(Distribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -30,8 +31,8 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al, 2017)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.real
+                       'logits': constraints.real_vector}
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -101,15 +102,15 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        base_dist = ExpRelaxedCategorical(temperature, probs, logits)
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits, validate_args=validate_args)
         super(RelaxedOneHotCategorical, self).__init__(base_dist,
                                                        ExpTransform(),
                                                        validate_args=validate_args)

@@ -1,7 +1,8 @@
+#include <ATen/Config.h>
 #if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/ThreadLocalState.h>
 
 #include <atomic>
 
@@ -56,6 +57,7 @@ void set_num_interop_threads(int nthreads) {
 }
 
 int get_num_interop_threads() {
+  at::internal::lazy_init_num_threads();
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
     return nthreads;
@@ -67,21 +69,27 @@ int get_num_interop_threads() {
   }
 }
 
+namespace internal {
+void launch_no_thread_state(std::function<void()> fn) {
+#if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
+  intraop_launch(std::move(fn));
+#else
+  get_pool().run(std::move(fn));
+#endif
+}
+} // namespace internal
+
 void launch(std::function<void()> func) {
-  auto fn = std::bind([](
-    std::function<void()> f, std::shared_ptr<ThreadLocalDebugInfoBase> info) {
-      DebugInfoGuard guard(std::move(info));
+  // NOLINTNEXTLINE(modernize-avoid-bind)
+  internal::launch_no_thread_state(std::bind([](
+    std::function<void()> f, ThreadLocalState thread_locals) {
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      ThreadLocalStateGuard guard(std::move(thread_locals));
       f();
     },
     std::move(func),
-    getThreadLocalDebugInfo()
-  );
-
-#if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
-  intraop_launch(fn);
-#else
-  get_pool().run(fn);
-#endif
+    ThreadLocalState()
+  ));
 }
 
 } // namespace at

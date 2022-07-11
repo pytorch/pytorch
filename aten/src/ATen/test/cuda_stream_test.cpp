@@ -1,16 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/impl/CUDAGuardImpl.h>
-#include <c10/core/impl/InlineEvent.h>
-#include <c10/core/Event.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/Event.h>
+#include <c10/core/impl/InlineEvent.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/impl/CUDAGuardImpl.h>
+#include <c10/util/irange.h>
 
 #include <cuda_runtime.h>
 
 #include <functional>
+#include <future>
 #include <thread>
 #include <unordered_set>
 
@@ -144,14 +145,6 @@ TEST(TestStream, CUDAGuardTest) {
 
   // -- end setup
 
-  // Test that all original streams are recorded.
-  {
-    at::cuda::CUDAMultiStreamGuard guard;
-    ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
-    ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
-    ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
-  }
-
   // Setting a stream changes the current device and the stream on that device
   {
     at::cuda::CUDAStreamGuard guard(streams1[1]);
@@ -180,13 +173,14 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   if (!at::cuda::is_available()) return;
   std::vector<at::cuda::CUDAStream> streams{};
-  for (int i = 0; i < 200; ++i) {
+  for (const auto i : c10::irange(200)) {
+    (void)i;
     streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (auto i = decltype(streams.size()){0}; i < streams.size(); ++i) {
+  for (const auto i: c10::irange(streams.size())) {
     cudaStream_t cuda_stream = streams[i];
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)
@@ -300,4 +294,142 @@ TEST(TestStream, GenericVirtualCUDAEventTest) {
 
   ASSERT_TRUE(event.query());
   ASSERT_TRUE(event.flag() == c10::EventFlag::PYTORCH_DEFAULT);
+}
+
+// Verifies external streams can be created and used
+TEST(TestStream, ExternalTest) {
+  if (!at::cuda::is_available())
+    return;
+  at::cuda::CUDAGuard device_guard(0);
+
+  cudaStream_t cuda_stream;
+  cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, -1);
+
+  at::cuda::CUDAStream myStream =
+      at::cuda::getStreamFromExternal(cuda_stream, 0);
+
+  at::cuda::setCurrentCUDAStream(myStream);
+  at::cuda::CUDAStream curStream = at::cuda::getCurrentCUDAStream();
+
+  ASSERT_EQ_CUDA(curStream, myStream);
+  ASSERT_EQ_CUDA(curStream.stream(), cuda_stream);
+
+  cudaStreamDestroy(cuda_stream);
+}
+
+// Verifies different external streams can be used for different devices at the
+// same time
+TEST(TestStream, ExternalMultiDeviceTest) {
+  if (!at::cuda::is_available())
+    return;
+  if (at::cuda::getNumGPUs() < 2)
+    return;
+  cudaStream_t cuda_stream_0;
+  cudaStream_t cuda_stream_1;
+  {
+    at::cuda::CUDAGuard device_guard(0);
+    cudaStreamCreateWithPriority(&cuda_stream_0, cudaStreamNonBlocking, -1);
+  }
+  {
+    at::cuda::CUDAGuard device_guard(1);
+    cudaStreamCreateWithPriority(&cuda_stream_1, cudaStreamNonBlocking, -1);
+  }
+  at::cuda::CUDAStream myStream0 =
+      at::cuda::getStreamFromExternal(cuda_stream_0, 0);
+  at::cuda::CUDAStream myStream1 =
+      at::cuda::getStreamFromExternal(cuda_stream_1, 1);
+
+  at::cuda::setCurrentCUDAStream(myStream0);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), myStream0);
+  at::cuda::setCurrentCUDAStream(myStream1);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), myStream0);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), myStream1);
+
+  cudaStreamDestroy(cuda_stream_0);
+  cudaStreamDestroy(cuda_stream_1);
+}
+
+// Verifies external streams work with guards, even nested ones
+TEST(TestStream, ExternalGuardTest) {
+  if (!at::cuda::is_available())
+    return;
+  at::cuda::CUDAGuard device_guard(0);
+
+  cudaStream_t a_cuda_stream;
+  cudaStream_t another_cuda_stream;
+  cudaStreamCreateWithPriority(&a_cuda_stream, cudaStreamNonBlocking, -1);
+  cudaStreamCreateWithPriority(&another_cuda_stream, cudaStreamNonBlocking, -1);
+  at::cuda::CUDAStream myFirstStream =
+      at::cuda::getStreamFromExternal(a_cuda_stream, 0);
+  at::cuda::CUDAStream mySecondStream =
+      at::cuda::getStreamFromExternal(another_cuda_stream, 0);
+
+  at::cuda::CUDAStream originalStream = at::cuda::getCurrentCUDAStream();
+  {
+    at::cuda::CUDAStreamGuard outerGuard(myFirstStream);
+    ASSERT_EQ_CUDA(outerGuard.original_stream(), originalStream);
+    ASSERT_EQ_CUDA(outerGuard.current_stream(), myFirstStream);
+    ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), myFirstStream);
+    {
+      at::cuda::CUDAStreamGuard innerGuard(mySecondStream);
+      ASSERT_EQ_CUDA(innerGuard.original_stream(), myFirstStream);
+      ASSERT_EQ_CUDA(innerGuard.current_stream(), mySecondStream);
+      ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), mySecondStream);
+    }
+    ASSERT_EQ_CUDA(outerGuard.original_stream(), originalStream);
+    ASSERT_EQ_CUDA(outerGuard.current_stream(), myFirstStream);
+    ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), myFirstStream);
+    outerGuard.reset_stream(mySecondStream);
+    ASSERT_EQ_CUDA(outerGuard.original_stream(), originalStream);
+    ASSERT_EQ_CUDA(outerGuard.current_stream(), mySecondStream);
+    ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), mySecondStream);
+  }
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), originalStream);
+
+  cudaStreamDestroy(a_cuda_stream);
+  cudaStreamDestroy(another_cuda_stream);
+}
+
+// Verifies that different threads stage their external streams to different
+// places in memory and thus don't interfere
+TEST(TestStream, ExternalMultiThreadTest) {
+  if (!at::cuda::is_available())
+    return;
+  at::cuda::CUDAGuard device_guard(0);
+
+  cudaStream_t cuda_stream_a;
+  cudaStream_t cuda_stream_b;
+  cudaStreamCreateWithPriority(&cuda_stream_a, cudaStreamNonBlocking, -1);
+  cudaStreamCreateWithPriority(&cuda_stream_b, cudaStreamNonBlocking, -1);
+  at::cuda::CUDAStream myStreamA =
+      at::cuda::getStreamFromExternal(cuda_stream_a, 0);
+  at::cuda::CUDAStream myStreamB =
+      at::cuda::getStreamFromExternal(cuda_stream_b, 0);
+
+  std::promise<void> aToBProm;
+  std::promise<void> bToAProm;
+  c10::optional<at::cuda::CUDAStream> foundStream;
+
+  std::thread threadA([&]() {
+    at::cuda::CUDAGuard device_guard(0);
+    at::cuda::setCurrentCUDAStream(myStreamA);
+    aToBProm.set_value();
+    bToAProm.get_future().wait();
+    foundStream = at::cuda::getCurrentCUDAStream();
+  });
+
+  std::thread threadB([&]() {
+    at::cuda::CUDAGuard device_guard(0);
+    aToBProm.get_future().wait();
+    at::cuda::setCurrentCUDAStream(myStreamB);
+    bToAProm.set_value();
+  });
+
+  threadA.join();
+  threadB.join();
+
+  ASSERT_EQ_CUDA(*foundStream, myStreamA);
+
+  cudaStreamDestroy(cuda_stream_a);
+  cudaStreamDestroy(cuda_stream_b);
 }

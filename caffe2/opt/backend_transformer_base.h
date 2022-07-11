@@ -29,6 +29,16 @@ struct BackendTransformOptions {
   BoundShapeSpec bound_shape_spec;
 };
 
+// Wrap TensorShape into TensorProto
+TensorProto wrapShapeInfoIntoTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info);
+
+// Wrap Quantized TensorShape into QTensorProto
+QTensorProto wrapShapeInfoIntoQTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info);
+
 // This class contains some common functions for backend lowering and graph
 // cutting
 class BackendTransformerBase {
@@ -50,14 +60,14 @@ class BackendTransformerBase {
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops) = 0;
+      const std::unordered_set<int>& blocklisted_ops) = 0;
 
   static void annotateOpIndex(NetDef* net);
 
- protected:
   // Get model ID from the NetDef
-  std::string getModelId(const NetDef& net);
+  static std::string getModelId(const NetDef& net);
 
+ protected:
   // add shape info to the net
   void addShapeToNet(NetDef& shape_net, const ShapeInfoMap& shape_hints) const;
 
@@ -73,16 +83,6 @@ class BackendTransformerBase {
       NetDef* pred_net,
       const ShapeInfoMap& input_shape_hints);
 
-  // Wrap TensorShape into TensorProto
-  TensorProto wrapShapeInfoIntoTensorProto(
-      const std::string& name,
-      const ShapeInfo& shape_info) const;
-
-  // Wrap Quantized TensorShape into QTensorProto
-  QTensorProto wrapShapeInfoIntoQTensorProto(
-      const std::string& name,
-      const ShapeInfo& shape_info) const;
-
   // Do bound shape inference and collect shape infos
   ShapeInfoMap inferShapes(
       Workspace* ws,
@@ -93,7 +93,7 @@ class BackendTransformerBase {
   // Input mapping of input name -> original input name
   std::unordered_map<std::string, std::string> input_mapping_;
 
-  // Input mapping of orignal input name -> input name
+  // Input mapping of original input name -> input name
   std::unordered_map<std::string, std::string> reverse_input_mapping_;
 };
 } // namespace caffe2

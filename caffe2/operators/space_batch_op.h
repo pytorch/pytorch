@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -29,14 +30,14 @@ void spaceToBatch(
   const int input_height = input.dim32(2);
   const int input_width = input.dim32(3);
 
-  for (int out_b = 0; out_b < output_batch; ++out_b) {
+  for (const auto out_b : c10::irange(output_batch)) {
     const int in_b = out_b % input_batch;
     const int offset_w = (out_b / input_batch) % block_size;
     const int offset_h = (out_b / input_batch) / block_size;
-    for (int d = 0; d < input_depth; ++d) {
-      for (int out_h = 0; out_h < output_height; ++out_h) {
+    for (const auto d : c10::irange(input_depth)) {
+      for (const auto out_h : c10::irange(output_height)) {
         const int in_h = out_h * block_size + offset_h - pad_t;
-        for (int out_w = 0; out_w < output_width; ++out_w) {
+        for (const auto out_w : c10::irange(output_width)) {
           const int in_w = out_w * block_size + offset_w - pad_l;
           const auto output_offset =
               ((out_b * output_depth + d) * output_height + out_h) *
@@ -80,14 +81,14 @@ void batchToSpace(
   const int input_width = input.dim32(3);
 
   CAFFE_ENFORCE(input_depth == output_depth);
-  for (int in_b = 0; in_b < input_batch; ++in_b) {
+  for (const auto in_b : c10::irange(input_batch)) {
     const int out_b = in_b % output_batch;
     const int offset_w = (in_b / output_batch) % block_size;
     const int offset_h = (in_b / output_batch) / block_size;
-    for (int d = 0; d < input_depth; ++d) {
-      for (int in_h = 0; in_h < input_height; ++in_h) {
+    for (const auto d : c10::irange(input_depth)) {
+      for (const auto in_h : c10::irange(input_height)) {
         const int out_h = in_h * block_size + offset_h - pad_t;
-        for (int in_w = 0; in_w < input_width; ++in_w) {
+        for (const auto in_w : c10::irange(input_width)) {
           const int out_w = in_w * block_size + offset_w - pad_l;
           if (out_h >= 0 && out_w >= 0 && out_h < output_height &&
               out_w < output_width) {

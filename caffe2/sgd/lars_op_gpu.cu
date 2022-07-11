@@ -31,6 +31,7 @@ void LarsOp<float, CUDAContext>::ComputeLearningRate(
     float* lr_rescaled) {
   ComputeLearningRateKernel<<<1, 1, 0, context_.cuda_stream()>>>(
       wd, trust, lr_max, offset, lr_min, X_norm, dX_norm, lr_rescaled);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(Lars, LarsOp<float, CUDAContext>);

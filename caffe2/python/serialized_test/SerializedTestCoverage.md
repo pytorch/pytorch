@@ -1,11 +1,11 @@
 # Serialized Test Coverage Report
 This is an automatically generated file. Please see `caffe2/python/serialized_test/README.md` for details. In the case of merge conflicts, please rebase and regenerate.
 ## Summary
-Serialized tests have covered 219/743 (29.4%) operators
+Serialized tests have covered 220/852 (25.8%) operators
 
 ## Not covered operators
 <details>
-<summary>There are 524 not covered operators</summary>
+<summary>There are 632 not covered operators</summary>
 
 * APMeter
 * ATen
@@ -16,8 +16,10 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Accuracy
 * Adam
 * Add
+* AddFakeFp16
 * AddGradient
 * Alias
+* AliasWithName
 * Allgather
 * Allreduce
 * And
@@ -25,6 +27,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Assert
 * AtomicAppend
 * AtomicFetchAdd
+* AtomicFetchAdd64
 * AtomicIter
 * AveragePool
 * AveragePool1D
@@ -37,6 +40,11 @@ Serialized tests have covered 219/743 (29.4%) operators
 * AveragePut
 * BRGNCHWCToPackedInt8BGRAStylizerDeprocess
 * Barrier
+* BatchMatMulFP16Acc16Fake
+* BatchMatMulFP16Acc32Fake
+* BatchMatMulFP16Fake
+* BatchPermutation
+* BatchPermutationGradient
 * BatchToSpace
 * BisectPercentile
 * BitwiseAnd
@@ -78,6 +86,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * CopyFromCPUInput
 * CopyGPUToCPU
 * CopyOnDeviceLike
+* CopyRowsToTensor
+* CopyRowsToTensorGradient
 * Cos
 * CosGradient
 * CosineSimilarity
@@ -114,6 +124,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * DestroyCommonWorld
 * DistributeFpnProposals
 * Div
+* DivFakeFp16
 * DivGradient
 * Do
 * DotProductWithPadding
@@ -125,6 +136,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * EnsureCPUOutput
 * EnsureClipped
 * EnsureDense
+* Equalizer
 * Exp
 * ExpandDims
 * FCFp16X
@@ -138,9 +150,11 @@ Serialized tests have covered 219/743 (29.4%) operators
 * FP16MomentumSGDUpdate
 * FP32MomentumSGDUpdate
 * FP32ToFP16Fake
+* FP32ToFP16FakeNoSubnormal
 * Fail
 * FbFCPacked
 * FbGemmPack
+* FbGemmPackTranspose
 * FeedBlob
 * FilterExampleIds
 * FilterSparseLabels
@@ -148,16 +162,30 @@ Serialized tests have covered 219/743 (29.4%) operators
 * FlattenToVec
 * Float16ConstantFill
 * Float16UniformFill
+* FloatToFused2BitFakeRowwiseQuantized
+* FloatToFused2BitRowwiseQuantized
+* FloatToFused4BitFakeRowwiseQuantized
+* FloatToFused4BitRowwiseQuantized
 * FloatToFused8BitRowwiseQuantized
+* FloatToFused8BitRowwiseQuantizedHalfScaleBias
 * FloatToFusedRandRowwiseQuantized
 * FloatToHalf
 * FloatToRowwiseQuantized8Bits
 * Fp16FC
 * Fp16FCAcc16
+* Fp16FCAcc16NNPI
+* Fp16FCAcc32
+* Fp16FCAcc32NNPI
 * Free
 * Ftrl
 * FunHash
 * FunHashGradient
+* Fused2BitRowwiseQuantizedToFloat
+* Fused2BitRowwiseQuantizedToHalf
+* Fused4BitRowwiseQuantizedToFloat
+* Fused4BitRowwiseQuantizedToHalf
+* Fused8BitRowwiseQuantizedHalfScaleBiasToFloat
+* Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat
 * Fused8BitRowwiseQuantizedToFloat
 * Fused8BitRowwiseQuantizedToHalfFloat
 * FusedRandRowwiseQuantizedToFloat
@@ -186,12 +214,18 @@ Serialized tests have covered 219/743 (29.4%) operators
 * HSoftmaxGradient
 * HSoftmaxSearch
 * HalfFloatToFused8BitRowwiseQuantized
+* HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias
 * HalfToFloat
+* HalfToFused2BitFakeRowwiseQuantized
+* HalfToFused2BitRowwiseQuantized
+* HalfToFused4BitFakeRowwiseQuantized
+* HalfToFused4BitRowwiseQuantized
 * HardSigmoid
 * HardSigmoidGradient
 * HasElements
 * HasScope
 * HeatmapMaxKeypoint
+* Histogram
 * HuffmanTreeHierarchy
 * If
 * Im2Col
@@ -213,7 +247,9 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Int8ConvRelu
 * Int8ConvTranspose
 * Int8Dequantize
+* Int8DequantizeNNPI
 * Int8FC
+* Int8FCFakeAcc32NNPI
 * Int8Flatten
 * Int8GivenIntTensorFill
 * Int8GivenTensorFill
@@ -221,6 +257,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Int8MaxPool
 * Int8MaxPoolRelu
 * Int8Quantize
+* Int8QuantizeNNPI
 * Int8Relu
 * Int8Reshape
 * Int8ResizeNearest
@@ -230,6 +267,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Int8Softmax
 * Int8Sum
 * Int8SumRelu
+* Int8Transpose
 * IntIndexCreate
 * IsEmpty
 * IsNaN
@@ -257,6 +295,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Lars
 * LastNWindowCollector
 * LayerNorm
+* LayerNormFakeFP16
 * LengthsIndicesInGradientMeanGradient
 * LengthsIndicesInGradientSumGradient
 * LengthsMax
@@ -310,6 +349,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * MergeSingleScalarFeatureTensorsGradient
 * Mod
 * MomentumSGDUpdate
+* MulFakeFp16
 * MulGradient
 * MultiClassAccuracy
 * NCHW2NHWC
@@ -340,6 +380,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * QuantDecode
 * QuantDecodeGradient
 * QuantDecompZstd
+* Quantile
 * RMACRegions
 * Range
 * RangeFill
@@ -360,6 +401,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * ReduceSum
 * ReduceSumGradient
 * ReduceTailSum
+* ReluFakeFp16
 * RemovePadding
 * ReplaceNaN
 * ReservoirSampling
@@ -368,6 +410,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Reshape
 * ResizeLike
 * ResizeNearest
+* ResizeNearest3D
+* ResizeNearest3DGradient
 * ResizeNearestGradient
 * RetrieveCount
 * RmsProp
@@ -378,6 +422,10 @@ Serialized tests have covered 219/743 (29.4%) operators
 * RoIPool
 * RoIPoolGradient
 * RowMul
+* RowWiseCounter
+* RowWiseSparseAdagradFusedWithSparseLengthsSumGradient
+* RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient
+* RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox
 * RowWiseSparseAdam
 * Rowwise8BitQuantizedToFloat
 * Rsqrt
@@ -397,6 +445,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Sigmoid
 * SigmoidCrossEntropyWithLogits
 * SigmoidCrossEntropyWithLogitsGradient
+* SigmoidFakeFp16
+* SigmoidFakeFp16NNPI
 * SigmoidGradient
 * Sin
 * SinGradient
@@ -423,7 +473,11 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SortedSegmentWeightedSum
 * SortedSegmentWeightedSumGradient
 * SpaceToBatch
+* SparseAdagradFusedWithSparseLengthsSumGradient
+* SparseAdagradFusedWithSparseLengthsWeightedSumGradient
+* SparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox
 * SparseAdam
+* SparseDropoutWithReplacement
 * SparseFtrl
 * SparseFunHash
 * SparseFunHashGradient
@@ -436,20 +490,64 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SparseLengthsIndicesInGradientWeightedSumGradient
 * SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient
 * SparseLengthsMean
+* SparseLengthsMean2BitRowwiseSparse
+* SparseLengthsMean4BitRowwiseSparse
+* SparseLengthsMean8BitRowwiseSparse
 * SparseLengthsMean8BitsRowwise
+* SparseLengthsMeanFakeFP16
+* SparseLengthsMeanFakeFP16AccFP16
+* SparseLengthsMeanFakeFP16EmbeddingOnly
+* SparseLengthsMeanFused2BitRowwise
+* SparseLengthsMeanFused4BitRowwise
 * SparseLengthsMeanFused8BitRowwise
+* SparseLengthsMeanFused8BitRowwiseFakeFP16
+* SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16
 * SparseLengthsMeanGradient
 * SparseLengthsPositionalWeightedSum
 * SparseLengthsSum
+* SparseLengthsSum2BitRowwiseSparse
+* SparseLengthsSum4BitRowwiseSparse
+* SparseLengthsSum8BitRowwiseSparse
 * SparseLengthsSum8BitsRowwise
+* SparseLengthsSumFakeFP16
+* SparseLengthsSumFakeFP16AccFP16
+* SparseLengthsSumFakeFP16EmbeddingOnly
+* SparseLengthsSumFused2BitRowwise
+* SparseLengthsSumFused4BitRowwise
+* SparseLengthsSumFused4BitRowwiseFakeFP16EmbeddingOnly
+* SparseLengthsSumFused4BitRowwiseFakeFP16NNPI
 * SparseLengthsSumFused8BitRowwise
+* SparseLengthsSumFused8BitRowwiseFakeFP16
+* SparseLengthsSumFused8BitRowwiseFakeFP16AccFP16
+* SparseLengthsSumFused8BitRowwiseFakeFP16AccInvScaleFP16
+* SparseLengthsSumFused8BitRowwiseFakeFP16EmbeddingOnly
+* SparseLengthsSumFused8BitRowwiseFakeFP16NNPI
+* SparseLengthsSumFused8BitRowwiseFakeFP32NNPI
 * SparseLengthsSumGradient
+* SparseLengthsSumSparseLookup
 * SparseLengthsWeightedMean8BitsRowwise
 * SparseLengthsWeightedSum
+* SparseLengthsWeightedSum2BitRowwiseSparse
+* SparseLengthsWeightedSum4BitRowwiseSparse
+* SparseLengthsWeightedSum8BitRowwiseSparse
 * SparseLengthsWeightedSum8BitsRowwise
+* SparseLengthsWeightedSumFakeFP16
+* SparseLengthsWeightedSumFakeFP16AccFP16
+* SparseLengthsWeightedSumFakeFP16EmbeddingOnly
+* SparseLengthsWeightedSumFused2BitRowwise
+* SparseLengthsWeightedSumFused4BitRowwise
+* SparseLengthsWeightedSumFused4BitRowwiseFakeFP16EmbeddingOnly
+* SparseLengthsWeightedSumFused4BitRowwiseFakeFP16NNPI
 * SparseLengthsWeightedSumFused8BitRowwise
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP16
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP16AccFP16
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP16AccInvScaleFP16
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP16EmbeddingOnly
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP16NNPI
+* SparseLengthsWeightedSumFused8BitRowwiseFakeFP32NNPI
 * SparseLengthsWeightedSumGradient
 * SparseLengthsWeightedSumWithMainInputGradient
+* SparseLpRegularizer
 * SparseMatrixReshape
 * SparseNormalize
 * SparseSortedSegmentMean
@@ -458,6 +556,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SparseSortedSegmentSumGradient
 * SparseSortedSegmentWeightedSum
 * SparseSortedSegmentWeightedSumGradient
+* SparseStorm
 * SparseToDense
 * SparseToDenseMask
 * SparseToDenseMaskGradient
@@ -467,7 +566,11 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SparseUnsortedSegmentSumGradient
 * SparseUnsortedSegmentWeightedSum
 * SparseUnsortedSegmentWeightedSumGradient
+* SpatialBNFakeFp16NNPI
+* SpatialBNFakeLoweredFp16NNPI
+* SpatialBNRelu
 * Sqr
+* SqrFakeFp16
 * Sqrt
 * SquaredL2Distance
 * SquaredL2DistanceGradient
@@ -477,14 +580,16 @@ Serialized tests have covered 219/743 (29.4%) operators
 * StatRegistryUpdate
 * StdDevPut
 * StopGradient
+* Storm
 * StringIndexCreate
 * StringJoin
 * StringPrefix
 * StringSuffix
 * StumpFunc
 * StumpFuncIndex
+* SubFakeFp16
 * SubGradient
-* Sum
+* SumFakeFp16
 * SumInt
 * SumRelu
 * Summarize
@@ -497,6 +602,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * TTLinearGradient
 * TTPad
 * TTPadGradient
+* TanhFakeFp16
+* TanhFakeFp16NNPI
 * TensorProtosDBInput
 * TensorVectorSize
 * TextFileReaderRead
@@ -521,6 +628,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * VideoInput
 * ViterbiPath
 * WallClockTime
+* WeightScale
 * WeightedMultiSampling
 * WeightedSample
 * WeightedSampleDequeueBlobs
@@ -535,7 +643,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 
 ## Covered operators
 <details>
-<summary>There are 219 covered operators</summary>
+<summary>There are 220 covered operators</summary>
 
 * Acos
 * AcosGradient
@@ -731,6 +839,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * StringEndsWith
 * StringStartsWith
 * Sub
+* Sum
 * SumElements
 * SumElementsGradient
 * SumElementsInt
@@ -761,30 +870,9 @@ Serialized tests have covered 219/743 (29.4%) operators
 ## Excluded from coverage statistics
 ### Schemaless operators
 <details>
-<summary>There are 23 schemaless operators</summary>
+<summary>There are 3 schemaless operators</summary>
 
-* C10Add_DontUseThisOpYet
-* C10AveragedLoss_DontUseThisOpYet
-* C10BatchGather_DontUseThisOpYet
-* C10BatchMatMul_DontUseThisOpYet
-* C10Cast_DontUseThisOpYet
-* C10Concat_DontUseThisOpYet
-* C10ConstantFill_DontUseThisOpYet
-* C10EnforceFinite_DontUseThisOpYet
-* C10ExpandDims_DontUseThisOpYet
-* C10FC_DontUseThisOpYet
-* C10Flatten_DontUseThisOpYet
-* C10GivenTensorFill_DontUseThisOpYet
-* C10GivenTensorInt64Fill_DontUseThisOpYet
-* C10GivenTensorIntFill_DontUseThisOpYet
 * C10LayerNorm_DontUseThisOpYet
-* C10Mul_DontUseThisOpYet
-* C10Relu_DontUseThisOpYet
-* C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet
-* C10Sigmoid_DontUseThisOpYet
-* C10SparseLengthsSum_DontUseThisOpYet
-* C10StopGradient_DontUseThisOpYet
-* C10UniformFill_DontUseThisOpYet
+* LengthsSumFakeFp16
 * SparseLengthsMax
 </details>
-

@@ -18,6 +18,8 @@ Currently implemented and planned for implementation operators are below:
 - [x] Sigmoid
 - [x] TanH
 - [x] Leaky ReLU
+- [x] Hardsigmoid
+- [x] Hardswish
 - [x] Clamp (can be used for ReLU, ReLU6 if it is not fused in another operator)
 - [x] SoftArgMax (aka SoftMax)
 - [ ] Group Normalization
@@ -68,7 +70,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for the host system
 # Use only 1 thread for build to avoid out-of-memory failures
@@ -95,7 +97,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for Android, and push to device
 scripts/build_android.sh -DANDROID_TOOLCHAIN=clang -DBUILD_BINARY=ON
@@ -125,7 +127,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for Android, and push to device
 scripts/build_android.sh -DANDROID_ABI=arm64-v8a -DANDROID_TOOLCHAIN=clang -DBUILD_BINARY=ON
@@ -162,7 +164,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Clone PEP repo
 cd ~/Code

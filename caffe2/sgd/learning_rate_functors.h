@@ -1,13 +1,14 @@
 #ifndef CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
 #define CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
-#define _USE_MATH_DEFINES
 
 #include <cmath>
 #include <list>
 #include <map>
 
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif // _MSC_VER
 
@@ -35,7 +36,7 @@ class FixedLearningRate : public LearningRateFunctor<T> {
 };
 
 // Alter: alternatate learning rate with active_period and inactive_period.
-// update for for a duration of active_period and then stop for a duration of
+// update for a duration of active_period and then stop for a duration of
 // inactive_period if active_first, and vice versa
 template <typename T>
 class AlternateLearningRate : public LearningRateFunctor<T> {
@@ -223,6 +224,41 @@ class HillLearningRate : public LearningRateFunctor<T> {
   T end_multiplier_;
 };
 
+// slope: the learning rate changes according to 2 stages
+// 1) constantWarmup with multiplier_1
+// 2) linearly shink to multiplier_2:
+//  max{
+//     multiplier_1 + (iter - num_iter_1) * (multiplier_2 - multiplier_1) / (num_iter_2 - num_iter_1),
+//     multiplier_2
+//  }
+template <typename T>
+class SlopeLearningRate : public LearningRateFunctor<T> {
+ public:
+  SlopeLearningRate(
+      const int64_t num_iter_1,
+      const T multiplier_1,
+      const T num_iter_2,
+      const T multiplier_2)
+      : num_iter_1_(num_iter_1),
+        multiplier_1_(multiplier_1),
+        num_iter_2_(num_iter_2),
+        multiplier_2_(multiplier_2) {}
+  T operator()(const int64_t iter) const override {
+    if (iter < num_iter_1_) {
+      return multiplier_1_;
+    } else {
+      return std::max(
+        multiplier_2_,
+        multiplier_1_ + (iter - num_iter_1_) * (multiplier_2_ - multiplier_1_) / (num_iter_2_ - num_iter_1_)
+      );
+    }
+  }
+  int64_t num_iter_1_;
+  T multiplier_1_;
+  int64_t num_iter_2_;
+  T multiplier_2_;
+};
+
 template <typename T>
 class CompositeLearningRateItem {
  public:
@@ -283,9 +319,9 @@ class CyclicalLearningRate : public LearningRateFunctor<T> {
         decay_(decay) {}
   T operator()(const int64_t iter) const override {
     int64_t cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
-    T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
+    T x = std::abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
     return 1 +
-        (T(abs(max_lr_)) / T(abs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)) *
+        (T(std::abs(max_lr_)) / T(std::abs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)) *
         std::pow(decay_, static_cast<int>(iter / (2 * stepsize_)));
   }
   T base_lr_;

@@ -15,10 +15,10 @@
 
 ## @package net_construct_bench
 # Module caffe2.experiments.python.net_construct_bench
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import argparse
 import logging
@@ -31,7 +31,7 @@ import caffe2.python.models.resnet as resnet
 
 '''
 Simple benchmark that creates a data-parallel resnet-50 model
-and measurs the time.
+and measures the time.
 '''
 
 

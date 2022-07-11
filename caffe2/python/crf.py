@@ -1,6 +1,6 @@
 ## @package crf
 # Module caffe2.python.crf
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import numpy as np
 from caffe2.python import brew, core, model_helper, recurrent
@@ -126,7 +126,7 @@ class CRFWithLoss(object):
             [], value=0, shape=[self.num_classes_padded], dtype=core.DataType.INT32
         )
 
-        # Compute the accumlated total score of all the paths
+        # Compute the accumulated total score of all the paths
         accum_score = self.model.net.SortedSegmentRangeLogSumExp(
             [out_last, zero_segment_id]
         )

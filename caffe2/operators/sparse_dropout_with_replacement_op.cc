@@ -26,12 +26,12 @@ bool SparseDropoutWithReplacementOp<CPUContext>::RunOnDevice() {
       X.numel(),
       "Inconsistent input data. Number of elements should match total length.");
 
-  std::bernoulli_distribution dist(1. - ratio_);
-  auto& gen = context_.RandGenerator();
+  at::bernoulli_distribution<double> dist(1. - ratio_);
+  auto* gen = context_.RandGenerator();
   int32_t total_output_length = 0;
   vector<bool> selected(Lengths.numel(), true);
   for (int i = 0; i < Lengths.numel(); ++i) {
-    if (dist(gen)) {
+    if (dist(gen) > 0.5) {
       output_lengths_data[i] = input_lengths_data[i];
     } else {
       // Replace with a single dropout value.  Even if input length is 0.

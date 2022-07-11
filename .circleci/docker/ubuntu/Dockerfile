@@ -6,6 +6,8 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
+ARG CLANG_VERSION
+
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
 ADD ./common/install_base.sh install_base.sh
@@ -13,7 +15,6 @@ RUN bash ./install_base.sh && rm install_base.sh
 
 # Install clang
 ARG LLVMDEV
-ARG CLANG_VERSION
 ADD ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
@@ -30,25 +31,32 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install katex
 ARG KATEX
-ADD ./common/install_katex.sh install_katex.sh
-RUN bash ./install_katex.sh && rm install_katex.sh
+ADD ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
-# Install non-standard Python versions (via Travis binaries)
-ARG TRAVIS_PYTHON_VERSION
-ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
-ADD ./common/install_travis_python.sh install_travis_python.sh
-RUN bash ./install_travis_python.sh && rm install_travis_python.sh
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
+
+# Install cuda and cudnn
+ARG CUDA_VERSION
+RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
+ENV DESIRED_CUDA ${CUDA_VERSION}
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
@@ -84,6 +92,18 @@ RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
+# (optional) Install Vulkan SDK
+ARG VULKAN_SDK_VERSION
+ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
+RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
+RUN rm install_vulkan_sdk.sh
+
+# (optional) Install swiftshader
+ARG SWIFTSHADER
+ADD ./common/install_swiftshader.sh install_swiftshader.sh
+RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
+RUN rm install_swiftshader.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 ADD ./common/install_cmake.sh install_cmake.sh
@@ -96,6 +116,12 @@ ADD ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+ENV OPENSSL_DIR /opt/openssl
+RUN rm install_openssl.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
@@ -106,9 +132,22 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
+# Install Open MPI for CUDA
+ADD ./common/install_openmpi.sh install_openmpi.sh
+RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
+RUN rm install_openmpi.sh
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+# AWS specific CUDA build guidance
+ENV TORCH_CUDA_ARCH_LIST Maxwell
+ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+ENV CUDA_PATH /usr/local/cuda
 
 USER jenkins
 CMD ["bash"]

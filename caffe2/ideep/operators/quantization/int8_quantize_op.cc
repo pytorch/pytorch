@@ -17,7 +17,8 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
 
     if (HasArgument("output_order")) {
       Y_fmt_ = static_cast<iformat>(
-        this->template GetSingleArgument<int>("output_order", iformat::nchw));
+        this->template GetSingleArgument<int>("output_order",
+                                              static_cast<int>(iformat::nchw)));
     }
 
     CAFFE_ENFORCE(zero_point_ == 0 || zero_point_ == 128,
@@ -25,6 +26,7 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
     Y_data_type_ = zero_point_ == 0 ? idtype::u8 : idtype::s8;
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8QuantizeOp() {}
 
   bool RunOnDevice() override {
@@ -32,9 +34,11 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
     CAFFE_ENFORCE(X.get_data_type() == idtype::f32, "Not support data type");
 
     auto* Y = Output(0);
-    Y->init({X.get_dims(), Y_data_type_,
-        Y_fmt_ != iformat::format_undef
-        ? Y_fmt_ : X.get_public_format()});
+    if (Y_fmt_ != iformat::undef) {
+      Y->init(X.get_desc().to_type(Y_data_type_).to_format(Y_fmt_));
+    } else {
+      Y->init(X.get_desc().to_type(Y_data_type_));
+    }
     Y->set_scale(Y_scales_);
     Y->feed_from(X);
 
@@ -46,7 +50,7 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
   int32_t zero_point_;
   iscale Y_scales_;
   idtype Y_data_type_;
-  iformat Y_fmt_ {iformat::format_undef};
+  iformat Y_fmt_ {iformat::undef};
 
   INPUT_TAGS(INPUT0);
   OUTPUT_TAGS(OUTPUT);

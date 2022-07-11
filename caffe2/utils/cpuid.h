@@ -6,17 +6,20 @@
 #include <intrin.h>
 #endif
 
-#include "caffe2/core/common.h"
+#include <c10/macros/Export.h>
 
 namespace caffe2 {
 
 class CpuId;
 
-CAFFE2_API const CpuId& GetCpuId();
+TORCH_API const CpuId& GetCpuId();
 
 ///////////////////////////////////////////////////////////////////////////////
 // Implementation of CpuId that is borrowed from folly.
 ///////////////////////////////////////////////////////////////////////////////
+
+// TODO: It might be good to use cpuinfo third-party dependency instead for
+// consistency sake.
 
 /**
  * Identification of an Intel CPU.
@@ -134,10 +137,10 @@ class CpuId {
 #undef X
 
  private:
-  CAFFE2_API static uint32_t f1c_;
-  CAFFE2_API static uint32_t f1d_;
-  CAFFE2_API static uint32_t f7b_;
-  CAFFE2_API static uint32_t f7c_;
+  TORCH_API static uint32_t f1c_;
+  TORCH_API static uint32_t f1d_;
+  TORCH_API static uint32_t f7b_;
+  TORCH_API static uint32_t f7c_;
 };
 
 } // namespace caffe2

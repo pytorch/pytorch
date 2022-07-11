@@ -5,18 +5,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-// Disable strict aliasing errors for CUDA 9.
-// The cuda_fp16.h header in CUDA 9 RC triggers this diagnostic.
-// It is included by cusparse.h as well, so guarding the
-// inclusion of that header here is not enough.
-#if CUDA_VERSION >= 9000
+#if !defined(USE_ROCM)
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
 #endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // USE_ROCM
 
 #include <cublas_v2.h>
 #include <curand.h>
@@ -30,8 +26,15 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #define CAFFE2_CUDA_EXPORT C10_EXPORT
-#define CAFFE2_CUDA_API TORCH_CUDA_API
 
+// CAFFE2_CUDA_API gets translated to CAFFE2_HIP_API in hipify script, which
+// causes a marco redefinition issue with the later definition of
+// CAFFE2_HIP_API, so we exclude this definition when HIP is specified
+#if !defined(USE_ROCM)
+#define CAFFE2_CUDA_API TORCH_CUDA_CPP_API
+#endif // USE_ROCM
+
+//TODO: [ROCm] Need to remove this after CUDA->HIP mapping is updated.
 #define CAFFE2_HIP_EXPORT C10_EXPORT
 #define CAFFE2_HIP_API TORCH_HIP_API
 
@@ -42,9 +45,7 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050 || defined(__HIP_PLATFORM_HCC__)
 #define CAFFE_HAS_CUDA_FP16
-#endif // CUDA_VERSION >= 7050
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
@@ -52,20 +53,20 @@
 #endif
 
 // cuda major revision number below which fp16 compute is not supoorted
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 constexpr int kFp16CUDADevicePropMajor = 6;
 #else
 constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
-#if CUDA_VERSION >= 9000
+#if !defined(USE_ROCM)
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
 #endif
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // USE_ROCM
 
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
@@ -78,14 +79,14 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 
 namespace caffe2 {
 
-#if CUDA_VERSION >= 9000
+#if !defined(USE_ROCM)
 /**
  * Empty class to identify TensorCore-based math
  */
 class TensorCoreEngine {};
-#endif
+#endif // USE_ROCM
 
-#if CUDA_VERSION >= 10000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
 #else
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE memoryType
@@ -95,7 +96,11 @@ class TensorCoreEngine {};
  * A runtime function to report the cuda version that Caffe2 is built with.
  */
 inline int CudaVersion() {
+#if defined(USE_ROCM)
+  return ROCM_VERSION;
+#else
   return CUDA_VERSION;
+#endif
 }
 
 /**
@@ -138,6 +143,8 @@ CAFFE2_CUDA_API int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device. This function is thread safe.
+ * The initial run on this function is ~1ms/device; however, the results are
+ * cached so subsequent runs should be much faster.
  */
 CAFFE2_CUDA_API const cudaDeviceProp& GetDeviceProperty(const int device);
 
@@ -260,15 +267,6 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
        i += blockDim.x * gridDim.x)                                 \
     for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
-
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
 
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'

@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at {
 namespace native {
@@ -26,7 +26,7 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
   if (tensor.is_contiguous()) {
-    auto default_strides_for_size = at::detail::defaultStrides(tensor.sizes());
+    auto default_strides_for_size = batched_matrix_contiguous_strides(tensor.sizes());
     if (tensor.strides() == default_strides_for_size) {
       return std::make_tuple(true, tensor);
     } else {

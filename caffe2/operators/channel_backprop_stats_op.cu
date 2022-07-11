@@ -95,13 +95,12 @@ __global__ void ChannelBackpropStatsBlockKernel(
 
 template <unsigned int blockSize>
 __global__ void ChannelBackpropStatsFinalSumsKernel(
-    int N,
-    int C,
-    int numSumsPerChannel,
-    const float* dBiasScratch,
-    const float* dScaleScratch,
-    float* dBias,
-    float* dScale) {
+    const int N,
+    const int numSumsPerChannel,
+    const float *const dBiasScratch,
+    const float *const dScaleScratch,
+    float *const dBias,
+    float *const dScale) {
   __shared__ float dBiasData[blockSize];
   __shared__ float dScaleData[blockSize];
 
@@ -190,16 +189,17 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
           invStddevArr,
           dBiasScratch_.mutable_data<float>(),
           dScaleScratch_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ChannelBackpropStatsFinalSumsKernel<CAFFE_CUDA_NUM_THREADS>
       <<<C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N,
-          C,
           numBlocksPerChannel,
           dBiasScratch_.data<float>(),
           dScaleScratch_.data<float>(),
           dBias->template mutable_data<float>(),
           dScale->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

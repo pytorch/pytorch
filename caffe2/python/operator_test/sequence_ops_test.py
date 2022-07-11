@@ -1,17 +1,17 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from functools import partial
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
+from caffe2.python import workspace
 
 
 def _gen_test_add_padding(with_pad_data=True,
@@ -102,11 +102,12 @@ def _gather_padding_ref(start_pad_width, end_pad_width, data, lengths):
 
 
 class TestSequenceOps(serial.SerializedTestCase):
-    @serial.given(start_pad_width=st.integers(min_value=1, max_value=2),
+    @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),
            ret_lengths=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_add_padding(
         self, start_pad_width, end_pad_width, args, ret_lengths, gc, dc
     ):
@@ -127,6 +128,127 @@ class TestSequenceOps(serial.SerializedTestCase):
             reference=partial(
                 _add_padding_ref, start_pad_width, end_pad_width, ret_lengths
             )
+        )
+
+    def _local_test_add_padding_shape_and_type(
+        self,
+        data,
+        start_pad_width,
+        end_pad_width,
+        ret_lengths,
+        lengths=None,
+    ):
+        if ret_lengths and lengths is None:
+            return
+
+        workspace.ResetWorkspace()
+        workspace.FeedBlob("data", data)
+        if lengths is not None:
+            workspace.FeedBlob("lengths", np.array(lengths).astype(np.int32))
+
+        op = core.CreateOperator(
+            'AddPadding',
+            ['data'] if lengths is None else ['data', 'lengths'],
+            ['output', 'lengths_out'] if ret_lengths else ['output'],
+            padding_width=start_pad_width,
+            end_padding_width=end_pad_width
+        )
+
+        add_padding_net = core.Net("add_padding_net")
+        add_padding_net.Proto().op.extend([op])
+        assert workspace.RunNetOnce(
+            add_padding_net
+        ), "Failed to run the add_padding_net"
+
+        shapes, types = workspace.InferShapesAndTypes(
+            [add_padding_net],
+        )
+
+        expected_shape = list(data.shape)
+        expected_shape[0] += (1 if lengths is None else len(lengths)) * (start_pad_width + end_pad_width)
+        self.assertEqual(shapes["output"], expected_shape)
+        self.assertEqual(types["output"], core.DataType.FLOAT)
+        if ret_lengths:
+            if lengths is None:
+                self.assertEqual(shapes["lengths_out"], [1])
+            else:
+                self.assertEqual(shapes["lengths_out"], [len(lengths)])
+            self.assertEqual(types["lengths_out"], core.DataType.INT32)
+
+
+    def test_add_padding_shape_and_type_3(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(1, 2).astype(np.float32),
+                        lengths=None,
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    def test_add_padding_shape_and_type_4(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(3, 1, 2).astype(np.float32),
+                        lengths=[1, 1, 1],
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    def test_add_padding_shape_and_type_5(
+        self
+    ):
+        for start_pad_width in range(3):
+            for end_pad_width in range(3):
+                for ret_lengths in [True, False]:
+                    self._local_test_add_padding_shape_and_type(
+                        data=np.random.rand(3, 2, 1).astype(np.float32),
+                        lengths=None,
+                        start_pad_width=start_pad_width,
+                        end_pad_width=end_pad_width,
+                        ret_lengths=ret_lengths,
+                    )
+
+    @given(start_pad_width=st.integers(min_value=0, max_value=3),
+           end_pad_width=st.integers(min_value=0, max_value=3),
+           num_dims=st.integers(min_value=1, max_value=4),
+           num_groups=st.integers(min_value=0, max_value=4),
+           ret_lengths=st.booleans(),
+           **hu.gcs)
+    @settings(deadline=1000)
+    def test_add_padding_shape_and_type(
+        self, start_pad_width, end_pad_width, num_dims, num_groups, ret_lengths, gc, dc
+    ):
+        np.random.seed(666)
+        lengths = []
+        for _ in range(num_groups):
+            lengths.append(np.random.randint(0, 3))
+        if sum(lengths) == 0:
+            lengths = []
+
+        data_shape = []
+        for _ in range(num_dims):
+            data_shape.append(np.random.randint(1, 4))
+        if sum(lengths) > 0:
+            data_shape[0] = sum(lengths)
+
+        data = np.random.randn(*data_shape).astype(np.float32)
+
+        self._local_test_add_padding_shape_and_type(
+            data=data,
+            lengths=lengths if len(lengths) else None,
+            start_pad_width=start_pad_width,
+            end_pad_width=end_pad_width,
+            ret_lengths=ret_lengths,
         )
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
@@ -188,10 +310,11 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, lengths],
             reference=partial(_remove_padding_ref, start_pad_width, end_pad_width))
 
-    @serial.given(start_pad_width=st.integers(min_value=0, max_value=2),
+    @given(start_pad_width=st.integers(min_value=0, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_gather_padding(self, start_pad_width, end_pad_width, args, gc, dc):
         lengths, data, start_padding, end_padding = args
         padded_data, padded_lengths = _add_padding_ref(
@@ -209,11 +332,12 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[padded_data, padded_lengths],
             reference=partial(_gather_padding_ref, start_pad_width, end_pad_width))
 
-    @serial.given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
-                          elements=st.floats(min_value=-np.inf,
+    @given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
+                          elements=hu.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=1, max_value=10),
                           **hu.gcs)
+    @settings(deadline=10000)
     def test_reverse_packed_segs(self, data, gc, dc):
         max_length = data.shape[0]
         batch_size = data.shape[1]
@@ -243,14 +367,15 @@ class TestSequenceOps(serial.SerializedTestCase):
             output_to_grad='reversed_data',
             grad_reference=op_grad_ref)
 
-    @serial.given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
-                          elements=st.floats(min_value=-np.inf,
+    @given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
+                          elements=hu.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=10, max_value=10),
            indices=st.lists(st.integers(min_value=0, max_value=9),
                             min_size=0,
                             max_size=10),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_remove_data_blocks(self, data, indices, gc, dc):
         indices = np.array(indices)
 
@@ -260,7 +385,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             ["shrunk_data"])
 
         def op_ref(data, indices):
-            unique_indices = np.unique(indices)
+            unique_indices = np.unique(indices) if len(indices)>0 else np.array([],dtype=np.int64)
             sorted_indices = np.sort(unique_indices)
             shrunk_data = np.delete(data, sorted_indices, axis=0)
             return (shrunk_data,)
@@ -271,10 +396,11 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, indices],
             reference=op_ref)
 
-    @serial.given(elements=st.lists(st.integers(min_value=0, max_value=9),
+    @given(elements=st.lists(st.integers(min_value=0, max_value=9),
                              min_size=0,
                              max_size=10),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_find_duplicate_elements(self, elements, gc, dc):
         mapping = {
             0: "a",

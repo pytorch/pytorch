@@ -1,9 +1,9 @@
 ## @package session
 # Module caffe2.python.session
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 
 from caffe2.python import core, workspace
@@ -192,7 +192,7 @@ class LocalSession(Session):
             task = task_group.to_task()
         plan = core.Plan('task_group_plan')
         plan.AddStep(task.get_step())
-        return (plan, task.output_list(), task.workspace_type)
+        return (plan, task.output_list(), task.workspace_type())
 
     def _run_compiled(self, compiled):
         plan, output_list, workspace_type = compiled

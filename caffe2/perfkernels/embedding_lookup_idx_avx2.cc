@@ -17,12 +17,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int64_t dataInd = 0;
   if (block_size == 128) {
@@ -45,14 +46,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -64,7 +64,9 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const float* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -161,14 +163,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -180,7 +181,9 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const float* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -237,14 +240,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -256,7 +258,9 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const float* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -293,14 +297,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -312,7 +315,9 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const float* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -345,14 +350,13 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -364,7 +368,9 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const float* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -407,7 +413,7 @@ bool EmbeddingLookupIdx_int32_t_float_float_false__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -432,7 +438,7 @@ bool EmbeddingLookupIdx_int32_t_float_float_true__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -487,14 +493,13 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -603,14 +608,13 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -679,14 +683,13 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -735,14 +738,13 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -787,14 +789,13 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -901,12 +902,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int64_t dataInd = 0;
   if (block_size == 128) {
@@ -929,14 +931,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -948,7 +949,9 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const at::Half* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -1105,14 +1108,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1124,7 +1126,9 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const at::Half* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -1211,14 +1215,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1230,7 +1233,9 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const at::Half* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -1282,14 +1287,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1301,7 +1305,9 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const at::Half* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -1333,6 +1339,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
@@ -1343,14 +1350,13 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1362,7 +1368,9 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const at::Half* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -1411,7 +1419,7 @@ bool EmbeddingLookupIdx_int32_t_half_float_false__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -1436,7 +1444,7 @@ bool EmbeddingLookupIdx_int32_t_half_float_true__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -1491,14 +1499,13 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1667,14 +1674,13 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1773,14 +1779,13 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1844,14 +1849,13 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1895,6 +1899,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
     alignas(64) at::Half vtmp1[8] = {0};
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
@@ -1905,14 +1910,13 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2025,12 +2029,13 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
     float* out) {
   const int prefdist_T0 = 16;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int64_t dataInd = 0;
   if (block_size == 128) {
@@ -2053,19 +2058,19 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2076,7 +2081,9 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -2231,19 +2238,19 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2254,7 +2261,9 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -2340,19 +2349,19 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2363,7 +2372,9 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -2415,19 +2426,19 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2438,7 +2449,9 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -2479,19 +2492,19 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2502,7 +2515,9 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * fused_block_size];
         const int next_T0 = (dataInd < index_size - prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             ? (dataInd + prefdist_T0)
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             : dataInd;
         const int idx_pref_T0 = indices[next_T0];
         if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {
@@ -2548,7 +2563,7 @@ bool EmbeddingLookupIdx_int32_t_uint8_t_float_false__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -2573,7 +2588,7 @@ bool EmbeddingLookupIdx_int32_t_uint8_t_float_true__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
@@ -2628,19 +2643,19 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2806,19 +2821,19 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2915,19 +2930,19 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -2990,19 +3005,19 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
@@ -3054,19 +3069,19 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd != offsets[rangeIndex]) {
+      if (dataInd != offsets[rangeIndex] - offsets[0]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];
-      for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];
+      for (int64_t start = dataInd; dataInd < end_offset - offsets[0];
+           ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
         }
         float wgt = 1.f;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];

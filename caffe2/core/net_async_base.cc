@@ -63,6 +63,7 @@ std::vector<int>& AsyncNetBase::getStreamCounters() {
   return stream_counters_;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
@@ -119,14 +120,14 @@ bool AsyncNetBase::handleRunError() {
   for (int task_id = 0; task_id < tasksNum(); ++task_id) {
     if (event(task_id).HasException()) {
       if (first_exc_task_id >= 0) {
-        auto exc_ts = event(task_id).ExceptionTimestamp();
+        auto exc_ts = event(task_id).ErrorTimestamp();
         if (exc_ts < first_exc_ts) {
           first_exc_task_id = task_id;
           first_exc_ts = exc_ts;
         }
       } else {
         first_exc_task_id = task_id;
-        first_exc_ts = event(task_id).ExceptionTimestamp();
+        first_exc_ts = event(task_id).ErrorTimestamp();
       }
     }
   }
@@ -232,6 +233,7 @@ bool AsyncNetBase::canSchedule(
   auto first_child_op_id = chains_[task_id].front();
   for (auto parent_id : parents(task_id)) {
     auto last_parent_op_id = chains_[parent_id].back();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     EventStatus parent_status;
     if (status) {
       parent_status = status->at(parent_id);
@@ -497,7 +499,13 @@ void AsyncNetBase::finalizeEvents() {
                 if (op != pending_op) {
                   try {
                     op->CancelAsyncCallback();
-                    op->event().SetFinished("Cancelled");
+
+                    // throw and catch exception to preserve stack trace
+                    try {
+                      throw AsyncNetCancelled();
+                    } catch (const AsyncNetCancelled& e) {
+                      op->event().SetFinishedWithException(e.what());
+                    }
                   } catch (const EnforceNotMet&) {
                     // ignore
                   }

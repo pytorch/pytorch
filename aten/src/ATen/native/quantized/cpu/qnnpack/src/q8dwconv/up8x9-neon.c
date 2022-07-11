@@ -24,17 +24,22 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   const uint8x8_t vkernel_zero_point =
-      vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
-  const int32x4_t vmultiplier =
-      vld1q_dup_s32(&quantization_params->neon.multiplier);
-  const int32x4_t vright_shift =
-      vld1q_dup_s32(&quantization_params->neon.right_shift);
+      vdup_n_u8(quantization_params->neon.kernel_zero_points[0]);
+  const float32x4_t requantization_scale_v =
+      vdupq_n_f32(quantization_params->neon.requantization_scales[0]);
+#ifdef __aarch64__
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
   const uint8x8_t voutput_min =
       vld1_dup_u8(&quantization_params->neon.output_min);
   const uint8x8_t voutput_max =
       vld1_dup_u8(&quantization_params->neon.output_max);
+#else
+  const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
+  const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
+  const float32x4_t vfmagic = vdupq_n_f32(quantization_params->neon.vfmagic);
+  const int32x4_t vimagic = vdupq_n_s32(quantization_params->neon.vimagic);
+#endif
 
 #ifdef __aarch64__
   /* Larger number of registers on AArch64 make it possible to process few
@@ -261,34 +266,18 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
             vmlal_s16(vacc2_lo, vget_low_s16(vxk22), vget_low_s16(vxi24));
         vacc2_hi = vmlal_high_s16(vacc2_hi, vxk22, vxi24);
 
-        vacc0_lo = vqrdmulhq_s32(vacc0_lo, vmultiplier);
-        vacc0_hi = vqrdmulhq_s32(vacc0_hi, vmultiplier);
-        vacc1_lo = vqrdmulhq_s32(vacc1_lo, vmultiplier);
-        vacc1_hi = vqrdmulhq_s32(vacc1_hi, vmultiplier);
-        vacc2_lo = vqrdmulhq_s32(vacc2_lo, vmultiplier);
-        vacc2_hi = vqrdmulhq_s32(vacc2_hi, vmultiplier);
-
-        const int32x4_t vzero_shift_mask =
-            vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-        vacc0_lo =
-            vsraq_n_s32(vacc0_lo, vbicq_s32(vacc0_lo, vzero_shift_mask), 31);
-        vacc0_hi =
-            vsraq_n_s32(vacc0_hi, vbicq_s32(vacc0_hi, vzero_shift_mask), 31);
-        vacc1_lo =
-            vsraq_n_s32(vacc1_lo, vbicq_s32(vacc1_lo, vzero_shift_mask), 31);
-        vacc1_hi =
-            vsraq_n_s32(vacc1_hi, vbicq_s32(vacc1_hi, vzero_shift_mask), 31);
-        vacc2_lo =
-            vsraq_n_s32(vacc2_lo, vbicq_s32(vacc2_lo, vzero_shift_mask), 31);
-        vacc2_hi =
-            vsraq_n_s32(vacc2_hi, vbicq_s32(vacc2_hi, vzero_shift_mask), 31);
-
-        vacc0_lo = vrshlq_s32(vacc0_lo, vright_shift);
-        vacc0_hi = vrshlq_s32(vacc0_hi, vright_shift);
-        vacc1_lo = vrshlq_s32(vacc1_lo, vright_shift);
-        vacc1_hi = vrshlq_s32(vacc1_hi, vright_shift);
-        vacc2_lo = vrshlq_s32(vacc2_lo, vright_shift);
-        vacc2_hi = vrshlq_s32(vacc2_hi, vright_shift);
+        vacc0_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc0_lo), requantization_scale_v));
+        vacc0_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc0_hi), requantization_scale_v));
+        vacc1_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc1_lo), requantization_scale_v));
+        vacc1_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc1_hi), requantization_scale_v));
+        vacc2_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc2_lo), requantization_scale_v));
+        vacc2_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc2_hi), requantization_scale_v));
 
         const int16x8_t vacc0 = vqaddq_s16(
             vqmovn_high_s32(vqmovn_s32(vacc0_lo), vacc0_hi),
@@ -530,34 +519,18 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
             vmlal_s16(vacc2_lo, vget_low_s16(vxk22), vget_low_s16(vxi24));
         vacc2_hi = vmlal_high_s16(vacc2_hi, vxk22, vxi24);
 
-        vacc0_lo = vqrdmulhq_s32(vacc0_lo, vmultiplier);
-        vacc0_hi = vqrdmulhq_s32(vacc0_hi, vmultiplier);
-        vacc1_lo = vqrdmulhq_s32(vacc1_lo, vmultiplier);
-        vacc1_hi = vqrdmulhq_s32(vacc1_hi, vmultiplier);
-        vacc2_lo = vqrdmulhq_s32(vacc2_lo, vmultiplier);
-        vacc2_hi = vqrdmulhq_s32(vacc2_hi, vmultiplier);
-
-        const int32x4_t vzero_shift_mask =
-            vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-        vacc0_lo =
-            vsraq_n_s32(vacc0_lo, vbicq_s32(vacc0_lo, vzero_shift_mask), 31);
-        vacc0_hi =
-            vsraq_n_s32(vacc0_hi, vbicq_s32(vacc0_hi, vzero_shift_mask), 31);
-        vacc1_lo =
-            vsraq_n_s32(vacc1_lo, vbicq_s32(vacc1_lo, vzero_shift_mask), 31);
-        vacc1_hi =
-            vsraq_n_s32(vacc1_hi, vbicq_s32(vacc1_hi, vzero_shift_mask), 31);
-        vacc2_lo =
-            vsraq_n_s32(vacc2_lo, vbicq_s32(vacc2_lo, vzero_shift_mask), 31);
-        vacc2_hi =
-            vsraq_n_s32(vacc2_hi, vbicq_s32(vacc2_hi, vzero_shift_mask), 31);
-
-        vacc0_lo = vrshlq_s32(vacc0_lo, vright_shift);
-        vacc0_hi = vrshlq_s32(vacc0_hi, vright_shift);
-        vacc1_lo = vrshlq_s32(vacc1_lo, vright_shift);
-        vacc1_hi = vrshlq_s32(vacc1_hi, vright_shift);
-        vacc2_lo = vrshlq_s32(vacc2_lo, vright_shift);
-        vacc2_hi = vrshlq_s32(vacc2_hi, vright_shift);
+        vacc0_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc0_lo), requantization_scale_v));
+        vacc0_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc0_hi), requantization_scale_v));
+        vacc1_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc1_lo), requantization_scale_v));
+        vacc1_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc1_hi), requantization_scale_v));
+        vacc2_lo = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc2_lo), requantization_scale_v));
+        vacc2_hi = vcvtnq_s32_f32(
+            vmulq_f32(vcvtq_f32_s32(vacc2_hi), requantization_scale_v));
 
         const int16x8_t vacc0 = vqaddq_s16(
             vqmovn_high_s32(vqmovn_s32(vacc0_lo), vacc0_hi),
@@ -767,28 +740,35 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
       int32x4_t vacc_lo = vaddq_s32(vaccX0_lo, vaccX1_lo);
       int32x4_t vacc_hi = vaddq_s32(vaccX0_hi, vaccX1_hi);
 
-      vacc_lo = vqrdmulhq_s32(vacc_lo, vmultiplier);
-      vacc_hi = vqrdmulhq_s32(vacc_hi, vmultiplier);
-
-      const int32x4_t vzero_shift_mask =
-          vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-      vacc_lo = vsraq_n_s32(vacc_lo, vbicq_s32(vacc_lo, vzero_shift_mask), 31);
-      vacc_hi = vsraq_n_s32(vacc_hi, vbicq_s32(vacc_hi, vzero_shift_mask), 31);
-
-      vacc_lo = vrshlq_s32(vacc_lo, vright_shift);
-      vacc_hi = vrshlq_s32(vacc_hi, vright_shift);
+      const float32x4_t vacc_lo_f =
+        vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v);
+      const float32x4_t vacc_hi_f =
+        vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v);
 
 #ifdef __aarch64__
+      vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
+      vacc_hi = vcvtnq_s32_f32(vacc_hi_f);
+
       const int16x8_t vacc = vqaddq_s16(
           vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), voutput_zero_point);
-#else
-      const int16x8_t vacc = vqaddq_s16(
-          vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-          voutput_zero_point);
-#endif
+
       uint8x8_t vout = vqmovun_s16(vacc);
       vout = vmax_u8(vout, voutput_min);
       vout = vmin_u8(vout, voutput_max);
+#else
+      const float32x4_t vacc_lo_f_clamped =
+          vminq_f32(vmaxq_f32(vacc_lo_f, vfmin), vfmax);
+      const float32x4_t vacc_hi_f_clamped =
+          vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
+      vacc_lo = vsubq_s32(
+          vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+      vacc_hi = vsubq_s32(
+          vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+      const int16x8_t vacc =
+          vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
+
+      uint8x8_t vout = vqmovun_s16(vacc);
+#endif
 
       vst1_u8(output, vout);
       output += 8;
@@ -920,28 +900,35 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
       int32x4_t vacc_lo = vaddq_s32(vaccX0_lo, vaccX1_lo);
       int32x4_t vacc_hi = vaddq_s32(vaccX0_hi, vaccX1_hi);
 
-      vacc_lo = vqrdmulhq_s32(vacc_lo, vmultiplier);
-      vacc_hi = vqrdmulhq_s32(vacc_hi, vmultiplier);
-
-      const int32x4_t vzero_shift_mask =
-          vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-      vacc_lo = vsraq_n_s32(vacc_lo, vbicq_s32(vacc_lo, vzero_shift_mask), 31);
-      vacc_hi = vsraq_n_s32(vacc_hi, vbicq_s32(vacc_hi, vzero_shift_mask), 31);
-
-      vacc_lo = vrshlq_s32(vacc_lo, vright_shift);
-      vacc_hi = vrshlq_s32(vacc_hi, vright_shift);
+      const float32x4_t vacc_lo_f =
+        vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v);
+      const float32x4_t vacc_hi_f =
+        vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v);
 
 #ifdef __aarch64__
+      vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
+      vacc_hi = vcvtnq_s32_f32(vacc_hi_f);
+
       const int16x8_t vacc = vqaddq_s16(
           vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), voutput_zero_point);
-#else
-      const int16x8_t vacc = vqaddq_s16(
-          vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-          voutput_zero_point);
-#endif
+
       uint8x8_t vout = vqmovun_s16(vacc);
       vout = vmax_u8(vout, voutput_min);
       vout = vmin_u8(vout, voutput_max);
+#else
+      const float32x4_t vacc_lo_f_clamped =
+          vminq_f32(vmaxq_f32(vacc_lo_f, vfmin), vfmax);
+      const float32x4_t vacc_hi_f_clamped =
+          vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
+      vacc_lo = vsubq_s32(
+          vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+      vacc_hi = vsubq_s32(
+          vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+      const int16x8_t vacc =
+          vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
+
+      uint8x8_t vout = vqmovun_s16(vacc);
+#endif
 
       if (c & 4) {
         vst1_lane_u32(

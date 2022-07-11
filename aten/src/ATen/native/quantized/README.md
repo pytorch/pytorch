@@ -21,7 +21,7 @@ Tensor quantized_xand(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
-  long zero_point qa.q_zero_point();
+  int64_t zero_point = qa.q_zero_point();
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
@@ -55,42 +55,31 @@ In the example above, the resulting tensor will be the same as the `qa.scalar_ty
 3. Implementation lambda. The main implementation should sit in the body of this lambda.
 it should also use the aliases for the quantized data types instead of the explicit data types.
 
-### Step 1. Create the kernel
+### Step 1. Define the schema
 
-All kernels must be classes inheriting from `torch::OperatorKernel`.
-The implementation itself should be under the `operator()` method.
-In the `qxand.cpp` file, we create the following
+Update `aten/src/ATen/native/quantized/library.cpp` and add
+a `def` for your new operator:
 
 ```c++
-class QuantizedXAnd final : public torch::OperatorKernel {
- public:
-  Tensor operator(Tensor qa, Tensor qb) {
-    return quantized_xand(qa, qb);
+TORCH_LIBRARY(quantized, m) {
+  // ... the existing definitions ...
+  m.def("quantized::xand(Tensor qa, Tensor qb) -> Tensor");
 }
-}
-;
 ```
 
-    ## #Step 2a. Register the kernel
-
-        The registration is done using the `torch::RegisterOperators()
-            .op(...)`.
-
-```c++ static auto registry = torch::RegisterOperators().op(
-    "quantized::xand(Tensor qa, Tensor qb) -> Tensor",
-    torch::RegisterOperators::options().kernel<QuantizedXAnd>(
-        QuantizedCPUTensorId()));
-```
-
-The registry takes two arguments:
-
-1. **Function schema string**: This schema describes the usage of the op.
+Def takes a **function schema string**: This schema describes the usage of the op.
 In the example above the schema is `"quantized::xand(Tensor qa, Tensor qb) -> Tensor"`.
 This translates to `torch._ops.ops.quantized.xand` function in Python of the appropriate signature.
-**Note:** The arguments signature in the schema is optional, and can also be written as `"quantized::xand"` (without args).
-2. **Registration options** should be of type `torch::RegisterOperators::options()`.
-To attach a kernel to it, use `.kernel<KERNEL_CLASS>(DISPATCH_KEY)`.
-In quantized ops you almost always want to use the `QuantizedCPUTensorId()` dispatcher.
+
+### Step 2. Register the implementation
+
+The registration is done using `TORCH_LIBRARY_IMPL`.
+
+```c++
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("xand", TORCH_FN(quantized_xand));
+}
+```
 
 ### Step 2b. [Optional] Registering the operation with the `native_functions.yaml`
 
@@ -127,7 +116,7 @@ The final file `ATen/native/quantized/cpu/qxand.cpp` would look as follows
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h> // Need that for the `native_functions.yaml`
 #include <ATen/core/Type.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
@@ -138,25 +127,11 @@ namespace at {
     return qc;
   }
 
-  namespace {
-  class QuantizedXAnd final : public torch::OperatorKernel {
-   public:
-    Tensor operator(Tensor qa, Tensor qb) {
-      return quantized_xand(qa, qb);
-    }
-  };
-
-  static auto registry = torch::RegisterOperators().op(
-      "quantized::xand(Tensor qa, Tensor qb) -> Tensor",
-      torch::RegisterOperators::options().kernel<QuantizedXAnd>(
-          QuantizedCPUTensorId()));
-
-  } // namespace
-  }}  // namespace at::native
+  TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+    m.impl("xand", TORCH_FN(quantized_xand));
+  }
+}}  // namespace at::native
 ```
-
-Notice that we try to keep all the kernels in the anonymous namespace.
-The reason for that is that we access the kernels only through the `torch` namespace and this prevents symbol clashes in the linker.
 
 ### Step 3. Administrative stuff
 
@@ -204,44 +179,8 @@ You should not need to use the registered kernels in C++.
 Although **officially not supported**, you can use the following
 
 ```c++
-namespace at {
-  namespace native {
-  namespace dispatch_tools {
-  /* Creates a stack of inputs consumable by the dispatcher.*/
-  template <class... Inputs>
-  inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
-    return {std::forward<Inputs>(inputs)...};
-  }
-
-  /* Given an operator handle, calls it using some arguments.*/
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const torch::OperatorHandle& op,
-      Args... args) {
-    auto stack = makeStack(std::forward<Args>(args)...);
-    auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
-    kernel.call(&stack);
-    return stack;
-  }
-
-  /* Finds the op and calls the callOp on it.*/
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const char* func_name,
-      const char* overload_name,
-      Args... args) {
-    const torch::optional<torch::OperatorHandle> op_handle =
-        torch::Dispatcher::singleton().findSchema(func_name, overload_name);
-    assert(op_handle.has_value());
-    return callOp(op_handle.value(), args...);
-  }
-  } // dispatch_tools
-
-  // This is your new function
   Tensor quantized_xand(Tensor qa, Tensor qb) {
-    return dispatch_tools::callOp("quantized::xand", "", qa, qb);
+    static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"quantized::xand", ""}).value();
+    return op.call<Tensor, Tensor, Tensor>(qa, qb);
   }
-  }}  // namespace at::native
 ```
-
-The `dispatch_tools` is just a local namespace created for a sake of example.

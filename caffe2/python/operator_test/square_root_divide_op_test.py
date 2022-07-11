@@ -1,11 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from functools import partial
-from hypothesis import given
 from hypothesis import strategies as st
 
 import caffe2.python.hypothesis_test_util as hu
@@ -30,7 +29,7 @@ def _data_and_scale(
             hu.arrays([param_[0], param_[1]], dtype=dtype),
             hu.arrays(
                 [param_[0]], dtype=param_[2],
-                elements=(st.floats(0.0, 10000.0) if param_[2] in [np.float32]
+                elements=(hu.floats(0.0, 10000.0) if param_[2] in [np.float32]
                           else st.integers(0, 10000)),
             ),
         )

@@ -82,12 +82,14 @@ void momentum_sgd_update<CUDAContext>(
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(N, g, m, ng, nm, lr, momentum, param);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     MomentumSGDKernel<false>
         <<<CaffeGetBlocksSGD(N),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(N, g, m, ng, nm, lr, momentum, param);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -150,6 +152,7 @@ bool SparseMomentumSGDUpdateOp<float, CUDAContext>::DoRunWithType() {
         Input(GRAD).template data<float>(),
         Output(OUTPUT_GRAD)->template mutable_data<float>(),
         Input(LR).template data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
 

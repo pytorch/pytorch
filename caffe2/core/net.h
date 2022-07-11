@@ -34,7 +34,7 @@ class Workspace;
 
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
-class CAFFE2_API NetBase : public Observable<NetBase> {
+class TORCH_API NetBase : public Observable<NetBase> {
  public:
   NetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   virtual ~NetBase() noexcept {}
@@ -62,6 +62,8 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
 
   virtual bool RunAsync();
 
+  virtual void Cancel();
+
   /* Benchmarks a network for one individual run so that we can feed new
    * inputs on additional calls.
    * This function returns the number of microseconds spent
@@ -76,7 +78,7 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
    * seconds spent during the benchmark. The 0-th item is the time spent per
    * each network run, and if a net instantiation supports run_individual,
    * the remainder of the vector returns the number of milliseconds spent per
-   * opeartor.
+   * operator.
    */
   virtual vector<float> TEST_Benchmark(
       const int /*warmup_runs*/,
@@ -133,7 +135,7 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   C10_DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
-class CAFFE2_API ExecutorHelper {
+class TORCH_API ExecutorHelper {
  public:
   ExecutorHelper() {}
   virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
@@ -159,14 +161,14 @@ C10_DECLARE_REGISTRY(
  * created net object to the workspace's net map, while this function returns
  * a standalone net object.
  */
-CAFFE2_API unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
-CAFFE2_API unique_ptr<NetBase> CreateNet(
+TORCH_API unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
+TORCH_API unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws);
 
-CAFFE2_API void AddGlobalNetObserverCreator(NetObserverCreator creator);
+TORCH_API void AddGlobalNetObserverCreator(NetObserverCreator creator);
 
-CAFFE2_API void ClearGlobalNetObservers();
+TORCH_API void ClearGlobalNetObservers();
 
 } // namespace caffe2
 

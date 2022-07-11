@@ -507,7 +507,7 @@ void TensorRTTransformer::Transform(
         return true;
       };
 
-  // function to convert runnbale subgraph into a trt op. Note that to keep the
+  // function to convert runnable subgraph into a trt op. Note that to keep the
   // interface clean, we do the double conversion from C2 op to Onnx ops here
   // but it should be OK as the cost is really small. We also need to keep the
   // same exporter throughout the process to avoid duplicated dummy name
@@ -518,7 +518,8 @@ void TensorRTTransformer::Transform(
     return SubnetToTrtOp(net, &mapped_ws, &exporter2, &shape_hints);
   };
 
-  NetDef net_opt = opt::OptimizeForBackend(*pred_net, supports, trt_converter);
+  auto cutResult = opt::OptimizeForBackend(*pred_net, supports, trt_converter)
+  NetDef net_opt = std::move(cutResult.net);
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());

@@ -9,7 +9,7 @@ ModelProto {
       outputs: [{name: "2", type:Tensor dims: 3 4}]
       initializers: []
       nodes: [
-        Node {type: "ATen", inputs: [0,1], outputs: [2], attributes: [{ name: 'operator', type: string, value: 'fmod'}]}
+        Node {type: "ATen", domain: "org.pytorch.aten", inputs: [0,1], outputs: [2], attributes: [{ name: 'operator', type: string, value: 'fmod'}, { name: 'overload_name', type: string, value: ''}]}
       ]
     }
   opset_import: [OperatorSetIdProto { domain: }OperatorSetIdProto { domain: org.pytorch.aten}],

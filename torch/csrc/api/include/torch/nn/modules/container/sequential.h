@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/container/any.h>
+#include <torch/nn/modules/container/named_any.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -33,7 +34,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -68,7 +69,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -88,6 +89,7 @@ namespace nn {
 ///   must accept a single argument. If your modules need to take multiple
 ///   arguments, you should define them to take and return tuples.
 /// \endrst
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
   using Iterator = std::vector<AnyModule>::iterator;
@@ -103,10 +105,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   }
 
   /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
-  explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
+  explicit SequentialImpl(
+      torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {
-      push_back(std::move(item.key()), std::move(item.value()));
+      push_back(item.key(), std::move(item.value()));
     }
   }
 
@@ -116,7 +119,9 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
     modules_.reserve(named_modules.size());
     for (const auto& named_module : named_modules) {
-      push_back(std::move(named_module.name()), std::move(named_module.module()));
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      push_back(
+          std::move(named_module.name()), std::move(named_module.module()));
     }
   }
 
@@ -178,7 +183,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
       input = iterator->any_forward(std::move(input));
     }
 
-    // Check the return value and give a nice error message if the requsted
+    // Check the return value and give a nice error message if the requested
     // return type was incorrect.
     if (auto* return_value = input.template try_get<ReturnType>()) {
       return std::move(*return_value);
@@ -212,8 +217,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(c10::to_string(modules_.size()), std::forward<M>(module));
   }
 
-  /// Adds a new named `Module` to the `Sequential` container, moving or copying it
-  /// into a `shared_ptr` internally. This method allows passing value types,
+  /// Adds a new named `Module` to the `Sequential` container, moving or copying
+  /// it into a `shared_ptr` internally. This method allows passing value types,
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(std::string name, M&& module) {
@@ -241,6 +246,17 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     for (const auto& module : container) {
       push_back(module);
     }
+  }
+
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(AnyModule any_module) {
+    push_back(c10::to_string(modules_.size()), std::move(any_module));
+  }
+
+  void push_back(std::string name, AnyModule any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::move(name), modules_[index].ptr());
   }
 
   /// Returns an iterator to the start of the `Sequential`.
@@ -328,28 +344,24 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// pack has only one type, in which case the template would be preferred,
   /// even if the other `push_back` functions are better fits (e.g. `unique_ptr`
   /// -> `shared_ptr` overload).
-  /// NOTE: We explicitly avoid matching this template with `push_back(std::string("name"), module)`
-  /// or `push_back("name", module)`, since they should be handled by their respective
-  /// `push_back` functions.
-  template <typename First, typename Second, typename... Rest,
-    typename = torch::disable_if_t<std::is_same<First, std::string>::value ||
-      std::is_same<typename std::decay<First>::type, std::decay<const char (&)[]>::type>::value>>
+  /// NOTE: We explicitly avoid matching this template with
+  /// `push_back(std::string("name"), module)` or `push_back("name", module)`,
+  /// since they should be handled by their respective `push_back` functions.
+  template <
+      typename First,
+      typename Second,
+      typename... Rest,
+      typename = torch::disable_if_t<
+          std::is_same<First, std::string>::value ||
+          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+          std::is_same<
+              typename std::decay<First>::type,
+              std::decay<const char (&)[]>::type>::value>>
   void push_back(First&& first, Second&& second, Rest&&... rest) {
     push_back(std::forward<First>(first));
     // Recursively calls this method, until the parameter pack only thas this
     // entry left. Then calls `push_back()` a final time (above).
     push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
-  }
-
-  /// Adds a type-erased `AnyModule` to the `Sequential`.
-  void push_back(AnyModule any_module) {
-    push_back(c10::to_string(modules_.size()), std::move(any_module));
-  }
-
-  void push_back(std::string name, AnyModule any_module) {
-    modules_.push_back(std::move(any_module));
-    const auto index = modules_.size() - 1;
-    register_module(std::move(name), modules_[index].ptr());
   }
 
   /// The base case, when the list of modules is empty.
@@ -374,7 +386,10 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
   /// It enables the following use case:
   /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
-  Sequential(std::initializer_list<NamedAnyModule> named_modules) : ModuleHolder(std::make_shared<SequentialImpl>(std::move(named_modules))) {}
+  // NOLINTNEXTLINE(performance-move-const-arg)
+  Sequential(std::initializer_list<NamedAnyModule> named_modules)
+      : ModuleHolder(
+            std::make_shared<SequentialImpl>(std::move(named_modules))) {}
 };
 } // namespace nn
 } // namespace torch

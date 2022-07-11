@@ -146,6 +146,15 @@ class GemmMicrokernelTester {
     return this->bZeroPoint_;
   }
 
+  inline GemmMicrokernelTester& multiplier(const float multiplier) {
+    this->multiplier_ = multiplier;
+    return *this;
+  }
+
+  inline float multiplier() const {
+    return this->multiplier_;
+  }
+
   inline GemmMicrokernelTester& qmin(uint8_t qmin) {
     this->qmin_ = qmin;
     return *this;
@@ -183,6 +192,8 @@ class GemmMicrokernelTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
+    auto f32rng =
+        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> a((m() - 1) * aStride() + k() + 8);
     std::vector<uint8_t> b(n() * k());
@@ -203,6 +214,10 @@ class GemmMicrokernelTester {
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
 
+      size_t num_zero_points_padded = n() + 8;
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
       pytorch_pack_q8gemm_w(
           n(),
           k(),
@@ -215,6 +230,9 @@ class GemmMicrokernelTester {
 #endif
           b.data(),
           bias.data(),
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+          kernel_zero_points.data(),
+#endif
           packedW.data());
 
       ASSERT_NE(
@@ -235,7 +253,7 @@ class GemmMicrokernelTester {
             acc[mIndex * n() + nIndex] +=
                 (int32_t(aPtr[mIndex * aStride() + kIndex]) -
                  int32_t(aZeroPoint())) *
-                (int32_t(b[nIndex * k() + kIndex]) - int32_t(bZeroPoint()));
+                (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
           }
           acc[mIndex * n() + nIndex] += bias[nIndex];
         }
@@ -258,19 +276,24 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(cScale);
+      std::vector<float> requantization_scales(num_zero_points_padded);
+      auto scale_generator = [&]() -> float {return (f32rng()/cScale);};
+      std::generate(
+          requantization_scales.begin(),
+          requantization_scales.end(),
+          std::ref(scale_generator));
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              bZeroPoint(),
-              requantizationScale,
+              kernel_zero_points.data(),
+              requantization_scales.data(),
               cZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
-                  requantizationScale, cZeroPoint, qmin(), qmax());
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
+                  requantization_scales.data(), cZeroPoint, qmin(), qmax());
 
       qgemm(
           m(),
@@ -281,12 +304,18 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          cRef[mIndex * n() + nIndex] = pytorch_qnnp_q31_requantize(
-              acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#if defined(__arm__) || defined(_M_ARM)
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize_magic(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams, nIndex);
+#else
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams, nIndex);
+#endif
         }
       }
 
@@ -303,8 +332,126 @@ class GemmMicrokernelTester {
               << "), optimized = " << (uint32_t)c[mIndex * cStride() + nIndex]
               << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
               << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantizationScale
+              << ", requantization scale = " << requantization_scales[nIndex]
               << ", output zero point = " << int32_t(cZeroPoint);
+        }
+      }
+    }
+  }
+
+  void test(pytorch_q8gemm_dq_ukernel_function qgemm) const {
+    ASSERT_LE(m(), mr());
+    ASSERT_LE(n(), nr());
+    ASSERT_GE(k(), kr());
+
+    std::random_device randomDevice;
+    auto rng = std::mt19937(randomDevice());
+    auto s32rng =
+        std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
+    auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
+
+    std::vector<uint8_t> a((m() - 1) * aStride() + k() + 8);
+    std::vector<uint8_t> b(n() * k());
+    std::vector<float, AlignedAllocator<float, 32>> bias(std::max<size_t>(8, n()));
+    std::vector<uint8_t, AlignedAllocator<uint8_t, 32>> packedW(
+        packedN() * packedK() + biasN() * sizeof(uint32_t) / sizeof(uint8_t));
+    std::vector<float> c((m() - 1) * cStride() + n());
+    std::vector<float> acc(m() * n());
+
+    const uint8_t* aPtr = a.data() + 8;
+
+    for (size_t iteration = 0; iteration < iterations(); iteration++) {
+      std::generate(a.begin(), a.end(), std::ref(u8rng));
+      std::generate(b.begin(), b.end(), std::ref(u8rng));
+      std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      std::fill(c.begin(), c.end(), 0.0f);
+
+      std::fill(packedW.begin(), packedW.end(), bZeroPoint());
+
+      size_t num_zero_points_padded = n() + 8;
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
+      pytorch_pack_q8gemm_w(
+          n(),
+          k(),
+          nr(),
+          np(),
+          kr(),
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+          aZeroPoint(),
+          bZeroPoint(),
+#endif
+          b.data(),
+          nullptr,
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+          kernel_zero_points.data(),
+#endif
+          packedW.data());
+
+      ASSERT_NE(
+          *std::max_element(a.cbegin(), a.cend()),
+          *std::min_element(a.cbegin(), a.cend()));
+      ASSERT_NE(
+          *std::max_element(b.cbegin(), b.cend()),
+          *std::min_element(b.cbegin(), b.cend()));
+
+      auto f32rng =
+          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      std::vector<float> dequantization_scales(num_zero_points_padded);
+      std::generate(
+          dequantization_scales.begin(),
+          dequantization_scales.end(),
+          std::ref(f32rng));
+      /* Compute 32-bit results and output quantization arguments */
+      std::fill(acc.begin(), acc.end(), 0);
+      for (size_t mIndex = 0; mIndex < m(); mIndex++) {
+        for (size_t nIndex = 0; nIndex < n(); nIndex++) {
+          for (size_t kIndex = 0; kIndex < k(); kIndex++) {
+            ASSERT_LE(n(), packedN());
+            ASSERT_LT(mIndex * n() + nIndex, acc.size());
+            ASSERT_LT(mIndex * k() + kIndex, a.size());
+            acc[mIndex * n() + nIndex] +=
+                (int32_t(aPtr[mIndex * aStride() + kIndex]) -
+                 int32_t(aZeroPoint())) *
+                (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
+          }
+          acc[mIndex * n() + nIndex] =
+            acc[mIndex * n() + nIndex] *
+            dequantization_scales[nIndex] +
+            bias[nIndex];
+        }
+      }
+
+      const struct pytorch_qnnp_conv_dynamic_quantization_params quantizationParams{
+        aZeroPoint(),
+        kernel_zero_points.data(),
+        dequantization_scales.data(),
+      };
+
+      qgemm(
+          m(),
+          n(),
+          k(),
+          aPtr,
+          aStride() * sizeof(uint8_t),
+          packedW.data(),
+          bias.data(),
+          c.data(),
+          cStride(),
+          0,
+          &quantizationParams);
+
+      for (size_t mIndex = 0; mIndex < m(); mIndex++) {
+        for (size_t nIndex = 0; nIndex < n(); nIndex++) {
+          ASSERT_EQ(
+              c[mIndex * cStride() + nIndex],
+              acc[mIndex * n() + nIndex])
+              << "at " << mIndex << ", " << nIndex
+              << ": reference = " << acc[mIndex * n() + nIndex]
+              << ", optimized = " << c[mIndex * cStride() + nIndex]
+              << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
+              << ", M x N x K = " << m() << " x " << n() << " x " << k();
         }
       }
     }
@@ -320,6 +467,8 @@ class GemmMicrokernelTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
+    auto f32rng =
+        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> a((mr() - 1) * aStride() + k() + 8);
     std::vector<uint8_t> b(n() * ks() * k());
@@ -342,6 +491,11 @@ class GemmMicrokernelTester {
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
 
+      size_t num_zero_points_padded = n() + 8;
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
+
       pytorch_pack_q8conv_w(
           n(),
           ks(),
@@ -354,6 +508,9 @@ class GemmMicrokernelTester {
 #endif
           b.data(),
           bias.data(),
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+          kernel_zero_points.data(),
+#endif
           packedW.data());
 
       ASSERT_NE(
@@ -396,7 +553,7 @@ class GemmMicrokernelTester {
                     (int32_t(
                          b[(nIndex * ks() + ksIndex) * k() + kBlockStart +
                            kBlockOffset]) -
-                     int32_t(bZeroPoint()));
+                     int32_t(kernel_zero_points[nIndex]));
               }
             }
           }
@@ -421,19 +578,24 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(cScale);
+      std::vector<float> requantization_scales(num_zero_points_padded, 1.0f / float(cScale));
+      auto scale_generator = [&]() -> float {return (f32rng()/cScale);};
+      std::generate(
+          requantization_scales.begin(),
+          requantization_scales.end(),
+          std::ref(scale_generator));
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              bZeroPoint(),
-              requantizationScale,
+              kernel_zero_points.data(),
+              requantization_scales.data(),
               cZeroPoint,
               qmin(),
               qmax());
-      const union pytorch_qnnp_q31_requantization_params
+      const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
-              pytorch_qnnp_compute_scalar_requantization_params(
-                  requantizationScale, cZeroPoint, qmin(), qmax());
+              pytorch_qnnp_compute_scalar_fp32_requantization_params(
+                  requantization_scales.data(), cZeroPoint, qmin(), qmax());
 
       qconv(
           m(),
@@ -444,12 +606,18 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          cRef[mIndex * n() + nIndex] = pytorch_qnnp_q31_requantize(
-              acc[mIndex * n() + nIndex], scalarRequantizationParams);
+#if defined(__arm__) || defined(_M_ARM)
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize_magic(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams, nIndex);
+#else
+          cRef[mIndex * n() + nIndex] = pytorch_qnnp_fp32_requantize(
+              acc[mIndex * n() + nIndex], scalarRequantizationParams, nIndex);
+#endif
         }
       }
 
@@ -466,7 +634,7 @@ class GemmMicrokernelTester {
               << "), optimized = " << uint32_t(c[mIndex * cStride() + nIndex])
               << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
               << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantizationScale
+              << ", requantization scale = " << requantization_scales[nIndex]
               << ", output zero point = " << int32_t(cZeroPoint);
         }
       }
@@ -994,4 +1162,5 @@ class GemmMicrokernelTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{15};
+  float multiplier_{2.0f};
 };

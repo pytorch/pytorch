@@ -1,39 +1,46 @@
 #pragma once
 
-#include <ATen/core/functional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
+#include <ATen/core/functional.h>
+#include <c10/core/TensorOptions.h>
+#include <torch/csrc/Export.h>
 #include <utility>
 
-namespace torch { namespace utils {
+namespace torch {
+namespace utils {
+
+/// Generate an ID for a combination of tensor backend + scalar type to be used
+/// when ordering tensors ('like' tensors are grouped by pulling out their
+/// backend + scalar type, so this function combines that into a single number)
+inline size_t type_id(const at::Tensor& tensor) {
+  return static_cast<size_t>(tensor.options().backend()) *
+      static_cast<size_t>(at::ScalarType::NumOptions) +
+      static_cast<size_t>(tensor.scalar_type());
+}
 
 inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
-  static auto flatten = [](const at::Tensor &t) { return t.contiguous().view({-1}); };
-  if (tensors.size() == 1)
-    return flatten(tensors[0]);
-  return at::cat(fmap(tensors, flatten));
+  return at::flatten_dense_tensors(tensors);
 }
 
-inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, at::TensorList tensors) {
-  std::vector<at::Tensor> outputs;
-  outputs.reserve(tensors.size());
-  size_t offset = 0;
-  for (const auto & tensor : tensors) {
-    auto numel = tensor.numel();
-    outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
-    offset += numel;
-  }
-  return outputs;
+inline std::vector<at::Tensor> unflatten_dense_tensors(
+    const at::Tensor& flat,
+    at::TensorList tensors) {
+  return at::unflatten_dense_tensors(flat, tensors);
 }
 
-
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
 
-  at::DeprecatedTypeProperties& type() {
+  size_t type_id() {
     AT_ASSERT(!tensors.empty());
-    return tensors[0].type();
+    return ::torch::utils::type_id(tensors[0]);
+  }
+
+  const at::TensorOptions options() {
+    AT_ASSERT(!tensors.empty());
+    return tensors[0].options();
   }
 };
 
@@ -64,13 +71,17 @@ TORCH_API std::vector<TensorGroup> take_tensors(
     size_t size_limit,
     bool fine_grained = false);
 
-TORCH_API void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
+TORCH_API void reorder_tensors_like(
+    std::vector<at::Tensor>& tensors,
+    at::TensorList order);
 
-TORCH_API std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors);
+TORCH_API std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(
+    at::TensorList tensors);
 
 TORCH_API std::vector<at::Tensor> unflatten_sparse_tensors(
     const at::Tensor& flat_indices,
     const at::Tensor& flat_values,
     at::TensorList tensors);
 
-}}
+} // namespace utils
+} // namespace torch

@@ -16,20 +16,25 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
  public:
   PropagateGradientsReq(
       const AutogradMetadata& autogradMetadata,
-      std::vector<torch::autograd::Variable> grads);
+      std::vector<torch::autograd::Variable> grads,
+      bool retainGraph = false);
 
   const AutogradMetadata& getAutogradMetadata();
 
   const std::vector<torch::autograd::Variable>& getGrads();
 
   // Serialization and deserialization methods.
-  rpc::Message toMessage() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<PropagateGradientsReq> fromMessage(
       const rpc::Message& message);
+
+  // Whether or not to retain the autograd graph.
+  bool retainGraph();
 
  private:
   AutogradMetadata autogradMetadata_;
   std::vector<torch::autograd::Variable> grads_;
+  bool retainGraph_;
 };
 
 } // namespace autograd

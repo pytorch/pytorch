@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_EXPAND_SQUEEZE_DIMS_OP_H_
 #define CAFFE2_OPERATORS_EXPAND_SQUEEZE_DIMS_OP_H_
 
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
@@ -88,10 +89,10 @@ class SqueezeOp : public Operator<Context> {
 
   static std::vector<int> ComputeDims(
       at::IntArrayRef inputDims,
-      std::vector<int> dims) {
+      const std::vector<int>& dims) {
     size_t j = 0;
     std::vector<int> newDims;
-    for (size_t i = 0; i < inputDims.size(); ++i) {
+    for (const auto i : c10::irange(inputDims.size())) {
       if (j < dims.size() && dims[j] == i) {
         CAFFE_ENFORCE_EQ(
             inputDims[i],

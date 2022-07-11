@@ -4,30 +4,6 @@ using namespace caffe2;
 
 namespace {
 
-void adam_ideep_update(
-    int N,
-    const float* g,
-    const float* m,
-    const float* v,
-    float* ng,
-    float* nm,
-    float* nv,
-    float beta1,
-    float beta2,
-    float eps_hat,
-    float correction,
-    const float* lr) {
-#ifdef _OPENMP
-    #pragma omp parallel for schedule(static)
-#endif
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
-  }
-}
-
 void adam_ideep_compute(
     int N,
     const float* w,
@@ -110,11 +86,11 @@ class IDEEPAdamOp final : public IDEEPOperator {
     CAFFE_ENFORCE(grad.get_nelems() == moment_1.get_nelems());
     CAFFE_ENFORCE(grad.get_nelems() == moment_2.get_nelems());
     if (params != *out_params)
-        out_params->reinit(params.get_descriptor());
+        out_params->init(params.get_descriptor());
     if (moment_1 != *out_moment1)
-        out_moment1->reinit(moment_1.get_descriptor());
+        out_moment1->init(moment_1.get_descriptor());
     if (moment_2 != *out_moment2)
-        out_moment2->reinit(moment_2.get_descriptor());
+        out_moment2->init(moment_2.get_descriptor());
     const auto w = static_cast<float *>(params.get_data_handle());
     const auto g = static_cast<float *>(grad.get_data_handle());
     const auto m = static_cast<float *>(moment_1.get_data_handle());
@@ -146,7 +122,7 @@ class IDEEPAdamOp final : public IDEEPOperator {
     } else {
       auto* out_grad = Output(OUTPUT_GRAD);
       if (grad != *out_grad)
-        out_grad->reinit(grad.get_descriptor());
+        out_grad->init(grad.get_descriptor());
       auto ng = static_cast<float *>(out_grad->get_data_handle());
       adam_ideep_compute_output_grad(
           grad.get_nelems(),
@@ -169,8 +145,11 @@ class IDEEPAdamOp final : public IDEEPOperator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta1_{0.9};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T beta2_{0.999};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes,cppcoreguidelines-avoid-magic-numbers)
   T epsilon_{1e-8};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);

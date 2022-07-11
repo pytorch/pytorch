@@ -1,13 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -32,7 +32,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         y = slopes[index] * x_ + intercepts[index]
         return y
 
-    @serial.given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_multi_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
@@ -59,7 +60,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_binary_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
@@ -85,7 +87,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], piecewise)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_multi_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
@@ -112,7 +115,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
             gc, op, [X, bounds, slopes, intercepts], piecewise)
         self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_binary_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)
@@ -137,7 +141,8 @@ class TestPiecewiseLinearTransform(serial.SerializedTestCase):
             gc, op, [X, bounds, slopes, intercepts], piecewise)
         self.assertDeviceChecks(dc, op, [X, bounds, slopes, intercepts], [0])
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @given(n=st.integers(1, 100), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_1D_predictions_params_from_input(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, size=n).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, size=n).astype(np.float32)

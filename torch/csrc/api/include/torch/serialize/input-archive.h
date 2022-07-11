@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <c10/core/Device.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/types.h>
-#include <torch/csrc/jit/script/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -18,9 +18,7 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
@@ -48,6 +46,10 @@ class TORCH_API InputArchive final {
   /// Reads an `IValue` associated with a given `key`.
   void read(const std::string& key, c10::IValue& ivalue);
 
+  /// Reads an `IValue` associated with a given `key`. If there is no `IValue`
+  /// associated with the `key`, this returns false, otherwise it returns true.
+  bool try_read(const std::string& key, c10::IValue& ivalue);
+
   /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
   /// associated with the `key`, this returns false, otherwise it returns true.
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
@@ -72,25 +74,32 @@ class TORCH_API InputArchive final {
   /// Loads the `InputArchive` from a serialized representation stored in the
   /// file at `filename`. Storage are remapped using device option. If device
   /// is not specified, the module is loaded to the original device.
-  void load_from(const std::string& filename,
+  void load_from(
+      const std::string& filename,
       c10::optional<torch::Device> device = c10::nullopt);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
   /// given `stream`. Storage are remapped using device option. If device
   /// is not specified, the module is loaded to the original device.
-  void load_from(std::istream& stream,
+  void load_from(
+      std::istream& stream,
       c10::optional<torch::Device> device = c10::nullopt);
 
   // Loads given the specified flat array.
-  void load_from(const char* data, size_t size,
+  void load_from(
+      const char* data,
+      size_t size,
       c10::optional<torch::Device> device = c10::nullopt);
 
   // Loads given the specified read and size functions.
   void load_from(
-       const std::function<size_t(
-                   uint64_t pos, void* buf, size_t nbytes)>& read_func,
-       const std::function<size_t(void)>& size_func,
-       c10::optional<torch::Device> device = c10::nullopt);
+      const std::function<size_t(uint64_t pos, void* buf, size_t nbytes)>&
+          read_func,
+      const std::function<size_t(void)>& size_func,
+      c10::optional<torch::Device> device = c10::nullopt);
+
+  // Returns the vector of keys in the input archive.
+  std::vector<std::string> keys();
 
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and
@@ -101,7 +110,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  jit::script::Module module_;
+  jit::Module module_;
   std::string hierarchy_prefix_;
 };
 } // namespace serialize

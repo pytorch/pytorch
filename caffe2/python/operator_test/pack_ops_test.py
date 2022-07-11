@@ -1,13 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import numpy as np
 import time
@@ -56,12 +56,13 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
         return pack_segments_ref
 
-    @serial.given(
+    @given(
         num_seq=st.integers(10, 100),
         cell_size=st.integers(1, 10),
         max_length_buffer=st.integers(-5, 5),
         **hu.gcs
     )
+    @settings(deadline=None, max_examples=50)
     def test_pack_with_max_length_ops(
         self, num_seq, cell_size, max_length_buffer, gc, dc
     ):
@@ -134,6 +135,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         cell_size=st.integers(1, 10),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_pack_ops(self, num_seq, cell_size, gc, dc):
         # create data
         lengths = np.arange(num_seq, dtype=np.int32) + 1
@@ -231,6 +233,42 @@ class TestTensorPackOps(serial.SerializedTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
+    def test_pad_no_minf(self):
+        workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
+        workspace.FeedBlob(
+            'd',
+            np.array([
+                [1.0, 1.1],
+                [2.0, 2.1],
+                [2.2, 2.2],
+                [3.0, 3.1],
+                [3.2, 3.3],
+                [3.4, 3.5]],
+                dtype=np.float32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'd'], ['t'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t')
+        assert(result[0, -1, 0] == 0.0)
+
+        workspace.FeedBlob(
+            'i',
+            np.array([
+                [1, 1],
+                [2, 2],
+                [2, 2],
+                [3, 3],
+                [3, 3],
+                [3, 3]],
+                dtype=np.int32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'i'], ['t2'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t2')
+        assert(result[0, -1, 0] == 0)
+
     @given(**hu.gcs)
     def test_presence_mask(self, gc, dc):
         lengths = np.array([1, 2, 3], dtype=np.int32)
@@ -288,6 +326,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         self.assertEquals(output.shape, expected_output_shape)
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_out_of_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 4
         lengths = np.array([1, 2, 4], dtype=np.int32)
@@ -310,6 +349,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         )
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_under_bounds(self, gc, dc):
         # Copy pasted from test_pack_ops but with 3 changed to 2
         lengths = np.array([1, 2, 2], dtype=np.int32)

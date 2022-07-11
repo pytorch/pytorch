@@ -1,30 +1,38 @@
 #include <unordered_set>
 
 #include "caffe2/core/db.h"
-#include "caffe2/utils/proto_utils.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 namespace db {
 
 class ProtoDBCursor : public Cursor {
  public:
-  explicit ProtoDBCursor(const TensorProtos* proto)
-    : proto_(proto), iter_(0) {}
+  explicit ProtoDBCursor(const TensorProtos* proto) : proto_(proto), iter_(0) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ProtoDBCursor() override {}
 
   void Seek(const string& /*str*/) override {
     CAFFE_THROW("ProtoDB is not designed to support seeking.");
   }
 
-  void SeekToFirst() override { iter_ = 0; }
-  void Next() override { ++iter_; }
-  string key() override { return proto_->protos(iter_).name(); }
-  string value() override {
-    return
-      SerializeAsString_EnforceCheck(proto_->protos(iter_), "ProtoDBCursor");
+  void SeekToFirst() override {
+    iter_ = 0;
   }
-  bool Valid() override { return iter_ < proto_->protos_size(); }
+  void Next() override {
+    ++iter_;
+  }
+  string key() override {
+    return proto_->protos(iter_).name();
+  }
+  string value() override {
+    return SerializeAsString_EnforceCheck(
+        proto_->protos(iter_), "ProtoDBCursor");
+  }
+  bool Valid() override {
+    return iter_ < proto_->protos_size();
+  }
 
  private:
   const TensorProtos* proto_;
@@ -40,9 +48,10 @@ class ProtoDBTransaction : public Transaction {
     }
   }
   ~ProtoDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
     }
@@ -80,6 +89,7 @@ class ProtoDB : public DB {
     LOG(INFO) << "Opened protodb " << source;
   }
   ~ProtoDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Close();
   }
 
@@ -105,5 +115,5 @@ REGISTER_CAFFE2_DB(ProtoDB, ProtoDB);
 // For lazy-minded, one can also call with lower-case name.
 REGISTER_CAFFE2_DB(protodb, ProtoDB);
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2

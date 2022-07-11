@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/test/test_assert.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 using namespace std;
@@ -10,7 +11,7 @@ using namespace at;
 
 void fill_tensor(int64_t scalar, Tensor& t_) {
   auto t = t_.view(-1);
-  for (int64_t i = 0; i < t.numel(); i++) {
+  for (const auto i : c10::irange(t.numel())) {
     t[i] = (i + 1) * scalar;
   }
 }
@@ -42,7 +43,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
   auto a4 = at::empty({0}, at::TensorOptions(kCPU).dtype(kDouble));
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     tensors[i].resize_(shape);
     fill_tensor(i + 1, tensors[i]);
     if (a >= 0 && b >= 0) {
@@ -55,7 +56,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
         a0, a1, [](scalar_t& y, const scalar_t& x) { y = x * x; });
     CPU_tensor_apply2<double, scalar_t>(
         a4, a1, [](double& y, scalar_t x) { y = (double)(x * x); });
-    for (int64_t i = 0; i < a0.numel(); i++) {
+    for (const auto i : c10::irange(a0.numel())) {
       auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);
       ASSERT(a4.data_ptr<double>()[i] == target);
@@ -71,7 +72,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
         a4, a1, a2, [](double& y, const scalar_t& x, const scalar_t& z) {
           y = (double)(x * x + z);
         });
-    for (int64_t i = 0; i < a0.numel(); i++) {
+    for (const auto i : c10::irange(a0.numel())) {
       auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
       target = target + a2.data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);
@@ -97,7 +98,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
         [](double& y, const scalar_t& x, const scalar_t& z, const scalar_t& a) {
           y = (double)(x * x + z * a);
         });
-    for (int64_t i = 0; i < a0.numel(); i++) {
+    for (const auto i : c10::irange(a0.numel())) {
       auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
       target = target + a2.data_ptr<scalar_t>()[i] * a3.data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);

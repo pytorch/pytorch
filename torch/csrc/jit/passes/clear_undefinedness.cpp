@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -9,7 +10,7 @@ void clearUndefinedness(Value* o) {
     o->setType(TensorType::get());
   } else if (
       o->type()->kind() == ListType::Kind &&
-      o->type()->expect<ListType>()->getElementType()->kind() ==
+      o->type()->expectRef<ListType>().getElementType()->kind() ==
           TensorType::Kind) {
     o->setType(ListType::create(TensorType::get()));
   }

@@ -14,85 +14,48 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack_func.h>
+
+#include "test_utils.h"
+using namespace qnnpack::testing;
 
 class DeconvolutionOperatorTester {
  public:
   inline DeconvolutionOperatorTester& padding(uint32_t padding) {
-    this->paddingTop_ = padding;
-    this->paddingRight_ = padding;
-    this->paddingBottom_ = padding;
-    this->paddingLeft_ = padding;
+    this->paddingHeight_ = padding;
+    this->paddingWidth_ = padding;
     return *this;
   }
 
   inline DeconvolutionOperatorTester& padding(
       uint32_t paddingHeight,
       uint32_t paddingWidth) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingRight_ = paddingWidth;
-    this->paddingBottom_ = paddingHeight;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingHeight_ = paddingHeight;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
   inline DeconvolutionOperatorTester& paddingHeight(uint32_t paddingHeight) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingBottom_ = paddingHeight;
+    this->paddingHeight_ = paddingHeight;
     return *this;
   }
 
   inline uint32_t paddingHeight() const {
-    return this->paddingTop_ + this->paddingBottom_;
+    return this->paddingHeight_;
   }
 
   inline DeconvolutionOperatorTester& paddingWidth(uint32_t paddingWidth) {
-    this->paddingRight_ = paddingWidth;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
   inline uint32_t paddingWidth() const {
-    return this->paddingLeft_ + this->paddingRight_;
-  }
-
-  inline DeconvolutionOperatorTester& paddingTop(uint32_t paddingTop) {
-    this->paddingTop_ = paddingTop;
-    return *this;
-  }
-
-  inline uint32_t paddingTop() const {
-    return this->paddingTop_;
-  }
-
-  inline DeconvolutionOperatorTester& paddingRight(uint32_t paddingRight) {
-    this->paddingRight_ = paddingRight;
-    return *this;
-  }
-
-  inline uint32_t paddingRight() const {
-    return this->paddingRight_;
-  }
-
-  inline DeconvolutionOperatorTester& paddingBottom(uint32_t paddingBottom) {
-    this->paddingBottom_ = paddingBottom;
-    return *this;
-  }
-
-  inline uint32_t paddingBottom() const {
-    return this->paddingBottom_;
-  }
-
-  inline DeconvolutionOperatorTester& paddingLeft(uint32_t paddingLeft) {
-    this->paddingLeft_ = paddingLeft;
-    return *this;
-  }
-
-  inline uint32_t paddingLeft() const {
-    return this->paddingLeft_;
+    return this->paddingWidth_;
   }
 
   inline DeconvolutionOperatorTester& adjustmentHeight(
@@ -164,6 +127,15 @@ class DeconvolutionOperatorTester {
 
   inline size_t groupInputChannels() const {
     return this->groupInputChannels_;
+  }
+
+  inline DeconvolutionOperatorTester& per_channel(bool per_channel) {
+    this->per_channel_ = per_channel;
+    return *this;
+  }
+
+  inline bool per_channel() const {
+    return this->per_channel_;
   }
 
   inline DeconvolutionOperatorTester& groupOutputChannels(
@@ -339,12 +311,12 @@ class DeconvolutionOperatorTester {
 
   inline size_t outputHeight() const {
     return strideHeight() * (inputHeight() - 1) + adjustmentHeight() +
-        dilatedKernelHeight() - paddingHeight();
+        dilatedKernelHeight() - paddingHeight() * 2;
   }
 
   inline size_t outputWidth() const {
     return strideWidth() * (inputWidth() - 1) + adjustmentWidth() +
-        dilatedKernelWidth() - paddingWidth();
+        dilatedKernelWidth() - paddingWidth() * 2;
   }
 
   inline DeconvolutionOperatorTester& qmin(uint8_t qmin) {
@@ -374,7 +346,7 @@ class DeconvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8() const {
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -400,12 +372,20 @@ class DeconvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    // Make num zero points multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded =
+      groups() * groupOutputChannels() + 8;
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
+
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      if (per_channel()) {
+        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
@@ -429,11 +409,11 @@ class DeconvolutionOperatorTester {
         for (size_t oy = 0; oy < outputHeight(); oy++) {
           for (size_t ox = 0; ox < outputWidth(); ox++) {
             for (size_t ky = 0; ky < kernelHeight(); ky++) {
-              const size_t y = oy + paddingTop() - ky * dilationHeight();
+              const size_t y = oy + paddingHeight() - ky * dilationHeight();
               const size_t iy = y / strideHeight();
               if (iy * strideHeight() == y && iy < inputHeight()) {
                 for (size_t kx = 0; kx < kernelWidth(); kx++) {
-                  const size_t x = ox + paddingLeft() - kx * dilationWidth();
+                  const size_t x = ox + paddingWidth() - kx * dilationWidth();
                   const size_t ix = x / strideWidth();
                   if (ix * strideWidth() == x && ix < inputWidth()) {
                     for (size_t g = 0; g < groups(); g++) {
@@ -461,7 +441,7 @@ class DeconvolutionOperatorTester {
                                              kx) *
                                                 groupOutputChannels() +
                                             oc]) -
-                               int32_t(kernelZeroPoint));
+                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -494,15 +474,23 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
+      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto f32rng =
+          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      if (per_channel()) {
+        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        std::generate(
+            requantization_scales.begin(),
+            requantization_scales.end(),
+            std::ref(scale_generator));
+      }
       pytorch_qnnp_operator_t deconvolution = nullptr;
 
       ASSERT_EQ(
           pytorch_qnnp_status_success,
           pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
+              paddingHeight(),
+              paddingWidth(),
               adjustmentHeight(),
               adjustmentWidth(),
               kernelHeight(),
@@ -515,39 +503,72 @@ class DeconvolutionOperatorTester {
               groupInputChannels(),
               groupOutputChannels(),
               inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
+              kernelZeroPoints.data(),
               kernel.data(),
               bias.data(),
               outputZeroPoint,
-              outputScale,
               qmin(),
               qmax(),
               0,
+              requantization_scales.data(),
               &deconvolution));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
-              deconvolution,
-              batchSize(),
-              inputHeight(),
-              inputWidth(),
-              inputPtr,
-              inputPixelStride(),
-              output.data(),
-              outputPixelStride(),
-              nullptr /* thread pool */));
+      switch (mode) {
+        case Mode::Static: {
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
+                  deconvolution,
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputPtr,
+                  inputPixelStride(),
+                  output.data(),
+                  outputPixelStride(),
+                  nullptr /* thread pool */));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_delete_operator(deconvolution));
-      deconvolution = nullptr;
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(deconvolution));
+          deconvolution = nullptr;
+        } break;
+
+        case Mode::Runtime:
+        {
+          auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
+              new qnnpack::PrePackConvWeights(
+                  deconvolution,
+                  kernelZeroPoints.data(),
+                  kernel.data(),
+                  bias.data()));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              qnnpack::qnnpackDeConv(
+                  deconvolution,
+                  packW->getPackedWeights(),
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputZeroPoint,
+                  inputPtr,
+                  kernelZeroPoints.data(),
+                  requantization_scales.data(),
+                  outputZeroPoint,
+                  qmin(),
+                  qmax(),
+                  output.data(),
+                  nullptr));
+        }
+        break;
+
+        default:
+          ASSERT_TRUE(false);
+      }
 
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t y = 0; y < outputHeight(); y++) {
@@ -560,8 +581,8 @@ class DeconvolutionOperatorTester {
                               groups() +
                           g) *
                              groupOutputChannels() +
-                         c] /
-                    outputScale;
+                         c] *
+                         requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,
@@ -609,10 +630,8 @@ class DeconvolutionOperatorTester {
   }
 
  private:
-  uint32_t paddingTop_{0};
-  uint32_t paddingRight_{0};
-  uint32_t paddingBottom_{0};
-  uint32_t paddingLeft_{0};
+  uint32_t paddingHeight_{0};
+  uint32_t paddingWidth_{0};
   size_t inputHeight_{1};
   size_t inputWidth_{1};
   uint32_t groups_{1};
@@ -632,4 +651,5 @@ class DeconvolutionOperatorTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
+  bool per_channel_{false};
 };

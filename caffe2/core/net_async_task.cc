@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(modernize-pass-by-value)
 AsyncTask::AsyncTask(const std::vector<OperatorBase*>& ops) : ops_(ops) {
   CAFFE_ENFORCE(!ops_.empty());
   device_option_ = ops_.front()->device_option();
@@ -40,7 +41,8 @@ bool AsyncTask::Run(const ExecutionOptions& options) {
   // TODO: insert CUDA's async stream waits; tracing and counters
   OperatorBase* op = nullptr;
   try {
-    for (auto op_idx = 0; op_idx < ops_.size(); ++op_idx) {
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (auto op_idx = 0U; op_idx < ops_.size(); ++op_idx) {
       op = ops_[op_idx];
       int stream_id = 0; // TODO: thread local stream id
       if (!op->RunAsync(stream_id)) {

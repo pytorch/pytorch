@@ -2,8 +2,8 @@
 
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
 namespace torch {
@@ -18,11 +18,20 @@ using torch::jit::Operator;
 // caontains the RRefId and the ForkId of the return value RRef.
 class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
+  // Constructor for builitin operator call.
   ScriptRemoteCall(
       std::shared_ptr<Operator> op,
-      std::vector<at::IValue>&& args,
+      std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
       const ForkId& retForkId);
+
+  // Constructor for TorchScript function call.
+  ScriptRemoteCall(
+      const c10::QualifiedName& qualifiedName,
+      std::vector<at::IValue>&& stack,
+      const RRefId& retRRefId,
+      const ForkId& retForkId,
+      const bool isAsyncExecution);
 
   inline const RRefId& retRRefId() const {
     return retRRefId_;
@@ -32,7 +41,10 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
     return retForkId_;
   }
 
-  Message toMessage() && override;
+  static std::unique_ptr<ScriptRemoteCall> fromIValues(
+      std::vector<at::IValue>& ivalues);
+
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptRemoteCall> fromMessage(const Message& message);
 
  private:

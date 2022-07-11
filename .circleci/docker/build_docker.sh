@@ -13,11 +13,12 @@ retry () {
 
 #until we find a way to reliably reuse previous build, this last_tag is not in use
 # last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
-tag="${CIRCLE_WORKFLOW_ID}"
+tag="${DOCKER_TAG}"
 
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
+ghcr_image="ghcr.io/pytorch/ci-image"
 
 login() {
   aws ecr get-authorization-token --region us-east-1 --output text --query 'authorizationData[].authorizationToken' |
@@ -26,11 +27,14 @@ login() {
     docker login -u AWS --password-stdin "$1"
 }
 
-# Retry on timeouts (can happen on job stampede).
-retry login "${registry}"
 
-# Logout on exit
-trap "docker logout ${registry}" EXIT
+# Only run these steps if not on github actions
+if [[ -z "${GITHUB_ACTIONS}" ]]; then
+  # Retry on timeouts (can happen on job stampede).
+  retry login "${registry}"
+  # Logout on exit
+  trap "docker logout ${registry}" EXIT
+fi
 
 # export EC2=1
 # export JENKINS=1
@@ -43,7 +47,25 @@ trap "docker logout ${registry}" EXIT
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
-docker push "${image}:${tag}"
+# Only push if `DOCKER_SKIP_PUSH` = false
+if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
+  # Only push if docker image doesn't exist already.
+  # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
+  # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
+  if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
+    docker push "${image}:${tag}"
+  fi
 
-docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
-aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
+  if [ "${PUSH_GHCR_IMAGE:-}" = "true" ]; then
+    # Push docker image to the ghcr.io
+    echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+    docker tag "${image}:${tag}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
+    docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+  fi
+fi
+
+if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
+  trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT
+  docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
+  aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
+fi

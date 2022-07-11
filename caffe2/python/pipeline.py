@@ -1,9 +1,9 @@
 ## @package pipeline
 # Module caffe2.python.pipeline
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
@@ -374,7 +374,7 @@ class ProcessingReader(Reader):
         # from it.
         with NetBuilder() as nb:
             # Current NetBuilder is optionally used inside the processor,
-            # then its children are retrived inside of
+            # then its children are retrieved inside of
             # normalize_processor_output.
             # Once readers and writers also use NetBuilder,
             # this logic will be more natural.

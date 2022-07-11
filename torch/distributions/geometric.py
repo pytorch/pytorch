@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Geometric']
 
 class Geometric(Distribution):
     r"""
@@ -35,8 +36,6 @@ class Geometric(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.probs, = broadcast_all(probs)
-            if not self.probs.gt(0).all():
-                raise ValueError('All elements of probs must be greater than 0')
         else:
             self.logits, = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
@@ -45,6 +44,18 @@ class Geometric(Distribution):
         else:
             batch_shape = probs_or_logits.size()
         super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+        if self._validate_args and probs is not None:
+            # Add an extra check beyond unit_interval
+            value = self.probs
+            valid = value > 0
+            if not valid.all():
+                invalid_value = value.data[~valid]
+                raise ValueError(
+                    "Expected parameter probs "
+                    f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                    f"of distribution {repr(self)} "
+                    f"to be positive but found invalid values:\n{invalid_value}"
+                )
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Geometric, _instance)
@@ -60,6 +71,10 @@ class Geometric(Distribution):
     @property
     def mean(self):
         return 1. / self.probs - 1.
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.probs)
 
     @property
     def variance(self):
@@ -88,7 +103,8 @@ class Geometric(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value, probs = broadcast_all(value, self.probs.clone(memory_format=torch.contiguous_format))
+        value, probs = broadcast_all(value, self.probs)
+        probs = probs.clone(memory_format=torch.contiguous_format)
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()
 

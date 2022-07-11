@@ -20,10 +20,8 @@ buildscript {
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.3.2'
-        classpath "com.jfrog.bintray.gradle:gradle-bintray-plugin:1.8.0"
-        classpath "com.github.dcendents:android-maven-gradle-plugin:2.1"
-        classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.9.8"
+        classpath 'com.android.tools.build:gradle:4.1.2'
+        classpath 'com.vanniktech:gradle-maven-publish-plugin:0.14.2'
     }
 }
 
@@ -53,9 +51,9 @@ android {
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'androidx.appcompat:appcompat:1.0.0'
-    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
     implementation 'com.google.code.findbugs:jsr305:3.0.1'
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
+    implementation 'com.facebook.soloader:nativeloader:0.10.1'
 
     implementation 'junit:junit:' + rootProject.junitVersion
     implementation 'androidx.test:core:' + rootProject.coreVersion

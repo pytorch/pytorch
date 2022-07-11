@@ -146,14 +146,17 @@ void ROIAlignBackwardFeature(
 
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
       const T y = roi_start_h + ph * bin_size_h +
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           static_cast<T>(iy + .5f) * bin_size_h /
               static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
       for (int ix = 0; ix < roi_bin_grid_w; ix++) {
         const T x = roi_start_w + pw * bin_size_w +
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             static_cast<T>(ix + .5f) * bin_size_w /
                 static_cast<T>(roi_bin_grid_w);
 
         T w1, w2, w3, w4;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int x_low, x_high, y_low, y_high;
 
         bilinear_interpolate_gradient(
@@ -191,7 +194,7 @@ void ROIAlignBackwardFeature(
 } // namespace
 
 template <>
-bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
@@ -261,4 +264,22 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
+template <typename T>
+using RoIAlignGradientCPUOp = RoIAlignGradientOp<T, CPUContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignGradient,
+    "_caffe2::RoIAlignGradient("
+    "    Tensor features,"
+    "    Tensor rois,"
+    "    Tensor grad,"
+    "    str order,"
+    "    float spatial_scale,"
+    "    int pooled_h,"
+    "    int pooled_w,"
+    "    int sampling_ratio,"
+    "    bool aligned"
+    ") -> Tensor",
+    caffe2::RoIAlignGradientCPUOp<float>);

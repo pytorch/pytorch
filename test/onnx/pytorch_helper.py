@@ -1,9 +1,10 @@
 import io
-import torch.onnx
-import onnx
-from caffe2.python.onnx.backend import Caffe2Backend
-from caffe2.python.core import BlobReference, Net
 
+import onnx
+
+import torch.onnx
+from caffe2.python.core import BlobReference, Net
+from caffe2.python.onnx.backend import Caffe2Backend
 
 _next_idx = 0
 # Clone net takes a dict instead of a lambda
@@ -11,7 +12,7 @@ _next_idx = 0
 # We fake dict here
 
 
-class _FakeDict(object):
+class _FakeDict:
     def __init__(self, fn):
         self.fn = fn
 
@@ -23,7 +24,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     """
     Embed an ONNX-exportable PyTorch Model into a Caffe2 model being built.
 
-    Arguments:
+    Args:
         helper (caffe2.python.core.ModelHelder): the model helper where
             this imported network should be inserted
         model (torch.nn.Module): the model to be exported
@@ -48,25 +49,29 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     """
     if prefix_name is None:
         global _next_idx
-        prefix_name = 'pytorch_import_' + str(_next_idx) + '/'
+        prefix_name = "pytorch_import_" + str(_next_idx) + "/"
         _next_idx += 1
 
     # TODO: handle the case where model cannot be exported
     # and embed as a Python op in Caffe2
     f = io.BytesIO()
-    torch.onnx.export(
-        model, sample_arguments, f, export_params=True)
+    torch.onnx.export(model, sample_arguments, f, export_params=True)
     onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-    init_net, predict_net = Caffe2Backend.onnx_graph_to_caffe2_net(
-        onnx_model)
+    init_net, predict_net = Caffe2Backend.onnx_graph_to_caffe2_net(onnx_model)
 
-    initialized = set([x.name for x in onnx_model.graph.initializer])
-    uninitialized_inputs = {x.name: i for i, x in enumerate(
-        onnx_model.graph.input) if x.name not in initialized}
+    initialized = {x.name for x in onnx_model.graph.initializer}
+    uninitialized_inputs = {
+        x.name: i
+        for i, x in enumerate(onnx_model.graph.input)
+        if x.name not in initialized
+    }
 
-    if(len(uninitialized_inputs) != len(caffe2_inputs)):
-        raise ValueError('Expected {} inputs but found {}'.format(
-            len(uninitialized_inputs), len(caffe2_inputs)))
+    if len(uninitialized_inputs) != len(caffe2_inputs):
+        raise ValueError(
+            "Expected {} inputs but found {}".format(
+                len(uninitialized_inputs), len(caffe2_inputs)
+            )
+        )
 
     def remap_blob_name(name):
         if name in uninitialized_inputs:
@@ -74,12 +79,14 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
             return str(caffe2_inputs[idx])
         return prefix_name + name
 
-    predict_net = Net(predict_net).Clone('anon', _FakeDict(remap_blob_name))
+    predict_net = Net(predict_net).Clone("anon", _FakeDict(remap_blob_name))
     helper.net.AppendNet(predict_net)
 
-    init_net = Net(init_net).Clone('anon', _FakeDict(remap_blob_name))
+    init_net = Net(init_net).Clone("anon", _FakeDict(remap_blob_name))
     helper.param_init_net.AppendNet(init_net)
 
-    results = tuple([BlobReference(remap_blob_name(x.name), helper.net)
-                     for x in onnx_model.graph.output])
+    results = tuple(
+        BlobReference(remap_blob_name(x.name), helper.net)
+        for x in onnx_model.graph.output
+    )
     return results

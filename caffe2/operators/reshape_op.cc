@@ -38,6 +38,7 @@ OPERATOR_SCHEMA(Reshape)
 
       // Copy over the dimensions for those that are specified zero
       // and check the eligibility of input
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < actualNewShape.size(); ++i) {
         CAFFE_ENFORCE_GE(
             actualNewShape[i],
@@ -63,6 +64,7 @@ OPERATOR_SCHEMA(Reshape)
       }
       int64_t size = 1;
       int unknownIdx = -1;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < actualNewShape.size(); ++i) {
         const auto dim = actualNewShape[i];
         if (dim == -1) {

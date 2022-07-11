@@ -58,7 +58,7 @@ class ShmProcessMutexCheck {
 template <class Derived>
 struct shm_traits;
 
-using ShmBaseHeader = struct {
+struct ShmBaseHeader {
   std::atomic<bool> isInitialized;
   std::atomic<int> countMapped;
   std::atomic<pid_t> owner;
@@ -331,7 +331,7 @@ struct shm_traits<ShmTicketMutex<T>> {
   using header_t = T;
 };
 
-using TicketStruct = struct : ShmBaseHeader {
+struct TicketStruct : ShmBaseHeader {
   std::atomic<unsigned> ticket;
   std::atomic<unsigned> now;
 };
