@@ -7,6 +7,7 @@
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <c10/util/irange.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
 
 namespace at {
 namespace native {
@@ -340,7 +341,7 @@ bool usable(const Tensor& input) {
          // Input
   return (4 == input.ndimension()) &&
          (c10::DeviceType::Vulkan == input.device().type()) &&
-         (kFloat == input.scalar_type()) &&
+         (kFloat == input.scalar_type() || c10::kQUInt8 == input.scalar_type()) &&
          (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
          (input.size(Layout::Activation4D::height) > 0) &&
@@ -361,7 +362,8 @@ VulkanOpContext conv2d_context_create(
     const IntArrayRef output_padding_arg,
     const int64_t groups,
     const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const c10::optional<Scalar>& output_max,
+    const bool is_quantized) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
   const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
@@ -384,13 +386,16 @@ VulkanOpContext conv2d_context_create(
       "transposed, output_padding, output_min, output_max) parameters are either "
       "invalid individually or their combination is not supported by Vulkan impl.");
 
-  const auto method = determine_method(
+  auto method = determine_method(
       weight.sizes(),
       stride,
       padding,
       dilation,
       groups);
 
+  if (is_quantized) {
+    method = Conv2dQSlidingWindow;
+  }
   c10::impl::GenericList packed_context{c10::AnyType::get()};
   packed_context.reserve(10);
   packed_context.emplace_back(convert(pack_weights(weight, method)));
@@ -457,6 +462,125 @@ void conv2d_sliding_window(
       safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
       safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
     },
+    {
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
+    },
+    {
+      packed_output_min,
+      packed_output_max,
+    },
+  };
+
+  uvec3 global_size = v_output.extents();
+  if (method_ == Conv2dPointwise) {
+    global_size = {
+      safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
+      safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::height], INT64_C(2))),
+      v_output.extents().data[2u]
+    };
+  }
+
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      shader,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      adaptive_work_group_size(global_size),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE),
+      packed_v_weight.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE),
+      packed_v_bias.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
+}
+
+void conv2d_sliding_window_q(
+    const api::ShaderSource& shader,
+    vTensor& v_output,
+    const vTensor& v_input,
+    const vTensor& packed_v_weight,
+    const vTensor& packed_v_bias,
+    const IntArrayRef packed_filter,
+    const IntArrayRef packed_stride,
+    const IntArrayRef packed_padding,
+    const IntArrayRef packed_dilation,
+    const float packed_output_min,
+    const float packed_output_max,
+    const IntArrayRef unpacked_filter,
+    const Conv2dMethod method_,
+    const double scale,
+    const double zero_point) {
+  api::Context* const context = api::context();
+
+  const double scale_out = v_output.get_scale();
+  const int64_t zero_point_out =  v_output.get_zero_point();
+
+  const struct Block final {
+    uvec3 extents;
+    int32_t ic4;
+    ivec4 kernel;
+    float scale_out;
+    float scale;
+    int32_t zero_point_out;
+    int32_t zero_point;
+    ivec2 ikernel;
+    ivec2 stride;
+    ivec2 padding;
+    ivec2 dilate;
+    vec2 clamp;
+    ivec4 src_filter;
+  } block {
+    v_output.extents(),
+    safe_downcast<int32_t>(packed_filter[Layout::Filter::input]),
+    {
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+    },
+    safe_downcast<float>(scale_out),
+    safe_downcast<float>(scale),
+    safe_downcast<int32_t>(zero_point_out),
+    safe_downcast<int32_t>(zero_point),
     {
       safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
       safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
@@ -617,6 +741,71 @@ Tensor conv2d_context_run(
   }
 
   return convert(v_output);
+}
+
+Tensor conv2d_context_run_q(
+    const Tensor& input_arg,
+    const c10::impl::GenericList& packed_context,
+    const c10::impl::GenericList& unpacked_context,
+    double scale,
+    int64_t zero_point) {
+  api::Context* const context = api::context();
+
+  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const vTensor& v_input = convert(input);
+
+  const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
+  const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
+
+  const auto packed_filter = packed_context.get(2).toIntVector();
+  const auto packed_stride = packed_context.get(3).toIntVector();
+  const auto packed_padding = packed_context.get(4).toIntVector();
+  const auto packed_dilation = packed_context.get(6).toIntVector();
+  const float packed_output_min = packed_context.get(8).toDouble();
+  const float packed_output_max = packed_context.get(9).toDouble();
+  const auto unpacked_filter = unpacked_context.get(2).toIntVector();
+  const Conv2dMethod method_ = (Conv2dMethod)unpacked_context.get(10).toInt();
+
+  TORCH_CHECK(
+      usable(input),
+      "Vulkan Convolution not usable! "
+      "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
+
+  vTensor v_output{
+    context,
+    conv_output_size(
+        v_input.sizes(),
+        unpacked_filter,
+        packed_padding,
+        packed_stride,
+        packed_dilation),
+    input.options(),
+    scale,
+    zero_point,
+  };
+
+  if (method_ == Conv2dQSlidingWindow) {
+    conv2d_sliding_window_q(
+      VK_KERNEL(quantized_conv2d),
+      v_output,
+      v_input,
+      packed_v_weight,
+      packed_v_bias,
+      packed_filter,
+      packed_stride,
+      packed_padding,
+      packed_dilation,
+      packed_output_min,
+      packed_output_max,
+      unpacked_filter,
+      method_,
+      v_input.get_scale(),
+      v_input.get_zero_point());
+  } else {
+    TORCH_CHECK(false, "Invalid Method");
+  }
+
+  return convert_quantized(v_output);
 }
 
 c10::intrusive_ptr<VulkanOpContext> create_conv2d_clamp_context(
