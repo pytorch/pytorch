@@ -43,6 +43,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/native/vulkan/**/*.h',
+    'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -51,6 +53,7 @@ include_patterns = [
     'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
