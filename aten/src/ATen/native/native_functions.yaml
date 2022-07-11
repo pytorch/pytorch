@@ -4570,7 +4570,7 @@
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
 
-- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4579,7 +4579,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -11617,13 +11617,6 @@
   variants: function
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-
-- func: linalg_vecdot(Tensor x, Tensor y, *, int dim=-1) -> Tensor
-  python_module: linalg
-  variants: function
-
-- func: linalg_vecdot.out(Tensor x, Tensor y, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 - func: linalg_matrix_exp(Tensor self) -> Tensor
