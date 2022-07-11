@@ -6,6 +6,15 @@ on:
     paths:
       - .circleci/docker/**
       - .github/workflows/docker-builds.yml
+  push:
+    branches:
+      - master
+      - main
+      - release/*
+      - landchecks/*
+    paths:
+      - .circleci/docker/**
+      - .github/workflows/docker-builds.yml
   schedule:
     - cron: 1 3 * * 3
 
