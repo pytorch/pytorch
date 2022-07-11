@@ -174,6 +174,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
   pip install -q --user ninja flatbuffers==2.0 numpy==1.21.5
+  # required by ort-nightly, but couldn't install by pip automatically.
+  pip install -q --user coloredlogs
   pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.12.0.dev20220707003
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
   # We don't actually need it for our tests, but it's imported if it's present, so uninstall.
