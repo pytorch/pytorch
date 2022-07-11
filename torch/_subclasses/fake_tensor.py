@@ -290,7 +290,7 @@ class FakeTensor(torch.Tensor):
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
-        assert elem.device.type == "meta"
+        assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
         assert device.type != "meta"
         self.fake_device = device
@@ -446,18 +446,6 @@ class FakeTensorMode(TorchDispatchMode):
             # TODO: apply as no_dispatch decorator
             converter = self.fake_tensor_converter
 
-            # this is generated from torch.tensor(), which does not use the
-            # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            # we need to handle before error checking
-            if func == torch.ops.aten.lift.default:
-                assert (
-                    len(kwargs) == 0
-                    and len(args) == 1
-                    and type(args[0]) is torch.Tensor
-                )
-                with no_dispatch():
-                    return converter(self, args[0])
-
             def wrap(e, device=None):
                 if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                     return converter(self, e, device)
@@ -468,20 +456,40 @@ class FakeTensorMode(TorchDispatchMode):
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
+            subclass_seen = False
 
             def check_non_fake_tensor(x):
-                nonlocal conversion_made
+                nonlocal conversion_made, subclass_seen
                 conversion_made = conversion_made or (
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                )
+                subclass_seen = subclass_seen or (
+                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                    and type(x) is not torch.Tensor
                 )
 
             tree_map(check_non_fake_tensor, args)
             tree_map(check_non_fake_tensor, kwargs)
 
+            if subclass_seen:
+                return NotImplemented
+
+            # this is generated from torch.tensor(), which does not use the
+            # dispatcher, to allow wrapper subclasses to wrap the new tensor
+            # we need to handle before error checking
+            if func in [torch.ops.aten.lift_fresh.default, torch.ops.aten.lift_fresh_copy.default]:
+                assert (
+                    len(kwargs) == 0
+                    and len(args) == 1
+                    and type(args[0]) is torch.Tensor
+                ), f"{args} {kwargs}"
+                with no_dispatch():
+                    return converter(self, args[0])
+
             if conversion_made:
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                    f"Please convert all Tensors to FakeTensors first. Found in {func}"
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
                 )
 
             for run_impl_check, op_impl in op_implementations:

@@ -176,6 +176,11 @@ at::Tensor lift_functionalize(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(self);
 }
 
+at::Tensor lift_functionalize_copy(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self.clone());
+}
+
 bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;

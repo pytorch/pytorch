@@ -6331,12 +6331,30 @@
     MPS: set_mps_
   autogen: set, set.out
 
+# Not making it CompositeImplicitAutograd because lift
+# should be a primitive w.r.t. functorch
+
+# TODO: this should have a view annotation
+# TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
   variants: method
   dispatch:
-    # Not making it CompositeImplicitAutograd because lift
-    # should be a primitive w.r.t. functorch
     CompositeExplicitAutograd: lift
+
+# lift_fresh is called with an argument that is guaranteed to be
+# fresh (i.e., newly allocated).  This is ONLY called from a
+# torch.tensor call; if you FX trace a lift_fresh, you are obligated
+# to convert this into a lift_fresh_copy (because FX will violate the
+# freshness invariant when tracing).
+- func: lift_fresh(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh
+
+# Like lift, but it clones the input.
+- func: lift_fresh_copy(Tensor self) -> Tensor
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh_copy
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
