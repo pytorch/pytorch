@@ -2086,13 +2086,14 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
 
+
 @register_decomposition(torch.ops.aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
     # given to expand may be "invalid"
     if len(shape) == 1 and isinstance(shape[0], Sequence):
-        shape = shape[0]
+        shape = tuple(shape[0])
 
     check(
         len(shape) >= len(a.shape),
