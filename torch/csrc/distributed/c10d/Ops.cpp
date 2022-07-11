@@ -35,7 +35,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
 // NCCL specific PREMUL_SUM Reductions
 // NCCL 2.11.1-1 introduced "User Defined Reduction Operators"
 //   - https://docs.nvidia.com/deeplearning/nccl/archives/nccl_21212/user-guide/docs/api/ops.html
-// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+#if defined(USE_NCCL)
 c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce_with_scaling_tensors_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -68,7 +68,7 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce_with_scaling_sca
       }
   );
 }
-// #endif
+#endif
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -214,7 +214,7 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
-// #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+#if defined(USE_NCCL)
   m.def(
       "nccl_premulsum_allreduce_with_scaling_tensors_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, nccl_premulsum_allreduce_with_scaling_tensors_)
@@ -223,7 +223,7 @@ TORCH_LIBRARY(c10d, m) {
       "nccl_premulsum_allreduce_with_scaling_scalar_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, nccl_premulsum_allreduce_with_scaling_scalar_)
   );
-// #endif
+#endif
 }
 } // namespace
 
