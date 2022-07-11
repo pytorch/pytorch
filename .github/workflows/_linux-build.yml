@@ -33,6 +33,9 @@ on:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
+      docker-image-name:
+        value: ${{ jobs.build.outputs.docker-image-name }}
+        description: The docker image containing the built PyTorch.
 
 jobs:
   build:
@@ -42,6 +45,7 @@ jobs:
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      docker-image-name: ${{ steps.calculate-docker-image.outputs.docker-image-name }}
     steps:
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local

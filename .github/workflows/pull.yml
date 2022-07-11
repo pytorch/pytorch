@@ -29,6 +29,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -46,6 +47,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image-name }}
 
   linux-focal-py3_7-gcc7-no-ops:
     name: linux-focal-py3.7-gcc7-no-ops
@@ -84,6 +86,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang7-asan
       docker-image: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
@@ -107,6 +110,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang10-onnx
       docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -127,6 +131,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -158,6 +163,7 @@ jobs:
     with:
       build-environment: linux-vulkan-bionic-py3.7-clang9
       docker-image: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -177,6 +183,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.7-gcc7
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -224,6 +231,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3_7-clang8-xla
       docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -303,6 +311,7 @@ jobs:
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-deploy
       docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-deploy-build.outputs.docker-image }}
+      docker-image-name: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-deploy-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },

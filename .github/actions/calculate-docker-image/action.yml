@@ -32,6 +32,9 @@ outputs:
   docker-image:
     description: The docker image to use for the rest of the workflow
     value: ${{ steps.calculate-tag.outputs.docker-image }}
+  docker-image-name:
+    description: The docker image to use for the rest of the workflow
+    value: ${{ steps.calculate-tag.outputs.docker-image-name }}
 
 runs:
   using: composite
@@ -42,6 +45,7 @@ runs:
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
         XLA_IMAGE_TAG: v0.4
+        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
         if [ -n "${IS_XLA}" ]; then
@@ -49,10 +53,12 @@ runs:
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "::set-output name=docker-tag::${DOCKER_TAG}"
           echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+          echo "::set-output name=docker-image-name::${DOCKER_IMAGE_NAME}"
         else
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "::set-output name=docker-tag::${DOCKER_TAG}"
           echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
+          echo "::set-output name=docker-image-name::${DOCKER_IMAGE_NAME}"
         fi
 
     - name: Check if image should be built
