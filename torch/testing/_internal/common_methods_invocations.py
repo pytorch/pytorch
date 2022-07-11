@@ -21204,6 +21204,16 @@ python_ref_db = [
         validate_view_consistency=False,
     ),
     PythonRefInfo(
+        "_refs.linalg.norm",
+        torch_opinfo_name="linalg.norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
+    ),
+    PythonRefInfo(
         "_refs.linalg.svd",
         torch_opinfo_name="linalg.svd",
         supports_out=True,
