@@ -26,7 +26,7 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(c10::string_view name);
 
-  bool is_non_deterministic() const;
+  bool is_nondeterministic() const;
 
   bool may_alias(
       const c10::SchemaArgument& lhs,
@@ -41,9 +41,9 @@ struct TORCH_API SchemaInfo {
       const std::unordered_map<std::string, at::IValue>& values);
 
  private:
-  at::IValue flattenZeroDimIValue(const at::IValue& value) const;
-
   void generateAliasMaps();
+
+  static std::vector<c10::FunctionSchema> getNonDeterministicOps();
 
   // Map of argument IValues
   std::unordered_map<std::string, at::IValue> value_map_;

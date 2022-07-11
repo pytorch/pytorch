@@ -396,6 +396,10 @@ struct TORCH_API FunctionSchema {
     return is_mutable(*index);
   }
 
+  // Returns whether lhs and rhs may alias directly.
+  // This does not account for cases where lhs or rhs are a container that
+  // may contain elements that alias the other argument.
+  // FunctionSchema::may_contain_alias will include that functionality.
   bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {

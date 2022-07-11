@@ -102,8 +102,8 @@ ALLOW_LIST = [
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
-    (r"__getstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 8)),
-    (r"__setstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 8)),
+    (r"__getstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 15)),
+    (r"__setstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -130,6 +130,7 @@ dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
     ("dist_c10d", datetime.date(2099, 9, 17)),
+    ("__backends__.nnc", datetime.date(2099, 9, 17)),
 ]
 
 def has_valid_upgraders(schema, version_map):

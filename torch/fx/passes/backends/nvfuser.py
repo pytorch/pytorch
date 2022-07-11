@@ -1,9 +1,57 @@
-import typing as t
+from typing import Dict
 
 import torch
-import torch.fx
+from torch.nn import Module
+from torch._ops import OpOverload
+
+from torch.fx import GraphModule
+from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
+from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+from torch._prims.executor import execute
+from torch.fx.experimental.proxy_tensor import DecompositionInterpreter
+from torch._decomp import decomposition_table
+
+import typing as t
+
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
+def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
+    if len(kwargs) > 0 or not dtype:
+        raise RuntimeError("No support for other to.dtype() formats other than to.dtype(self, dtype)")
+    return torch._prims.convert_element_type(self, dtype)
+
+# decomposition_table currently contains both aten2aten and aten2prim decomposition
+# this is a hack to seperate them, as we only need aten2prim decomposition for nvfuser-supported aten graph lowering
+aten2aten_decomp = {}
+aten2prim_decomp = {}
+
+for op, decomp_fn in decomposition_table.items():
+    if "torch._refs" in decomp_fn.__module__:
+        aten2prim_decomp[op] = decomp_fn
+    else:
+        aten2aten_decomp[op] = decomp_fn
+
+aten2aten_decomp_skips = {
+    "aten.native_layer_norm_backward.default",
+    "aten.embedding_dense_backward.default",   # This is hurting nvfuser's perf
+    "aten.addmm.default"
+}
+
+for op, decomp_fn in decomposition_table.items():
+    if "torch._refs" in decomp_fn.__module__:
+        aten2prim_decomp[op] = decomp_fn
+    else:
+        if str(op) not in aten2aten_decomp_skips:
+            aten2aten_decomp[op] = decomp_fn
+
+
+aten2prim_decomp[torch.ops.aten.to.dtype] = aten_to_dtype
+
 
 class NvFuserOperatorSupport(OperatorSupport):
     """
@@ -32,7 +80,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.add": None,
             "torch.ops.aten.sub": None,
             "torch.ops.aten.rsub": None,
-            # "torch.ops.aten.div": None,       # missing prim decomp
+            "torch.ops.aten.div": None,
             "torch.ops.aten.atan2": None,
             "torch.ops.aten.mul": None,
             "torch.ops.aten.max": None,
@@ -101,15 +149,17 @@ class NvFuserOperatorSupport(OperatorSupport):
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
             # "torch.ops.aten.threshold_backward": None,
             "torch.ops.aten.clamp": None,
-            "torch.ops.aten.where": None,
+            # Failing with where(): incompatible function arguments: \
+            # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
+            # "torch.ops.aten.where": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
-            "torch.ops.aten.native_dropout": None,
+            # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
             "torch.ops.aten.dropout": None,
-            "torch.ops.aten.native_dropout_backward": None,
+            # "torch.ops.aten.native_dropout_backward": None,   # missing refs for aten.type_as
             "torch.ops.aten.instance_norm": None,
             "torch.ops.aten._batch_norm_impl_index": None,
-            "torch.ops.aten.native_batch_norm": None,
+            # "torch.ops.aten.native_batch_norm": None,     # missing refs for aten.var
             "torch.ops.aten.batch_norm": None,
             "torch.ops.aten.cudnn_batch_norm": None,
             "torch.ops.aten._batch_norm_impl_index_backward": None,
@@ -124,21 +174,21 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten._softmax": None,
             "torch.ops.aten._log_softmax_backward_data": None,
             "torch.ops.aten._softmax_backward_data": None,
-            "torch.ops.aten.var.dim": None,
+            # "torch.ops.aten.var.dim": None,       # missing refs
             "torch.ops.aten.std.dim": None,
-            "torch.ops.aten.sum.dim_IntList": None,
-            "torch.ops.aten.mean.dim": None,
+            "torch.ops.aten.sum": None,
+            # "torch.ops.aten.mean.dim": None,      # missing refs
             "torch.ops.aten._grad_sum_to_size": None,
             "torch.ops.aten.sum_to_size": None,
             "torch.ops.aten._autocast_to_reduced_precision": None,
             "torch.ops.aten._autocast_to_full_precision": None,
-            "torch.ops.aten.to.dtype": None,
-            "torch.ops.aten.type_as": None,
+            # "torch.ops.aten.to.dtype": None,      # causing segfault
+            # "torch.ops.aten.type_as": None,       # missing refs
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
-            # "torch.ops.aten.tanh_backward": None,
+            "torch.ops.aten.tanh_backward": None,
             # "torch.ops.aten.amax": None,      # missing prim decomp
             "torch.ops.aten.amin": None,
             "torch.ops.aten.reshape": None,
@@ -167,11 +217,74 @@ class NvFuserOperatorSupport(OperatorSupport):
         super().__init__(support_dict)
 
     def is_node_supported(
-        self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
+        self, submodules: t.Mapping[str, Module], node: Node
     ) -> bool:
 
         # nvFuser FX subgraph should be purely functional
         if node.op not in CALLABLE_NODE_OPS:
             return False
 
+        # ops in supported_dict doesn't have overload name
+        # use overloadpacket's qualified_name for OpOverload
+        if isinstance(node.target, OpOverload):
+            target = _get_qualified_name(node.target.overloadpacket)
+            if target in self._support_dict:
+                return True
+
         return super().is_node_supported(submodules, node)
+
+
+class NvFuserBackend:
+    def __init__(self):
+        self.supported_ops = NvFuserOperatorSupport()
+
+        # TODO: this is a naive implementation of cache without proper guard
+        self.partitioner_cache: Dict[GraphModule, GraphModule] = {}
+
+        # TODO: this is a naive implementation of cache without proper guard, this will only work for identical inputs
+        self.prim_decomp_cache: Dict[GraphModule, GraphModule] = {}
+
+    def lower_to_prims_and_execute(self, graph_module: GraphModule, *args, **kwargs):
+        # `graph_module` is an Aten-Fx graph
+        # "lowering to prims" and "trace execution" are grouped into this function, as they are both input dependent
+
+        if graph_module in self.prim_decomp_cache:
+            logging.debug("prim_decomp_cache hit!")
+            prim_module = self.prim_decomp_cache[graph_module]
+        else:
+            prim_graph = torch.fx.Graph()
+            DecompositionInterpreter(graph_module, prim_graph, decomposition_table=aten2prim_decomp).run(*args, **kwargs)
+            prim_module = torch.fx.GraphModule(graph_module, prim_graph)
+            self.prim_decomp_cache[graph_module] = prim_module
+
+            logging.debug("Lower to prims graph: ", prim_module.code)
+
+        # invokes trace executor for running the prim graph
+        return execute(prim_module, *args, executor="nvfuser")
+
+    def compile(self, graph_module: GraphModule) -> GraphModule:
+        # entry function for nvFuser backend
+        logging.debug("Compiling graph_module: ", graph_module.code)
+
+        # FX graph based partitioning based on nvfuser supported ops
+        if graph_module in self.partitioner_cache:
+            logging.debug("partitioner_cache hit!")
+            fused_graph_module = self.partitioner_cache[graph_module]
+        else:
+            partitioner = CapabilityBasedPartitioner(graph_module, self.supported_ops)
+            fused_graph_module = partitioner.partition_and_fuse()
+
+            self.partitioner_cache[graph_module] = fused_graph_module
+
+        # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
+        for node in fused_graph_module.graph.nodes:
+            # TODO: use a better way to identify fused submodule
+            if "fused_" in node.name:
+                fused_module = getattr(fused_graph_module, node.name)
+                fused_module._wrapped_call = self.lower_to_prims_and_execute
+
+        return fused_graph_module
+
+    def __call__(self, graph_module: GraphModule, _) -> GraphModule:
+        # wrap self.compile as __call__ function to fit the interface for AOTAutograd's fw_compiler
+        return self.compile(graph_module)
