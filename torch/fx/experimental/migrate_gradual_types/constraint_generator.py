@@ -902,10 +902,17 @@ class ConstraintGenerator:
         elif n.op == 'get_attr':
             t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
             if isinstance(t.data, torch.Tensor):
-                attr_type = TensorType(t.data.shape)
-                output, counter = gen_tvar(counter)
-                self.symbol_dict[n] = output
-                return [BinConstraintT(output, attr_type, op_eq)], counter
+                if len(t.data.shape) > 0:
+                    res = []
+                    for t in t.data.shape:
+                        res.append(t)
+                    attr_type = TensorType(res)
+                    output, counter = gen_tvar(counter)
+                    self.symbol_dict[n] = output
+                    return [BinConstraintT(output, attr_type, op_eq)], counter
+                else:
+                    # scalar?
+                    return [], counter
             else:
                 return [], counter
 
