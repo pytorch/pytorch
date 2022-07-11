@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -29,7 +29,6 @@ jobs:
     with:
       build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
       docker-image: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
@@ -50,7 +49,6 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.1-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-slow-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-focal-rocm5_1-py3_7-slow-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
@@ -74,7 +72,6 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.1-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-distributed-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-focal-rocm5_1-py3_7-distributed-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
@@ -98,7 +95,6 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
@@ -119,7 +115,6 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
