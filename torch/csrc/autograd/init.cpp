@@ -266,7 +266,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_property_readonly("function_name", [](const PyFrameState& s) {
           return s.funcname_.str();
         });
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
+        .def_readonly(
+            "allow_tf32_cudnn",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cudnn_)
+        .def_readonly(
+            "allow_tf32_cublas",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");

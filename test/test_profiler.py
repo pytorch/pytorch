@@ -28,7 +28,10 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern, ForLoopIndexingPattern
+from torch.profiler._pattern_matcher import (Pattern, NamePattern,
+                                             ExtraCUDACopyPattern,
+                                             ForLoopIndexingPattern,
+                                             FP32TorchOpPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1531,6 +1534,22 @@ aten::mm""")
             pattern = ForLoopIndexingPattern(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_fp32_torchop_pattern(self):
+        has_tf32 = 1
+        for arch in torch.cuda.get_arch_list():
+            arch_no = int(arch[3:])
+            # For anything lower than sm_80, there is no TF32
+            if arch_no < 80:
+                has_tf32 = 0
+                break
+        x = torch.ones((100, 100), device="cuda")
+        with profile(with_stack=True) as prof:
+            x = x @ x
+        pattern = FP32TorchOpPattern(prof)
+        num_matched = len(pattern.matched_events())
+        self.assertEqual(num_matched, has_tf32)
 
 
 if __name__ == '__main__':

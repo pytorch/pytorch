@@ -3,6 +3,7 @@ from enum import Enum
 import re
 from typing import Dict, List, Set
 
+import torch
 from torch.profiler import profile
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_Backend, _ExtraFields_Allocation,
@@ -169,6 +170,43 @@ class ForLoopIndexingPattern(Pattern):
         return repeat_count >= 10
 
 
+class FP32TorchOpPattern(Pattern):
+
+    def __init__(self, prof: profile):
+        super().__init__(prof)
+        self.description = (
+            "You are currently using GPU that supports TF32. "
+            "Please enable TF32 by setting 'torch.backends.cuda.matmul.allow_tf32 = True' "
+            "and 'torch.backends.cudnn.allow_tf32 = True'.")
+        for arch in torch.cuda.get_arch_list():
+            assert arch.startswith("sm_")
+            arch_no = int(arch[3:])
+            # For anything lower than sm_80, there is no TF32
+            if arch_no < 80:
+                self.skip = True
+                break
+        self.matched_once = False
+
+    def match(self, event: _ProfilerEvent):
+        # If we saw this pattern once, we don't need to match it again
+        if self.matched_once:
+            return False
+        if event_type(event) != EventType.TorchOp:
+            return False
+        assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+        if event.name() == "aten::matmul" or event.name() == "aten::mm":
+            if event.extra_fields.allow_tf32_cublas is False:
+                self.matched_once = True
+                return True
+        assert event.extra_fields
+        if event.extra_fields.allow_tf32_cudnn is False:
+            self.matched_once = True
+            return True
+
+    def report(self, event: _ProfilerEvent):
+        return self.description
+
+
 def eventTreeBFS(event_tree):
     stack = deque(event_tree)
     while stack:
@@ -191,8 +229,9 @@ def source_code_location(event: _ProfilerEvent):
 
 
 def report_all_anti_patterns(prof):
-    anti_patterns = [ExtraCUDACopyPattern(prof), ForLoopIndexingPattern(prof)]
+    anti_patterns = [ExtraCUDACopyPattern(prof), ForLoopIndexingPattern(prof), FP32TorchOpPattern(prof)]
     reported = set()
+    print(f"{'-'*40}TorchTidy Report{'-'*40}")
     for anti_pattern in anti_patterns:
         for event in anti_pattern.matched_events():
             report_msg = anti_pattern.report(event)

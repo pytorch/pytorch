@@ -106,6 +106,8 @@ class _PyFrameState:
     ...
 
 class _ExtraFields_TorchOp:
+    allow_tf32_cudnn: bool
+    allow_tf32_cublas: bool
     ...
 
 class _ExtraFields_Backend:
