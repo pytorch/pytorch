@@ -1,9 +1,9 @@
 """
 Initializer script that installs stuff to pip.
 """
-import os
 import argparse
 import logging
+import os
 import subprocess
 import sys
 import time
