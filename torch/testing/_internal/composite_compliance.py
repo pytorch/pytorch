@@ -456,9 +456,11 @@ def check_backward_formula(op: Callable, args, kwargs,
 # Checks if the forward AD formula is composite compliant by testing
 # all possible permutations of {primals, tangents} being
 # CompositeCompliantTensor or regular Tensors.
-def check_forward_ad_formula(op, args, kwargs):
-    assert op.supports_forward_ad
-
+#
+# NB: it is important that op is accepted as a Callable and not an OpInfo,
+# this means we can apply check_forward_ad_formula to things that aren't OpInfos
+# while debugging.
+def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None):
     CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
     # Permutations of arg and kwargs in CCT.
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
@@ -500,7 +502,10 @@ def check_forward_ad_formula(op, args, kwargs):
                 op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
 
                 try:
-                    op.gradcheck_wrapper(op.get_op(), *op_args, **op_kwargs)
+                    if gradcheck_wrapper is None:
+                        op(*op_args, **op_kwargs)
+                    else:
+                        gradcheck_wrapper(op, *op_args, **op_kwargs)
                 # see NOTE: [What errors are Composite Compiance trying to catch?]
                 except RuntimeError as err:
                     raise_composite_compliance_error(
