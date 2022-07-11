@@ -181,6 +181,25 @@ static void validate_compressed_sparse_indices_kernel(
   // For TensorIterator's output: no void lambdas.
   const auto dummy = at::empty({1}, cidx.options());
 
+  // Invariants 5.4 and 5.5
+  {
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .add_owned_output(dummy.expand_as(idx))
+      .add_input(idx)
+      .build();
+
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, dim] () {
+        const auto zero = index_t {0};
+        KernelLauncher::launch(iter,
+            [zero, dim] FUNCAPI (index_t idx) -> index_t {
+              _check_idx_bounds<index_t>(idx, zero, dim);
+              return 0;
+            }
+        );
+    });
+  }
+
   // Invariants 5.1 and 5.2
   {
     const auto cidx_first = cidx.slice(-1, 0, 1);
@@ -225,25 +244,6 @@ static void validate_compressed_sparse_indices_kernel(
         KernelLauncher::launch(iter,
             [zero, dim] FUNCAPI (index_t cidx_curr, index_t cidx_next) -> index_t {
               _check_cidx_nondecreasing_locally_bounded_sequence<index_t>(cidx_curr, cidx_next, zero, dim);
-              return 0;
-            }
-        );
-    });
-  }
-
-  // Invariants 5.4 and 5.5
-  {
-    auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)
-      .add_owned_output(dummy.expand_as(idx))
-      .add_input(idx)
-      .build();
-
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, dim] () {
-        const auto zero = index_t {0};
-        KernelLauncher::launch(iter,
-            [zero, dim] FUNCAPI (index_t idx) -> index_t {
-              _check_idx_bounds<index_t>(idx, zero, dim);
               return 0;
             }
         );
