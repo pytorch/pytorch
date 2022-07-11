@@ -498,12 +498,13 @@ test_forward_backward_compatibility() {
   else
     git reset --hard "${BASE_SHA}"
     pip install -r requirements.txt
+    # shellcheck source=./common-build.sh --> set up sccache
+    source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
     python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
     python -mpip install base_dist/*.whl
     pushd test/forward_backward_compatibility
     pip show torch
     python dump_all_function_schemas.py --filename nightly_schemas.txt
-    popd
     git reset --hard "${SHA1}"
   fi
   # install the nightly before the base commit -- fallback to most recent nightly in case of error
@@ -522,8 +523,8 @@ test_forward_backward_compatibility() {
   deactivate
   rm -r venv
   echo "NOW EXITING VENV"
-  ls base_dist || true
-  ls dist || true
+  ls "${REPO_DIR}/base_dist" || true
+  ls "${REPO_DIR}/dist" || true
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
