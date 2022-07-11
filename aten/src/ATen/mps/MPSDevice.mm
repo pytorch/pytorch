@@ -3,6 +3,7 @@
 #include <c10/util/CallOnce.h>
 
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/IndexKernels.h>
 
 namespace at {
 namespace mps {
@@ -15,6 +16,24 @@ MPSDevice* MPSDevice::getInstance() {
       mps_device = std::unique_ptr<MPSDevice>(new MPSDevice());
   });
   return mps_device.get();
+}
+
+id<MTLFunction> MPSDevice::metalFunction(const std::string& kernel, MTLFunctionConstantValues* constantValues) {
+  assert(_mtl_device);
+  NSError* error = nil;
+  if (!_mtl_indexing_library) {
+    _mtl_indexing_library = [_mtl_device newLibraryWithSource: [NSString stringWithCString: mps::indexing_metal_shaders encoding:NSASCIIStringEncoding]
+                                                      options: nil
+                                                        error: &error];
+    TORCH_CHECK(_mtl_indexing_library, "Failed to create indexing library, error: ", [[error description] UTF8String]);
+  }
+
+  id<MTLFunction> indexFunction = [_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String:kernel.c_str()]
+                                                              constantValues: constantValues
+                                                                       error: &error];
+  TORCH_CHECK(indexFunction, "Failed to create specialized function state object: ", kernel, ", error: ", [[error description] UTF8String]);
+
+  return indexFunction;
 }
 
 MPSDevice::~MPSDevice() {
@@ -45,6 +64,7 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
       break;
     }
   }
+  _mtl_indexing_library = nil;
   assert(_mtl_device);
 }
 

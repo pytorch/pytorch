@@ -521,9 +521,9 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA tensors, force all index tensors to have the same striding to
-  // simplify the CUDA kernel.
-  if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
+  // For CUDA/MPS tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
