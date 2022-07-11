@@ -567,31 +567,6 @@ Q: How to export models with primitive type inputs (e.g. int, float)?
   Support for primitive numeric type inputs was added in PyTorch 1.9.
   However, the exporter does not support models with str inputs.
 
-Q: Does ONNX support implicit scalar datatype casting?
-
-  No, but the exporter will try to handle that part. Scalars are exported as constant tensors.
-  The exporter will try to figure out the right datatype for scalars. However when it is unable
-  to do so, you will need to manually specify the datatype. This often happens with
-  scripted models, where the datatypes are not recorded. For example::
-
-    class ImplicitCastType(torch.jit.ScriptModule):
-        @torch.jit.script_method
-        def forward(self, x):
-            # Exporter knows x is float32, will export "2" as float32 as well.
-            y = x + 2
-            # Currently the exporter doesn't know the datatype of y, so
-            # "3" is exported as int64, which is wrong!
-            return y + 3
-            # To fix, replace the line above with:
-            # return y + torch.tensor([3], dtype=torch.float32)
-
-    x = torch.tensor([1.0], dtype=torch.float32)
-    torch.onnx.export(ImplicitCastType(), x, "implicit_cast.onnx",
-                      example_outputs=ImplicitCastType()(x))
-
-  We are trying to improve the datatype propagation in the exporter such that implicit casting
-  is supported in more cases.
-
 Q: Are lists of Tensors exportable to ONNX?
 
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
