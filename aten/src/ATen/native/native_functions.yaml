@@ -6446,6 +6446,13 @@
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
 
+- func: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: view_symint
+
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
   device_check: NoCheck
@@ -12328,6 +12335,13 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _neg_view_copy_out
+
+
+- func: view_copy.SymInt(Tensor self, SymInt[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_copy_SymInt
+  tags: view_copy
 
 
 - func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
