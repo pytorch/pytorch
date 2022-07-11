@@ -637,22 +637,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv != nullptr,
       "Could not find a fully broadcasted output to reference schedule on.");
 
-  IterDomain* inner_most_id = nullptr;
-  for (auto it = reference_tv->domain()->domain().rbegin();
-       it != reference_tv->domain()->domain().rend();
-       it++) {
-    if ((*it)->isReduction()) {
-      continue;
-    }
-    if ((*it)->isBroadcast() && inner_most_id == nullptr) {
-      inner_most_id = *it;
-    }
-    inner_most_id = *it;
-    break;
-  }
-
-  TORCH_INTERNAL_ASSERT(inner_most_id != nullptr);
-
   // Caches of inputs
   std::vector<TensorView*> cached_inputs;
 
