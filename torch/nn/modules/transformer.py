@@ -413,9 +413,8 @@ class TransformerEncoderLayer(Module):
             self.self_attn.batch_first and
             self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
             self.norm1.eps == self.norm2.eps and
-            ((src_mask is None and src_key_padding_mask is None)
-             if src.is_nested
-             else (src_mask is None or src_key_padding_mask is None))):
+            src_mask is None and 
+            not (src.is_nested and src_key_padding_mask is not None):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
