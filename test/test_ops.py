@@ -1251,7 +1251,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper)
 
 
 class TestMathBits(TestCase):
