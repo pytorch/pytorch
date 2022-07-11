@@ -299,27 +299,17 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    skip('nn.functional.dropout'),  # randomness testing artifact
-    skip('nn.functional.rrelu'),  # randomness testing artifact
-    skip('bernoulli'),  # randomness testing artifact
-    skip('normal', ''),  # randomness testing artifact
-    skip('normal', 'number_mean'),  # randomness testing artifact
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
-    skip('nn.functional.feature_alpha_dropout', 'with_train'),  # fails on cuda, runs okay on cpu
-    skip('nn.functional.feature_alpha_dropout', 'without_train'),  # fails on cuda, runs okay on cpu
     skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
     skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
-    skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 }
 
 
 class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
-        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
-        skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -368,16 +358,9 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
-        skip('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
-        skip('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
-        skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
-        skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
-        skip('nn.functional.feature_alpha_dropout', 'with_train'),  # fails on cuda, runs okay on cpu
-        skip('nn.functional.feature_alpha_dropout', 'without_train'),  # fails on cuda, runs okay on cpu
         skip('pca_lowrank', ''),  # fails on cuda, runs okay on cpu
         skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
-        skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 
         # =============================================
         # NB: The above failures also fail using PyTorch core's
@@ -388,8 +371,6 @@ class TestOperators(TestCase):
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
-
-        skip('bernoulli'),  # cuda set seed randomness issues
 
         # BUG: runs and produces numerical differences
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
@@ -435,12 +416,7 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
-        skip('nn.functional.fractional_max_pool2d'),  # fails on cpu, runs okay on cuda
-        skip('nn.functional.fractional_max_pool3d'),  # fails on cpu, runs okay on cuda
-        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
-        xfail('nn.functional.dropout2d', ''),
-        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
@@ -484,8 +460,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
-        skip('nn.functional.fractional_max_pool2d'),  # randomness
-        skip('nn.functional.fractional_max_pool3d'),  # randomness
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -576,7 +550,11 @@ class TestOperators(TestCase):
         skip('bernoulli'),  # randomness
         skip('normal', ''),  # randomness
         skip('normal', 'number_mean'),  # randomness
-        xfail('nn.functional.dropout'),  # randomness
+        skip('nn.functional.rrelu'),  # randomness
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('nn.functional.dropout'),  # randomness
+        skip('nn.functional.dropout2d'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -934,6 +912,9 @@ class TestOperators(TestCase):
         skip('bernoulli', ''),  # vjpvmap testing can't handle randomness
         skip('normal', ''),  # vjpvmap testing can't handle randomness
         skip('normal', 'number_mean'),  # vjpvmap testing can't handle randomness
+        skip('nn.functional.rrelu'),  # randomness
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -951,8 +932,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout2d', ''),
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
-        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
-        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('clamp'),
         # something weird happening with channels_last
         xfail('bfloat16'),
@@ -1025,10 +1004,6 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
-        # These are weirdly non-deterministic
-        skip('nn.functional.fractional_max_pool2d'),  # Random
-        skip('nn.functional.fractional_max_pool3d'),  # Random
-
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
@@ -1049,11 +1024,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('renorm', ''),
         xfail('symeig', ''),
-        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         skip('nn.functional.kl_div', ''),  # will pass when linux cpu binaries update
         xfail('pca_lowrank', ''),
-        xfail('nn.functional.dropout2d', ''),
-        xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.multilabel_soft_margin_loss', ''),
