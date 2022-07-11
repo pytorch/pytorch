@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -30,7 +30,6 @@ jobs:
     with:
       build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -59,7 +58,6 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
@@ -123,7 +121,6 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9-slow
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -240,7 +237,6 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.1-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-build.outputs.docker-image }}
-      docker-image-name: ${{ needs.linux-focal-rocm5_1-py3_7-build.outputs.docker-image-name }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
