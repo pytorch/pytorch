@@ -50,6 +50,9 @@ If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
 output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+"""}, {'opt_dim': """
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+        If ``None``, all dimensions are reduced.
 """})
 
 single_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
@@ -1699,7 +1702,7 @@ on inplace modification of the outputs.
 
 add_docstr(torch.unsafe_split,
            r"""
-unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
+unsafe_split(tensor, split_size, dim=0) -> List of Tensors
 
 Works like :func:`torch.split` but without enforcing the autograd restrictions
 on inplace modification of the outputs.
@@ -9651,7 +9654,7 @@ reduce over all of them.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -10162,6 +10165,50 @@ Example::
             [[5, 7],
              [4, 6]]])
 """.format(**common_args))
+
+add_docstr(torch.split,
+           r"""
+split(input, split_size, dim=0) -> List[Tensor]
+
+Splits the tensor into chunks. Each chunk is a view of the original tensor.
+
+If :attr:`split_size` is an integer type, then :attr:`tensor` will
+be split into equally sized chunks (if possible). Last chunk will be smaller if
+the tensor size along the given dimension :attr:`dim` is not divisible by
+:attr:`split_size`.
+
+If :attr:`split_size` is a list, then :attr:`tensor` will be split
+into ``len(split_size)`` chunks with sizes in :attr:`dim` according
+to :attr:`split_size`.
+
+Args:
+    tensor (Tensor): tensor to split.
+    split_size (int) or (list(int)): size of a single chunk or
+        list of sizes for each chunk
+    dim (int): dimension along which to split the tensor.
+
+Example::
+
+    >>> a = torch.arange(10).reshape(5,2)
+    >>> a
+    tensor([[0, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7],
+            [8, 9]])
+    >>> torch.split(a, 2)
+    (tensor([[0, 1],
+             [2, 3]]),
+     tensor([[4, 5],
+             [6, 7]]),
+     tensor([[8, 9]]))
+    >>> torch.split(a, [1,4])
+    (tensor([[0, 1]]),
+     tensor([[2, 3],
+             [4, 5],
+             [6, 7],
+             [8, 9]]))
+""")
 
 add_docstr(torch.take,
            r"""
@@ -11147,15 +11194,19 @@ logdet(input) -> Tensor
 
 Calculates log determinant of a square matrix or batches of square matrices.
 
-.. note::
-    Result is ``-inf`` if :attr:`input` has zero log determinant, and is ``nan`` if
-    :attr:`input` has negative determinant.
+It returns ``-inf`` if the input has a determinant of zero, and ``NaN`` if it has
+a negative determinant.
 
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
+
+.. seealso::
+
+        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more

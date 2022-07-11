@@ -39,7 +39,7 @@ def pt_operator_library(
         name = name,
         out = "model_operators.yaml",
         cmd = (
-            "$(exe {root}:gen_operators_yaml) " +
+            "$(exe {exe}) " +
             "{optionally_root_ops} " +
             "{optionally_training_root_ops} " +
             "--rule_name {rule_name} " +
@@ -52,7 +52,7 @@ def pt_operator_library(
             "{optionally_model_traced_backends} " +
             "{optionally_include_all_operators}"
         ).format(
-            root = "//" if IS_OSS else "//xplat/caffe2",
+            exe = "//tools:gen_operators_yaml" if IS_OSS else "//xplat/caffe2/tools:gen_operators_yaml",
             rule_name = name,
             model_name = model_name,
             dep_graph_yaml = "none" if IS_OSS else "$(location //xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",

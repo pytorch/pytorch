@@ -15,7 +15,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 import torch.testing._internal.jit_utils
-from torch.testing._internal.common_utils import IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_SANDCASTLE, skipIfTorchDynamo
 from typing import List, Tuple, Iterable, Optional, Dict
 
 if __name__ == '__main__':
@@ -505,6 +505,7 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", ""):
             sc = torch.jit.script(fun)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
         import jit._imported_class_test.foo
@@ -1230,6 +1231,7 @@ class TestClassType(JitTestCase):
 
         self.checkScript(test_function, (1,))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_properties(self):
         """
         Test that a scripted class can make use of the @property decorator.
