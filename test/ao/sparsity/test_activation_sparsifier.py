@@ -5,7 +5,7 @@ import copy
 from torch.testing._internal.common_utils import TestCase
 import logging
 import torch
-from torch.ao.sparsity.experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
+from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.sparsity.sparsifier.utils import module_to_fqn
@@ -47,9 +47,6 @@ class TestActivationSparsifier(TestCase):
         sparsifier_defaults = activation_sparsifier.defaults
         combined_defaults = {**defaults, 'sparse_config': sparse_config}
 
-        # check model
-        assert activation_sparsifier.model == model
-
         # more keys are populated in activation sparsifier (eventhough they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
 
@@ -86,7 +83,6 @@ class TestActivationSparsifier(TestCase):
             sparse_config_actual.update(sparse_config_layer)
 
             name = module_to_fqn(activation_sparsifier.model, layer_arg['layer'])
-            assert data_groups[name]['layer'] == layer_arg['layer']
 
             assert data_groups[name]['sparse_config'] == sparse_config_actual
 

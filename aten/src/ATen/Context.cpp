@@ -144,6 +144,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
   static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
   return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
