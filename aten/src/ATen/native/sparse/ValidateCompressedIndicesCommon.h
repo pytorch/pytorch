@@ -204,7 +204,7 @@ static void validate_compressed_sparse_indices_kernel(
   {
     const auto cidx_first = cidx.slice(-1, 0, 1);
     const auto cidx_last = cidx.slice(-1, cdim, cdim + 1);
-    // These are reused for Invariant 5.6
+
     const auto cidx_curr = cidx.slice(-1, 0, cdim);
     const auto cidx_next = cidx.slice(-1, 1, cdim + 1);
 
