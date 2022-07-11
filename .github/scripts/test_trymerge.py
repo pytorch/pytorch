@@ -259,7 +259,7 @@ class TestGitHubPR(TestCase):
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+    def test_get_many_land_checks(self, mocked_gql: Any) -> None:
         """ Tests that all checkruns can be fetched for a commit
         """
         pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
@@ -268,8 +268,8 @@ class TestGitHubPR(TestCase):
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_pending_status_check(self, mocked_gql: Any) -> None:
-        """ Tests that PR with nonexistent/pending status checks fails with the right reason.
+    def test_failed_land_checks(self, mocked_gql: Any) -> None:
+        """ Tests that PR with Land Checks fail with a RunTime error
         """
         pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
         self.assertRaisesRegex(RuntimeError,

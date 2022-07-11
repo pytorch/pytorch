@@ -1097,9 +1097,9 @@ def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
             pending_checks.append((checkname, None))
         elif check_runs[checkname][0] is None:
             pending_checks.append((checkname, check_runs[checkname][1]))
-        elif check_runs[checkname][0].upper() != 'SUCCESS' \
-             and check_runs[checkname][0].upper() != 'SKIPPED' \
-             and check_runs[checkname][0].upper() != 'NEUTRAL':
+        elif (check_runs[checkname][0].upper() != 'SUCCESS'
+              and check_runs[checkname][0].upper() != 'SKIPPED'
+              and check_runs[checkname][0].upper() != 'NEUTRAL'):
             failed_checks.append((checkname, check_runs[checkname][1]))
     return (pending_checks, failed_checks)
 
