@@ -299,7 +299,7 @@ class Module:
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
-    _dynamic_attributes : Dict
+    __dict__ : Dict
 
     __slots__ = (
         "training",
@@ -313,7 +313,7 @@ class Module:
         "_load_state_dict_pre_hooks",
         "_load_state_dict_post_hooks",
         "_modules",
-        "_dynamic_attributes",
+        "__dict__",
     )
 
     def __init__(self) -> None:
@@ -340,7 +340,7 @@ class Module:
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
-        super().__setattr__('_dynamic_attributes', OrderedDict())
+        super().__setattr__('__dict__', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -1271,8 +1271,8 @@ class Module:
             return self._buffers[name] # type:ignore
         if name in self._modules:
             return self._modules[name] # type:ignore
-        if name in self._dynamic_attributes:
-            return self._dynamic_attributes[name] # type:ignore
+        if name in self.__dict__:
+            return self.__dict__[name] # type:ignore
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -1323,7 +1323,7 @@ class Module:
                 elif name == "__class__":
                     super().__setattr__(name, value)
                 else:
-                    self._dynamic_attributes[name] = value
+                    self.__dict__[name] = value
 
     def __delattr__(self, name):
         if name in self._parameters:
@@ -1336,7 +1336,7 @@ class Module:
         elif name == "__class__":
             super().__delattr__(name)
         else:
-            del self._dynamic_attributes[name]
+            del self.__dict__[name]
 
     def _register_state_dict_hook(self, hook):
         r"""These hooks will be called with arguments: `self`, `state_dict`,
@@ -2021,7 +2021,7 @@ class Module:
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
-        attrs = list(self._dynamic_attributes.keys())
+        attrs = list(self.__dict__.keys())
         parameters = list(self._parameters.keys())
         modules = list(self._modules.keys())
         buffers = list(self._buffers.keys())
