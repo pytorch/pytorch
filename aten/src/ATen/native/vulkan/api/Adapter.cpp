@@ -134,7 +134,7 @@ VkDevice create_logical_device(
   std::vector<const char*> requested_device_extensions {
   #ifdef VK_KHR_portability_subset
     VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-  #endif
+  #endif /* VK_KHR_portability_subset */
   };
 
   std::vector<const char*> enabled_device_extensions;
@@ -160,7 +160,7 @@ VkDevice create_logical_device(
 
 #ifdef USE_VULKAN_VOLK
   volkLoadDevice(handle);
-#endif
+#endif /* USE_VULKAN_VOLK */
 
   // Obtain handles for the created queues and initialize queue usage heuristic
 
