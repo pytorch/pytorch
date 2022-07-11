@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -66,11 +65,11 @@ Tensor _clamp(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -137,7 +136,7 @@ Tensor& _clamp_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -204,11 +203,11 @@ Tensor activation(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -256,7 +255,7 @@ Tensor& activation_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -350,11 +349,11 @@ Tensor activation_scalar(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -405,7 +404,7 @@ Tensor& activation_scalar_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
