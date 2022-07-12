@@ -70,28 +70,21 @@ constexpr bool is_py_fields() {
       value;
 }
 
-struct EventFieldsVisitor {
-  EventFieldsVisitor(
-      std::shared_ptr<Result>& result,
-      KinetoEvent& kineto_event)
-      : kineto_activity_{result->kineto_activity_},
-        kineto_event_{kineto_event} {
-    c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
-      kineto_event.deviceIndex(_(result->kineto_info_).device);
-      kineto_event.deviceResourceId(_(result->kineto_info_).resource);
-    });
-
-    setPythonMetadata(result);
+struct AddKinetoMetadata {
+  AddKinetoMetadata(std::shared_ptr<Result>& result, KinetoEvent& kineto_event)
+      : kineto_activity_{result->kineto_activity_} {
     result->visit(*this);
 
+    setPythonMetadata(result);
     const auto module_hierarchy = kineto_event.moduleHierarchy();
     addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
     addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
+
+    // It is not safe to use the activity after post processing.
+    result->kineto_activity_ = nullptr;
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    kineto_event_.get().debugHandle(op_event.debug_handle_);
-
     auto& shapes = op_event.inputs_.shapes_;
     if (!shapes.empty()) {
       addMetadata("Input Dims", shapesToStr(shapes));
@@ -102,10 +95,6 @@ struct EventFieldsVisitor {
       addMetadata("Input type", dtypesToStr(dtypes));
     }
 
-    if (!op_event.extra_args_.empty()) {
-      kineto_event_.get().flops(
-          computeFlops(op_event.name_, op_event.extra_args_));
-    }
 
     // add information about an associated forward op, if a sequence number
     // is available (e.g. during training)
@@ -116,17 +105,12 @@ struct EventFieldsVisitor {
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
-    kineto_event_.get().debugHandle(backend_event.debug_handle_);
-
     if (!backend_event.backend_.empty()) {
       addMetadata("Backend", "\"" + backend_event.backend_ + "\"");
     }
   }
 
   void operator()(const ExtraFields<EventType::Allocation>& alloc) {
-    kineto_event_.get()
-        .deviceIndex(alloc.device_index_);
-
     addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
     addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_)));
@@ -147,12 +131,7 @@ struct EventFieldsVisitor {
 
   void operator()(const ExtraFields<EventType::PyCCall>& py_call) {}
 
-  void operator()(const ExtraFields<EventType::Kineto>& e) {
-    const auto linked = e.linked_activity_.lock();
-    if (linked) {
-      kineto_event_.get().linkedCorrelationId(linked->correlationID());
-    }
-  }
+  void operator()(const ExtraFields<EventType::Kineto>& e) {}
 
   void setPythonMetadata(std::shared_ptr<Result> result) {
     result->visit([&](const auto& i) {
@@ -186,7 +165,6 @@ struct EventFieldsVisitor {
   }
 
   torch::profiler::impl::kineto::activity_t* kineto_activity_;
-  std::reference_wrapper<KinetoEvent> kineto_event_;
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
@@ -281,19 +259,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       }
 
       if (e->finished_) {
-        kineto_events_.emplace_back(e);
-        kineto_events_.back().durationUs(
-            (e->endTimeNS() - e->start_time_ns_) / 1000);
-
         e->visit(c10::overloaded(
             [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
             [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
             [](auto&) {}));
 
-        EventFieldsVisitor set_fields_and_metadata(e, kineto_events_.back());
-
-        // It is not safe to use the activity after post processing.
-        e->kineto_activity_ = nullptr;
+        kineto_events_.emplace_back(e);
+        AddKinetoMetadata add_kineto_metadata(e, kineto_events_.back());
       }
     }
   }
@@ -673,6 +645,31 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
       [&](const auto&) -> out_t { return python_stack_; }));
 }
 
+uint64_t KinetoEvent::durationUs() const {
+  return (result_->endTimeNS() - result_->start_time_ns_) / 1000;
+}
+
+int64_t KinetoEvent::debugHandle() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& i) { return i.debug_handle_; },
+      [](const ExtraFields<EventType::Backend>& i) { return i.debug_handle_; },
+      [](const auto&) ->int64_t { return -1; }));
+}
+
+uint8_t KinetoEvent::deviceIndex() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::Allocation>& i) {
+        return static_cast<uint8_t>(i.device_index_);
+      },
+      [&](const auto&) {
+        return static_cast<uint8_t>(result_->kineto_info_.device);
+      }));
+}
+
+bool KinetoEvent::hasStack() const {
+  return !stack().empty();
+}
+
 int64_t KinetoEvent::cudaElapsedUs() const {
   auto cuda_event_start = fallbackStart();
   auto cuda_event_end = fallbackEnd();
@@ -703,6 +700,7 @@ FORWARD_FROM_RESULT(name, name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
 FORWARD_FROM_RESULT(startUs, start_time_ns_ / 1000)
 FORWARD_FROM_RESULT(correlationId, correlationID())
+FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
 #undef FORWARD_FROM_RESULT
 
 // Most of the fields in `KinetoEvent` only make sense for a single event type.
@@ -735,8 +733,16 @@ TYPED_ATTR(TorchOp, moduleHierarchy, e.jit_modules_)
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
 TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
+TYPED_ATTR(
+    TorchOp,
+    flops,
+    !e.extra_args_.empty() ? computeFlops(e.name_, e.extra_args_) : 0)
 TYPED_ATTR(Backend, backend, e.backend_)
 TYPED_ATTR(Allocation, nBytes, e.alloc_size_)
+TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {
+  const auto linked = e.linked_activity_.lock();
+  return linked ? linked->correlationID() : 0;
+}())
 #undef TYPED_ATTR
 #undef TYPED_ATTR_WITH_DEFAULT
 
