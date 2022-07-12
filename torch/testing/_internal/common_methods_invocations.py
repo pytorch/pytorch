@@ -12418,7 +12418,16 @@ op_db: List[OpInfo] = [
                # Both Hessians are incorrect on complex inputs??
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
-           )),
+               # dtypes are tested in the suite above, no need to repeat it for singulaDor
+               # ALSO, it produced a CUDA context failure of the form
+               # aten/src/ATen/native/cuda/ScatterGatherKernel.cu:367: operator():
+               # block: [0,0,0], thread: [1,0,0] Assertion `idx_dim >= 0 && idx_dim < index_size
+               # && "index out of bounds"` failed.
+               # in CI with CUDA 10.2 (I don't know if the CUDA version is relevant). See
+               # https://github.com/pytorch/pytorch/runs/7300117715?check_suite_focus=true
+               # After SSHing into the job, I have not been able to reproduce this (!!)
+               # As such, skipping for now.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type="cuda"),)),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
