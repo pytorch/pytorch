@@ -761,14 +761,14 @@ class TestSparseCompressed(TestCase):
                    shape((2, 3)),
                    r'`0 <= plain_indices < plain_dim` is not satisfied.')
 
-            #yield ('non-coalesced',
-            #       tensor([0, 2, 4]),
-            #       tensor([1, 0, 0, 2]),
-            #       values([1, 2, 3, 4]),
-            #       shape((2, 3)),
-            #       r'`{col|row}_indices[..., c{row|col}_indices[..., i - 1]:c{row|col}_indices[..., i]] '
-            #       'for all i = 1, ..., cdim '
-            #       'are sorted and distinct along the last dimension values` is not satisfied.')
+            yield ('non-coalesced',
+                   tensor([0, 2, 4]),
+                   tensor([1, 0, 0, 2]),
+                   values([1, 2, 3, 4]),
+                   shape((2, 3)),
+                   r'`plain_indices\[..., compressed_indices\[..., i - 1\]:compressed_indices\[..., i\]\] '
+                   'for all i = 1, ..., compressed_dim '
+                   'are sorted and distinct along the last dimension values` is not satisfied.')
 
         if TEST_CUDA and torch.device(device).type == 'cpu':
             yield ('indices and values mismatch of device',
@@ -808,11 +808,13 @@ class TestSparseCompressed(TestCase):
             if layout in {torch.sparse_csr, torch.sparse_bsr}:
                 errmsg = errmsg.replace('compressed_indices', 'crow_indices') \
                                .replace('plain_indices', 'col_indices') \
-                               .replace('plain_dim', 'ncols')
+                               .replace('plain_dim', 'ncols') \
+                               .replace('compressed_dim', 'nrows')
             else:
                 errmsg = errmsg.replace('compressed_indices', 'ccol_indices') \
                                .replace('plain_indices', 'row_indices') \
-                               .replace('plain_dim', 'nrows')
+                               .replace('plain_dim', 'nrows') \
+                               .replace('compressed_dim', 'ncols')
 
             if target == 'sparse_compressed_tensor_no_size' and label in {
                     'invalid size', 'invalid batchsize', 'invalid compressed_indices shape', 'invalid max(plain_indices)',

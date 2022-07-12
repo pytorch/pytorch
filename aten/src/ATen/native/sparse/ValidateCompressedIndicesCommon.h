@@ -44,6 +44,8 @@ namespace {
 // execution paths.
 
 // All the invariants are described in https://pearu.github.io/bsr_tensor_invariants.html
+// NOTE: in the code we also use `cidx/idx` to refer to `compressed_indices/plain_indices`
+// respectively.
 
 INVARIANT_CHECK_FUNC_API
 _assert(const bool cond, const char* const message) {
@@ -128,10 +130,10 @@ _check_idx_bounds(
 }
 
 // Invariant 5.6
-// {col/row}_indices[..., c{row|col}[..., i - 1]:c{row|col}[..., i]]
-// for all i = 1, ..., cdim
+// plain_indices[..., compressed_indices[..., i - 1]:compressed_indices[..., i]]
+// for all i = 1, ..., compressed_dim
 // are sorted and distinct along the last dimension values.
-template <typename index_t>
+template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_idx_sorted_distinct_vals_slices_with_cidx(
     const index_t* RESTRICT ptr_idx_batch,
@@ -146,7 +148,18 @@ _check_idx_sorted_distinct_vals_slices_with_cidx(
   const auto* RESTRICT slice_end = ptr_idx_batch + cidx_next;
   for (auto* RESTRICT curr = slice_begin + 1; curr < slice_end; ++curr) {
     const auto invariant = *(curr - 1) < *curr;
-    _assert(invariant, message);
+    if (cdim_name == CDimName::CRow) {
+      _assert(invariant, "`col_indices[..., crow_indices[..., i - 1]:crow_indices[..., i]] "
+                         "for all i = 1, ..., nrows "
+                         "are sorted and distinct along the last dimension values` "
+                         "is not satisfied.");
+    }
+    else {
+      _assert(invariant, "`row_indices[..., ccol_indices[..., i - 1]:ccol_indices[..., i]] "
+                         "for all i = 1, ..., ncols "
+                         "are sorted and distinct along the last dimension values` "
+                         "is not satisfied.");
+    }
   }
 }
 
@@ -267,7 +280,8 @@ static void _validate_compressed_sparse_indices_kernel(
               // work is not guaranteed to be well-balanced between different threads.
               // idx is contiguous and of shape (..., nnz), so batches are multiples of nnz apart.
               const auto* RESTRICT ptr_idx_batch = ptr_idx + batch_idx * nnz;
-              _check_idx_sorted_distinct_vals_slices_with_cidx<index_t>(ptr_idx_batch, cidx_curr, cidx_next);
+              _check_idx_sorted_distinct_vals_slices_with_cidx<cdim_name, index_t>(
+                  ptr_idx_batch, cidx_curr, cidx_next);
               return 0;
             }
         );
