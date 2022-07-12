@@ -176,7 +176,7 @@ print("Model #1 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, 
 Model with uniform activation, APoT weight
 """
 qconfig2 = get_apot_weights_qconfig()
-qconfig_dict2 = {"": qconfig2}
+qconfig_dict2 = {"object_type": [(torch.nn.Linear, qconfig2)]}
 prepared_model2 = prepare_fx(float_model, qconfig_dict2)  # fuse modules and insert observers
 calibrate(prepared_model2, data_loader_test)  # run calibration on sample data
 
