@@ -62,7 +62,6 @@ using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
 using torch::profiler::impl::kineto::annotation_t;
-using torch::profiler::impl::kineto::KinetoActivityType;
 
 struct EventFieldsVisitor {
   EventFieldsVisitor(
@@ -341,7 +340,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         int64_t start_us = e->start_time_ns_ / 1000;
         int64_t end_us = e->endTimeNS() / 1000;
         kineto_events_.emplace_back(
-            e->kinetoType() == KinetoActivityType::PYTHON_FUNCTION);
+            e->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION);
         kineto_events_.back()
             .name(e->name())
             .startUs(start_us)
