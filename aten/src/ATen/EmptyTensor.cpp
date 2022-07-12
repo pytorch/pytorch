@@ -113,17 +113,7 @@ SymInt computeStorageNbytesSymInt(
     // Note: the non-symint version of this code includes overflow checks.
     // The code that eventually materialized the SymInt will need to be
     // in charge of handling overflow.
-    // TODO: this should be (sizes[i] - 1), but that breaks, figure out why.
-    auto tmp1 = sizes[i];
-    auto tmp2 = strides[i];
-    SymInt next_size = tmp1 * tmp2;
-    //SymInt next_size = sizes[i] * strides[i];
-    size = size + next_size;
-    //size = size + (strides[i] * (sizes[i] - 1));
-  //SymInt size_bytes = dtype.itemsize();
-  //for (auto s : size) {
-    //size_bytes = size_bytes * s;
-  //}
+    size = size + (strides[i] * (sizes[i] - 1));
   }
   size = size * itemsize_bytes;
   return size;
