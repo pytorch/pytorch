@@ -158,6 +158,10 @@ IntArrayRef NestedTensorImpl::strides_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 
+Device NestedTensorImpl::device_custom() const {
+  TORCH_CHECK(false, "Internal error: device_custom() is not supported on NestedTensorImpl")
+}
+
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
 }
