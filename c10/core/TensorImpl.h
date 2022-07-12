@@ -577,6 +577,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return strides_default();
   }
 
+  // TODO: make it non-virtual after a change to XLA
+  virtual c10::SymIntArrayRef sym_strides() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_strides_custom();
+    }
+    return sym_strides_default();
+  }
+  inline c10::SymIntArrayRef sym_strides_default() const {
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
+
+  virtual c10::SymIntArrayRef sym_strides_custom() const;
+
   /**
    * Return the size of a tensor at some dimension, wrapping the dimension if
    * necessary.
@@ -2084,6 +2101,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense() const {
     return is_non_overlapping_and_dense_;
+  }
+
+  bool has_symbolic_sizes_strides() const {
+    return has_symbolic_sizes_strides_;
   }
 
  private:
