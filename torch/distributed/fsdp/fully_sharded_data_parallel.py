@@ -1936,7 +1936,7 @@ class FullyShardedDataParallel(nn.Module):
         if self._fsdp_wrapped_module.orig_flat_param[0] is None:
             assert self._fsdp_wrapped_module.flat_param is not None, (
                 "When no_params is False, one of flat_param and orig_flat_param "
-                "should has value."
+                "should have value."
             )
             return state_dict
 
@@ -1969,24 +1969,23 @@ class FullyShardedDataParallel(nn.Module):
 
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
-            key = fqn
             assert fqn in state_dict, (
                 f"FSDP assumes {fqn} is in the state_dict but the state_dict "
                 f"only has {state_dict.keys()}. prefix={prefix}, "
                 f"module_name={module_name} param_name={param_name}."
             )
             if clean_key not in self._ignored_param_names and \
-                    not getattr(state_dict[key], "_has_been_cloned", False):
+                    not getattr(state_dict[fqn], "_has_been_cloned", False):
                 try:
-                    state_dict[key] = state_dict[key].clone().detach()
-                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                    state_dict[fqn] = state_dict[fqn].clone().detach()
+                    state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
                     warnings.warn(
-                        f"Failed to clone() tensor with name {key}. This may mean "
+                        f"Failed to clone() tensor with name {fqn}. This may mean "
                         "that this state_dict entry could point to invalid memory "
                         "regions after returning from state_dict() call if this "
                         "parameter is managed by FSDP. Please check clone "
-                        f"implementation of {key}. Error: {str(e)}"
+                        f"implementation of {fqn}. Error: {str(e)}"
                     )
 
         # Offload the buffer to CPU if needed -- we do not do this in
@@ -2001,7 +2000,6 @@ class FullyShardedDataParallel(nn.Module):
                     f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
                 )
                 fqn = f"{prefix}{clean_key}"
-                fqn = fqn.replace("mod.", "")
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
