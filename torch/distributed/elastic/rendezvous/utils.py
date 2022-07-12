@@ -4,10 +4,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import fcntl
 import ipaddress
 import random
 import re
 import socket
+import struct
 import time
 import weakref
 from datetime import timedelta
@@ -15,6 +17,37 @@ from threading import Event, Thread
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 __all__ = ['parse_rendezvous_endpoint']
+
+
+# From https://stackoverflow.com/a/27494105.
+def nic_ip_address(nic_name):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', nic_name[:15].encode("UTF-8"))
+    )[20:24])
+
+
+# Adapted from https://stackoverflow.com/a/27494105.
+def nic_info():
+    """Return a list of tuples containing each NIC's hostname and its IPv4."""
+    nics = []
+    try:
+        if_nameindex = socket.if_nameindex()
+    except OSError:
+        return nics
+
+    for (_, nic_name) in if_nameindex:
+        try:
+            ip_addr = nic_ip_address(nic_name)
+        except OSError:
+            continue
+
+        hostname = socket.gethostbyaddr(ip_addr)[0]
+        nics.append((hostname, ip_addr))
+    return nics
+
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
     """Extracts key-value pairs from a rendezvous configuration string.
@@ -141,6 +174,10 @@ def _matches_machine_hostname(host: str) -> bool:
         # Otherwise if `host` represents an IP address, compare it to our IP
         # address.
         if addr and addr_info[4][0] == str(addr):
+            return True
+
+    for (nic_host, nic_addr) in nic_info():
+        if nic_host == host or addr and nic_addr == str(addr):
             return True
 
     return False
