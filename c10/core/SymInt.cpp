@@ -25,7 +25,6 @@ SymInt SymInt::operator+(SymInt sci) const {
   return SymInt(data_ + sci.data_);
 }
 
-
 bool SymInt::operator==(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ == sci.data_;
@@ -50,7 +49,6 @@ bool SymInt::operator==(SymInt sci) const {
   auto c = a->eq(b);
   return c->bool_();
 }
-
 
 SymInt SymInt::operator*(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {

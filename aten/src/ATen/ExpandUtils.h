@@ -1,6 +1,6 @@
 #pragma once
 
-#include "c10/core/SymIntArrayRef.h"
+#include <c10/core/SymIntArrayRef.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -438,12 +438,17 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-static inline Tensor functionalize_sum(int64_t leading_dims, const Tensor& tensor, c10::SymIntArrayRef shape, bool always_return_non_view) {
+static inline Tensor functionalize_sum(
+    int64_t leading_dims,
+    const Tensor& tensor,
+    c10::SymIntArrayRef shape,
+    bool always_return_non_view) {
   if (always_return_non_view) {
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
     // of the input.
-    return leading_dims > 0 ? at::view_copy_symint(tensor, shape) : tensor.clone();
+    return leading_dims > 0 ? at::view_copy_symint(tensor, shape)
+                            : tensor.clone();
   } else {
     return leading_dims > 0 ? tensor.view_symint(shape) : tensor;
   }
@@ -473,8 +478,10 @@ static inline Tensor sum_to(
     tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
 
-  auto sym_shape = c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
-  return functionalize_sum(leading_dims, tensor, sym_shape, always_return_non_view);
+  auto sym_shape = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
+  return functionalize_sum(
+      leading_dims, tensor, sym_shape, always_return_non_view);
 }
 
 static inline Tensor sum_to(
@@ -518,7 +525,9 @@ static bool is_expandable_to_(T shape, T desired) {
   return true;
 }
 
-static inline bool is_expandable_to(SymIntArrayRef shape, c10::SymIntArrayRef desired) {
+static inline bool is_expandable_to(
+    SymIntArrayRef shape,
+    c10::SymIntArrayRef desired) {
   return is_expandable_to_(shape, desired);
 }
 

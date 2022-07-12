@@ -6,13 +6,13 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/util/Exception.h>
-#include <c10/util/variant.h>
 #include <c10/util/DimVector.h>
-#include <c10/core/SymIntArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/variant.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -150,7 +150,7 @@ struct InputMetadata {
 
   c10::SymIntArrayRef shape_as_dim_vector() const {
     const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
-   return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
+    return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
 
   at::Tensor shape_as_tensor() const {

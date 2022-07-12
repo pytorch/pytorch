@@ -185,9 +185,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::TensorOptions& options,
-    c10::SymIntArrayRef shape,
-    bool is_tensor_subclass) noexcept {
+      const at::TensorOptions& options,
+      c10::SymIntArrayRef shape,
+      bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
