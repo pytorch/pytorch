@@ -149,6 +149,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
             # "torch.ops.aten.threshold_backward": None,
             "torch.ops.aten.clamp": None,
+            # "torch.ops.aten.clone": None,
             # Failing with where(): incompatible function arguments: \
             # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
             # "torch.ops.aten.where": None,
@@ -187,31 +188,22 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
+            # "torch.ops.aten.hardtanh": None,        # has functional ref, using unsupported aten.clamp
+            "torch.ops.aten.leaky_relu": None,
+            "torch.ops.aten.square": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
             "torch.ops.aten.tanh_backward": None,
             # "torch.ops.aten.amax": None,      # missing prim decomp
-            "torch.ops.aten.amin": None,
-            "torch.ops.aten.reshape": None,
+            # "torch.ops.aten.amin": None,      # missing prim decomp
+            # "torch.ops.aten.reshape": None,
             # "torch.ops.aten.view": None,      # missing prim decomp
             "torch.ops.aten.flatten.using_ints": None,
-
-            # ===============================================================
-            # call_function aten: inplace variants
-            # ===============================================================
-            # TODO: These nodes shouldn't show up, the functionalization pass should have removed inplace ops
-            # "torch.ops.aten.add_": None,
-            # "torch.ops.aten.relu_": None,
 
             # ===============================================================
             # call_function builtins and operator
             # ===============================================================
             "getattr": None,
-            #     "_operator.add": None,
-            #     "_operator.div": None,
             "_operator.getitem": None,
-            #     "_operator.mul": None,
-            #     "_operator.sub": None,
-            #     "_operator.truediv": None,
         }
 
         super().__init__(support_dict)

@@ -1,12 +1,13 @@
 # Owner(s): ["oncall: fx"]
 
+import copy
 import sys
 import logging
 from typing import List, Tuple
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
-
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.backends.nvfuser import NvFuserBackend
 
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
@@ -146,6 +147,55 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser_result = compiled_module(*inputs)
 
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_aten_square(self, device, dtype):
+
+        def fn(x):
+            square = torch.square(x)
+            a = square + 1
+            b = a + 1
+            return b
+
+        inputs = torch.randn(4, device=device)
+        traced = make_fx(fn)(inputs)
+
+        nvfuser = NvFuserBackend()
+        compiled_module = nvfuser.compile(copy.deepcopy(traced))
+
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
+
+        eager_result = traced(inputs)
+        nvfuser_result = compiled_module(inputs)
+        torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_aten_leakyrelu(self, device, dtype):
+
+        def fn(x):
+            square = torch.ops.aten.leaky_relu(x, 0.1)
+            a = square + 1
+            b = a + 1
+            return b
+
+        inputs = torch.randn(4, device=device)
+        traced = make_fx(fn)(inputs)
+
+        nvfuser = NvFuserBackend()
+        compiled_module = nvfuser.compile(copy.deepcopy(traced))
+
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
+
+        eager_result = traced(inputs)
+        nvfuser_result = compiled_module(inputs)
+        torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
+
 
 
 instantiate_device_type_tests(TestFxNvFuserBackend, globals(), only_for="cuda")
