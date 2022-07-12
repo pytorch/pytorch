@@ -127,7 +127,8 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     return constraints, counter
 
-
+@register_inference_rule(torch.nn.functional.dropout)
+@register_inference_rule("detach")
 @register_inference_rule("to")
 @register_inference_rule("int")
 @register_inference_rule("long")
