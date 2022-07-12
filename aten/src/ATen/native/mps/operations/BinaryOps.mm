@@ -25,7 +25,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 
 // alpha is always 1.0 except when this function is called from add_sub_template()
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
-                    const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
+                    const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
   // it's possible to receive empty tensors here
   if (self.numel() == 0 || other.numel() == 0) {
@@ -37,13 +37,25 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   const bool is_other_scalar = other.dim() == 0;
 
   auto new_size = at::infer_size(self.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-      output.resize_(new_size);
+  if (!output_.sizes().equals(new_size)) {
+      output_.resize_(new_size);
+  }
+
+  Tensor output = output_;
+  bool needsCopyToOutput = false;
+
+  if (!output_.is_contiguous()) {
+    output = output_.contiguous();
+    needsCopyToOutput = true;
+  // else, determine if this is an in-place operation on a view output
+  } else if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
+    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    needsCopyToOutput = true;
   }
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, other, output_}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -69,8 +81,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
           // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
           // Output tensor should have been promoted but it remains an int32 tensor
-          if (output.scalar_type() != common_dtype) {
-            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output.scalar_type());
+          if (output_.scalar_type() != common_dtype) {
+            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output_.scalar_type());
           }
         }
         return newCachedGraph;
@@ -99,11 +111,15 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsCopyToOutput ? output : output_);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+
+    if (needsCopyToOutput) {
+      output_.copy_(output);
+    }
   }
 }
 
@@ -172,18 +188,18 @@ void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alp
 
 } // namespace mps
 
-#define CREATE_MPS_BINARY_COMPARISON_OP_FUNC(func_out, func_stub, other_type)                              \
-Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) { \
-  mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
-    ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
-      MPSGraph* mpsGraph = cachedGraph->graph();                                                \
+#define CREATE_MPS_BINARY_COMPARISON_OP_FUNC(func_out, func_stub, other_type)                                             \
+Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) {                                          \
+  mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                                                 \
+    ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                                                    \
+      MPSGraph* mpsGraph = cachedGraph->graph();                                                                          \
       return [mpsGraph func_stub##WithPrimaryTensor:mps::castMPSTensor(mpsGraph, primaryCastTensor, ScalarType::Bool)     \
                                     secondaryTensor:mps::castMPSTensor(mpsGraph, secondaryCastTensor, ScalarType::Bool)   \
-                                               name:nil]; });                                   \
-  return output;                                                                                \
+                                               name:nil]; });                                                             \
+  return output;                                                                                                          \
 }
 
-#define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                              \
+#define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                   \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
@@ -194,7 +210,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Te
 }
 
 // Boolean Ops require casting output to "MPSDataTypeBool"
-#define CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                             \
+#define CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                  \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \

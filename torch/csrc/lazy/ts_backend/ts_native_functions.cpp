@@ -269,6 +269,23 @@ at::Tensor LazyNativeFunctions::_to_copy(
   }
 };
 
+at::Tensor LazyNativeFunctions::empty_symint(
+    c10::SymIntArrayRef size,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<at::MemoryFormat> memory_format) {
+  // TODO: support SymIntNodes as well
+  return empty(
+      c10::asIntArrayRefSlow(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      memory_format);
+}
+
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size,
     c10::optional<at::ScalarType> dtype,
@@ -474,12 +491,6 @@ at::Tensor LazyNativeFunctions::_trilinear(
     int64_t unroll_dim) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(_trilinear)>::
       call(i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim);
-}
-::std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::linalg_inv_ex(
-    const at::Tensor& self,
-    bool check_errors) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
-      linalg_inv_ex)>::call(self, check_errors);
 }
 at::Tensor LazyNativeFunctions::linalg_pinv(
     const at::Tensor& self,

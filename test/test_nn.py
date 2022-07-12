@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     download_file, get_function_arglist, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS, \
-    slowTest
+    slowTest, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -565,6 +565,7 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
@@ -617,6 +618,7 @@ class TestNN(NNTestCase):
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_no_requires_grad(self):
         mod = nn.Linear(2, 3)
 
@@ -805,6 +807,7 @@ class TestNN(NNTestCase):
         with module.register_full_backward_hook(bw_hook):
             module(inp1, inp2).sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -822,6 +825,7 @@ class TestNN(NNTestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_forward_preforward_writable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1576,6 +1580,15 @@ class TestNN(NNTestCase):
         del n[1::2]
         self.assertEqual(n, nn.Sequential(l1, l3))
 
+    def test_Sequential_add(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+        l4 = nn.Linear(4, 5)
+        n = nn.Sequential(l1, l2)
+        other = nn.Sequential(l3, l4)
+        self.assertEqual(n + other, nn.Sequential(l1, l2, l3, l4))
+
     def test_Sequential_append(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
@@ -1763,6 +1776,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -1871,6 +1885,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -4372,6 +4387,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
         self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4404,6 +4420,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
@@ -4530,6 +4547,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -6399,6 +6417,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
         import gc
@@ -6530,6 +6549,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, 'Missing key'):
             m.load_state_dict(m.state_dict())
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -8072,7 +8092,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -9382,6 +9402,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(grad_output, grad_output_clone)
 
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
                                                  upscale_factor=None):
@@ -10014,6 +10035,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
             self.assertTrue(gradcheck(F.pdist, (inp,)))
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @unittest.expectedFailure
     def test_pdist_cpu_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, requires_grad=True)
@@ -15916,6 +15938,72 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.float, torch.double)
+    @onlyCUDA
+    def test_max_pool3d_ndhwc(self, device, dtype):
+        def helper(n, c, h, w, d, kernel_size, stride=None):
+            batch = n
+            if not batch:
+                batch = 1
+            input = torch.randn(batch, c, d, h, w, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+            if not n:
+                input = input.squeeze(0).detach().clone().requires_grad_()
+            if isinstance(kernel_size, int):
+                kernel_size = [kernel_size] * 3
+            if stride is None:
+                stride = kernel_size
+            elif isinstance(stride, int):
+                stride = [stride] * 3
+            grad = torch.randn(batch, c,
+                               (d - kernel_size[0]) // stride[0] + 1,
+                               (h - kernel_size[1]) // stride[1] + 1,
+                               (w - kernel_size[2]) // stride[2] + 1,
+                               dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last_3d)
+            if not n:
+                grad = grad.squeeze(0)
+            pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            if len(out.shape) == 4:
+                self.assertTrue(out.unsqueeze(0).is_contiguous(memory_format=torch.channels_last_3d))
+            else:
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_out.is_contiguous())
+            if len(ind.shape) == 4:
+                self.assertTrue(ind.unsqueeze(0).is_contiguous(memory_format=torch.channels_last_3d))
+            else:
+                self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            if dtype == torch.half:
+                self.assertEqual(input.grad, ref_input.grad, atol=0.05, rtol=0.01)
+            else:
+                self.assertEqual(input.grad, ref_input.grad)
+
+        helper(4, 8, 8, 8, 8, 7)
+        helper(4, 8, 8, 8, 8, (5, 6, 7))
+        helper(1, 8, 8, 8, 8, (5, 6, 7))
+        helper(0, 6, 12, 13, 14, (5, 6, 7))
+        helper(4, 8, 7, 7, 7, 3, stride=1)
+        helper(10, 128, 19, 19, 19, 3, stride=2)
+        helper(10, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(1, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(1, 79, 4, 4, 4, 3, stride=2)
+        helper(0, 79, 4, 4, 4, 3, stride=2)
+
+
     @onlyCPU
     def test_max_pool2d_bfloat16(self, device):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
@@ -16694,6 +16782,7 @@ torch.cuda.synchronize()
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
@@ -17889,17 +17978,25 @@ torch.cuda.synchronize()
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
     @onlyCUDA
-    @largeTensorTest('6GB')
+    @largeTensorTest('18GB')
+    @largeTensorTest('180GB', 'cpu')
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
-        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device, requires_grad=True)
         y = torch.nn.functional.max_pool3d(x, 5)
+        g = torch.randn_like(y, dtype=torch.half)
+        torch.cuda.synchronize()
+        y.backward(g)
         torch.cuda.synchronize()
 
-        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x = x.detach().cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x.requires_grad = True
+        ref_g = g.cpu().float()
         ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+        ref_y.backward(ref_g)
 
         self.assertEqual(y, ref_y, exact_dtype=False)
+        self.assertEqual(x.grad, ref_x.grad, exact_dtype=False)
 
     @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
@@ -20153,6 +20250,7 @@ torch.cuda.synchronize()
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]
@@ -20839,6 +20937,7 @@ class TestModuleGlobalHooks(TestCase):
         nn.modules.module._global_forward_hooks = OrderedDict()
         nn.modules.module._global_forward_pre_hooks = OrderedDict()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_hooks(self):
         module = nn.Sigmoid
 
@@ -20959,6 +21058,7 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_forward_preforward_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -20980,6 +21080,7 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_preforward_hook_removable(self):
         """
         This test is to test when multiple pre-forward hook functions can be
@@ -21015,6 +21116,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
@@ -21050,6 +21152,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_global_and_local_hooks_order(self):
         module = nn.Sigmoid()
 
