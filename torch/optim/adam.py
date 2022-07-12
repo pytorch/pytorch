@@ -121,7 +121,7 @@ class Adam(Optimizer):
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
             if not all(p.is_cuda for pg in self.param_groups for p in pg['params']):
-                raise RuntimeError("WIP FusedAdam requires all the params to be hosted on CUDA device")
+                raise RuntimeError("FusedAdam requires all the params to be hosted on CUDA device")
 
     def __setstate__(self, state):
         super().__setstate__(state)
