@@ -1463,7 +1463,7 @@ trunc_divide = _make_elementwise_binary_reference(
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def addcdiv(
     self: TensorLikeType,
