@@ -1808,9 +1808,9 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
   }
 
   if (upper) {
-    at::triu_out(L, A);
+    at::triu_out(const_cast<Tensor&>(L), A);
   } else {
-    at::tril_out(L, A);
+    at::tril_out(const_cast<Tensor&>(L), A);
   }
 
   cholesky_stub(L.device().type(), L, info, upper);
