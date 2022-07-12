@@ -2670,7 +2670,7 @@ TEST_F(VulkanAPITest, cat_dim1_samefeature_success) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cat_dim1_difffeature_success) {
+TEST_F(VulkanAPITest, DISABLED_cat_dim1_difffeature_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
