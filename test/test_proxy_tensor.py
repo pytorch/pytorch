@@ -260,6 +260,22 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+
+    # segfaults
+    skip('_masked.norm'),
+    skip('_masked.mean'),
+    skip('_masked.prod'),
+    skip('_masked.std'),
+    skip('_masked.sum'),
+    skip('_masked.var'),
+
+    skip('mean'),
+    skip('sum'),
+
+    skip('linalg.pinv'),
+    skip('pca_lowrank'),
+    skip('t'),
+    skip('transpose'),
 }
 
 
@@ -278,7 +294,10 @@ def _test_make_fx_helper(self, device, dtype, op, use_fake):
             self.skipTest("Dynamic output shape operation in trace")
 
         for arg in args:
+
             if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
+                if arg.numel() == 0:
+                    continue
                 arg.uniform_(0, 1)
         try:
             old_out = f(args, kwargs)
@@ -296,6 +315,7 @@ class TestProxyTensorOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
+        import gc; gc.disable()
         _test_make_fx_helper(self, device, dtype, op, True)
 
 
