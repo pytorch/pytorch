@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/Pool.h>
 #include <torch/library.h>
@@ -80,11 +79,11 @@ Tensor adaptive_avg_pool2d(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -224,11 +223,11 @@ Tensor pool2d(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
