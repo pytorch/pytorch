@@ -1089,6 +1089,9 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
 
 def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     checks = get_land_checkrun_conclusions(org, project, commit)
+    if(len(checks) == 0):
+        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) are not yet run")
+
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
