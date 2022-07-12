@@ -668,9 +668,13 @@ VulkanFence::~VulkanFence() {
 void VulkanFence::wait() {
   // if get_submit_handle() has not been called, then this will no-op
   if (waiting_) {
-    VkResult fence_status;
+    VkResult fence_status = VK_NOT_READY;
+    // Run the wait in a loop to keep the CPU hot. A single call to
+    // vkWaitForFences with no timeout may cause the calling thread to be
+    // scheduled out.
     do {
-      fence_status = vkGetFenceStatus(device_, handle_);
+      // The timeout (last) arg is in units of ns
+      fence_status = vkWaitForFences(device_, 1u, &handle_, VK_TRUE, 10000);
 
       TORCH_CHECK(
           fence_status != VK_ERROR_DEVICE_LOST,
