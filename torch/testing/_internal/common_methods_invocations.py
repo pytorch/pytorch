@@ -6136,11 +6136,12 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
         shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
+    repeat_op = op_info.name in ['repeat', '_refs.repeat']
     samples = []
     for rep_dim, shape in product(rep_dims, shapes):
         # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
         # so we filter such combinations.
-        if op_info.name == 'repeat' and len(rep_dim) < len(shape):
+        if repeat_op and len(rep_dim) < len(shape):
             continue
         samples.append(SampleInput(make_arg(shape), args=(rep_dim,),))
 
@@ -21142,6 +21143,12 @@ python_ref_db = [
         "_refs.ravel",
         torch_opinfo_name="ravel",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.repeat",
+        torch_opinfo_name="repeat",
+        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.reshape",

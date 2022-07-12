@@ -204,6 +204,7 @@ __all__ = [
     "native_layer_norm",
     "permute",
     "ravel",
+    "repeat",
     "reshape",
     "roll",
     "rot90",
@@ -214,6 +215,7 @@ __all__ = [
     "t",
     "tensor_split",
     "transpose",
+    "unfold",
     "unsqueeze",
     "view",
     "vsplit",
@@ -2131,9 +2133,11 @@ def expand(a: Tensor, *shape) -> Tensor:
         a, shape_, tuple(range(offset, len(a.shape) + offset))
     )
 
+
 @register_decomposition(torch.ops.aten.expand_as)
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
+
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
@@ -2301,6 +2305,65 @@ def native_layer_norm(
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+@register_decomposition(torch.ops.aten.repeat)
+def repeat(a: Tensor, *shape) -> Tensor:
+    # NOTE: cannot use utils.extract_shape_from_varargs here
+    # because that also validates the shape, but the shape
+    # given to repeat may be "invalid"
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        shape = tuple(shape[0])
+
+    utils.check(
+        len(shape) >= len(a.shape),
+        lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+    )
+
+    if len(shape) == 0:
+        return torch.clone(a)
+
+    num_new_dimensions = len(shape) - a.ndim
+    padded_shape = [1 for _ in range(num_new_dimensions)]
+    for dim_size in a.shape:
+        padded_shape.append(dim_size)
+
+    target_shape = []
+    zero_tensor = False
+    for padded_size, repeat_size in zip(padded_shape, shape):
+        if repeat_size == 0:
+            zero_tensor = True
+        target_shape.append(padded_size * repeat_size)
+
+    # add new dimensions to input tensor a
+    xtensor = a.expand(padded_shape)
+
+    result = torch.empty(
+        tuple(target_shape),
+        dtype=a.dtype,
+        device=a.device,
+        requires_grad=a.requires_grad,
+    )
+    if zero_tensor:
+        return result
+
+    result_shape = result.shape
+    result_stride = result.stride()
+
+    urtensor = result
+    for dim, dim_size in enumerate(xtensor.shape):
+        # repeat each dimension by using unfold tensor operation
+        urtensor = _unfold(urtensor, dim, dim_size, max(dim_size, 1))
+
+    # expand dimensions according to urtensor to match repeat size
+    repeat_xtensor = xtensor.expand_as(urtensor)
+    urtensor.copy_(repeat_xtensor)
+    return result
+
+    # cloned_result = torch.clone(repeat_xtensor)
+    # transpose axis so strides are in sorted order
+    # permuted_result = cloned_result.permute()
+    # return permuted_result.reshape(target_shape)
 
 
 def _reshape_view_helper(
@@ -2814,6 +2877,44 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 
 # Aliases for transpose
 swap_axes = transpose
+
+
+def _unfold(a: TensorLikeType, dimension: int, size: int, step: int):
+    # some special handling to deal with allow dimension == 0 when self.dim() == 0
+    # dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+
+    max_size = 1 if a.ndim == 0 else a.shape[dimension]
+    last_stride = 1 if a.ndim == 0 else a.stride()[dimension]
+
+    utils.check(
+        size <= max_size,
+        lambda: "Maximum size for tensor at dimension "
+        + str(dimension)
+        + " is "
+        + str(max_size)
+        + " but size is "
+        + str(size),
+    )
+
+    utils.check(
+        step > 0,
+        lambda: "Step is " + str(step) + " but must be > 0",
+    )
+
+    new_size = []
+    new_stride = []
+
+    for d, (a_size, a_stride) in enumerate(zip(a.shape, a.stride())):
+        if d == dimension:
+            new_size.append((a_size - size) // step + 1)
+            new_stride.append(step * a_stride)
+        else:
+            new_size.append(a_size)
+            new_stride.append(a_stride)
+    new_size.append(size)
+    new_stride.append(last_stride)
+
+    return a.as_strided(new_size, new_stride)
 
 
 @register_decomposition(torch.ops.aten.unsqueeze)
