@@ -5,8 +5,8 @@ import os
 import torch.cuda
 import sys
 import torch.distributed as dist
-import torch.distributed.algorithms.quantization.quantization as quant
-from torch.distributed.algorithms.quantization.quantization import DQuantType
+import torch.distributed.algorithms._quantization.quantization as quant
+from torch.distributed.algorithms._quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     init_multigpu_helper,
