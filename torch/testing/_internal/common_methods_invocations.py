@@ -21091,6 +21091,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.expand_as",
+        torch_opinfo_name="expand_as",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
         supports_nvfuser=False,

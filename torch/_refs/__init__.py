@@ -193,6 +193,7 @@ __all__ = [
     "dsplit",
     "dstack",
     "expand",
+    "expand_as",
     "flatten",
     "flip",
     "fliplr",
@@ -2130,6 +2131,9 @@ def expand(a: Tensor, *shape) -> Tensor:
         a, shape_, tuple(range(offset, len(a.shape) + offset))
     )
 
+@register_decomposition(torch.ops.aten.expand_as)
+def expand_as(a: Tensor, b: Tensor) -> Tensor:
+    return a.expand(b.shape)
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
