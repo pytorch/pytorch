@@ -8,8 +8,7 @@ from torch.utils._pytree import tree_flatten
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
-
-def call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum"):
+def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
     r"""
     call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum")
     ``call_for_per_sample_grads`` returns a function that is invoked like the forward
@@ -24,8 +23,9 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum"):
         batch_size: The batch size of the input. If None is passed, all tensor arguments in args and kwargs must have
           the same batch size, which is the size of the first dimension. Otherwise, it must be passed manually.
           Default: None
-        loss_reduction: The reduction used on the loss. If "mean", per sample gradients will be scaled by the batch size
-          to offset the crossbatch interaction from running mean across a batch. Must be "mean" or "sum". Default: "sum"
+        loss_reduction: Indicates if the loss reduction (for aggregating the gradients) is a sum or a mean operation. If
+          "mean", per sample gradients will be scaled by the batch size to offset the crossbatch interaction from
+          running mean across a batch. Must be "mean" or "sum". Default: "sum"
 
     Examples::
         >>> model = nn.Linear(4, 3)
@@ -38,6 +38,14 @@ def call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum"):
         >>> assert model.bias.shape == (3,)
         >>> assert model.bias.grad_sample.shape == (5, 3)
         >>> assert model.bias.grad == None
+
+    An example using "mean" loss reduction. The grad_sample fields will be scaled by batch_size from what they would be
+    if we ran the same code with loss_reduction="sum". This is because the mean at the end will scale all
+    grad_outputs by 1 / batch_size from cross batch interaction.
+        >>> model = nn.Linear(4, 3)
+        >>> batched_input = torch.randn(5, 4)  # batch size of 5
+        >>> res = call_for_per_sample_grads(model, 5, loss_reduction="mean")(batched_input).mean()
+        >>> res.backward()
 
     Note::
         Does not work with any `nn.RNN`, including `nn.GRU` or `nn.LSTM`. Please use custom
