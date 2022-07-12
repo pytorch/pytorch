@@ -121,6 +121,7 @@ class TestActivationSparsifier(TestCase):
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
+        assert 'data' in activation_sparsifier.data_groups[layer_name]
         assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
 
     def test_activation_sparsifier(self):
