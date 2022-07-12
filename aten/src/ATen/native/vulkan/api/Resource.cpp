@@ -556,7 +556,7 @@ VulkanImage MemoryAllocator::create_image3d_fp(
     const VkFormat image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 #else
     const VkFormat image_format = VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif
+#endif /* USE_VULKAN_FP16_INFERENCE */
 
   const VulkanImage::ImageProperties image_props{
     VK_IMAGE_TYPE_3D,
