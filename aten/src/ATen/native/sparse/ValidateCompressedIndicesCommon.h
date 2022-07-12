@@ -137,10 +137,6 @@ _check_idx_sorted_distinct_vals_slices_with_cidx(
     const index_t* RESTRICT ptr_idx_batch,
     const index_t cidx,
     const index_t cidx_next) {
-  static constexpr auto message = "`{col|row}_indices[..., c{row|col}_indices[..., i - 1]:c{row|col}_indices[..., i]] "
-                       "for all i = 1, ..., cdim "
-                       "are sorted and distinct along the last dimension values` "
-                       "is not satisfied.";
   // Note that ptr_idx_batch = &idx[batch_idx] and is contiguous.
   const auto* RESTRICT slice_begin = ptr_idx_batch + cidx;
   const auto* RESTRICT slice_end = ptr_idx_batch + cidx_next;
