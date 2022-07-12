@@ -1580,6 +1580,15 @@ class TestNN(NNTestCase):
         del n[1::2]
         self.assertEqual(n, nn.Sequential(l1, l3))
 
+    def test_Sequential_add(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+        l4 = nn.Linear(4, 5)
+        n = nn.Sequential(l1, l2)
+        other = nn.Sequential(l3, l4)
+        self.assertEqual(n + other, nn.Sequential(l1, l2, l3, l4))
+
     def test_Sequential_append(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
@@ -8083,7 +8092,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=False).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm, enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -15929,6 +15938,72 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.float, torch.double)
+    @onlyCUDA
+    def test_max_pool3d_ndhwc(self, device, dtype):
+        def helper(n, c, h, w, d, kernel_size, stride=None):
+            batch = n
+            if not batch:
+                batch = 1
+            input = torch.randn(batch, c, d, h, w, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+            if not n:
+                input = input.squeeze(0).detach().clone().requires_grad_()
+            if isinstance(kernel_size, int):
+                kernel_size = [kernel_size] * 3
+            if stride is None:
+                stride = kernel_size
+            elif isinstance(stride, int):
+                stride = [stride] * 3
+            grad = torch.randn(batch, c,
+                               (d - kernel_size[0]) // stride[0] + 1,
+                               (h - kernel_size[1]) // stride[1] + 1,
+                               (w - kernel_size[2]) // stride[2] + 1,
+                               dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last_3d)
+            if not n:
+                grad = grad.squeeze(0)
+            pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            if len(out.shape) == 4:
+                self.assertTrue(out.unsqueeze(0).is_contiguous(memory_format=torch.channels_last_3d))
+            else:
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_out.is_contiguous())
+            if len(ind.shape) == 4:
+                self.assertTrue(ind.unsqueeze(0).is_contiguous(memory_format=torch.channels_last_3d))
+            else:
+                self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            if dtype == torch.half:
+                self.assertEqual(input.grad, ref_input.grad, atol=0.05, rtol=0.01)
+            else:
+                self.assertEqual(input.grad, ref_input.grad)
+
+        helper(4, 8, 8, 8, 8, 7)
+        helper(4, 8, 8, 8, 8, (5, 6, 7))
+        helper(1, 8, 8, 8, 8, (5, 6, 7))
+        helper(0, 6, 12, 13, 14, (5, 6, 7))
+        helper(4, 8, 7, 7, 7, 3, stride=1)
+        helper(10, 128, 19, 19, 19, 3, stride=2)
+        helper(10, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(1, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(1, 79, 4, 4, 4, 3, stride=2)
+        helper(0, 79, 4, 4, 4, 3, stride=2)
+
+
     @onlyCPU
     def test_max_pool2d_bfloat16(self, device):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
@@ -17903,17 +17978,25 @@ torch.cuda.synchronize()
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
     @onlyCUDA
-    @largeTensorTest('6GB')
+    @largeTensorTest('18GB')
+    @largeTensorTest('180GB', 'cpu')
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
-        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device, requires_grad=True)
         y = torch.nn.functional.max_pool3d(x, 5)
+        g = torch.randn_like(y, dtype=torch.half)
+        torch.cuda.synchronize()
+        y.backward(g)
         torch.cuda.synchronize()
 
-        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x = x.detach().cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x.requires_grad = True
+        ref_g = g.cpu().float()
         ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+        ref_y.backward(ref_g)
 
         self.assertEqual(y, ref_y, exact_dtype=False)
+        self.assertEqual(x.grad, ref_x.grad, exact_dtype=False)
 
     @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
