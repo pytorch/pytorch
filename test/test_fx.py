@@ -3896,6 +3896,7 @@ class TestFunctionalTracing(JitTestCase):
         "cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
+        "dropout1d": CONTROL_FLOW,
         "dropout2d": CONTROL_FLOW,
         "dropout3d": CONTROL_FLOW,
         "elu": CONTROL_FLOW,

@@ -3,6 +3,11 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes.utils.common import (
+    _deprecation_warning,
+    _iter_deprecated_functional_names,
+    _map_deprecated_functional_names,
+)
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 try:
@@ -45,7 +50,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     All subclasses should overwrite :meth:`__iter__`, which would return an
     iterator of samples in this DataPipe. Calling ``__iter__`` of an ``IterDataPipe`` automatically invokes its
     method ``reset()``, which by default performs no operation. When writing a custom ``IterDataPipe``, users should
-    override ``reset()`` if necesssary. The common usages include resetting buffers, pointers,
+    override ``reset()`` if necessary. The common usages include resetting buffers, pointers,
     and various state variables within the custom ``IterDataPipe``.
 
     Note:
@@ -53,14 +58,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         and the creation a second iterator will invalidate the first one. This constraint is necessary because
         some ``IterDataPipe`` have internal buffers, whose states can become invalid if there are multiple iterators.
         The code example below presents details on how this constraint looks in practice.
-        If you have any feedback related to this constraint, please see `Github IterDataPipe Singler Iterator Issue`_.
+        If you have any feedback related to this constraint, please see `GitHub IterDataPipe Single Iterator Issue`_.
 
     These DataPipes can be invoked in two ways, using the class constructor or applying their
     functional form onto an existing ``IterDataPipe`` (recommended, available to most but not all DataPipes).
     You can chain multiple `IterDataPipe` together to form a pipeline that will perform multiple
     operations in succession.
 
-    .. _Github IterDataPipe Singler Iterator Issue:
+    .. _GitHub IterDataPipe Single Iterator Issue:
         https://github.com/pytorch/data/issues/45
 
     Note:
@@ -105,10 +110,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
+    _number_of_samples_yielded: int = 0
     _restored: bool = False
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
+            if attribute_name in _iter_deprecated_functional_names:
+                kwargs = _iter_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
@@ -232,6 +241,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
+            if attribute_name in _map_deprecated_functional_names:
+                kwargs = _map_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(MapDataPipe.functions[attribute_name], self)
             return function
         else:

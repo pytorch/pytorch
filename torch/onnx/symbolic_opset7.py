@@ -56,3 +56,4 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 for block_listed_op in block_listed_operators:
     vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
+    vars()[block_listed_op].__module__ = "torch.onnx.symbolic_opset7"

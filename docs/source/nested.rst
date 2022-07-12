@@ -60,3 +60,15 @@ nested_tensor([
 ])
 >>> nt.unbind()
 [tensor([0., 1., 2.], device='cuda:0'), tensor([3., 4., 5., 6., 7.], device='cuda:0')]
+
+Nested tensor methods
++++++++++++++++++++++++++
+
+The following Tensor methods are related to nested tensors:
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Tensor.to_padded_tensor

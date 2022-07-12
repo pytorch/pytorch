@@ -134,12 +134,8 @@ class TestFreezingWeights(FSDPTest):
             optimizer.zero_grad()
             fake_loss.backward()
             if freezing_method == FreezingMethod.GradToNone:
-                if with_fsdp:
-                    for param in model.module.module.trunk.parameters():
-                        param.grad = None
-                else:
-                    for param in model.module.trunk.parameters():
-                        param.grad = None
+                for param in model.module.trunk.parameters():
+                    param.grad = None
             optimizer.step()
 
         if with_fsdp:

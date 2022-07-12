@@ -16,7 +16,6 @@
 namespace at {
 namespace native {
 
-constexpr int NUM_INPUTS = 8;
 
 #define AT_FOR_8_CASES(_)  \
   _(1)                      \
@@ -28,7 +27,7 @@ constexpr int NUM_INPUTS = 8;
   _(7)                      \
   _(8)
 
-c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Scalar>& extra_args) {
+c10::SmallVector<std::string> get_extra_args_typenames(const c10::SmallVector<at::Scalar>& extra_args) {
   c10::SmallVector<std::string> args_typenames(extra_args.size());
   for (auto i = 0; i < extra_args.size(); ++i) {
     args_typenames[i] = at::cuda::jit::typeName(extra_args[i].type());
@@ -113,29 +112,29 @@ struct OffsetCalculatorVariant {
 };
 
 struct ArrayVariant {
-  // notice: This would produce c10::variant<at::detail::Array<char*, 2...9>>
-#define DEFINE_CASE(index) at::detail::Array<char*, index + 1>,
+// works for up to 8 input + 8 outputs
+#define DEFINE_CASE(index) at::detail::Array<char*, index>, at::detail::Array<char*, index+8>,
   using ArrayTypes = c10::variant<
     AT_FOR_8_CASES(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
   ArrayVariant(const TensorIteratorBase& iter) {
-    int arity = iter.ninputs();
-    // This assumes that jiterator kernels only have 1 output
-    switch(arity) {
-#define DEFINE_CASE(index)                              \
-      case index: array = at::detail::Array<char*, index + 1>{}; break;
+    int ntensors = iter.ntensors();
+    switch(ntensors) {
+#define DEFINE_CASE(index)                                            \
+      case index: array = at::detail::Array<char*, index>{}; break;   \
+      case index+8: array = at::detail::Array<char*, index+8>{}; break;
 
       AT_FOR_8_CASES(DEFINE_CASE)
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "ArrayVariant is not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "ArrayVariant is not implemented for ntensors = ", ntensors);
     }
 
     c10::visit([&](auto& a) {
-      for (auto i = 0; i < arity + 1; ++i) {
+      for (auto i = 0; i < ntensors; ++i) {
         a[i] = (char*)iter.data_ptr(i);
       }
     }, array);

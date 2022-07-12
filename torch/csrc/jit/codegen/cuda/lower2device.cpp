@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
+#include <torch/csrc/jit/codegen/cuda/lower_instrument.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
@@ -349,10 +350,12 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
 
+  const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
+
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from
   // GpuLower.
-  kernel_->finalize(exprs_cleaned_up_loops);
+  kernel_->finalize(exprs_instrumented);
 }
 
 kir::Kernel* GpuLower::kernel() const {

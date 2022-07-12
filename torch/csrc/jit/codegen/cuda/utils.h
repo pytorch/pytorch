@@ -53,6 +53,7 @@ TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 //! These can be set through the `PYTORCH_NVFUSER_DISABLE` environment variable
 //!
 enum class DisableOption {
+  ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
@@ -62,6 +63,17 @@ enum class DisableOption {
 };
 
 TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
+
+//! Types of features to enable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_ENABLE` environment variable
+//!
+enum class EnableOption {
+  Complex, //! Enable complex support on python
+  KernelProfile //! Enable intra-kernel performance profiling
+};
+
+TORCH_CUDA_CU_API bool isEnabled(EnableOption option);
 
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.

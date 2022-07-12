@@ -274,13 +274,20 @@ at::Tensor inferAndAlloc(
     const TensorView* tv,
     const std::vector<Val*>& sizes,
     kir::ExpressionEvaluator& expr_eval,
+    // Map from dim -> expanded size of TV if any expanded broadcast dimensions
+    // exist
+    std::unordered_map<int, Val*> expanded_map,
     const CompileOptions& options,
     bool zero_init = false) {
   FUSER_PERF_SCOPE("inferAndAlloc");
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  // Going to infer all the sizes of the TensorView
   std::vector<int64_t> inferred_sizes;
-
+  // Expanded sizes is at maximum the same size of inferred_sizes, as you could
+  // have a fully broadcasted tensor that's being expanded
+  std::vector<int64_t> expanded_sizes;
+  bool expanded_dim = false;
   for (const auto size : sizes) {
     const auto inferred_val = expr_eval.evaluate(size);
     TORCH_INTERNAL_ASSERT(
@@ -292,6 +299,29 @@ at::Tensor inferAndAlloc(
         ") for the buffer ",
         tv->toString());
     inferred_sizes.push_back(inferred_val.value());
+    if (expanded_map.count(expanded_sizes.size())) {
+      auto expanded_size = expanded_map.at(expanded_sizes.size());
+      const auto inferred_expanded_size = expr_eval.evaluate(expanded_size);
+      TORCH_INTERNAL_ASSERT(
+          inferred_expanded_size.has_value(),
+          "Could not launch kernel as program could not infer the expanded extent ",
+          expanded_size->toString(),
+          "(",
+          expanded_size->name(),
+          ") for the buffer ",
+          tv->toString());
+      if (inferred_val.value() != 1) {
+        TORCH_INTERNAL_ASSERT(
+            inferred_val.value() == inferred_expanded_size.value(),
+            "Attempted an expand on a non-broadcasted dimension,",
+            " but the expand doesn't match the dimensions size.");
+      } else {
+        expanded_dim = true;
+      }
+      expanded_sizes.push_back(inferred_expanded_size.value());
+    } else {
+      expanded_sizes.push_back(inferred_val.value());
+    }
   }
 
   const auto at_type = data_type_to_aten(tv->dtype());
@@ -300,13 +330,21 @@ at::Tensor inferAndAlloc(
     const auto tensor_options =
         at::TensorOptions().dtype(at_type).device(options.device);
     c10::IntArrayRef isizes(inferred_sizes);
-    return at::zeros(isizes, tensor_options);
+    auto zeros = at::zeros(isizes, tensor_options);
+    if (expanded_dim) {
+      return zeros.expand(expanded_sizes);
+    }
+    return zeros;
   } else {
     c10::IntArrayRef isizes(inferred_sizes);
     // Non Variable type guard for empty_cuda call
     at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
-    return at::native::empty_cuda(
+    auto empty = at::native::empty_cuda(
         isizes, at_type, c10::nullopt, options.device, c10::nullopt);
+    if (expanded_dim) {
+      return empty.expand(expanded_sizes);
+    }
+    return empty;
   }
 }
 
@@ -321,16 +359,18 @@ at::Tensor inferAndAllocOutput(
       : domain->getRootDomain();
 
   std::vector<Val*> sizes;
+  std::unordered_map<int, Val*> expand_map;
 
   for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() || id->isStride() ||
-        id->getIterType() == IterType::BroadcastWithoutStride) {
+    if (id->isReduction() || id->isStride()) {
       continue;
     }
     sizes.push_back(id->extent());
+    if (id->isBroadcast() && id->hasExpandedExtent()) {
+      expand_map[sizes.size() - 1] = id->expandedExtent();
+    }
   }
-
-  return inferAndAlloc(tv, sizes, expr_eval, options, zero_init);
+  return inferAndAlloc(tv, sizes, expr_eval, expand_map, options, zero_init);
 }
 
 } // namespace
@@ -596,12 +636,17 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     }
     if (alloc->zeroInit()) {
       global_buffers.buffers.push_back(
-          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, true));
+          inferAndAlloc(tv, alloc->shape(), expr_eval, {}, options_, true));
       global_buffers.zero_init.push_back(true);
     } else {
       global_buffers.buffers.push_back(
-          inferAndAlloc(tv, alloc->shape(), expr_eval, options_, false));
+          inferAndAlloc(tv, alloc->shape(), expr_eval, {}, options_, false));
       global_buffers.zero_init.push_back(false);
+    }
+    // Remember the tensor buffer used for storing kernel profile
+    if (isEnabled(EnableOption::KernelProfile) &&
+        tv == kernel->profile().getBuffer()) {
+      global_buffers.profile_buffer = global_buffers.buffers.back();
     }
   }
 
@@ -617,7 +662,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
-    // Dummy output.
+    // If the output is just trivially the input, just "copy" it over.
     if (kernel->outputs()[out_i]->isFusionInput()) {
       for (auto inp_i : c10::irange(kernel->inputs().size())) {
         if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
@@ -636,13 +681,14 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
           kernel->outputs()[out_i]->isA<TensorView>(),
           "Cannot allocate outputs that are not tensors.");
       auto output = kernel->outputs()[out_i]->as<TensorView>();
-      if (alias_indices.count(out_i) == 0) {
-        outputs.push_back(
-            inferAndAllocOutput(output, expr_eval, options_, false));
-      } else {
+      if (alias_indices.count(out_i) != 0) {
         // aliasing to inputs, no need to allocate real output
         outputs.push_back(
-            inferAndAlloc(output, {}, expr_eval, options_, false));
+            inferAndAlloc(output, {}, expr_eval, {}, options_, false));
+      } else {
+        // Allocate a real output
+        outputs.push_back(
+            inferAndAllocOutput(output, expr_eval, options_, false));
       }
     }
   }
@@ -858,7 +904,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         allocated_outputs[entry.first] = inputs[entry.second].toTensor();
       }
     } else {
-      // TODO: Update this as well;
+      // TODO: Update for aliasing, validate the outputs are the right sizes.
       executor_utils::validateKernelOutputs(
           fusion_, allocated_outputs, options_.device);
     }
@@ -1033,6 +1079,10 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       std::cout << "kernel" << fusion_id_ << " run in " << kernel_time_ms_
                 << " ms, achieved: " << gb_per_s << " GB/s" << std::endl;
     }
+  }
+
+  if (isEnabled(EnableOption::KernelProfile)) {
+    std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 
   return allocated_outputs;

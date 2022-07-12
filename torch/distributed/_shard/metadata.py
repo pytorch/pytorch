@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Union, Optional
 from functools import reduce
 
 from torch.distributed.remote_device import _remote_device
@@ -25,21 +25,20 @@ class ShardMetadata(object):
 
     shard_offsets: List[int]
     shard_sizes: List[int]
-    placement: Union[str, _remote_device]
+    placement: Optional[_remote_device]
 
-    def __hash__(self):
-        def _hash_reduce(a, b):
-            return (a << 8) + hash(b)
-
-        res = reduce(_hash_reduce, self.shard_offsets, 37)
-        res = reduce(_hash_reduce, self.shard_sizes, res)
-        res = _hash_reduce(res, self.placement)
-        return res
-
-    def __post_init__(self):
-        if isinstance(self.placement, str):
-            self.placement = _remote_device(self.placement)
-
+    def __init__(
+        self,
+        shard_offsets: List[int],
+        shard_sizes: List[int],
+        placement: Optional[Union[str, _remote_device]] = None
+    ):
+        self.shard_offsets = shard_offsets
+        self.shard_sizes = shard_sizes
+        if isinstance(placement, str):
+            self.placement = _remote_device(placement)
+        else:
+            self.placement = placement
         if len(self.shard_offsets) != len(self.shard_sizes):
             raise ValueError(
                 f'shard_offsets and shard_sizes should have '
@@ -51,3 +50,12 @@ class ShardMetadata(object):
                 raise ValueError('shard_offsets should be >=0')
             if self.shard_sizes[i] < 0:
                 raise ValueError('shard_sizes should be >= 0')
+
+    def __hash__(self):
+        def _hash_reduce(a, b):
+            return (a << 8) + hash(b)
+
+        res = reduce(_hash_reduce, self.shard_offsets, 37)
+        res = reduce(_hash_reduce, self.shard_sizes, res)
+        res = _hash_reduce(res, self.placement)
+        return res

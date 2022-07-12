@@ -519,3 +519,12 @@ template <typename T>
 bool isreal(std::complex<T> x) {
   return std::imag(x) == 0;
 }
+
+// Return the current value of the cycle counter
+__device__ inline int64_t readCycleCounter() {
+  // Ensures preceding memory operations are completed. Doing this
+  // would make sense for measuring elapsed times enclosed with this
+  // function.
+  __threadfence();
+  return clock64();
+}

@@ -4,7 +4,6 @@ import torch
 import numpy as np
 
 import math
-from itertools import product, chain
 from numbers import Number
 import random
 import unittest
@@ -73,54 +72,6 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_uf
 # See NumPy's universal function documentation
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
-
-
-def generate_numeric_tensors_hard(device, dtype, *, domain=(None, None), filter_=None):
-    is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-    if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
-        return ()
-
-    if dtype.is_floating_point:
-        if dtype is torch.float16:
-            # float16 has smaller range.
-            vals = _large_float16_vals
-        else:
-            vals = _large_float_vals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_large_float_vals, _large_float_vals),
-                product(_float_vals, _large_float_vals),
-                product(_large_float_vals, _float_vals),
-            )
-        )
-    else:
-        vals = _large_int_vals
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
-
-
-def generate_numeric_tensors_extremal(
-    device, dtype, *, domain=(None, None), filter_=None
-):
-    if not (dtype.is_floating_point or dtype.is_complex):
-        return ()
-
-    vals = []
-    if dtype.is_floating_point:
-        vals = _float_extremals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_float_extremals, _float_extremals),
-                product(_float_vals, _float_extremals),
-                product(_float_extremals, _float_vals),
-            )
-        )
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 # TODO: port test_unary_out_op_mem_overlap

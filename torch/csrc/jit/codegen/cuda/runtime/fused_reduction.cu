@@ -31,6 +31,10 @@ constexpr __device__ bool activeNotIter(int STATE) {
   return STATE != 3 && STATE != 1;
 }
 
+constexpr __device__ bool isReduceOrIter(int STATE) {
+  return isReduce(STATE) || isIter(STATE);
+}
+
 // When generating an index into the reduction, we have to stride by iteration
 // domains and reduction domains. Collapsed domains we can ignore, but we need
 // to make sure they never read or write (need to be predicated to correct
@@ -254,10 +258,13 @@ class ParallelReduce {
           index_utils::
               maskedSize<isIter(X_BLOCK), isIter(Y_BLOCK), isIter(Z_BLOCK)>(
                   gridDim) *
+          index_utils::
+              maskedSize<isIter(X_THREAD), isIter(Y_THREAD), isIter(Z_THREAD)>(
+                  blockDim) *
           grid_red_size;
       global_work_buffer += global_buffer_size;
     }
-    flip = ~flip;
+    flip = !flip;
 
     // How many grid reductions have to be performed, in the grid dimension
     const auto num_block_iters = index_utils::
@@ -446,9 +453,7 @@ class ParallelReduce {
         // need of an additional grid_sync. Since we flip back and forth between
         // sections of the buffer, the one grid sync protects the other part of
         // the buffer.
-
       } else {
-        // Forward protect the smem used in this reduction
         if (grid_reduce_participate) {
           if (last_block && has_block_result && block_reduce_participate &&
               write_pred) {
@@ -456,8 +461,48 @@ class ParallelReduce {
                 out, shared_buf, block_reduction_idx * block_reduction_size_2);
           }
         }
-        block_sync::sync();
       }
+      // Forward protect the smem used in this reduction
+      block_sync::sync();
+    }
+  }
+
+  template <typename Func, typename... Types>
+  __device__ __inline__ void reduce(
+      RefTuple<Types...> out,
+      const ConstRefTuple<Types...>& inp,
+      VolatilePtrTuple<Types...> global_work_buffer,
+      int64_t* global_sync_buffer, // Allocated as product of all
+                                   // non-participating Grid dimension
+      PtrTuple<Types...> shared_buf,
+      bool read_pred, // Prevent reading from out of bounds memory
+      bool write_pred, // Prevent from writing out of bounds
+      const LocalTuple<Types...>& init_val,
+      Func reduction_op,
+      int64_t& cycles,
+      int64_t& count) {
+    int64_t start_counter = 0;
+
+    if (isLastBlockInGrid() &&
+        index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+      start_counter = readCycleCounter();
+    }
+
+    reduce(
+        out,
+        inp,
+        global_work_buffer,
+        global_sync_buffer,
+        shared_buf,
+        read_pred,
+        write_pred,
+        init_val,
+        reduction_op);
+
+    if (isLastBlockInGrid() &&
+        index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+      cycles += readCycleCounter() - start_counter;
+      ++count;
     }
   }
 
@@ -587,11 +632,14 @@ class ParallelReduce {
           index_utils::
               maskedSize<isIter(X_BLOCK), isIter(Y_BLOCK), isIter(Z_BLOCK)>(
                   gridDim) *
+          index_utils::
+              maskedSize<isIter(X_THREAD), isIter(Y_THREAD), isIter(Z_THREAD)>(
+                  blockDim) *
           grid_red_size;
       global_work_buffer1 += global_buffer_size;
       global_work_buffer2 += global_buffer_size;
     }
-    flip = ~flip;
+    flip = !flip;
 
     // Per-block partial reduction to global work buffer
     {
@@ -610,6 +658,7 @@ class ParallelReduce {
           copyTuple(global_work_buffer1, work_buf_offset, block_result);
         }
       }
+      block_sync::sync();
     }
     {
       const auto block_result = reduceBlock(
@@ -681,7 +730,71 @@ class ParallelReduce {
         has_block_result);
   }
 
+  template <
+      typename Func1,
+      typename DataType1,
+      typename Func2,
+      typename DataType2>
+  __device__ __inline__ void reduceGroup(
+      RefTuple<DataType1> out1,
+      const ConstRefTuple<DataType1>& inp1,
+      VolatilePtrTuple<DataType1> global_work_buffer1,
+      const LocalTuple<DataType1>& init_val1,
+      Func1 reduction_op1,
+      RefTuple<DataType2> out2,
+      const ConstRefTuple<DataType2>& inp2,
+      VolatilePtrTuple<DataType2> global_work_buffer2,
+      const LocalTuple<DataType2>& init_val2,
+      Func2 reduction_op2,
+      int64_t* global_sync_buffer, // Allocated as product of all
+                                   // non-participating Grid dimension
+      void* shared_mem,
+      bool read_pred,
+      bool write_pred,
+      int64_t& cycles,
+      int64_t& count) {
+    int64_t start_counter = 0;
+
+    if (isLastBlockInGrid() &&
+        index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+      start_counter = readCycleCounter();
+    }
+
+    reduceGroup<Func1, DataType1, Func2, DataType2>(
+        out1,
+        inp1,
+        global_work_buffer1,
+        init_val1,
+        reduction_op1,
+        out2,
+        inp2,
+        global_work_buffer2,
+        init_val2,
+        reduction_op2,
+        global_sync_buffer,
+        shared_mem,
+        read_pred,
+        write_pred);
+
+    if (isLastBlockInGrid() &&
+        index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+      cycles += readCycleCounter() - start_counter;
+      ++count;
+    }
+  }
+
  private:
+  __device__ bool isLastBlockInGrid() {
+    return index_utils::maskedIsLast<
+               isReduceOrIter(X_BLOCK),
+               isReduceOrIter(Y_BLOCK),
+               isReduceOrIter(Z_BLOCK)>(blockIdx, gridDim) &&
+        index_utils::maskedIsZero<
+               !isReduceOrIter(X_BLOCK),
+               !isReduceOrIter(Y_BLOCK),
+               !isReduceOrIter(Z_BLOCK)>(blockIdx);
+  }
+
   // Almost exact copy of the initial block reduction part in the
   // reduce function, but only unary tuples are supported as there's
   // only one shared-memory buffer. As such, this can't be used with
@@ -978,9 +1091,7 @@ class ParallelReduce {
         // need of an additional grid_sync. Since we flip back and forth between
         // sections of the buffer, the one grid sync protects the other part of
         // the buffer.
-
       } else {
-        // Forward protect the smem used in this reduction
         if (grid_reduce_participate) {
           if (last_block && has_block_result && block_reduce_participate &&
               write_pred) {
@@ -988,8 +1099,9 @@ class ParallelReduce {
                 out, shared_buf, block_reduction_idx * block_reduction_size_2);
           }
         }
-        block_sync::sync();
       }
+      // Forward protect the smem used in this reduction
+      block_sync::sync();
     }
   }
 

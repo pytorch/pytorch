@@ -16,6 +16,31 @@ namespace {
 // Utility for mma dimension matching
 enum class MmaDimension { M = 0, N, K };
 
+// Utility for mma dimension matching before broadcast,
+//   assumes the innermost 2 dimensions are the mma
+//   operand dimensions, i.e. mnk.
+IterDomain* getMmaOperandRootDimension2d(
+    TensorView* tv,
+    MmaOptions options,
+    MmaDimension mma_dimension) {
+  TORCH_INTERNAL_ASSERT(tv->getMaybeRFactorDomain().size() >= 2);
+  // NT : K,M x K,N -> K,M,N
+  // TT : M,K X K,N -> M,K,N
+  // TN : M,K X N,K -> M,N,K
+  int axis_id = mma_dimension == MmaDimension::K ? 1 : 0;
+  bool is_transposed = isOperandTransposed(options);
+
+  // Decode the transpostion
+  if ((options.operand == MmaOptions::Operand::A && !is_transposed) ||
+      (options.operand == MmaOptions::Operand::B && is_transposed)) {
+    axis_id = 1 - axis_id;
+  }
+
+  int root_size = tv->getMaybeRFactorDomain().size();
+  // Convert to index from right.
+  return tv->getMaybeRFactorDomain().at(root_size + axis_id - 2);
+}
+
 // Utility for mma dimension matching, assumes the innermost
 //  3 dimensions are the mma operand dimensions, i.e. mnk, but
 // not necessarily in this order.
@@ -63,6 +88,23 @@ IterDomain* getMmaOperandRootDimension(
   if (isVolta(options.macro)) {
     return getMmaOperandRootDimension3d(
         tv, options.operand_layout, mma_dimension);
+  } else if (isTuring(options.macro) || isAmpere(options.macro)) {
+    // Volta mma swizzle requires the broadcast dimension to
+    //  participate, which is not true in Turing+. So the two
+    //  cases w/ or w/o the broadcast are supported here for
+    //  mma pre-swizzle validation.
+    bool has_broadcast_or_reduction = std::any_of(
+        tv->getMaybeRFactorDomain().begin(),
+        tv->getMaybeRFactorDomain().end(),
+        [](IterDomain* id) { return id->isBroadcast() || id->isReduction(); });
+    if (has_broadcast_or_reduction) {
+      TORCH_INTERNAL_ASSERT(tv->nDims() >= 3);
+      return getMmaOperandRootDimension3d(
+          tv, options.operand_layout, mma_dimension);
+    } else {
+      TORCH_INTERNAL_ASSERT(tv->nDims() >= 2);
+      return getMmaOperandRootDimension2d(tv, options, mma_dimension);
+    }
   }
   TORCH_INTERNAL_ASSERT(false, "unreachable");
   return nullptr;
@@ -144,7 +186,7 @@ void checkDimSize(
   ExpressionEvaluator const_eval(tv->fusion());
   for (auto axis_index : c10::irange(axis.size())) {
     TORCH_INTERNAL_ASSERT(
-        ((axis[axis_index] + tv->nDims()) >= 0) &&
+        ((axis[axis_index] + static_cast<int>(tv->nDims())) >= 0) &&
             (axis[axis_index] < (int)tv->nDims()),
         "CheckDimSize: axis position out of bound ",
         axis[axis_index],
@@ -177,6 +219,13 @@ void WarpMmaSwizzler::scheduleMmaWarpOutput(
         setWarpMapped(tv, 5);
       }
       break;
+    case MmaOptions::MacroType::Turing_16_8_16:
+    case MmaOptions::MacroType::Ampere_16_8_16:
+      scheduleTuringM16N8K16MmaWarpOutput(tv, options);
+      if (tv->definition()->isA<MmaOp>()) {
+        setWarpMapped(tv, 4);
+      }
+      break;
     default:
       TORCH_CHECK(
           false, "scheduleMmaWarp: unsupported mma option ", toString(macro));
@@ -191,6 +240,10 @@ void WarpMmaSwizzler::scheduleOperandRead(TensorView* tv, MmaOptions options) {
   switch (options.macro) {
     case MmaOptions::MacroType::Volta_16_16_4:
       scheduleVoltaOperandRead(tv, options);
+      break;
+    case MmaOptions::MacroType::Turing_16_8_16:
+    case MmaOptions::MacroType::Ampere_16_8_16:
+      scheduleTuringOperandRead(tv, options);
       break;
     default:
       TORCH_CHECK(false, "WarpMmaSwizzler: please specify macro");
@@ -209,27 +262,78 @@ namespace {
 // Utility to check operand innermost scheduled dimensions
 void validateInnerMNK(TensorView* tv, MmaOptions options, int m, int n, int k) {
   TORCH_INTERNAL_ASSERT(tv->nDims() >= 3);
-  TORCH_INTERNAL_ASSERT(canValidateIsInnerDim(
-      getMmaOperandRootDimension(tv, options, MmaDimension::M),
-      tv->axis(-3),
-      m));
-  TORCH_INTERNAL_ASSERT(canValidateIsInnerDim(
-      getMmaOperandRootDimension(tv, options, MmaDimension::N),
-      tv->axis(-2),
-      n));
-  TORCH_INTERNAL_ASSERT(canValidateIsInnerDim(
-      getMmaOperandRootDimension(tv, options, MmaDimension::K),
-      tv->axis(-1),
-      k));
+  TORCH_INTERNAL_ASSERT(
+      canValidateIsInnerDim(
+          getMmaOperandRootDimension(tv, options, MmaDimension::M),
+          tv->axis(-3),
+          m),
+      "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+  TORCH_INTERNAL_ASSERT(
+      canValidateIsInnerDim(
+          getMmaOperandRootDimension(tv, options, MmaDimension::N),
+          tv->axis(-2),
+          n),
+      "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+  TORCH_INTERNAL_ASSERT(
+      canValidateIsInnerDim(
+          getMmaOperandRootDimension(tv, options, MmaDimension::K),
+          tv->axis(-1),
+          k),
+      "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
 }
 
 void validateResultInnerMN(TensorView* tv, int m, int n) {
   TORCH_INTERNAL_ASSERT(tv->nDims() >= 2);
   int root_dim = tv->getMaybeRFactorDomain().size();
-  TORCH_INTERNAL_ASSERT(canValidateIsInnerDim(
-      tv->getMaybeRFactorDomain()[root_dim - 2], tv->axis(-2), m));
-  TORCH_INTERNAL_ASSERT(canValidateIsInnerDim(
-      tv->getMaybeRFactorDomain()[root_dim - 1], tv->axis(-1), n));
+  TORCH_INTERNAL_ASSERT(
+      canValidateIsInnerDim(
+          tv->getMaybeRFactorDomain()[root_dim - 2], tv->axis(-2), m),
+      "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+  TORCH_INTERNAL_ASSERT(
+      canValidateIsInnerDim(
+          tv->getMaybeRFactorDomain()[root_dim - 1], tv->axis(-1), n),
+      "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+}
+
+//! Performs checks on tv given to schedule ld matrix.
+//!  Currently only allowed ones are either:
+//!    1. direct output of an ldmatrix op  or
+//!    2. direct output of a broadcast op following a ldmatrix op
+//!  Returns true if the tv is an immediate output of ldmatrix op
+//!
+//! TODO: this check is a WAR with pattern matching for now.
+//!  The two patterns mentioned above are the only supported use
+//!    cases of ldmatrix currently. This restriction can be greatly
+//!    relaxed after the iterdomain swizzle infrastructure, which
+//!    will provide the capability to directly model the exact
+//!    data format of ldmatrix output.
+bool checkLdMatrixTv(TensorView* tv) {
+  // First check if tv is an ldmatrix output:
+  auto tv_def = tv->definition();
+  TORCH_CHECK(tv_def != nullptr, "ldmatrix : invalid tv");
+  bool is_immediate_output = true;
+  if (!ir_utils::isLdMatrixOp(tv_def)) {
+    // Only allow one broadcast in between tv and the ldmatrix op
+    TORCH_CHECK(
+        tv_def->isA<BroadcastOp>(),
+        "ldmatrix: only allow serial broadcast between ldmatrix and mma");
+    tv_def = tv_def->input(0)->definition();
+    TORCH_CHECK(tv_def != nullptr, "ldmatrix : invalid tv");
+    is_immediate_output = false;
+  }
+  TORCH_CHECK(ir_utils::isLdMatrixOp(tv_def), "ldmatrix : invalid op type");
+  TORCH_CHECK(
+      tv->nDims() > 2,
+      "ldmatrix: scheduled tv needs to be more than 2 dimensional");
+  TORCH_CHECK(
+      !tv->axis(-1)->isBroadcast(), "ldmatrix: unsupported scheduled axes");
+  TORCH_CHECK(
+      !tv->axis(-1)->isReduction(), "ldmatrix: unsupported scheduled axes");
+  TORCH_CHECK(
+      !tv->axis(-2)->isBroadcast(), "ldmatrix: unsupported scheduled axes");
+  TORCH_CHECK(
+      !tv->axis(-2)->isReduction(), "ldmatrix: unsupported scheduled axes");
+  return is_immediate_output;
 }
 
 void scheduleVoltaA(TensorView* tv, MmaOptions options) {
@@ -300,6 +404,110 @@ void scheduleVoltaB(TensorView* tv, MmaOptions options) {
 
   //[Moo, Mi8, Warp, K/Nii4]
   tv->axis(-2)->parallelize(ParallelType::TIDx);
+}
+
+void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
+  // Check if tv should use ldmatrix layout and
+  //   if tv is immediate output of ldmatrix
+  bool is_immediate_output = checkLdMatrixTv(tv);
+
+  // Decode transposition requirement for turing mma
+  bool transposed = options.operand == MmaOptions::Operand::A
+      ? !isOperandTransposed(options)
+      : isOperandTransposed(options);
+  // Check mma option is supported
+  TORCH_CHECK(
+      options.macro == MmaOptions::MacroType::Ampere_16_8_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_8_16,
+      "scheduleLdMatrix: unknown macro for ldmatrix");
+
+  if (options.operand == MmaOptions::Operand::A) {
+    TORCH_INTERNAL_ASSERT(tv->nDims() >= 2);
+    // validation:
+    TORCH_INTERNAL_ASSERT(
+        canValidateIsInnerDim(
+            getMmaOperandRootDimension(tv, options, MmaDimension::M),
+            tv->axis(-2),
+            16),
+        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+    TORCH_INTERNAL_ASSERT(
+        canValidateIsInnerDim(
+            getMmaOperandRootDimension(tv, options, MmaDimension::K),
+            tv->axis(-1),
+            16),
+        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+
+    //[16m, 16k]
+    tv->split(-2, 8);
+    tv->split(-1, 8);
+
+    // -4  -3  -2  -1
+    //[2o, 8o, 2i, 8i]
+    tv->reorder({{-4, -3}, {-3, -2}, {-2, -4}});
+
+    //  -4  -3 -2  -1
+    // [2i, 2o, 8o, 8i]
+
+    if (transposed) {
+      tv->reorder({{-1, -2}, {-2, -1}});
+    }
+
+    tv->merge(-4);
+    tv->merge(-3);
+    // [warp, 8i/o]
+
+    tv->axis(-2)->parallelize(ParallelType::TIDx);
+  } else if (options.operand == MmaOptions::Operand::B) {
+    // validation:
+    TORCH_INTERNAL_ASSERT(
+        canValidateIsInnerDim(
+            getMmaOperandRootDimension(tv, options, MmaDimension::N),
+            tv->axis(-2),
+            8),
+        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+    TORCH_INTERNAL_ASSERT(
+        canValidateIsInnerDim(
+            getMmaOperandRootDimension(tv, options, MmaDimension::K),
+            tv->axis(-1),
+            16),
+        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+
+    if (transposed) {
+      // [8, 16]
+      tv->split(-2, 4);
+
+      // [2i, 4i, 16]
+      tv->reorder({{-1, -2}, {-2, -1}});
+      // [2i, 16, 4i]
+
+      tv->merge(-3);
+      // [warp, 4i]
+    } else {
+      //[8, 16]
+      tv->split(-1, 4);
+      tv->split(-2, 2);
+
+      // 0  1   2   3
+      //[8, oo2,oi2,i4]
+      tv->reorder({{-4, -2}, {-2, -4}});
+
+      // 0     1   2  3
+      //[oi2, oo2, 8,i4]
+
+      tv->merge(-4);
+      tv->merge(-3);
+      //  0    1
+      //[warp, i4]
+    }
+
+    tv->axis(-2)->parallelize(ParallelType::TIDx);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unreachable");
+  }
+
+  if (is_immediate_output) {
+    tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
 }
 
 } // namespace
@@ -377,6 +585,52 @@ void WarpMmaSwizzler::scheduleVoltaM16N16K4Fp32Output(
       tv->axis(-pos - 1)->toMmaSwizzled();
     }
   }
+}
+
+void WarpMmaSwizzler::scheduleTuringOperandRead(
+    TensorView* tv,
+    MmaOptions options) {
+  scheduleLdMatrix(tv, options);
+  setWarpMapped(tv, 2);
+}
+
+void WarpMmaSwizzler::scheduleTuringM16N8K16MmaWarpOutput(
+    TensorView* tv,
+    const MmaOptions& options) {
+  // Assume last 2 dims [M16, N8] or [M16, N8, R]
+  // Locate instruction m
+  bool is_reduction = tv->axis(-1)->isReduction();
+
+  // Make sure instruction tile size is correct.
+  if (is_reduction) {
+    validateInnerMNK(tv, options, 16, 8, 16);
+  } else {
+    validateResultInnerMN(tv, 16, 8);
+  }
+
+  int m_pos = is_reduction ? -3 : -2;
+
+  //  m
+  // [16, 8  (,R)]
+  tv->split(m_pos, 8);
+  tv->split(m_pos + 1, 2);
+
+  //          m
+  // [2o, 8o, 4i, 2i (,R)]
+  tv->merge(m_pos - 1);
+
+  //       m
+  // [2o, Warp, 2i (,R)]
+  TORCH_CHECK(tv->definition() != nullptr);
+
+  if (is_reduction && tv->definition()->isA<MmaOp>()) {
+    // Set instruction loops for mma reduce
+    for (int pos : c10::irange(4)) {
+      tv->axis(-pos - 1)->parallelize(ParallelType::Mma);
+    }
+  }
+
+  tv->axis(m_pos)->parallelize(ParallelType::TIDx);
 }
 
 namespace {

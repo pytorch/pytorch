@@ -204,6 +204,17 @@ Tensor empty_sparse(
       size.size(), 0, size, dtype, layout, device, pin_memory);
 }
 
+/** Empty init **/
+Tensor empty_symint_sparse(
+    c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<MemoryFormat> optional_memory_format) {
+      return at::native::empty_sparse(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 /* Shape init */
 Tensor sparse_coo_tensor(IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -632,8 +643,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, values.scalar_type(),
-                                         "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -646,7 +658,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
               blockSize,
-              1,
+              static_cast<scalar_t>(1),
               values_ptr + pos * blockSize,
               1,
               newValues_ptr + i * blockSize,

@@ -54,6 +54,7 @@ class TensorIndex;
 class Allocate;
 class BlockSync;
 class GridSync;
+class CpAsyncWait;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -254,6 +255,14 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
  private:
   // TODO: war_sync_ is only used for testing/validation purposes.
   bool war_sync_ = false;
+};
+
+// CpAsyncWait represents wait intrinsics for cp.async
+// TODO: expand to support different wait modes of the intrinsic
+//  as the analysis passes build out.
+class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
+ public:
+  explicit CpAsyncWait(IrBuilderPasskey passkey);
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
@@ -515,7 +524,7 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
       Allocate* sync_buffer,
       Val* entrance_index,
       Val* entrances,
-      bool is_fused = false);
+      bool is_allreduce = false);
 
   Allocate* reduction_buffer() const {
     return reduction_buffer_;
@@ -564,6 +573,8 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       std::vector<Val*> in,
       std::vector<Allocate*> reduction_buffers,
       Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances,
       bool is_allreduce = false);
 
   const std::vector<Allocate*>& reduction_buffers() const {
@@ -576,6 +587,16 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
 
   Allocate* sync_buffer() const {
     return sync_buffer_;
+  }
+
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
   }
 
   const ParallelTypeBitmap& threadPredicate() const {
@@ -593,6 +614,8 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
   ParallelTypeBitmap thread_predicate_;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
 };
 
 //! Grid broadcast operation

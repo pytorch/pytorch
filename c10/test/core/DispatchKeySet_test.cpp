@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <iterator>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
@@ -14,7 +16,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // It corresponds to "dense" functionality, "CPU" backend.
   // This means that it gets a dense functionality bit, and a cpu backend bit
   // set.
-  auto undefined_set = DispatchKeySet();
   auto dense_cpu_set = DispatchKeySet(DispatchKey::CPU);
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::Dense));
   ASSERT_TRUE(dense_cpu_set.has_backend(BackendComponent::CPUBit));
@@ -48,8 +49,6 @@ TEST(DispatchKeySet, ShowSemantics) {
        DispatchKey::Dense,
        DispatchKey::CUDA,
        DispatchKey::CPU});
-  auto fpga = DispatchKeySet(DispatchKey::FPGA);
-  auto fpga_and_cpu = DispatchKeySet({DispatchKey::FPGA, DispatchKey::CPU});
   // this keyset has all of the building block keys:
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradFunctionality));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::Dense));
@@ -86,8 +85,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // Iterators allow you to iterate individually through the DispatchKey's in a
   // DispatchKeySet
   auto empty_set = DispatchKeySet();
-  auto t1 = empty_set.begin();
-  auto t2 = empty_set.end();
   ASSERT_EQ(*empty_set.begin(), *empty_set.end());
 
   // However, only keys that correspond to actual runtime indices of kernels in
@@ -370,29 +367,12 @@ TEST(DispatchKeySet, IteratorCrossProduct) {
 
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (const auto& it : full_set) {
-    i++;
-  }
-  // Total # of runtime entries includes an entry for DispatchKey::Undefined,
-  // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
-}
-
-TEST(DispatchKeySet, IteratorRangeFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (DispatchKey dispatch_key : full_set) {
-    i++;
-  }
+  std::ptrdiff_t count = std::distance(full_set.begin(), full_set.end());
 
   // Total # of runtime entries includes an entry for DispatchKey::Undefined,
   // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
+  ASSERT_EQ(count, std::ptrdiff_t{num_runtime_entries} - 1);
 }
-
 TEST(DispatchKeySet, FailAtEndIterator) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint64_t raw_repr = full_set.raw_repr();

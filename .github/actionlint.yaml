@@ -13,3 +13,4 @@ self-hosted-runner:
     - bm-runner
     - linux.rocm.gpu
     - macos-12
+    - macos12.3-m1

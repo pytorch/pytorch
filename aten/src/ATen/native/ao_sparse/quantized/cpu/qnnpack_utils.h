@@ -4,10 +4,10 @@
 #include <c10/core/QScheme.h>
 
 #ifdef USE_PYTORCH_QNNPACK
-// TODO: Refacto qnnpack_utils.h so as to separate code
+// TODO: Refacto QnnpackUtils.h so as to separate code
 // needed for quantized op from the generic qnnpack specific
 // quantization utilities.
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <pack_block_sparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 

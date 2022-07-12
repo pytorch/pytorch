@@ -16,7 +16,7 @@ namespace lazy {
 
 class TORCH_API Computation {
  public:
-  virtual int parameters_size() const  = 0;
+  virtual int parameters_size() const = 0;
 
   virtual const std::vector<Shape>& parameter_shapes() const = 0;
 
@@ -39,26 +39,31 @@ using ComputationPtr = std::shared_ptr<Computation>;
 class TORCH_API LoweringContext {
  public:
   LoweringContext(const std::string& name, BackendDevice device);
-  LoweringContext(const std::string& name, BackendDevice device,
-                  c10::ArrayRef<torch::lazy::Node*> post_order,
-                  Util::EmissionMap emit_status);
+  LoweringContext(
+      const std::string& name,
+      BackendDevice device,
+      c10::ArrayRef<torch::lazy::Node*> post_order,
+      Util::EmissionMap emit_status);
 
   virtual ~LoweringContext() = default;
 
   static std::unique_ptr<LoweringContext> Create(
-      const std::string& name, BackendDevice device,
+      const std::string& name,
+      BackendDevice device,
       c10::ArrayRef<torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status);
 
-  static std::unique_ptr<LoweringContext> Create(const std::string& name,
-                                                 BackendDevice device);
+  static std::unique_ptr<LoweringContext> Create(
+      const std::string& name,
+      BackendDevice device);
 
-  const BackendDevice& device() const { return device_; };
+  const BackendDevice& device() const {
+    return device_;
+  };
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
-  const std::vector<BackendDataPtr>&
-  GetParametersData() const;
+  const std::vector<BackendDataPtr>& GetParametersData() const;
 
   // Adds a new input/output alias.
   virtual void SetUpAlias(
@@ -84,15 +89,19 @@ class TORCH_API LoweringContext {
   // Associates the given output with the input parameter of the given index and
   // shape. Only used for the operator-by-operator execution, mostly for
   // debugging purposes.
-  virtual void AddParameter(const torch::lazy::Output& output, size_t index,
-                            const Shape& shape,
-                            const std::string& name) = 0;
+  virtual void AddParameter(
+      const torch::lazy::Output& output,
+      size_t index,
+      const Shape& shape,
+      const std::string& name) = 0;
 
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
   virtual ComputationPtr Build() = 0;
 
-  size_t GetEmittedNodeCount() const { return emit_status_.size(); }
+  size_t GetEmittedNodeCount() const {
+    return emit_status_.size();
+  }
 
  protected:
   BackendDevice device_;
@@ -101,5 +110,5 @@ class TORCH_API LoweringContext {
   Util::EmissionMap emit_status_;
 };
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

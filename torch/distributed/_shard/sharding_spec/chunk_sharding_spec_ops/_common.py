@@ -186,8 +186,8 @@ def _result_distribute_with_col_rearrange(
     sharding_dim_size = weight.size(sharding_dim)
     dims = list(results[0].size())
     dims[0] = sharding_dim_size
-    output = torch.empty(*dims, device=input.device)
     combined_results = torch.cat(results)
+    output = torch.empty(*dims, device=combined_results.device, dtype=combined_results.dtype)
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)

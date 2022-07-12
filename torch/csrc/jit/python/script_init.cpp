@@ -59,6 +59,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -1899,9 +1900,30 @@ void initJitScriptBindings(PyObject* module) {
     return _get_model_bytecode_version(filename);
   });
   m.def(
+      "_get_model_extra_files",
+      [](const std::string& filename, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        _load_for_mobile(filename, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
+      });
+  m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def(
+      "_get_model_extra_files_from_buffer",
+      [](const std::string& buffer, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        std::istringstream in(buffer);
+        _load_for_mobile(in, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
       });
   m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
     return _get_mobile_model_contained_types(filename);
@@ -2272,6 +2294,14 @@ void initJitScriptBindings(PyObject* module) {
         return "invalid";
     }
   });
+
+  m.def(
+      "_save_parameters",
+      [](const std::map<std::string, at::Tensor>& map,
+         const std::string& filename,
+         bool use_flatbuffer = false) {
+        _save_parameters(map, filename, use_flatbuffer);
+      });
 
   initScriptDictBindings(module);
   initScriptListBindings(module);

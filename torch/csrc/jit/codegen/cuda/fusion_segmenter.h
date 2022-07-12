@@ -253,6 +253,13 @@ class TORCH_CUDA_CU_API SegmentedFusion {
  public:
   explicit SegmentedFusion(std::unique_ptr<Fusion> fusion);
 
+  //! Factory function for the un-segmented case, directly
+  //!  constructs a "SegmentedFusion", with the given Fusion
+  //!  as the only group.
+  static std::unique_ptr<SegmentedFusion> fromCompleteFusion(
+      std::unique_ptr<Fusion> fusion,
+      ScheduleHeuristic heuristic);
+
   //! Is the fusion segmented?
   bool isSegmented() const {
     return !groups_.empty();

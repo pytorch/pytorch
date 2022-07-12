@@ -1,3 +1,5 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
 
@@ -10,8 +12,6 @@ from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# This file exports ONNX ops for opset 11
 
 
 @symbolic_helper.parse_args("v", "f", "f")
@@ -257,7 +257,16 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
+upsample_nearest1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_linear1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bilinear2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_trilinear3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bicubic2d.__module__ = "torch.onnx.symbolic_opset11"
 
+
+@symbolic_helper.quantized_args(True, False, False, False, False, False, False)
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -415,6 +424,7 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
@@ -1052,12 +1062,15 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = 0
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim
@@ -1079,7 +1092,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
