@@ -24,6 +24,10 @@
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
 
+#ifdef USE_C10D_UCC
+#include <c10d/ProcessGroupUCC.hpp>
+#endif
+
 #include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
@@ -1555,6 +1559,25 @@ Example::
         return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
       },
       py::call_guard<py::gil_scoped_release>());
+#endif
+
+#ifdef USE_C10D_UCC
+  auto processGroupUCC =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupUCC>(
+          module, "ProcessGroupUCC", processGroup)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const std::chrono::milliseconds& timeout) {
+                return c10::make_intrusive<::c10d::ProcessGroupUCC>(
+                    store, rank, size, timeout);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
   py::class_<
