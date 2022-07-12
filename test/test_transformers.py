@@ -14,6 +14,21 @@ class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @parametrize("use_cuda", [True, False])
+    def test_transformerencoderlayer_src_mask(use_cuda=False):
+        if use_cuda and TEST_CUDA:
+            device = "cuda"
+        else:
+            device = "cpu"
+
+        model = torch.nn.TransformerEncoderLayer(d_model=8, nhead=8, batch_first=True).to(device)
+        src = torch.rand(2, 4, 8).to(device) # bs, seqlen, d_model
+        src_mask = torch.zeros(4, 4).to(torch.bool).to(device)
+
+        model.eval()
+        with torch.no_grad():
+            model(src, src_mask=src_mask)
+
     @parametrize("use_torchscript", [True, False])
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
