@@ -269,7 +269,7 @@ class TestParamInit(FSDPTest):
         mixed_precision = MixedPrecision() if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(
-            group, mixed_precision=mixed_precision, cuda_first=False
+            group, config=config, cuda_first=False
         )
         model.eval()  # no dropout for this test
         input = model.module.get_input(torch.device("cuda"))
@@ -331,7 +331,7 @@ class TestHooks(FSDPTest):
         mixed_precision = MixedPrecision() if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(
-            group, mixed_precision=mixed_precision, cuda_first=cuda_first
+            group, config=config, cuda_first=cuda_first
         )
         input = model.module.get_input(torch.device("cuda"))
         model._register_post_backward_hooks = mock.MagicMock(return_value=None)
