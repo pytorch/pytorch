@@ -1339,6 +1339,10 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
+          // Writting an empty file is a noop
+          if (size == 0) {
+            return size;
+          }
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));
@@ -1549,10 +1553,15 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func = py::cpp_function(
-                  [op, symbol](py::args args, py::kwargs kwargs) {
+              auto func =
+                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
+                                       py::args args, py::kwargs kwargs) {
+                    ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
                   });
@@ -1588,8 +1597,14 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+
           auto func = py::cpp_function(
-              [operations, symbol](py::args args, py::kwargs kwargs) {
+              [operations, symbol, allow_numbers_as_tensors](
+                  py::args args, py::kwargs kwargs) {
+                ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
                     operations, symbol, args, kwargs, false);
               },

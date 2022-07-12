@@ -1584,7 +1584,7 @@ def define_buck_targets(
         header_namespace = "",
         exported_headers = [],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else [],
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = [
@@ -1807,7 +1807,7 @@ def define_buck_targets(
         header_namespace = "",
         exported_headers = ["fb/supported_mobile_models/SupportedMobileModels.h"] if NOT_OSS else [],
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
-        exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else [],
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = [
@@ -1925,8 +1925,9 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/serialization/*.h"),
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
-                ("third_party/miniz-2.0.8", "*.h") if NOT_OSS else ("third-party/miniz-2.0.8", "*.h"),
-            ],
+            ] + ([
+                ("third_party/miniz-2.1.0", "*.h"),
+            ] if NOT_OSS else []),
             exclude = [
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
@@ -2017,6 +2018,7 @@ def define_buck_targets(
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
+            "aten/src/ATen/core/function_schema.cpp",
             "aten/src/ATen/core/operator_name.cpp",
             "aten/src/ATen/core/register_symbols.cpp",
             "aten/src/ATen/core/tensor_type.cpp",
