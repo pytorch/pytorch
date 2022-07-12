@@ -60,6 +60,13 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
+#if PY_VERSION_HEX >= 0x030a00f0
+  // In Python-3.10 floats can no longer be silently converted to integers
+  // Keep backward compatible behavior for now
+  if (PyFloat_Check(obj)) {
+    return static_cast<int64_t>(PyFloat_AS_DOUBLE(obj));
+  }
+#endif
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int overflow;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
