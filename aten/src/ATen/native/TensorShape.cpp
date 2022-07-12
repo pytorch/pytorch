@@ -847,6 +847,11 @@ Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool i
   return expand(self, size, implicit);
 }
 
+Tensor view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  auto size_ = asIntArrayRefSlow(size);
+  return self.view(size_);
+}
+
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,

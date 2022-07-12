@@ -138,10 +138,12 @@ Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tenso
 }
 
 Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, bool implicit) {
+    // TODO: to actually work with functionalization, this should call sum_to.symint
     return at::sum_to(mutated_view, base.sizes(),/*always_return_non_view=*/!reapply_views);
 }
 
 Tensor FunctionalInverses::expand_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, bool implicit) {
+    // TODO: to actually work with functionalization, this should call sum_to.symint
     return at::sum_to(mutated_view, c10::asIntArrayRefSlow(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
 }
 
@@ -292,6 +294,13 @@ Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& m
       return mutated_view.view(base.sizes());
     } else {
       return at::view_copy(mutated_view, base.sizes());
+    }
+}
+at::Tensor FunctionalInverses::view_copy_SymInt_inverse(const at::Tensor & base, const at::Tensor & mutated_view, bool reapply_views, c10::SymIntArrayRef size) {
+    if (reapply_views) {
+      return mutated_view.view_symint(base.sym_sizes());
+    } else {
+      return at::view_copy_symint(mutated_view, base.sym_sizes());
     }
 }
 

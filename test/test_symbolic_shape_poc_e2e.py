@@ -26,23 +26,45 @@ def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
     return a.new_empty(tuple(shape))
 
 
+# Do we need to re-implement *every* meta function in python??
 @register_meta([aten.expand.SymInt])
 def expand_symint_meta(a, size, implicit=False):
-    return a.new_empty(size)
+    # new_empty breaks - not sure why.
+    return torch.empty(tuple(size))
+
+@register_meta([aten.expand_copy.SymInt])
+def expand_copy_symint_meta(a, size, implicit=False):
+    return torch.empty(tuple(size))
+
+@register_meta([aten.view.SymInt])
+def view_symint_meta(a, size):
+    return torch.empty(tuple(size))
+
+@register_meta([aten.view_copy.SymInt])
+def view_copy_symint_meta(a, size):
+    return torch.empty(tuple(size))
+
+@register_meta([aten.mul_.Tensor])
+def mul__meta(x, y):
+    return x
 
 
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
+from functorch.experimental import functionalize
+
 def f(x, y):
     val = torch.mul(x, y)
+    val_view = val.view(val.shape)
+    val_view.mul_(x)
     out = torch.cat([val, val])
     if out.shape[0] * out.shape[1] > 20:
         out = out.cos()
     return out.expand(out.shape)
 
-fx_g = make_fx(f)(torch.randn(5, 1), torch.randn(1, 5))
+fx_g = make_fx(functionalize(f, remove='mutations_and_views'))(torch.randn(5, 1), torch.randn(1, 5))
 fx_g.graph.eliminate_dead_code()
 fx_g.recompile()
 print(fx_g.code)
