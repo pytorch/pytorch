@@ -14,6 +14,7 @@
 #else
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
@@ -188,7 +189,8 @@ at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
 
 at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
-  return at::functionalization::impl::to_functional_tensor(self.clone());
+  at::AutoDispatchSkipFunctionalize guard;
+  return at::functionalization::impl::to_functional_tensor(at::lift_fresh_copy(self));
 }
 
 bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
