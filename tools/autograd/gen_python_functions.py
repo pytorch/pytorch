@@ -156,6 +156,7 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
     "lift",
+    "normal_functional",  # only used by the functionalization pas
 ]
 
 SKIP_PYTHON_BINDINGS = list(
