@@ -652,9 +652,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
-        [](Stack& stack) {
-          push(stack, at::autocast::is_enabled());
-        },
+        [](Stack& stack) { push(stack, at::autocast::is_enabled()); },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
