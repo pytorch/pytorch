@@ -320,7 +320,13 @@ TensorTypePtr TensorType::create(
 }
 
 std::string TensorType::str() const {
-  return "Tensor";
+  std::string s = "Tensor";
+  if (scalar_type_.has_value()) {
+    s.append("<");
+    s.append(toString(scalar_type_.value()));
+    s.append(">");
+  }
+  return s;
 }
 
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
