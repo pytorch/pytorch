@@ -228,7 +228,9 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_device_tensor_from_numpy, (numpy_tensor,
                                                                      self.dtype,
                                                                      str(self.device),
-                                                                     self.requires_grad))
+                                                                     self.requires_grad,
+                                                                     self.grad
+                                                                     ))
         if self.device.type == 'meta':
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
@@ -267,6 +269,7 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 quantizer_params,
                 self.requires_grad,
+                self.grad,
                 backward_hooks)
             return (torch._utils._rebuild_qtensor, args_qtensor)
         elif self.is_sparse:
@@ -313,6 +316,7 @@ class Tensor(torch._C._TensorBase):
                 tuple(self.size()),
                 self.stride(),
                 self.requires_grad,
+                self.grad,
                 backward_hooks)  # previously was self._backward_hooks
             return (torch._utils._rebuild_tensor_v2, args)
 

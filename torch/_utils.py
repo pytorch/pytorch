@@ -141,9 +141,10 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     return t.set_(storage._untyped(), storage_offset, size, stride)
 
 
-def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
+def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, grad, backward_hooks):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    tensor.grad = grad
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
@@ -207,9 +208,10 @@ def _rebuild_sparse_csr_tensor(layout, data):
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 
-def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
+def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad, grad):
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
+    tensor.grad = grad
     return tensor
 
 
@@ -229,7 +231,7 @@ def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
 # be a _TypedStorage
-def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
+def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
@@ -249,6 +251,7 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    tensor.grad = grad
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
