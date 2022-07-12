@@ -4,10 +4,17 @@
 
 // cuSparse Generic API added in CUDA 10.1
 // Windows support added in CUDA 11.0
-#if defined(USE_ROCM) || (defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && ((CUSPARSE_VERSION >= 10300) || (CUSPARSE_VERSION >= 11000 && defined(_WIN32))))
+#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && ((CUSPARSE_VERSION >= 10300) || (CUSPARSE_VERSION >= 11000 && defined(_WIN32)))
 #define AT_USE_CUSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_CUSPARSE_GENERIC_API() 0
+#endif
+
+// hipSparse Generic API
+#if defined(USE_ROCM) && ROCM_VERSION >= 50100
+#define AT_USE_HIPSPARSE_GENERIC_API() 1
+#else
+#define AT_USE_HIPSPARSE_GENERIC_API() 0
 #endif
 
 // cuSparse Generic API spsv function was added in CUDA 11.3.0

@@ -95,7 +95,7 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
 
 #endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
@@ -207,7 +207,7 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 };
 #endif
 
-#endif // AT_USE_CUSPARSE_GENERIC_API()
+#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace sparse
 } // namespace cuda

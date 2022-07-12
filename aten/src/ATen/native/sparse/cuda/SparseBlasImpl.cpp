@@ -562,7 +562,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_USE_CUSPARSE_GENERIC_API() || defined(USE_ROCM)
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
@@ -663,7 +663,7 @@ void spmm(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif // !AT_USE_CUSPARSE_GENERIC_API()
+#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 void spgemm(
@@ -862,7 +862,7 @@ void addmv_out_sparse_csr(
   if (mat.layout() == kSparseBsr) {
     return block_sparse_mv(mat, vec, beta, alpha, result);
   }
-#if !AT_USE_CUSPARSE_GENERIC_API()
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   TORCH_CHECK(
       false,
       "Calling addmv on a sparse GPU tensor requires compiling ",
@@ -936,7 +936,7 @@ void addmv_out_sparse_csr(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif
+#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 /*
