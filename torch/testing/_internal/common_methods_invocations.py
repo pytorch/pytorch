@@ -12417,17 +12417,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("The backward may give different results"), 'TestCommon', 'test_noncontiguous_samples'),
                # Both Hessians are incorrect on complex inputs??
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.complex128,)),
-               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
-               # dtypes are tested in the suite above, no need to repeat it for singulaDor
-               # ALSO, it produced a CUDA context failure of the form
-               # aten/src/ATen/native/cuda/ScatterGatherKernel.cu:367: operator():
-               # block: [0,0,0], thread: [1,0,0] Assertion `idx_dim >= 0 && idx_dim < index_size
-               # && "index out of bounds"` failed.
-               # in CI with CUDA 10.2 (I don't know if the CUDA version is relevant). See
-               # https://github.com/pytorch/pytorch/runs/7300117715?check_suite_focus=true
-               # After SSHing into the job, I have not been able to reproduce this (!!)
-               # As such, skipping for now.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type="cuda"),)),
+               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),)),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
@@ -18868,9 +18858,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
@@ -18911,9 +18898,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
             DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
                          dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
@@ -19096,9 +19080,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
             # FIXME: "_segment_reduce_lengths_cpu/cuda" not implemented for ... (used for sparse_csr inputs)
             DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout',
                          dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
@@ -19149,9 +19130,6 @@ op_db: List[OpInfo] = [
             # can't take variable number of arguments or use
             # keyword-only arguments with defaults
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -19179,9 +19157,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
@@ -19220,9 +19195,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                          dtypes=(torch.float16,)),
         ),
@@ -19249,9 +19221,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
@@ -19267,9 +19236,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
@@ -19289,9 +19255,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # see https://github.com/pytorch/pytorch/issues/76227
-            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                         device_type='cpu'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,

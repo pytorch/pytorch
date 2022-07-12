@@ -2,13 +2,12 @@
 
 import copy
 import io
+import unittest
 
 import onnx
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
-from test_pytorch_common import (
-    TestCase,
-    run_tests,
+from pytorch_test_common import (
     skipIfNoCuda,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
@@ -32,9 +31,10 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
+from torch.testing._internal import common_utils
 
 
-class _BaseTestCase(TestCase):
+class _BaseTestCase(common_utils.TestCase):
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
@@ -1085,6 +1085,33 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[0].op_type, "Gelu")
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
+    @unittest.skip("It started failing after #80074")
+    def test_custom_opsets_inverse(self):
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def inverse(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(self.type())
+
+        register_custom_op_symbolic("::inverse", inverse, 1)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertEqual(graph.graph.node[0].op_type, "Inverse")
+        self.assertEqual(graph.opset_import[0].version, self.opset_version)
+        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
+        self.assertEqual(graph.opset_import[1].version, 1)
+
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
         class Module(torch.nn.Module):
@@ -1650,4 +1677,4 @@ class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()
