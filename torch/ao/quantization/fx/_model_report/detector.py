@@ -939,6 +939,8 @@ class OutlierDetector(DetectorBase):
             Should be between 0 and 1
             Default: 0.975
         statistical_threshold (float, optional): Fraction of batches to determine outliers per channel should be above this
+            If fraction is below this, we deem number of samples used to calculate outliers as insignificant and alert user
+            regardless of whether we detected outliers or not in channel to take a closer look at channel results
             Should be between 0 and 1
             Default: 0.95
         ch_axis (int, optional): The channel axis being observed to determine input weight equalization
@@ -1080,7 +1082,7 @@ class OutlierDetector(DetectorBase):
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
-            "above_sample_threshold_count": if o_r was >= statistical_threshold:
+            "sufficient_batches": if o_r was >= statistical_threshold:
                 where o_r = counted_batches / total_batches
         """
         outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
@@ -1091,12 +1093,12 @@ class OutlierDetector(DetectorBase):
 
         # calculate whether channels were statistically significant
         significant_size = [
-            True if batch_size / total_batches >= self.statistical_threshold else False for batch_size in num_batches_list
+            batch_size / total_batches >= self.statistical_threshold for batch_size in num_batches_list
         ]
         outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate for each channel whether it's an outlier or not based on ratio
-        outlier_detected = [True if ratio > self.ratio_threshold else False for ratio in ratios_list]
+        outlier_detected = [ratio > self.ratio_threshold for ratio in ratios_list]
         outlier_dict[self.OUTLIER_KEY] = outlier_detected
 
         # return the dictionary with the two lists
@@ -1140,6 +1142,9 @@ class OutlierDetector(DetectorBase):
                 # we have to specifically modify how we are recording negative ratio for pre-relu layers
                 for index, ratio_val in enumerate(average_ratios):
                     # check if we have a negative ratio
+                    # a ratio might be negative if we have a situation where the 100th percentile is
+                    # > 0 while the nth percentile is < 0, in which case this would not be detected
+                    # as an outlier. Since we care more about magnitude, we make it positive.
                     if ratio_val.item() < 0:
                         # first make it positive
                         average_ratios[index] = -ratio_val
