@@ -1344,7 +1344,7 @@ def skipCUDAIfNoCusparseGeneric(fn):
     return skipCUDAIfNotRocm(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
 
 def skipCUDAIfNoHipsparseGeneric(fn):
-    return skipCUDAIfRocmVersionLessThan((5,1))(fn)
+    return skipCUDAIfRocmVersionLessThan((5, 1))(fn)
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
