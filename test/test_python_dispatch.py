@@ -762,6 +762,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
 
+    def test_nested_push_regular(self):
+        with LoggingTensorMode.push() as mode:
+            # This previously errored
+            with LoggingTensorMode():
+                pass
+
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
         y = torch.randn([])
@@ -1788,7 +1794,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return (5, 3)
                     return NotImplemented
 
@@ -1801,13 +1807,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
