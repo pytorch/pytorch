@@ -62,11 +62,13 @@ class RMSprop(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     """
 
     def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0,
-                 centered=False, foreach: Optional[bool] = None):
+                 centered=False, foreach: Optional[bool] = None, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -79,7 +81,7 @@ class RMSprop(Optimizer):
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
         defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered,
-                        weight_decay=weight_decay, foreach=foreach)
+                        weight_decay=weight_decay, foreach=foreach, maximize=maximize)
         super(RMSprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -88,6 +90,7 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
             group.setdefault('foreach', None)
+            group.setdefault('maximize', False)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -150,7 +153,8 @@ class RMSprop(Optimizer):
                     weight_decay=group['weight_decay'],
                     momentum=group['momentum'],
                     centered=group['centered'],
-                    foreach=group['foreach'])
+                    foreach=group['foreach'],
+                    maximize=group["maximize"])
 
         return loss
 
@@ -163,6 +167,7 @@ def rmsprop(params: List[Tensor],
             # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
             # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
             foreach: bool = None,
+            maximize: bool = False,
             *,
             lr: float,
             alpha: float,
@@ -196,7 +201,8 @@ def rmsprop(params: List[Tensor],
          eps=eps,
          weight_decay=weight_decay,
          momentum=momentum,
-         centered=centered)
+         centered=centered,
+         maximize=maximize)
 
 
 def _single_tensor_rmsprop(params: List[Tensor],
@@ -210,10 +216,12 @@ def _single_tensor_rmsprop(params: List[Tensor],
                            eps: float,
                            weight_decay: float,
                            momentum: float,
-                           centered: bool):
+                           centered: bool,
+                           maximize: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         square_avg = square_avgs[i]
 
         if weight_decay != 0:
@@ -247,10 +255,14 @@ def _multi_tensor_rmsprop(params: List[Tensor],
                           eps: float,
                           weight_decay: float,
                           momentum: float,
-                          centered: bool):
+                          centered: bool,
+                          maximize: bool):
 
     if len(params) == 0:
         return
+
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
