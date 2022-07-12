@@ -125,8 +125,10 @@ TORCH_API TensorBase empty_strided_meta(
     IntArrayRef stride,
     const TensorOptions& options);
 
-TORCH_API TensorBase
-empty_strided_symint_meta(SymIntArrayRef size, SymIntArrayRef stride, ScalarType dtype);
+TORCH_API TensorBase empty_strided_symint_meta(
+    SymIntArrayRef size,
+    SymIntArrayRef stride,
+    ScalarType dtype);
 
 TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef size,

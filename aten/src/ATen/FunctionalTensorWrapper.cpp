@@ -22,11 +22,6 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   if (!value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     refresh_numel();
     refresh_contiguous();
-  } else {
-    // So.. today, this function will set the has_symbolic_sizes_strides_ bit
-    // on the wrapper.
-    // We need that to keep that bit in sync with the inner tensor.
-    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
   }
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
@@ -190,12 +185,20 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  // TODO: how should changes to sizes/strides work when dealing with symbolic shapes?
+  //
   if (!has_symbolic_sizes_strides()) {
     if (sizes() != value_.sizes() || strides() != value_.strides()) {
       set_sizes_and_strides(value_.sizes(), value_.strides());
+      refresh_numel();
+      refresh_contiguous();
+    }
+  } else {
+    // For sym ints, this will check pointer equality, which I'm pretty sure is what we want.
+    if (!sym_sizes().equals(value_.sym_sizes()) || !sym_strides().equals(value_.sym_strides())) {
+      set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
     }
   }
+
   if (storage_offset() != value_.storage_offset()) {
     set_storage_offset(value_.storage_offset());
   }

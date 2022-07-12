@@ -563,6 +563,8 @@ void TensorImpl::copy_generic_tensor_metadata(
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
   dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
+  dest_impl->has_symbolic_sizes_strides_ =
+      src_impl->has_symbolic_sizes_strides_;
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
