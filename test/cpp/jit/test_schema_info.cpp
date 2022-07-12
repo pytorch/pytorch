@@ -53,6 +53,14 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
   ASSERT_TRUE(schema.is_mutable(1));
   ASSERT_TRUE(schema.is_mutable("other"));
 }
+TEST(SchemaInfoIsNonDeterministicTest, Basic) {
+  SchemaInfo deterministic_schema_info(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  SchemaInfo nondeterministic_schema_info(
+      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor");
+  ASSERT_FALSE(deterministic_schema_info.is_nondeterministic());
+  ASSERT_TRUE(nondeterministic_schema_info.is_nondeterministic());
+}
 
 TEST(FunctionSchemaMayAliasTest, Basic) {
   c10::FunctionSchema schema = torch::jit::parseSchema(
