@@ -337,12 +337,12 @@ test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -617,8 +617,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
-  # TODO: run some C++ tests
-  echo "no-op at the moment"
+  test_vulkan
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchdynamo
   test_distributed
