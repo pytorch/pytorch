@@ -34,6 +34,7 @@
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/crow_indices_native.h>
+#include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
@@ -46,6 +47,7 @@
 #include <ATen/ops/sparse_csc_tensor_native.h>
 #include <ATen/ops/sparse_bsr_tensor_native.h>
 #include <ATen/ops/sparse_bsc_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/values_native.h>
 #endif
 
@@ -521,6 +523,16 @@ SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
+Tensor empty_symint_sparse_compressed(
+    c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  return at::native::empty_sparse_compressed(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 Tensor empty_sparse_compressed(
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -658,6 +670,14 @@ Tensor row_indices_sparse_csr(const Tensor& self) {
                                                    [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
 }
 
+int64_t sparse_dim_sparse_csr(const SparseCsrTensor& self) {
+  return get_sparse_csr_impl(self)->sparse_dim();
+}
+
+int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
+  return get_sparse_csr_impl(self)->dense_dim();
+}
+
 bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
@@ -738,13 +758,22 @@ Tensor empty_like_sparse_csr(
 }
 
 Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  TORCH_CHECK_INDEX(self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(
+      self.layout() == kSparseCsr || self.layout() == kSparseBsr,
+      "select(): currently only supports the SparseCsr and SparseBsr layout.");
+  TORCH_CHECK_INDEX(
+      self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
-                   self.sizes(), " at dimension ", dim);
+    TORCH_CHECK_INDEX(
+        false,
+        "select(): index ",
+        index,
+        " out of range for tensor of size ",
+        self.sizes(),
+        " at dimension ",
+        dim);
   }
   if (index < 0) {
     index += size;
@@ -758,6 +787,17 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
 
   // Selecting batch dimension
   if (dim < self.dim() - 2) {
+    if (self.layout() == kSparseBsr) {
+      return at::native::_sparse_bsr_tensor_unsafe(
+          self.crow_indices().select(dim, index),
+          self.col_indices().select(dim, index),
+          self.values().select(dim, index),
+          new_sizes,
+          optTypeMetaToScalarType(options.dtype_opt()),
+          options.layout_opt(),
+          options.device_opt(),
+          options.pinned_memory_opt());
+    }
     return at::native::_sparse_csr_tensor_unsafe(
         self.crow_indices().select(dim, index),
         self.col_indices().select(dim, index),
@@ -768,9 +808,15 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         options.device_opt(),
         options.pinned_memory_opt());
   } else {
-    TORCH_CHECK(self.dim() == 2, "select(): selecting rows or columns is not implemented for batched sparse CSR tensors.")
-    // Converting to COO and calling select is slighly slower than operating on the CSR indices directly
-    // for constructing a COO vector, however current version is more readable and easier to understand.
+    TORCH_CHECK(
+        self.is_sparse_csr(),
+        "select(): selecting non-batch dimensions is currently only supported for CSR tensors.");
+    TORCH_CHECK(
+        self.dim() == 2,
+        "select(): selecting rows or columns is not implemented for batched sparse CSR tensors.")
+    // Converting to COO and calling select is slighly slower than operating on
+    // the CSR indices directly for constructing a COO vector, however current
+    // version is more readable and easier to understand.
     return self.to_sparse().select(dim, index);
   }
 }
