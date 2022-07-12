@@ -19,8 +19,15 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   level_ = -1;
   // mirror all of the generic tensor metadata onto the wrapper
   copy_generic_tensor_metadata(value_.getIntrusivePtr().get(), this);
-  refresh_numel();
-  refresh_contiguous();
+  if (!value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    refresh_numel();
+    refresh_contiguous();
+  } else {
+    // So.. today, this function will set the has_symbolic_sizes_strides_ bit
+    // on the wrapper.
+    // We need that to keep that bit in sync with the inner tensor.
+    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
+  }
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
   // and these changes need to be reflected in the metadata of the wrapper.
@@ -183,8 +190,11 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  if (sizes() != value_.sizes() || strides() != value_.strides()) {
-    set_sizes_and_strides(value_.sizes(), value_.strides());
+  // TODO: how should changes to sizes/strides work when dealing with symbolic shapes?
+  if (!has_symbolic_sizes_strides()) {
+    if (sizes() != value_.sizes() || strides() != value_.strides()) {
+      set_sizes_and_strides(value_.sizes(), value_.strides());
+    }
   }
   if (storage_offset() != value_.storage_offset()) {
     set_storage_offset(value_.storage_offset());
@@ -227,11 +237,15 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   value_ = other;
   generation_ = 0;
   // And update the metadata on the wrapper to reflect the new sizes and strides
-  set_sizes_and_strides(value_.sizes(), value_.strides());
-  refresh_numel();
-  // (Technically we should be guaranteed that the tensor was already contiguous,
-  // since it's guaranteed not to have been a view. Doesnt hurt to run though)
-  refresh_contiguous();
+  if (has_symbolic_sizes_strides()) {
+    set_sym_sizes_and_strides(value_.sym_sizes(), value_.sym_strides());
+  } else {
+    set_sizes_and_strides(value_.sizes(), value_.strides());
+    refresh_numel();
+    // (Technically we should be guaranteed that the tensor was already contiguous,
+    // since it's guaranteed not to have been a view. Doesnt hurt to run though)
+    refresh_contiguous();
+  }
 }
 
 
@@ -597,7 +611,11 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
+  if (out.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    out.unsafeGetTensorImpl()->set_sym_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides());
+  } else {
+    out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
+  }
   out.unsafeGetTensorImpl()->set_storage_offset(reference_out.storage_offset());
 }
 
