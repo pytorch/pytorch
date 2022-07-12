@@ -22,6 +22,13 @@ class FunctionCtx(object):
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
 
+        Note that if tensors that are neither input nor output are saved for backward,
+        your custom Function may not support
+        `double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
+        Custom Functions that do not support double backward should decorate their
+        backward functions with `@once_differentiable` to ensure that performing
+        double backward errors loudly.
+
         In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
@@ -34,18 +41,19 @@ class FunctionCtx(object):
             >>> class Func(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
-            >>>         w = x * y * z
-            >>>         out = x * y + y * z + w
+            >>>         w = x * z
+            >>>         out = x * y + y * z + w * y
             >>>         ctx.save_for_backward(x, y, w, out)
             >>>         ctx.z = z  # z is not a tensor
             >>>         return out
             >>>
             >>>     @staticmethod
+            >>>     @once_differentiable
             >>>     def backward(ctx, grad_out):
             >>>         x, y, w, out = ctx.saved_tensors
             >>>         z = ctx.z
             >>>         gx = grad_out * (y + y * z)
-            >>>         gy = grad_out * (x + z + x * z)
+            >>>         gy = grad_out * (x + z + w)
             >>>         gz = None
             >>>         return gx, gy, gz
             >>>
