@@ -4102,6 +4102,39 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Tensor& linalg_vecdot_out(const Tensor& x, const Tensor& y, int64_t dim, Tensor& out) {
+  checkFloatingOrComplex(x, "linalg.vecdot");
+  TORCH_CHECK(x.scalar_type() == y.scalar_type(),
+              "linalg.vecdot: Expected x and y to have the same dtype, but found x of type ",
+              x.scalar_type(), " and y of type ", y.scalar_type(), " instead");
+  // out checks
+  TORCH_CHECK(out.scalar_type() == x.scalar_type(),
+              "linalg.vecdot: Expected out of dtype", x.scalar_type(),
+              " but found ", out.scalar_type());
+  checkSameDevice("linalg.vecdot", x, out);
+
+  // Computes x^H y
+  if (x.dim() == 1 && y.dim() == 1) {
+    at::native::resize_output(out, {});
+    return at::vdot_out(out, x, y);
+  } else {
+    return at::sum_out(out, x.conj() * y, /*dim=*/dim);
+  }
+}
+
+Tensor linalg_vecdot(const Tensor& x, const Tensor& y, int64_t dim) {
+  checkFloatingOrComplex(x, "linalg.vecdot");
+  TORCH_CHECK(x.scalar_type() == y.scalar_type(),
+              "linalg.vecdot: Expected x and y to have the same dtype, but found x of type ",
+              x.scalar_type(), " and y of type ", y.scalar_type(), " instead");
+  // Computes x^H y
+  if (x.dim() == 1 && y.dim() == 1) {
+    return at::vdot(x, y);
+  } else {
+    return x.conj().mul(y).sum(/*dim=*/dim);
+  }
+}
+
 /*
 Solves the matrix equation AX = B for A triangular.
 'left' If true solves AX = B, if false solves XA = B
