@@ -567,6 +567,13 @@ Q: How to export models with primitive type inputs (e.g. int, float)?
   Support for primitive numeric type inputs was added in PyTorch 1.9.
   However, the exporter does not support models with str inputs.
 
+Q: Does ONNX support implicit scalar datatype casting?
+
+  No, but the exporter will try to handle that part. Scalars are exported as constant tensors.
+  The exporter will figure out the right data type for scalars. In rare cases when it is unable
+  to do so, you will need to manually specify the datatype with e.g. `dtype=torch.float32`.
+  If you see any errors, please [create a GitHub issue](https://github.com/pytorch/pytorch/issues).
+
 Q: Are lists of Tensors exportable to ONNX?
 
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
