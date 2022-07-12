@@ -37,6 +37,7 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-docs:
