@@ -1007,7 +1007,9 @@ TensorView* sum(
 TensorView* max(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(dtype == DataType::Null, "A dtype other than Null is not currently supported.");
   Val* init = getMinimumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
@@ -1016,7 +1018,9 @@ TensorView* max(
 TensorView* min(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(dtype == DataType::Null, "A dtype other than Null is not currently supported.");
   Val* init = getMaximumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);

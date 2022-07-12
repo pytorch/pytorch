@@ -810,14 +810,32 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP("addcmul", addcmul)
 #undef NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP
+
+#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)                   \
+  nvf_ops.def(                                                                 \
+      op_str,                                                                  \
+      [](nvfuser::FusionDefinition::Operators& self,                           \
+         nvfuser::Tensor* arg, const std::vector<int>& axes, bool keep_dim,    \
+         NvfDataType dtype)                                                    \
+         -> nvfuser::Tensor* {                                                 \
+        nvfuser::Tensor* output =                                              \
+          new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
+        self.fusion_definition->recording_state.emplace_back(output);          \
+        self.fusion_definition->recording.emplace_back(                        \
+          new nvfuser::ReductionOpRecord(                                      \
+            {arg->index}, {output->index},                                     \
+            torch::jit::fuser::cuda::op_name,                                  \
+            axes, keep_dim, dtype));                                           \
+        return output;                                                         \
+      },                                                                       \
+      py::return_value_policy::reference);                                     \
+
+  NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)
+  NVFUSER_PYTHON_BINDING_REDUCTION_OP("max", max)
+  NVFUSER_PYTHON_BINDING_REDUCTION_OP("min", min)
+#undef NVFUSER_PYTHON_BINDING_REDUCTION_OP
+
 /*
-  // Reduction Operations
-  nvf_ops.def_static(
-      "max", &torch::jit::fuser::cuda::max, py::return_value_policy::reference);
-  nvf_ops.def_static(
-      "min", &torch::jit::fuser::cuda::min, py::return_value_policy::reference);
-  nvf_ops.def_static(
-      "sum", &torch::jit::fuser::cuda::sum, py::return_value_policy::reference);
   nvf_ops.def_static(
       "var",
       [](TensorView* input,

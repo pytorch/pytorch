@@ -80,4 +80,30 @@ struct OpRecord : RecordFunctor {
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
+struct ReductionOpRecord : RecordFunctor {
+  ReductionOpRecord(std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::function<NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)> fusion_op,
+      std::vector<int> axes,
+      bool keep_dim,
+      NvfDataType dtype) :
+    RecordFunctor(std::move(_args), std::move(_outputs)),
+    fusion_op_(fusion_op),
+    axes_(std::move(axes)),
+    keep_dim_(keep_dim),
+    dtype_(dtype) {}
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.fusion_state.at(args.at(0))->as<NvfTensorView>();
+    auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+
+ private:
+  std::function<NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)> fusion_op_;
+  std::vector<int> axes_;
+  bool keep_dim_;
+  NvfDataType dtype_;
+};
+
 } // nvfuser namespace
