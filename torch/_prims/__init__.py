@@ -3,6 +3,7 @@ from torch import Tensor, _TypedStorage
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    check,
     TensorLike,
     TensorLikeType,
     ShapeType,
@@ -102,6 +103,7 @@ __all__ = [
     "gcd",
     "ge",
     "gt",
+    "hypot",
     "igamma",
     "igammac",
     "le",
@@ -146,7 +148,6 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
-    "clone",
     "convert_element_type",
     "device_put",
     "item",
@@ -172,6 +173,10 @@ __all__ = [
     #
     "empty_strided",
     "scalar_tensor",
+    #
+    # Linear algebra (linalg) Prims
+    #
+    "svd",
     #
     # Randomness Prims
     #
@@ -318,7 +323,7 @@ def _wrap_tensor_meta(f):
 def _make_prim(
     *,
     schema: str,
-    return_type: RETURN_TYPE,
+    return_type: Union[RETURN_TYPE, Tuple[RETURN_TYPE, ...]],
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
@@ -1019,6 +1024,13 @@ gt = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
+hypot = _make_elementwise_binary_prim(
+    "hypot",
+    impl_aten=torch.hypot,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 igamma = _make_elementwise_binary_prim(
     "igamma",
     impl_aten=torch.special.gammainc,
@@ -1706,10 +1718,8 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
-    squeezes = 0
-    for idx in dimensions:
-        a = torch.squeeze(a, dim=(idx - squeezes))
-        squeezes = squeezes + 1
+    for idx in reversed(sorted(dimensions)):
+        a = torch.squeeze(a, dim=idx)
 
     return a
 
@@ -1934,32 +1944,6 @@ where = _make_prim(
 #
 # Type conversions
 #
-# TODO: model memory format on TensorMeta
-# TODO: make clone a reference following its implementation in TensorFactories.cpp
-def _clone_meta(
-    a: TensorLikeType, *, memory_format: torch.memory_format
-) -> TensorLikeType:
-    strides = utils.compute_elementwise_output_strides(a)
-    return TensorMeta(a, strides=strides)
-
-
-def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
-    return torch.clone(a, memory_format=memory_format)
-
-
-_clone_doc = """
-    Creates a copy of a tensors.
-"""
-
-clone = _make_prim(
-    schema="clone(Tensor a, *, MemoryFormat memory_format) -> Tensor",
-    meta=_clone_meta,
-    impl_aten=_clone_aten,
-    return_type=RETURN_TYPE.NEW,
-    doc=_clone_doc,
-)
-
-
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     # Type checks
     assert isinstance(a, TensorLike)
@@ -2014,7 +1998,7 @@ def _device_put_meta(
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
 
-    return TensorMeta(a, device=utils.wrap_device(device))
+    return TensorMeta(a, device=utils.canonicalize_device(device))
 
 
 def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
@@ -2542,6 +2526,66 @@ scalar_tensor = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_scalar_tensor_doc,
 )
+
+
+#
+# Linear algebra (linalg) prims
+#
+
+
+def _svd_meta(
+    A: TensorLikeType, *, full_matrices: bool
+) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+    utils.check_is_matrix(A, "linalg.svd")
+    utils.check_fp_or_complex(A.dtype, "linalg.svd", allow_low_precision_dtypes=False)
+
+    A_shape = A.shape
+    batch = A_shape[:-2]
+    m, n = A_shape[-2:]
+    k = min(m, n)
+
+    shape_U = batch + (m, m if full_matrices else k)
+    strides_U = utils.make_contiguous_strides_for(shape_U, row_major=False)
+    U = TensorMeta(shape=shape_U, strides=strides_U, dtype=A.dtype, device=A.device)
+
+    shape_S = batch + (k,)
+    strides_S = utils.make_contiguous_strides_for(shape_S)
+    S = TensorMeta(
+        shape=shape_S,
+        strides=strides_S,
+        dtype=utils.corresponding_real_dtype(A.dtype) if A.is_complex() else A.dtype,
+        device=A.device,
+    )
+
+    shape_Vh = batch + (n if full_matrices else k, n)
+    # The CPU backend returns V, but the cuSolver backend returns V^H
+    # TODO The MAGMA backend returns V, so this is wrong if used with the MAGMA backend
+    is_cuda = A.device.type == "cuda"
+    strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
+    Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    return U, S, Vh
+
+
+def _svd_aten(
+    A: TensorLikeType, *, full_matrices: bool
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return torch.linalg.svd(A, full_matrices=full_matrices)
+
+
+_svd_doc = """
+    Returns the SVD of a matrix or batch of matrices.
+
+    The `full_matrices` flag controls whether the full or reduced SVD decomposition is returned.
+"""
+
+svd = _make_prim(
+    schema="svd(Tensor A, *, bool full_matrices) -> (Tensor U, Tensor S, Tensor Vh)",
+    meta=_svd_meta,
+    impl_aten=_svd_aten,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    doc=_svd_doc,
+)
+
 
 #
 # Randomness Prims
