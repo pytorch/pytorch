@@ -2310,7 +2310,12 @@ c10::IntArrayRef concrete_strides_fn(
   auto out = torchDispatchFromTensorImpl(
       self,
       "stride",
-      py::module::import("torch").attr("ops").attr("aten").attr("stride").attr("default").ptr(),
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("stride")
+          .attr("default")
+          .ptr(),
       "torch.ops.aten");
 
   if (out == Py_None) {
