@@ -54,30 +54,43 @@ _assert(const bool cond, const char* const message) {
 #endif
 }
 
+enum class CDimName : bool {
+  CRow,
+  CCol
+};
+
 // Invariant 5.1
-// cidx[..., 0] == 0
-template <typename index_t>
+// compressed_index[..., 0] == 0
+template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_first_cidx_is_zero(const index_t& cidx, const index_t& zero) {
   const bool invariant = cidx == zero;
-  static constexpr auto message = "`c{row|col}_indices[..., 0] == 0` is not satisfied.";
-  _assert(invariant, message);
+  if (cdim_name == CDimName::CRow) {
+    _assert(invariant, "`crow_indices[..., 0] == 0` is not satisfied.");
+  }
+  else {
+    _assert(invariant, "`ccol_indices[..., 0] == 0` is not satisfied.");
+  }
 }
 
 // Invariant 5.2
-// cidx[..., -1] == nnz
-template <typename index_t>
+// compressed_index[..., -1] == nnz
+template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_last_cidx_is_nnz(const index_t& cidx, const index_t& nnz) {
   const bool invariant = cidx == nnz;
-  static constexpr auto message = "`c{row|col}_indices[..., -1] == nnz` is not satisfied.";
-  _assert(invariant, message);
+  if (cdim_name == CDimName::CRow) {
+    _assert(invariant, "`crow_indices[..., -1] == nnz` is not satisfied.");
+  }
+  else {
+    _assert(invariant, "`ccol_indices[..., -1] == nnz` is not satisfied.");
+  }
 }
 
 // Invariant 5.3
-// 0 <= cidx[..., 1:] - cidx[..., :-1] <= dim,
+// 0 <= compressed_indices[..., 1:] - compressed_indices[..., :-1] <= plain_dim,
 // where cidx/dim is either crow/ncols or ccol/nrows.
-template <typename index_t>
+template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_cidx_nondecreasing_locally_bounded_sequence(
     const index_t& cidx,
@@ -86,8 +99,14 @@ _check_cidx_nondecreasing_locally_bounded_sequence(
     const index_t& dim) {
   const auto s_cidx = cidx_next - cidx;
   const bool invariant = zero <= s_cidx && s_cidx <= dim;
-  static constexpr auto message = "`0 <= c{row|col}_indices[..., 1:] - c{row|col}_indices[..., :-1] <= dim` is not satisfied.";
-  _assert(invariant, message);
+  if (cdim_name == CDimName::CRow) {
+    _assert(invariant,
+        "`0 <= crow_indices[..., 1:] - crow_indices[..., :-1] <= ncols` is not satisfied.");
+  }
+  else {
+    _assert(invariant,
+        "`0 <= ccol_indices[..., 1:] - ccol_indices[..., :-1] <= nrows` is not satisfied.");
+  }
 }
 
 // Invariants 5.4 and 5.5
@@ -160,10 +179,11 @@ struct KernelLauncher {
 };
 
 template <
+  CDimName cdim_name,
   template <typename func_t> class kernel_t,
   template <typename func_t, typename vec_func_t> class vec_kernel_t = EmptyVecKernel,
   template <typename scalar_t> class Vec = DummyVec>
-void validate_compressed_sparse_indices_kernel(
+static void _validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
     const int64_t cdim,
@@ -233,11 +253,11 @@ void validate_compressed_sparse_indices_kernel(
               index_t cidx_next,
               index_t batch_idx) -> index_t {
               // Invariant 5.1
-              _check_first_cidx_is_zero<index_t>(cidx_first, zero);
+              _check_first_cidx_is_zero<cdim_name, index_t>(cidx_first, zero);
               // Invariant 5.2
-              _check_last_cidx_is_nnz<index_t>(cidx_last, nnz);
+              _check_last_cidx_is_nnz<cdim_name, index_t>(cidx_last, nnz);
               // Invariant 5.3
-              _check_cidx_nondecreasing_locally_bounded_sequence<index_t>(cidx_curr, cidx_next, zero, dim);
+              _check_cidx_nondecreasing_locally_bounded_sequence<cdim_name, index_t>(cidx_curr, cidx_next, zero, dim);
               // Invariant 5.6
               // NOTE: the implementation below is sync-less, but, unfortunately,
               // work is not guaranteed to be well-balanced between different threads.
@@ -248,6 +268,27 @@ void validate_compressed_sparse_indices_kernel(
             }
         );
     });
+  }
+}
+
+template <
+  template <typename func_t> class kernel_t,
+  template <typename func_t, typename vec_func_t> class vec_kernel_t = EmptyVecKernel,
+  template <typename scalar_t> class Vec = DummyVec>
+void validate_compressed_sparse_indices_kernel(
+    const bool is_crow,
+    const Tensor& cidx,
+    const Tensor& idx,
+    const int64_t cdim,
+    const int64_t dim,
+    const int64_t nnz) {
+  if (is_crow) {
+    _validate_compressed_sparse_indices_kernel<CDimName::CRow, kernel_t, vec_kernel_t, Vec>(
+        cidx, idx, cdim, dim, nnz);
+  }
+  else {
+    _validate_compressed_sparse_indices_kernel<CDimName::CCol, kernel_t, vec_kernel_t, Vec>(
+        cidx, idx, cdim, dim, nnz);
   }
 }
 

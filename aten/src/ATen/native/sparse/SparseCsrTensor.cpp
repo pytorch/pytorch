@@ -195,6 +195,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   // Indices invariants
   if (plain_indices.numel() > 0) {
     at::_validate_compressed_sparse_indices(
+        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
         compressed_indices,
         plain_indices,
         ncompressed_dims,

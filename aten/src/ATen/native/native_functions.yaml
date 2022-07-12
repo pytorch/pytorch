@@ -2487,7 +2487,7 @@
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
 
-- func: _validate_compressed_sparse_indices(Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
+- func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
   device_check: NoCheck
   variants: function
   dispatch:

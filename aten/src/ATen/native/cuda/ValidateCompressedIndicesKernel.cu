@@ -16,13 +16,14 @@ struct CUDAKernelLauncher {
 }
 
 void _validate_compressed_sparse_indices_cuda(
+    const bool is_crow,
     const Tensor& cidx,
     const Tensor& idx,
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
   validate_compressed_sparse_indices_kernel<CUDAKernelLauncher>(
-      cidx, idx, cdim, dim, nnz);
+      is_crow, cidx, idx, cdim, dim, nnz);
 }
 
 }}

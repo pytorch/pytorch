@@ -29,6 +29,7 @@ struct CPUVecKernel {
 }
 
 void _validate_compressed_sparse_indices_cpu(
+    const bool is_crow,
     const Tensor& cidx,
     const Tensor& idx,
     const int64_t cdim,
@@ -39,7 +40,7 @@ void _validate_compressed_sparse_indices_cpu(
   // to enable vectorized checks once all the conditions for that are met,
   // see ATen/native/sparse/CompressedIndexChecksCommon.h for more details.
   validate_compressed_sparse_indices_kernel<CPUKernel>(
-      cidx, idx, cdim, dim, nnz);
+      is_crow, cidx, idx, cdim, dim, nnz);
 }
 
 }}
