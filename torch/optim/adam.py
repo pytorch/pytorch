@@ -1,5 +1,6 @@
+from collections import defaultdict
 import math
-from typing import cast, List, Optional
+from typing import cast, List, Optional, Dict, Tuple
 
 import torch
 from torch import Tensor
@@ -13,7 +14,7 @@ def _get_fp16AMP_params(
     optimizer: Optimizer,
     grad_scaler: Optional[torch.cuda.amp.GradScaler] = None,
     device: torch.device,
-) -> Optional[Tensor]:
+) -> Optional[_MultiDeviceReplicator]:
     if grad_scaler is None:
         return None
     found_inf_dict = grad_scaler._check_inf_per_device(optimizer)
@@ -24,7 +25,7 @@ def _get_fp16AMP_params(
     assert len(found_infs) > 0, "No inf checks were recorded in _check_inf_per_device."
     with torch.no_grad():
         found_inf_combined = cast(torch.Tensor, sum(found_infs))
-    return found_inf_combined
+    return _MultiDeviceReplicator(found_inf_combined)
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm.
@@ -167,8 +168,10 @@ class Adam(Optimizer):
             inv_grad_scale = None
             found_inf = None
             if group['fused'] and grad_scaler is not None:
-                inv_grad_scale = grad_scaler._get_scale_async().double().reciprocal().float()
-                found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=inv_grad_scale.device)
+                _inv_grad_scale = grad_scaler._get_scale_async().double().reciprocal().float()
+                device = _inv_grad_scale.device
+                inv_grad_scale = _MultiDeviceReplicator(_inv_grad_scale)
+                found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
 
             for p in group['params']:
                 if p.grad is not None:
@@ -245,8 +248,8 @@ def adam(params: List[Tensor],
          weight_decay: float,
          eps: float,
          maximize: bool,
-         inv_grad_scale: Optional[Tensor] = None,
-         found_inf: Optional[Tensor] = None):
+         inv_grad_scale: Optional[_MultiDeviceReplicator] = None,
+         found_inf: Optional[_MultiDeviceReplicator] = None):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
@@ -302,9 +305,9 @@ def _single_tensor_adam(params: List[Tensor],
                         eps: float,
                         maximize: bool,
                         capturable: bool,
-                        differentiable: bool):
-                        inv_grad_scale: Optional[Tensor],
-                        found_inf: Optional[Tensor]):
+                        differentiable: bool,
+                        inv_grad_scale: Optional[_MultiDeviceReplicator],
+                        found_inf: Optional[_MultiDeviceReplicator]):
 
     assert inv_grad_scale is None and found_inf is None
 
@@ -398,9 +401,9 @@ def _multi_tensor_adam(params: List[Tensor],
                        eps: float,
                        maximize: bool,
                        capturable: bool,
-                       differentiable: bool):
-                       inv_grad_scale: Optional[Tensor],
-                       found_inf: Optional[Tensor]):
+                       differentiable: bool,
+                       inv_grad_scale: Optional[_MultiDeviceReplicator],
+                       found_inf: Optional[_MultiDeviceReplicator]):
     if len(params) == 0:
         return
 
@@ -494,6 +497,28 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
 
 
+@torch.no_grad()
+def _group_params_by_device_and_dtype(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+) -> Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]]:
+    per_device_and_dtype_tensors = defaultdict(lambda: [[] for _ in range(6)])
+    for i, (p, step) in enumerate(zip(params, state_steps)):
+        key = (p.device, p.dtype)
+        per_device_and_dtype_tensors[key][0].append(p)
+        per_device_and_dtype_tensors[key][1].append(grads[i])
+        per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
+        per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
+        if max_exp_avg_sqs:
+            per_device_and_dtype_tensors[key][4].append(exp_avg_sqs[i])
+        per_device_and_dtype_tensors[key][5].append(step)
+    return per_device_and_dtype_tensors
+
+
 def _fused_adam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -510,31 +535,45 @@ def _fused_adam(
     eps: float,
     maximize: bool,
     capturable: bool,
-    inv_grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    inv_grad_scale: Optional[_MultiDeviceReplicator],
+    found_inf: Optional[_MultiDeviceReplicator],
 ) -> None:
-    # TODO(crcrpar): Group params and the other tensors including state_steps by device & dtype.
-    # This can be tedious as the availability of `inv_grad_scale` and `found_inf` is variable.
-    torch._foreach_add_(state_steps, 1)
-    torch._fused_adam_(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        max_exp_avg_sqs,
-        state_steps,
-        amsgrad=amsgrad,
-        lr=lr,
-        beta1=beta1,
-        beta2=beta2,
-        weight_decay=weight_decay,
-        eps=eps,
-        maximize=maximize,
-        capturable=capturable,
-        inv_grad_scale=inv_grad_scale,
-        found_inf=found_inf,
-    )
-    # NOTE(crcrpar): Is there a better way to handle a situation where `GradScaler` is used
-    # and `inf` grads are found.
-    if found_inf is not None:
-        torch._foreach_sub_(state_steps, [found_inf] * len(state_steps))
+    grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+    for (device, dtype) in grouped_tensors:
+        (
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            d_max_exp_avg_sqs,
+            d_state_steps,
+        ) = grouped_tensors[(device, dtype)]
+        if inv_grad_scale is not None and found_inf is not None:
+            d_inv_grad_scale = inv_grad_scale.get(device)
+            d_found_inf = found_inf.get(device)
+        else:
+            d_inv_grad_scale = None
+            d_found_inf = None
+        torch._foreach_add_(d_state_steps, 1)
+        torch._fused_adam_(
+            d_params,
+            d_grads,
+            d_exp_avgs,
+            d_exp_avg_sqs,
+            d_max_exp_avg_sqs,
+            d_state_steps,
+            amsgrad=amsgrad,
+            lr=lr,
+            beta1=beta1,
+            beta2=beta2,
+            weight_decay=weight_decay,
+            eps=eps,
+            maximize=maximize,
+            capturable=capturable,
+            inv_grad_scale=d_inv_grad_scale,
+            found_inf=d_found_inf,
+        )
+        # NOTE(crcrpar): Is there a better way to handle a situation where `GradScaler` is used
+        # and `inf` grads are found.
+        if found_inf is not None:
+            torch._foreach_sub_(d_state_steps, [d_found_inf] * len(d_state_steps))
