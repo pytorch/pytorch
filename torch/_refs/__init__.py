@@ -1350,6 +1350,7 @@ remainder = _make_elementwise_binary_reference(
 )
 
 # reverse sub
+@register_decomposition(torch.ops.aten.rsub)
 def rsub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
