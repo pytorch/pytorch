@@ -9,15 +9,19 @@ void SchemaInfo::addArgumentValue(
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
   value_map_[name] = value;
-  updated_ = false;
+  alias_maps_current_ = false;
 }
 
 void SchemaInfo::addArgumentValues(
     const std::vector<c10::optional<at::IValue>>& value_list) {
+  TORCH_INTERNAL_ASSERT(
+      value_list.size() <= schema_.arguments().size(),
+      "Schema does not have enough arguments for value list");
+
   for (size_t i = 0; i < value_list.size(); i++) {
-    if (i < schema_.arguments().size() && value_list[i] != c10::nullopt) {
+    if (value_list[i] != c10::nullopt) {
       value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
-      updated_ = false;
+      alias_maps_current_ = false;
     }
   }
 }
@@ -60,7 +64,7 @@ bool SchemaInfo::is_mutable() {
 bool SchemaInfo::is_mutable(size_t index) {
   TORCH_INTERNAL_ASSERT(
       index < schema_.arguments().size(), "Invalid index for schema.");
-  if (!updated_) {
+  if (!alias_maps_current_) {
     generateAliasMaps();
   }
   return std::any_of(
@@ -96,7 +100,7 @@ bool SchemaInfo::may_alias(
   if (basic_check) {
     return true;
   }
-  if (!updated_) {
+  if (!alias_maps_current_) {
     generateAliasMaps();
   }
   if (lhs.type == c10::SchemaArgType::input &&
@@ -106,10 +110,8 @@ bool SchemaInfo::may_alias(
       lhs.type == c10::SchemaArgType::output &&
       rhs.type == c10::SchemaArgType::output) {
     for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
-      for (size_t rhs_alias_input : output_alias_map_[rhs.index]) {
-        if (lhs_alias_input == rhs_alias_input) {
-          return true;
-        }
+      if (output_alias_map_[rhs.index].count(lhs_alias_input)) {
+        return true;
       }
     }
     return false;
@@ -157,7 +159,7 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
 }
 
 void SchemaInfo::generateAliasMaps() {
-  updated_ = true;
+  alias_maps_current_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());
   output_alias_map_ = std::vector<std::unordered_set<size_t>>(
