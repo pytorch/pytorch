@@ -11273,6 +11273,7 @@ op_db: List[OpInfo] = [
                    check_batched_forward_grad=False,
                    supports_out=False),
     UnaryUfuncInfo('conj_physical',
+                   decomp_aten_name='_conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                     torch.half, torch.chalf),
