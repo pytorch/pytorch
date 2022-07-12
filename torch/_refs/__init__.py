@@ -2353,7 +2353,7 @@ def repeat(a: Tensor, *shape) -> Tensor:
     urtensor = result
     for dim, dim_size in enumerate(xtensor.shape):
         # repeat each dimension by using unfold tensor operation
-        urtensor = _unfold(urtensor, dim, dim_size, max(dim_size, 1))
+        urtensor = torch.unfold_copy(urtensor, dim, dim_size, max(dim_size, 1))
 
     # expand dimensions according to urtensor to match repeat size
     repeat_xtensor = xtensor.expand_as(urtensor)
@@ -2879,8 +2879,9 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-def _unfold(a: TensorLikeType, dimension: int, size: int, step: int):
-    # some special handling to deal with allow dimension == 0 when self.dim() == 0
+@register_decomposition(torch.ops.aten.unfold_copy)
+def unfold(a: TensorLikeType, dimension: int, size: int, step: int):
+    # TODO some special handling to deal with allow dimension == 0 when self.dim() == 0
     # dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
 
     max_size = 1 if a.ndim == 0 else a.shape[dimension]
