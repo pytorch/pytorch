@@ -158,7 +158,7 @@ class TestFxNvFuserBackend(TestCase):
             b = a + 1
             return b
 
-        inputs = torch.randn(4, device = device)
+        inputs = torch.randn(4, device=device)
         traced = make_fx(fn)(inputs)
 
         nvfuser = NvFuserBackend()
@@ -182,7 +182,7 @@ class TestFxNvFuserBackend(TestCase):
             b = a + 1
             return b
 
-        inputs = torch.randn(4, device = device)
+        inputs = torch.randn(4, device=device)
         traced = make_fx(fn)(inputs)
 
         nvfuser = NvFuserBackend()
