@@ -14,17 +14,49 @@ class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_self_attn_TxT_attn_mask(self):
+        embed_dim = 16
+        num_heads = 4
+        batch_size = 10
+        tgt_len = 16
+
+        query = torch.rand(batch_size, tgt_len, embed_dim, device="cuda")  # [N, T, D]
+        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
+
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda()
+        mta_model.eval()
+
+        # Generate 3D results
+        with torch.inference_mode():
+            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
+            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
+
+            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
+            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
+
+            self.assertEqual(output_mask_4d, output_mask_TxT)
+
     @parametrize("use_cuda", [True, False])
-    def test_transformerencoderlayer_src_mask(use_cuda=False):
+    def test_transformerencoderlayer_src_mask(self, use_cuda=False):
         if use_cuda and TEST_CUDA:
             device = "cuda"
         else:
             device = "cpu"
+        
+        batch_size = 2
+        seqlen = 4
+        d_model = 8
+        nhead = 8
 
-        model = torch.nn.TransformerEncoderLayer(d_model=8, nhead=8, batch_first=True).to(device)
-        src = torch.rand(2, 4, 8).to(device) # bs, seqlen, d_model
-        src_mask = torch.zeros(4, 4).to(torch.bool).to(device)
+        model = torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True).to(device)
+        src = torch.rand(batch_size, seqlen, d_model).to(device) # bs, seqlen, d_model
+        src_mask = torch.zeros(seqlen, seqlen).to(torch.bool).to(device)
 
+        model(src, src_mask=src_mask)
         model.eval()
         with torch.no_grad():
             model(src, src_mask=src_mask)
