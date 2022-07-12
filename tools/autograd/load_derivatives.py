@@ -21,6 +21,7 @@ from torchgen.api.types import (
     boolT,
     CppSignatureGroup,
     intArrayRefT,
+    symIntArrayRefT,
     layoutT,
     longT,
     NamedCType,
@@ -694,6 +695,14 @@ def saved_variables(
             {
                 "suffix": "_sizes",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
+            },
+        ),
+        # replace self.sym_sizes() with self_sizes
+        (
+            r"{}.sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes",
+                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
             },
         ),
         # replace self->sizes() with self_sizes_opt
