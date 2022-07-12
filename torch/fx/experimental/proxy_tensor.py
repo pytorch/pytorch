@@ -122,6 +122,8 @@ def proxy_call(func_overload, args, kwargs=None):
         return args[0].fake_device
     if func_overload == aten.sym_size.default:
         return None
+    if func_overload == aten.sym_stride.default:
+        return None
     if func_overload == aten.stride.default:
         return None
     if func_overload == aten.size.default:
@@ -187,7 +189,13 @@ class ProxyTensor(torch.Tensor):
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        r = torch.Tensor._make_wrapper_subclass(cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=create_contiguous(elem.shape), storage_offset=elem.storage_offset())
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, [
+                create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))
+            ], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad,
+            strides=[
+                create_proxy_symint(stride_i, proxy.stride(i)) for i, stride_i in enumerate(create_contiguous(elem.shape))
+            ], storage_offset=elem.storage_offset())
         return r
 
     def __init__(self, elem, proxy, *, requires_grad=None):
