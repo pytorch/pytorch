@@ -365,6 +365,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
+    "torch/csrc/utils/schema_info.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
@@ -743,6 +744,9 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
+    "torch/csrc/distributed/c10d/UCCTracing.cpp",
+    "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -1164,8 +1168,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_deserialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_serialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",

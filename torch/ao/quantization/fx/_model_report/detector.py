@@ -9,6 +9,7 @@ from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.quantize import is_activation_post_process
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -931,25 +932,57 @@ class OutlierDetector(DetectorBase):
         if p_r is above some threshold, then we consider the activations to have significant outliers
 
     Args:
-        ratio_threshold (float): The threshold for p_r to determine if there are outliers in activations
-            Should be between 0 and 1 (both non-inclusive)
+        ratio_threshold (float, optional): The threshold for p_r to determine if there are outliers in activations
+            Default: 3.5
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
+            Should be between 0 and 1
+            Default: 0.975
+        ch_axis (int, optional): The channel axis being observed to determine input weight equalization
+            Default: 1
 
     * :attr:`ratio_threshold`: The threshold for p_r to determine if there are outliers in activations
-        Should be between 0 and 1
+        The p_r value (average ratio of 100th percentile/reference_percentile) is compared to ratio_threshold
+        If it is significantly greater, then we consider it an outlier
+        This threshold was calculated based on the ratio of the percentiles in a normal distribution
 
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
+        Should be between 0 and 1
 
+    * :attr:`ch_axis`: The channel axis being observed to determine outliers
+
+    * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    def __init__(self, ratio_threshold: float = 10.0, reference_percentile: float = 0.95):
+    # names for the pre observers that are inserted
+    DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
+
+    def __init__(self, ratio_threshold: float = 3.5, reference_percentile: float = 0.975, ch_axis: int = 1):
         # initialize the variables of interest
         self.ratio_threshold = ratio_threshold
+
+        # make sure passed in percentile is valid
+        assert reference_percentile >= 0 and reference_percentile <= 1
         self.reference_percentile = reference_percentile
+        self.ch_axis = ch_axis
 
     def get_detector_name(self) -> str:
         r"""Returns the name of this detector"""
         return "outlier_detector"
+
+    def _supports_insertion(self, module: nn.Module) -> bool:
+        r"""Returns whether the given module is supported for observers insertion
+
+        Any module that doesn't have children and isn't an observer itself is supported
+
+        Args
+            module: The module to check and ensure is supported
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # case for insertion of module
+        # check if the module has any children and isn't observer
+        num_children = len(list(module.children()))
+        return num_children == 0 and not is_activation_post_process(module)
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r""" Determines where observers need to be inserted for the Outlier Detector.
@@ -968,7 +1001,29 @@ class OutlierDetector(DetectorBase):
             key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
-        pass
+        # observer for this detector is ModelReportObserver
+        obs_ctr = ModelReportObserver
+
+        # return dict
+        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+
+        for fqn, module in prepared_fx_model.named_modules():
+            # check to see if module is of a supported type
+            if self._supports_insertion(module):
+                # if it's a supported type, we want to get node and add observer insert locations
+                targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
+
+                # add entry for pre-observer
+                pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
+
+                obs_fqn_to_info[pre_obs_fqn] = {
+                    "target_node": targeted_node,
+                    "insert_observer": obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    "insert_post": False,
+                    "observer_args": targeted_node.args,
+                }
+
+        return obs_fqn_to_info
 
     def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
         r"""

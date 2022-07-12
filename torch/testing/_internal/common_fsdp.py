@@ -13,12 +13,12 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
 from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -30,11 +30,6 @@ class FSDPInitMode(Enum):
     # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
-def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with FullyShardedDataParallel.summon_full_params(fsdp_model):
-        params = list(p.clone().detach_() for p in fsdp_model.parameters())
-
-    return params
 
 def _validate(model, process_group, assert_fn):
     module_states = [param.detach().cpu() for param in model.parameters()]
