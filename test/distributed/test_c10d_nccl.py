@@ -425,8 +425,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 )
 
 
-            for op, err in zip((c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
-                          ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR")):
+            for op, err in zip(
+                (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
+                ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
+            ):
                 with self.assertRaisesRegex(
                         RuntimeError, "Cannot use " + err + " with NCCL"
                 ):

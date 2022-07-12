@@ -536,31 +536,25 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
 
-  reduce_op
-      .def(py::init<::c10d::ReduceOp::Kind>())
+  reduce_op.def(py::init<::c10d::ReduceOp::Kind>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
 
   py::enum_<::c10d::ReduceOp::Kind>(reduce_op, "Kind")
-    .value("SUM", ::c10d::ReduceOp::Kind::SUM)
-    .value("AVG", ::c10d::ReduceOp::Kind::AVG)
-    .value("PRODUCT", ::c10d::ReduceOp::Kind::PRODUCT)
-    .value("MIN", ::c10d::ReduceOp::Kind::MIN)
-    .value("MAX", ::c10d::ReduceOp::Kind::MAX)
-    .value("BAND", ::c10d::ReduceOp::Kind::BAND)
-    .value("BOR", ::c10d::ReduceOp::Kind::BOR)
-    .value("BXOR", ::c10d::ReduceOp::Kind::BXOR)
-    .value("PREMUL_SUM", ::c10d::ReduceOp::Kind::PREMUL_SUM)
-    .export_values();
+      .value("SUM", ::c10d::ReduceOp::Kind::SUM)
+      .value("AVG", ::c10d::ReduceOp::Kind::AVG)
+      .value("PRODUCT", ::c10d::ReduceOp::Kind::PRODUCT)
+      .value("MIN", ::c10d::ReduceOp::Kind::MIN)
+      .value("MAX", ::c10d::ReduceOp::Kind::MAX)
+      .value("BAND", ::c10d::ReduceOp::Kind::BAND)
+      .value("BOR", ::c10d::ReduceOp::Kind::BOR)
+      .value("BXOR", ::c10d::ReduceOp::Kind::BXOR)
+      .value("PREMUL_SUM", ::c10d::ReduceOp::Kind::PREMUL_SUM)
+      .export_values();
 
-  // NOTE(crcrpar): Goal of implicit conversion between ``::C10d::ReduceOp::Kind`` and ``::c10d::ReduceOp``.
-  // It's to enable the following.
-  // i.e.
-  // ```python
-  // opts = c10d.AllreduceOptions()
-  // opts.reduceOp = c10d.ReduceOp.SUM  # Because this PR changes `ReduceOp` to struct.
-  // opts.reduceOp = c10d.ReduceOp(c10d.ReduceOp.SUM)
-  // ```
-  // Ref: [Implicit conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
+  // Ref: [Implicit
+  // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
+  // Let us skip the explicit construction of `c10d::ReduceOp` from
+  // `c10d::ReduceOp::Kind` in Python.
   py::implicitly_convertible<::c10d::ReduceOp::Kind, ::c10d::ReduceOp>();
 
   module
@@ -1059,7 +1053,8 @@ Arguments:
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                 if (self->getBackendName() == "nccl") {
                   if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-                    return ::c10d::ops::nccl_premulsum_allreduce(self, tensors, opts);
+                    return ::c10d::ops::nccl_premulsum_allreduce(
+                        self, tensors, opts);
                   }
                 }
 #endif
@@ -1079,7 +1074,8 @@ Arguments:
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                 if (self->getBackendName() == "nccl") {
                   if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-                    return ::c10d::ops::nccl_premulsum_allreduce(self, xs, opts);
+                    return ::c10d::ops::nccl_premulsum_allreduce(
+                        self, xs, opts);
                   }
                 }
 #endif
@@ -1100,7 +1096,8 @@ Arguments:
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                 if (self->getBackendName() == "nccl") {
                   if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-                    return ::c10d::ops::nccl_premulsum_allreduce(self, xs, opts);
+                    return ::c10d::ops::nccl_premulsum_allreduce(
+                        self, xs, opts);
                   }
                 }
 #endif

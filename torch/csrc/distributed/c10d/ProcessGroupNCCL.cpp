@@ -63,7 +63,6 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 #endif
 };
 
-// TODO(crcrpar): Replace `getNcclDataType` with `to_nccl_data_type`
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
   auto it = ncclDataType.find(type);
@@ -75,31 +74,36 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 }
 
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
-template<typename T, ncclDataType_t dataType>
-ncclRedOpRAII unpackPreMulSum(const ReduceOp& reduceOp,
-                              const ncclComm_t& comm,
-                              int dev_in_group) {
+template <typename T, ncclDataType_t dataType>
+ncclRedOpRAII unpackPreMulSum(
+    const ReduceOp& reduceOp,
+    const ncclComm_t& comm,
+    int dev_in_group) {
   const auto* preMulSupplement =
       reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
   ncclRedOp_t preMulSum;
   bool has_tensor = !preMulSupplement->tensor_factors.empty();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor = has_tensor ? preMulSupplement->tensor_factors[dev_in_group].data_ptr<T>() : nullptr;
+  T* ptr_factor = has_tensor
+      ? preMulSupplement->tensor_factors[dev_in_group].data_ptr<T>()
+      : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
-  ncclRedOpCreatePreMulSum(&preMulSum,
-                           has_tensor ? ptr_factor : &scalar_factor,
-                           dataType,
-                           residence,
-                           comm);
+  ncclRedOpCreatePreMulSum(
+      &preMulSum,
+      has_tensor ? ptr_factor : &scalar_factor,
+      dataType,
+      residence,
+      comm);
   return ncclRedOpRAII(preMulSum, comm);
 }
 #endif
 
-ncclRedOpRAII getNcclReduceOp(const ReduceOp& reduceOp,
-                            at::Tensor& input,
-                            const ncclDataType_t& dataType,
-                            const ncclComm_t& comm,
-                            int dev_in_group) {
+ncclRedOpRAII getNcclReduceOp(
+    const ReduceOp& reduceOp,
+    at::Tensor& input,
+    const ncclDataType_t& dataType,
+    const ncclComm_t& comm,
+    int dev_in_group) {
   try {
     if (input.scalar_type() == at::kBool) {
       if (reduceOp == ReduceOp::SUM) {
@@ -118,13 +122,17 @@ ncclRedOpRAII getNcclReduceOp(const ReduceOp& reduceOp,
     if (reduceOp == ReduceOp::PREMUL_SUM) {
       switch (dataType) {
         case ncclHalf:
-          return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm, dev_in_group);
+          return unpackPreMulSum<at::Half, ncclHalf>(
+              reduceOp, comm, dev_in_group);
         case ncclFloat:
-          return unpackPreMulSum<float, ncclFloat>(reduceOp, comm, dev_in_group);
+          return unpackPreMulSum<float, ncclFloat>(
+              reduceOp, comm, dev_in_group);
         case ncclDouble:
-          return unpackPreMulSum<double, ncclDouble>(reduceOp, comm, dev_in_group);
+          return unpackPreMulSum<double, ncclDouble>(
+              reduceOp, comm, dev_in_group);
         default:
-          TORCH_CHECK(false, "PreMulSum Data type must be half, float, or double");
+          TORCH_CHECK(
+              false, "PreMulSum Data type must be half, float, or double");
           ncclRedOp_t unused;
           return unused;
       }
@@ -1819,7 +1827,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         auto ncclDataType = getNcclDataType(input.scalar_type());
-        auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -1985,7 +1994,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
         auto ncclDataType = getNcclDataType(input.scalar_type());
-        auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -2279,7 +2289,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
         auto ncclDataType = getNcclDataType(input.scalar_type());
-        auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),

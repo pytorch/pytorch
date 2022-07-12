@@ -51,13 +51,13 @@ struct ReduceOp {
     if (optional_supplement.get()) {
       op_ = op;
     } else {
-#if defined(USE_NCCL) && defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
+#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
       TORCH_INTERNAL_ASSERT(op == PREMUL_SUM, "Only PREMUL_SUM supports supplement");
       op_ = ReduceOp::PREMUL_SUM;
       supplement_ = optional_supplement;
 #else
-      AT_ERROR("Invalid");
-#endif  // USE_NCCL
+      TORCH_CHECK(false, "Optional supplement is not supported for ", op);
+#endif
     }
   }
 
@@ -97,7 +97,7 @@ template<typename T> ReduceOp makeNCCLPreMulSum(const T& factor) {
   rop.supplement_ = std::make_shared<NCCLPreMulSumSupplement>(factor);
   return rop;
 #else
-  AT_ERROR("PreMulSum is available from 2.11.0 or later");
+  TORCH_CHECK(false, "PreMulSum is available from NCCL 2.11.1 or later");
 #endif
 }
 
