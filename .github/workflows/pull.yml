@@ -91,6 +91,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 4, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_7-clang10-onnx-build:
@@ -186,6 +187,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-xenial-py3-clang5-mobile-build:
@@ -248,6 +250,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "windows.4xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
   win-vs2019-cuda11_6-py3-build:
