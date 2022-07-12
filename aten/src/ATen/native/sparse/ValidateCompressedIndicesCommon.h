@@ -62,7 +62,7 @@ enum class CDimName : bool {
 };
 
 // Invariant 5.1
-// compressed_index[..., 0] == 0
+// compressed_index[..., 0] == 0.
 template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_first_cidx_is_zero(const index_t& cidx, const index_t& zero) {
@@ -76,7 +76,7 @@ _check_first_cidx_is_zero(const index_t& cidx, const index_t& zero) {
 }
 
 // Invariant 5.2
-// compressed_index[..., -1] == nnz
+// compressed_index[..., -1] == nnz.
 template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_last_cidx_is_nnz(const index_t& cidx, const index_t& nnz) {
@@ -90,8 +90,7 @@ _check_last_cidx_is_nnz(const index_t& cidx, const index_t& nnz) {
 }
 
 // Invariant 5.3
-// 0 <= compressed_indices[..., 1:] - compressed_indices[..., :-1] <= plain_dim,
-// where cidx/dim is either crow/ncols or ccol/nrows.
+// 0 <= compressed_indices[..., 1:] - compressed_indices[..., :-1] <= plain_dim.
 template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_cidx_nondecreasing_locally_bounded_sequence(
@@ -112,8 +111,7 @@ _check_cidx_nondecreasing_locally_bounded_sequence(
 }
 
 // Invariants 5.4 and 5.5
-// 0 <= plain_index < plain_dim,
-// where idx/dim is either col/ncols or row/nrows.
+// 0 <= plain_index < plain_dim.
 template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_idx_bounds(
