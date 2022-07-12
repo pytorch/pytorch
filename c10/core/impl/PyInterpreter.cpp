@@ -71,6 +71,14 @@ static c10::SymIntArrayRef noop_sym_sizes_fn(
       "attempted to call `sym_sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::SymIntArrayRef noop_sym_strides_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `sym_strides` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -82,6 +90,7 @@ void PyInterpreter::disarm() noexcept {
   strides_fn_ = &noop_strides_fn;
   sizes_fn_ = &noop_sizes_fn;
   sym_sizes_fn_ = &noop_sym_sizes_fn;
+  sym_strides_fn_ = &noop_sym_strides_fn;
 }
 
 } // namespace impl
