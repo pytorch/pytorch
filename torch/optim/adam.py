@@ -513,6 +513,8 @@ def _fused_adam(
     inv_grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
 ) -> None:
+    # TODO(crcrpar): Group params and the other tensors including state_steps by device & dtype.
+    # This can be tedious as the availability of `inv_grad_scale` and `found_inf` is variable.
     torch._foreach_add_(state_steps, 1)
     torch._fused_adam_(
         params,
