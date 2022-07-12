@@ -3,7 +3,7 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Optional, Set
+from typing import Any, Callable, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -810,7 +810,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             if interpolate_mode == "nearest"
             else "align_corners"
             if align_corners
-            else "pytorch_half_pixel"
+            else "half_pixel"
         )
 
         if scales is None:
@@ -880,7 +880,7 @@ def __interpolate_helper(
         if mode == "nearest"
         else "align_corners"
         if align_corners
-        else "pytorch_half_pixel"
+        else "half_pixel"
     )
 
     if not _is_none(size):
@@ -1129,13 +1129,17 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     return weight, bias, running_mean, running_var
 
 
-def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
+def _avgpool_helper(
+    tuple_fn: Callable[[Any], Sequence[int]],
+    padding: Union[int, Sequence[int]],
+    kernel_size,
+    stride,
+    divisor_override,
+    name,
+) -> Tuple[int, ...]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
-        return _unimplemented(name, "divisor_override")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(tuple_fn(padding))
-    return padding
+        _unimplemented(name, "divisor_override")
+    return tuple(tuple_fn(padding))
 
 
 def check_training_mode(op_train_mode: int, op_name: str) -> None:
@@ -1329,10 +1333,6 @@ def _set_opset_version(opset_version: int):
 
 def _set_operator_export_type(operator_export_type):
     GLOBALS.operator_export_type = operator_export_type
-
-
-def _set_training_mode(training_mode):
-    GLOBALS.training_mode = training_mode
 
 
 # This function is for debug use only.

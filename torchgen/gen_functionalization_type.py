@@ -75,8 +75,30 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
     if g.view_copy is None:
         return None
+
+    # For view_copy.SymInt overloads,
+    # See gen_symint_view_copy_kernel.
+    if g.view_copy.func.name.overload_name == "SymInt":
+        return None
+
+    # We can make view_copy work in more cases by using reshape()
+    # when a normal view call would ordinarily fail.
+    # This also makes LTC more efficient, because they don't need to include
+    # clone() calls in their graph (which is normally needed by reshape).
+    if str(g.view_copy.func.name) == "view_copy":
+        return """\
+at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
+  if (!at::detail::computeStride(self.sizes(), self.strides(), size).has_value()) {
+    return self.reshape(size);
+  } else {
+    auto output = at::_ops::view::call(self, size);
+    return output.clone();
+  }
+}
+"""
     # view_copy is a native signature, since we're generating an at::native:: kernel
     view_copy_sig = NativeSignature(g.view_copy.func)
+
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
 
@@ -109,6 +131,34 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 {view_copy_sig.defn()} {{
   auto output = at::_ops::{view_api_name}::call({exprs});
   {return_cloned_output}
+}}
+"""
+
+
+# For symint view copy kernels, we want to generate them to call into
+# their concrete view_copy counterparts.
+@with_native_function_and
+def gen_symint_view_copy_kernel(
+    view_copy: NativeFunction, view_copy_symint: NativeFunction
+) -> str:
+    # view_copy.symint is a native signature, since we're generating an at::native:: kernel
+    view_copy_symint_sig = NativeSignature(view_copy_symint.func)
+
+    # view_copy is a dispatcher signature, since we're calling into the at::_ops API
+    view_copy_sig = DispatcherSignature(view_copy.func)
+
+    exprs = ", ".join(
+        [
+            e.expr
+            for e in translate(
+                view_copy_symint_sig.arguments(), view_copy_sig.arguments()
+            )
+        ]
+    )
+
+    return f"""
+{view_copy_symint_sig.defn()} {{
+  return at::_ops::{view_copy.func.name.unambiguous_name()}::call({exprs});
 }}
 """
 
@@ -313,7 +363,8 @@ def emit_view_functionalization_body(
       );
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
@@ -341,12 +392,16 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-      {return_type} tmp_output;
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+      }}
+      {return_type} tmp_output;
+      {{
+        at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
           tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
@@ -553,8 +608,9 @@ def emit_inplace_functionalization_body(
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        at::AutoDispatchSkipFunctionalize guard;
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}

@@ -1,3 +1,4 @@
+import sys
 from typing import Any, Dict, List, NamedTuple, Tuple
 from gitutils import _check_output
 
@@ -5,14 +6,8 @@ import rockset  # type: ignore[import]
 import os
 import re
 
-regex = [
-    "^pull+",
-    "^trunk+",
-    "^lint+",
-    "^linux-binary+",
-    "^android-tests+",
-    "^windows-binary+"
-]
+def eprint(msg: str) -> None:
+    print(msg, file=sys.stderr)
 
 class WorkflowCheck(NamedTuple):
     workflowName: str
@@ -72,23 +67,41 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
 def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
 
+    regex = {
+        "pull": False,
+        "trunk": False,
+        "lint": False,
+        "linux-binary": False,
+        "windows-binary": False,
+    }
+
     for check in workflow_checks:
         workflowName = check['workflowName']
         conclusion = check['conclusion']
-        if re.search("|".join(regex), workflowName, flags=re.IGNORECASE) and conclusion != 'success':
-            if check['name'] == "pull / win-vs2019-cuda11.3-py3" and conclusion == 'skipped':
-                pass
-                # there are trunk checks that run the same tests, so this pull workflow check can be skipped
-            else:
-                return (False, workflowName + " checks were not successful")
-        elif workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
+        for required_check in regex:
+            if re.match(required_check, workflowName, flags=re.IGNORECASE):
+                if conclusion not in ["success", "skipped"]:
+                    return (False, workflowName + " checks were not successful")
+                else:
+                    regex[required_check] = True
+        if workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
             return (False, workflowName + " checks were not successful")
+
+    missing_workflows = [x for x in regex.keys() if not regex[x]]
+    if len(missing_workflows) > 0:
+        return (False, "missing required workflows: " + ", ".join(missing_workflows))
+
     return (True, "")
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        if isGreen(commit, results)[0]:
+        eprint(f"Checking {commit}")
+        is_green, msg = isGreen(commit, results)
+        if is_green:
+            eprint("GREEN")
             return commit
+        else:
+            eprint("RED: " + msg)
     return None
 
 def main() -> None:
