@@ -9,15 +9,19 @@ void SchemaInfo::addArgumentValue(
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
   value_map_[name] = value;
-  updated_ = false;
+  alias_maps_current_ = false;
 }
 
 void SchemaInfo::addArgumentValues(
     const std::vector<c10::optional<at::IValue>>& value_list) {
+  TORCH_INTERNAL_ASSERT(
+      value_list.size() <= schema_.arguments().size(),
+      "Schema does not have enough arguments for value list");
+
   for (size_t i = 0; i < value_list.size(); i++) {
-    if (i < schema_.arguments().size() && value_list[i] != c10::nullopt) {
+    if (value_list[i] != c10::nullopt) {
       value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
-      updated_ = false;
+      alias_maps_current_ = false;
     }
   }
 }
@@ -41,7 +45,7 @@ bool SchemaInfo::is_mutable() {
 bool SchemaInfo::is_mutable(size_t index) {
   TORCH_INTERNAL_ASSERT(
       index < schema_.arguments().size(), "Invalid index for schema.");
-  if (!updated_) {
+  if (!alias_maps_current_) {
     generateAliasMaps();
   }
   return std::any_of(
@@ -59,7 +63,7 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
 }
 
 void SchemaInfo::generateAliasMaps() {
-  updated_ = true;
+  alias_maps_current_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
