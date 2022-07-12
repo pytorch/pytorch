@@ -1022,6 +1022,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Dict.cpp",
     "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
+    "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
