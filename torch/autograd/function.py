@@ -26,8 +26,8 @@ class FunctionCtx(object):
         your custom Function may not support
         `double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
         Custom Functions that do not support double backward should decorate their
-        backward functions with `@once_differentiable` to ensure that performing
-        double backward errors loudly.
+        :func:`backward` method with `@once_differentiable` so that performing
+        double backward raises an error.
 
         In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
