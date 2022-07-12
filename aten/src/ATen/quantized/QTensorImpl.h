@@ -99,6 +99,32 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
     refresh_contiguous();
   }
 
+ protected:
+  int64_t numel_custom() const override {
+    TORCH_CHECK(false, "Internal error: numel_custom() not supported for SparseTensorImpl.");
+  }
+  bool is_contiguous_custom(MemoryFormat) const override {
+    TORCH_CHECK(false, "Internal error: is_contiguous_custom() not supported for SparseTensorImpl.");
+  }
+  int64_t size_custom(int64_t d) const override {
+    TORCH_CHECK(false, "Internal error: size_custom() not supported for SparseTensorImpl.");
+  }
+  IntArrayRef sizes_custom() const override {
+    TORCH_CHECK(false, "Internal error: sizes_custom() not supported for SparseTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_sizes_custom() const override {
+    TORCH_CHECK(false, "Internal error: sym_sizes_custom() not supported for SparseTensorImpl.");
+  }
+  IntArrayRef strides_custom() const override {
+    TORCH_CHECK(false, "Internal error: strides_custom() not supported for SparseTensorImpl.");
+  }
+  Device device_custom() const override {
+    TORCH_CHECK(false, "Internal error: device_custom() not supported for SparseTensorImpl.");
+  }
+  int64_t dim_custom() const override {
+    TORCH_CHECK(false, "Internal error: dim_custom() not supported for SparseTensorImpl.");
+  }
+
  private:
   QuantizerPtr quantizer_;
 
