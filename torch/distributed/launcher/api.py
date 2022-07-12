@@ -224,6 +224,7 @@ def launch_agent(
         tee=config.tee,
         master_addr=master_addr,
         master_port=master_port,
+        endpoint=rdzv_parameters.endpoint.strip(),
     )
 
     agent = LocalElasticAgent(

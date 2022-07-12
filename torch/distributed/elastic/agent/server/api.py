@@ -8,6 +8,7 @@
 
 import abc
 import functools
+import ipaddress
 import json
 import os
 import signal
@@ -60,6 +61,8 @@ class WorkerSpec:
                      if not specified then will chose a random free port
         master_addr: fixed master_addr to run the c10d store on rank 0
                      if not specified then will chose hostname on agent rank 0
+        endpoint: original endpoint that is discarded when the static
+                  rendezvous backend is specified
         redirects: redirect std streams to a file,
                    selectively redirect for a particular
                    local rank by passing a map
@@ -80,6 +83,7 @@ class WorkerSpec:
     monitor_interval: float = 30.0
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
+    endpoint: str = ''
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
 
@@ -381,8 +385,27 @@ def _get_socket_with_port() -> socket.socket:
     raise RuntimeError("Failed to create a socket")
 
 
-def _get_fq_hostname() -> str:
-    return socket.getfqdn(socket.gethostname())
+def _get_fq_hostname(master_addr: Optional[str], endpoint: str) -> str:
+    if master_addr:
+        return master_addr
+
+    # `master_addr` is None when we don't have the "static" rendezvous backend.
+    # `endpoint` may not be given (i.e. it is an empty string); then
+    # we have to fall back to `socket.gethostname`.
+    if not endpoint:
+        return socket.getfqdn(socket.gethostname())
+
+    host = rdzv.utils.parse_rendezvous_endpoint(endpoint, default_port=-1)[0]
+    try:
+        ipaddress.ip_address(host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+
+    if is_ip:
+        return socket.gethostbyaddr(host)[0]
+    else:
+        return socket.getfqdn(host)
 
 
 class ElasticAgent(abc.ABC):
@@ -504,15 +527,17 @@ class SimpleElasticAgent(ElasticAgent):
 
     @staticmethod
     def _set_master_addr_port(
-        store: Store, master_addr: Optional[str], master_port: Optional[int]
+            store: Store,
+            master_addr: Optional[str],
+            master_port: Optional[int],
+            endpoint: str,
     ):
         if master_port is None:
             sock = _get_socket_with_port()
             with closing(sock):
                 master_port = sock.getsockname()[1]
 
-        if master_addr is None:
-            master_addr = _get_fq_hostname()
+        master_addr = _get_fq_hostname(master_addr, endpoint)
 
         store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
@@ -545,7 +570,9 @@ class SimpleElasticAgent(ElasticAgent):
         worker_group.group_world_size = group_world_size
 
         if group_rank == 0:
-            self._set_master_addr_port(store, spec.master_addr, spec.master_port)
+            self._set_master_addr_port(
+                store, spec.master_addr, spec.master_port, spec.endpoint
+            )
         master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
@@ -781,7 +808,7 @@ class SimpleElasticAgent(ElasticAgent):
             "group_rank": wg.group_rank,
             "worker_id": worker_id,
             "role": spec.role,
-            "hostname": _get_fq_hostname(),
+            "hostname": _get_fq_hostname(spec.master_addr, spec.endpoint),
             "state": state,
             "total_run_time": self._total_execution_time,
             "rdzv_backend": spec.rdzv_handler.get_backend(),
