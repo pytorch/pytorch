@@ -17,8 +17,17 @@ from ..quantize import (
 from ..observer import (
     ObserverBase,
 )
-from ..qconfig import QConfigAny, is_reuse_input_qconfig
-from ..qconfig_mapping import QConfigMapping
+from ..qconfig import (
+    _partial_wrapper_equals,
+    float16_dynamic_qconfig,
+    float16_static_qconfig,
+    is_reuse_input_qconfig,
+    QConfigAny,
+)
+from ..qconfig_mapping import (
+    _FIXED_QPARAMS_OP_TO_OBSERVER,
+    QConfigMapping,
+)
 from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
     update_qconfig_for_qat,
@@ -1316,6 +1325,27 @@ def insert_observers_for_model(
 
     return results_node
 
+def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
+    """
+    Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
+    """
+    # TODO: handle fp16 qconfigs properly
+    allowed_observer_ctrs = [
+        float16_dynamic_qconfig.activation,
+        float16_static_qconfig.activation,
+    ]
+    for node in model.graph.nodes:
+        if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            bad_observer = True
+            qconfig = qconfig_map.get(node.name, None)
+            for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[node.target]]:
+                if qconfig is None or _partial_wrapper_equals(qconfig.activation, observer_ctr):
+                    bad_observer = False
+            if bad_observer:
+                raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
+                                 "'%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
+                                 "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % node.target)
+
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
     is_qat: bool,
@@ -1500,6 +1530,7 @@ def prepare(
     equalization_qconfig_map = generate_qconfig_map(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
+    _validate_fixed_qparams_qconfigs(model, qconfig_map)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())
