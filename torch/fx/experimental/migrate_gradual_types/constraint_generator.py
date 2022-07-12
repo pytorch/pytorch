@@ -15,7 +15,6 @@ from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, ge
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
-from torch.fx.experimental.graph_gradual_typechecker import get_parameter
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
@@ -853,6 +852,7 @@ def maxpool_inference_rule(n: Node, module_instance, symbols, constraints, count
 class ConstraintGenerator:
     def __init__(self, traced, graph=None):
         self.traced = traced  # traced or tracer.root
+        self.traced_params = dict(self.traced.named_parameters())
         self.constraints = []
         self.symbol_dict = {}
         self.graph = traced.graph if hasattr(traced, 'graph') else graph
@@ -918,11 +918,12 @@ class ConstraintGenerator:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'get_attr':
-            t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
-            if isinstance(t.data, torch.Tensor):
-                if len(t.data.shape) > 0:
+            t = self.traced_params.get(n.target, None)
+
+            if isinstance(t, torch.Tensor):
+                if len(t.shape) > 0:
                     res = []
-                    for t in t.data.shape:
+                    for t in t.shape:
                         res.append(t)
                     attr_type = TensorType(res)
                     output, counter = gen_tvar(counter)
