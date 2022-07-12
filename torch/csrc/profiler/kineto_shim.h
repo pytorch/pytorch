@@ -42,10 +42,8 @@ namespace kineto {
 // -- Interface (Does not require Kineto) -------------------------------------
 // ----------------------------------------------------------------------------
 struct DeviceAndResource {
-#ifdef USE_KINETO
   int32_t device;
   int32_t resource;
-#endif // USE_KINETO
 };
 const DeviceAndResource kineto_ids();
 

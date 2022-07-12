@@ -83,7 +83,6 @@ struct EventFieldsVisitor {
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
     handleJIT(op_event);
     kineto_event_.get()
-        .endThreadId(op_event.end_tid_)
         .scope((int8_t)op_event.scope_)
         .debugHandle(op_event.debug_handle_)
         .setAsync(op_event.is_async_);
@@ -123,7 +122,6 @@ struct EventFieldsVisitor {
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
     handleJIT(backend_event);
     kineto_event_.get()
-        .endThreadId(kineto_event_.get().startThreadId())
         .scope((int8_t)backend_event.scope_)
         .debugHandle(backend_event.debug_handle_)
         .backend(backend_event.backend_);
@@ -346,6 +344,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .correlationId(e->correlationID())
             .deviceType(e->deviceType())
             .startThreadId(e->start_tid_)
+            .endThreadId(e->endTID())
             .activityType((uint8_t)e->kinetoType());
 
         EventFieldsVisitor set_fields_and_metadata(
