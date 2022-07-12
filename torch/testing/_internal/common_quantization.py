@@ -10,8 +10,8 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,

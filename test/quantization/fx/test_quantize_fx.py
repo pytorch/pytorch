@@ -177,10 +177,6 @@ import unittest
 import io
 from typing import Callable, Optional, List
 
-
-
-TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
         """ ibinary_op means inplace binary op
