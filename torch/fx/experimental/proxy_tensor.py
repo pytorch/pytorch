@@ -136,7 +136,7 @@ def proxy_call(func_overload, args, kwargs=None):
     any_constant = False
 
     def check_constant(e):
-        nonlocal all_constant
+        nonlocal all_constant, any_constant
         if isinstance(e, ProxyTensor):
             if e.constant is None:
                 all_constant = False
