@@ -1071,11 +1071,11 @@ class OutlierDetector(DetectorBase):
         num_batches_list: List = counted_batches.tolist()
 
         # calculate whether channels were statistically significant
-        significant_size = [True if batch_size >= 30 else False for batch_size in num_batches_list]
+        significant_size = [batch_size >= 30 for batch_size in num_batches_list]
         outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate for each channel whether it's an outlier or not based on ratio
-        outlier_detected = [True if ratio > self.ratio_threshold else False for ratio in ratios_list]
+        outlier_detected = [ratio > self.ratio_threshold for ratio in ratios_list]
         outlier_dict[self.OUTLIER_KEY] = outlier_detected
 
         # return the dictionary with the two lists
@@ -1118,6 +1118,9 @@ class OutlierDetector(DetectorBase):
                 # we have to specifically modify how we are recording negative ratio for pre-relu layers
                 for index, ratio_val in enumerate(average_ratios):
                     # check if we have a negative ratio
+                    # a ratio might be negative if we have a situation where the 100th percentile is
+                    # > 0 while the nth percentile is < 0, in which case this would not be detected
+                    # as an outlier. Since we care more about magnitude, we make it positive.
                     if ratio_val.item() < 0:
                         # first make it positive
                         average_ratios[index] = -ratio_val
