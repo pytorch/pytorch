@@ -62,7 +62,7 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule("index_select")
 def index_select_inference_rule(n: Node, symbols, constraints, counter):
     """
-    We constrain the second argument to a vector
+    We constrain the second argument to a vector or Dyn.
     The output replaces the input with the shape of the vector
     at the position given by the index (first argument)
     """

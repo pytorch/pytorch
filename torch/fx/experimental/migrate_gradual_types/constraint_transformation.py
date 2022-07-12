@@ -41,6 +41,9 @@ def valid_index(index, dims):
 @register_transformation_rule(IndexSelect)
 def transform_index_select(constraint, counter):
     """
+    The constraints consider the given tensor size, checks if the index is valid
+    and if so, generates a constraint for replacing the input dimension
+    with the required dimension
     """
     dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
     is_valid_index = valid_index(constraint.index, dims)
