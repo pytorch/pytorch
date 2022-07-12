@@ -221,20 +221,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "shapes",
           [](const KinetoEvent& e) {
-            if (e.hasShapes()) {
-              return e.shapes();
-            } else {
-              return std::vector<std::vector<int64_t>>();
-            }
+            return e.shapes().vec();
           })
       .def(
           "dtypes",
           [](const KinetoEvent& e) {
-            if (e.hasTypes()) {
-              return e.dtypes();
-            } else {
-              return std::vector<std::string>();
-            }
+            return e.dtypes().vec();
           })
       // stack traces of the PyTorch CPU events
       .def(

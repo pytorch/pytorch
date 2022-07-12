@@ -82,20 +82,15 @@ struct EventFieldsVisitor {
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
     handleJIT(op_event);
-    kineto_event_.get()
-        .scope((int8_t)op_event.scope_)
-        .debugHandle(op_event.debug_handle_)
-        .setAsync(op_event.is_async_);
+    kineto_event_.get().debugHandle(op_event.debug_handle_);
 
     auto& shapes = op_event.inputs_.shapes_;
     if (!shapes.empty()) {
-      kineto_event_.get().shapes(shapes);
       addMetadata("Input Dims", shapesToStr(shapes));
     }
 
     auto& dtypes = op_event.inputs_.dtypes_;
     if (!dtypes.empty()) {
-      kineto_event_.get().dtypes(dtypes);
       addMetadata("Input type", dtypesToStr(dtypes));
     }
 
@@ -103,17 +98,10 @@ struct EventFieldsVisitor {
       kineto_event_.get().flops(
           computeFlops(op_event.name_, op_event.extra_args_));
     }
-    kineto_event_.get().cuda_event_start_ =
-        op_event.gpu_fallback_.cuda_event_start_;
-    kineto_event_.get().cuda_event_end_ =
-        op_event.gpu_fallback_.cuda_event_end_;
 
     // add information about an associated forward op, if a sequence number
     // is available (e.g. during training)
     if (op_event.sequence_number_ >= 0) {
-      kineto_event_.get()
-          .sequenceNr(op_event.sequence_number_)
-          .fwdThreadId(op_event.forward_tid_);
       addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
@@ -121,10 +109,7 @@ struct EventFieldsVisitor {
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
     handleJIT(backend_event);
-    kineto_event_.get()
-        .scope((int8_t)backend_event.scope_)
-        .debugHandle(backend_event.debug_handle_)
-        .backend(backend_event.backend_);
+    kineto_event_.get().debugHandle(backend_event.debug_handle_);
 
     if (!backend_event.backend_.empty()) {
       addMetadata("Backend", "\"" + backend_event.backend_ + "\"");
@@ -133,8 +118,7 @@ struct EventFieldsVisitor {
 
   void operator()(const ExtraFields<EventType::Allocation>& alloc) {
     kineto_event_.get()
-        .deviceIndex(alloc.device_index_)
-        .nBytes(alloc.alloc_size_);
+        .deviceIndex(alloc.device_index_);
 
     addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
@@ -164,7 +148,6 @@ struct EventFieldsVisitor {
     }
 
     if (!jit_modules.empty()) {
-      kineto_event_.get().moduleHierarchy(jit_modules);
       addMetadata(
           "Module Hierarchy",
           torch::profiler::impl::stacksToStr(jit_modules, "."));
@@ -322,7 +305,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         std::remove_if(
             kineto_events_.begin(),
             kineto_events_.end(),
-            [](const auto& i) { return i.is_python_function_; }),
+            [](const auto& i) { return i.isPythonFunction(); }),
         kineto_events_.end());
 
     return std::move(records_and_trace.second);
@@ -335,8 +318,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       }
 
       if (e->finished_) {
-        kineto_events_.emplace_back(
-            e->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION);
+        kineto_events_.emplace_back(e);
         kineto_events_.back()
             .name(e->name())
             .startUs(e->start_time_ns_ / 1000)
@@ -697,19 +679,66 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   return result;
 }
 
+KinetoEvent::KinetoEvent(
+    std::shared_ptr<const torch::profiler::impl::Result> result)
+    : result_{result} {
+  TORCH_INTERNAL_ASSERT(result != nullptr);
+}
+
+bool KinetoEvent::isPythonFunction() const {
+  return result_->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION;
+}
+
 int64_t KinetoEvent::cudaElapsedUs() const {
-  if (!cuda_event_start_ || !cuda_event_end_) {
+  auto cuda_event_start = fallbackStart();
+  auto cuda_event_end = fallbackEnd();
+  if (!cuda_event_start || !cuda_event_end) {
     return -1;
   }
   try {
     return (int64_t)torch::profiler::impl::cudaStubs()->elapsed(
-        &cuda_event_start_, &cuda_event_end_);
+        &cuda_event_start, &cuda_event_end);
   } catch (std::exception& e) {
     LOG(WARNING) << "Failed to measure time between two CUDA events. "
                  << e.what();
   }
   return -1;
 }
+
+// Most of the fields in `KinetoEvent` only make sense for a single event type.
+// (Generally TorchOp.) For all other types they simply return the default
+// value. This macro provides a succinct way of expressing this behavior.
+#define TYPED_ATTR_WITH_DEFAULT(                                       \
+    event_type, method_name, expression, default_value)                \
+  decltype(std::declval<KinetoEvent>().method_name())                  \
+  KinetoEvent::method_name() const {                                   \
+    using out_t = decltype(std::declval<KinetoEvent>().method_name()); \
+    return result_->visit(c10::overloaded(                             \
+        [](const ExtraFields<EventType::event_type>& e) -> out_t {     \
+          return expression;                                           \
+        },                                                             \
+        [](const auto&) -> out_t { return default_value; }));          \
+  }
+
+#define TYPED_ATTR(event_type, method_name, expression) \
+  TYPED_ATTR_WITH_DEFAULT(event_type, method_name, expression, {})
+
+TYPED_ATTR_WITH_DEFAULT(TorchOp, sequenceNr, e.sequence_number_, -1)
+TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
+TYPED_ATTR(TorchOp, hasShapes, !e.inputs_.shapes_.empty())
+TYPED_ATTR(TorchOp, shapes, e.inputs_.shapes_)
+TYPED_ATTR(TorchOp, hasTypes, !e.inputs_.dtypes_.empty())
+TYPED_ATTR(TorchOp, dtypes, e.inputs_.dtypes_)
+TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
+TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
+TYPED_ATTR(TorchOp, moduleHierarchy, e.jit_modules_)
+TYPED_ATTR(TorchOp, isAsync, e.is_async_)
+TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
+TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
+TYPED_ATTR(Backend, backend, e.backend_)
+TYPED_ATTR(Allocation, nBytes, e.alloc_size_)
+#undef TYPED_ATTR
+#undef TYPED_ATTR_WITH_DEFAULT
 
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
