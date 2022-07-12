@@ -173,15 +173,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     Tensor dst_contig;
     Tensor src_contig;
 
-    // Estimate dst size in bytes and get GPU memory info
-    size_t dst_bytes = dst.element_size() * dst.numel();
-    size_t mem_free, mem_total;
-    cudaMemGetInfo(&mem_free, &mem_total);
-
-    // Type conversions for CPU-GPU copies are performed on src GPU device if there is enough memory,
-    // otherwise they are performed on the CPU. Type conversions for GPU-GPU copies are performed on
-    // the src device.
-    if (iter.device_type(0) == kCUDA || dst_bytes < mem_free) {
+    // If non_blocking is true - type conversions are performed on the GPU
+    // for CPU-GPU copies, otherwise type conversions are performed on the CPU. 
+    // Type conversions are performed on the src device for GPU-GPU copies.
+    if (iter.device_type(0) == kCUDA || non_blocking) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
