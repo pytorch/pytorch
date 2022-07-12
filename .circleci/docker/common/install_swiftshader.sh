@@ -11,7 +11,7 @@ retry () {
 _https_amazon_aws=https://ossci-android.s3.amazonaws.com
 
 # SwiftShader
-_swiftshader_dir=/var/lib/jenkins/swiftshader
+_swiftshader_dir=/tmp/jenkins/swiftshader
 _swiftshader_file_targz=swiftshader-abe07b943-prebuilt.tar.gz
 mkdir -p $_swiftshader_dir
 _tmp_swiftshader_targz="/tmp/${_swiftshader_file_targz}"
