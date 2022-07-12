@@ -2078,17 +2078,15 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-@register_decomposition(torch.ops.aten.conj)
 def conj(input: TensorLikeType) -> TensorLikeType:
     if not input.dtype.is_complex:
         return input
     if input.is_sparse:
-        return prims.conj_physical(input)
+        return torch.conj_physical(input)
     return prims.conj(input)
 
 
 # This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
-@register_decomposition(torch.ops.aten.constant_pad_nd)
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
