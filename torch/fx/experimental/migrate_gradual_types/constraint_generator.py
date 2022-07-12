@@ -87,9 +87,7 @@ def index_select_inference_rule(n: Node, symbols, constraints, counter):
     c3 = Conj([is_dyn, Disj([IndexSelect(i + 1, symbols[n.args[0]], Dyn, n.args[1], index_select)
                              for i in range(MAX_TENSOR_RANK)])])
 
-    return [c3], counter
-
-    # return [Disj([c2, c3])], counter
+    return [Disj([c2, c3])], counter
 
 
 @register_inference_rule("expand")
