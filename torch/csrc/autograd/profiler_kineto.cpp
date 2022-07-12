@@ -282,15 +282,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       if (e->finished_) {
         kineto_events_.emplace_back(e);
-        kineto_events_.back()
-            .name(e->name())
-            .startUs(e->start_time_ns_ / 1000)
-            .durationUs((e->endTimeNS() - e->start_time_ns_) / 1000)
-            .correlationId(e->correlationID())
-            .deviceType(e->deviceType())
-            .startThreadId(e->start_tid_)
-            .endThreadId(e->endTID())
-            .activityType((uint8_t)e->kinetoType());
+        kineto_events_.back().durationUs(
+            (e->endTimeNS() - e->start_time_ns_) / 1000);
 
         e->visit(c10::overloaded(
             [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
@@ -695,6 +688,22 @@ int64_t KinetoEvent::cudaElapsedUs() const {
   }
   return -1;
 }
+
+#define FORWARD_FROM_RESULT(method_name, result_expr)                        \
+  decltype(std::declval<KinetoEvent>().method_name())                        \
+  KinetoEvent::method_name() const {                                         \
+    return static_cast<decltype(std::declval<KinetoEvent>().method_name())>( \
+        result_->result_expr);                                               \
+  }
+
+FORWARD_FROM_RESULT(startThreadId, start_tid_)
+FORWARD_FROM_RESULT(endThreadId, endTID())
+FORWARD_FROM_RESULT(activityType, kinetoType())
+FORWARD_FROM_RESULT(name, name())
+FORWARD_FROM_RESULT(deviceType, deviceType())
+FORWARD_FROM_RESULT(startUs, start_time_ns_ / 1000)
+FORWARD_FROM_RESULT(correlationId, correlationID())
+#undef FORWARD_FROM_RESULT
 
 // Most of the fields in `KinetoEvent` only make sense for a single event type.
 // (Generally TorchOp.) For all other types they simply return the default
