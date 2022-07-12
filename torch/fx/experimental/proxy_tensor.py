@@ -133,12 +133,15 @@ def proxy_call(func_overload, args, kwargs=None):
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
     all_constant = True
+    any_constant = False
 
     def check_constant(e):
         nonlocal all_constant
         if isinstance(e, ProxyTensor):
             if e.constant is None:
                 all_constant = False
+            else:
+                any_constant = True
 
     pytree.tree_map(check_constant, args)
     pytree.tree_map(check_constant, kwargs)
@@ -149,7 +152,8 @@ def proxy_call(func_overload, args, kwargs=None):
         return e
 
     constant = None
-    if all_constant:
+    # NB: do NOT include factories as constants
+    if all_constant and any_constant:
         with maybe_disable_fake_tensor_mode():
             constant = func_overload(
                 *pytree.tree_map(unwrap_constant, args),
@@ -330,7 +334,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             # constant, so we keep a copy of the original argument along so
             # we can query it if we're asked to item() it at some later point
             is_lift = func_overload is torch.ops.aten.lift_fresh_copy.default
-            return wrap_output(inner_res, proxy_res, constant=args[0] if is_lift else None)
+            if is_lift:
+                with maybe_disable_fake_tensor_mode():
+                    constant = args[0].clone()
+            else:
+                constant = False
+            return wrap_output(inner_res, proxy_res, constant=constant)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
