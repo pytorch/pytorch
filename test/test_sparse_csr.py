@@ -246,13 +246,15 @@ class TestSparseCompressed(TestCase):
 
         return shape, values
 
-    def _generate_small_inputs(self, layout, device, dtype, index_dtype,
+    def _generate_small_inputs(self, layout, device=None, dtype=None, index_dtype=None,
                                enable_batched=True, enable_hybrid=True):
         """Generator of inputs to sparse compressed tensor factory functions.
 
         The input is defined as a 4-tuple:
           compressed_indices, plain_indices, values, expected_size_from_shape_inference
         """
+        if index_dtype is None:
+            index_dtype = torch.int64
 
         shape, values = self._generate_small_inputs_utils(layout, device, dtype)
 
@@ -817,6 +819,19 @@ class TestSparseCompressed(TestCase):
                     torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, layout=layout)
                 else:
                     raise NotImplementedError(target)
+
+    @skipMeta
+    @onlyCPU
+    @all_sparse_compressed_layouts()
+    def test_dim(self, layout):
+        for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout):
+            batch_dim = compressed_indices.dim() - 1
+            sparse_dim = 2
+            block_dim = 2 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 0
+            dense_dim = values.dim() - batch_dim - block_dim - 1
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size, layout=layout)
+            self.assertEqual(sparse.sparse_dim(), sparse_dim)
+            self.assertEqual(sparse.dense_dim(), dense_dim)
 
 
 class TestSparseCSR(TestCase):
