@@ -16,9 +16,10 @@ namespace utils {
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema)
-      : schema_(std::move(schema)), updated_(false) {}
+      : schema_(std::move(schema)), alias_maps_current_(false) {}
   explicit SchemaInfo(const char* signature)
-      : schema_(torch::jit::parseSchema(signature)), updated_(false) {}
+      : schema_(torch::jit::parseSchema(signature)),
+        alias_maps_current_(false) {}
 
   bool is_mutable();
 
@@ -52,7 +53,7 @@ struct TORCH_API SchemaInfo {
 
   c10::FunctionSchema schema_;
 
-  bool updated_;
+  bool alias_maps_current_;
 };
 } // namespace utils
 } // namespace torch
