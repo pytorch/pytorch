@@ -128,6 +128,60 @@ def find_input_mutations(g):
     return mutated_inputs
 
 
+class FindInputMutations(torch.fx.Interpreter):
+    def __init__(self, gm, **kwargs):
+        super().__init__(gm, **kwargs)
+        self.inputs = defaultdict(set)
+        self.input_idx = 0
+        self.mutated_inputs = set()
+
+    def placeholder(self, target, args, kwargs):
+        r = super().placeholder(target, args, kwargs)
+        self.inputs[StorageWeakRef(r.storage())].add(self.input_idx)
+        self.input_idx += 1
+        return r
+
+    def call_function(self, target, args, kwargs):
+        r = super().call_function(target, args, kwargs)
+        schema = target._schema
+        for i, arg in enumerate(schema.arguments):
+            if i < len(args):
+                argument = args[i]
+            else:
+                if arg.name not in kwargs:
+                    continue
+                argument = kwargs[arg.name]
+            mut_arg = False
+            if arg.alias_info:
+                if arg.alias_info.is_write:
+                    mut_arg = True
+            if mut_arg:
+                # TODO: not correct for args that contain tensors in a struct
+                # like list
+                mutated_inputs |= self.inputs[StorageWeakRef(r.storage())]
+        # TODO: error on unrecognized nodes
+        return r
+
+    def __call__(self, *args):
+        self.run(*args)
+        return self.mutated_inputs
+
+
+class ApplyCudaGraphs(torch.fx.Interpreter):
+    def call_module(self, target, args, kwargs):
+        assert not kwargs
+        submod = self.module.get_submodule(target)
+        self.module.delete_submodule(target)
+        mutated_inputs = FindInputMutations(submod)(*args)
+        self.module.add_submodule(target, CudaGraphModule(submod, mutated_inputs))
+        r = super().call_module(target, args, kwargs)
+        return r
+
+    def run(self, *args):
+        with FakeTensorMode.push() as mode:
+            return super().run(*map(mode.from_tensor, args))
+
+
 # Mutates input graph
 def apply_cuda_graphs(gm):
     for n in gm.graph.nodes:
@@ -141,8 +195,11 @@ def apply_cuda_graphs(gm):
 
 
 def cudagraphs(model, inputs):
+    print("cudagraphs: ", model)
     model = partition_cudagraphs(model, inputs)
-    apply_cuda_graphs(model)
+    print("post partition: ", model)
+    #apply_cuda_graphs(model)
+    ApplyCudaGraphs(model).run(*inputs)
     return model
 
 
@@ -166,8 +223,22 @@ def aot_autograd_cudagraphs(model, inputs):
     return aot_module_simplified(model, **kwargs)
 
 
+def composed(*decs):
+    def deco(f):
+        for dec in reversed(decs):
+            f = dec(f)
+        return f
+    return deco
+
+
+patch_all = composed(
+    patch("torchdynamo.config.verify_correctness", True),
+    patch("functorch._src.config.use_functionalize", True),
+)
+
+
 class TestDynamoCudaGraphs(TestCase):
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_basic(self):
         def model(x, y):
             return (x + y) * y
@@ -179,7 +250,7 @@ class TestDynamoCudaGraphs(TestCase):
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_dtoh(self):
         def model(x, y):
             a = x + y
@@ -193,7 +264,7 @@ class TestDynamoCudaGraphs(TestCase):
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_htod(self):
         def model(x, y):
             a = x + y
@@ -206,7 +277,7 @@ class TestDynamoCudaGraphs(TestCase):
                 loss = model(x, y).sum()
                 loss.backward()
 
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
@@ -241,7 +312,7 @@ class TestDynamoCudaGraphs(TestCase):
 
         make_fx(f)()
 
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_mutate_constant(self):
         def model(x, y):
             c = torch.tensor(1)
@@ -257,7 +328,7 @@ class TestDynamoCudaGraphs(TestCase):
                     self.assertEqual(loss, torch.tensor(3.0, device="cuda"))
                     loss.backward()
 
-    @patch("torchdynamo.config.verify_correctness", True)
+    @patch_all
     def test_factory(self):
         def model(y):
             x = torch.zeros(3, device="cuda:0")
@@ -270,6 +341,24 @@ class TestDynamoCudaGraphs(TestCase):
                     y = torch.randn(3, device="cuda:0", requires_grad=True)
                     loss = model(y).sum()
                     loss.backward()
+
+    @patch_all
+    def test_mutated_metadata(self):
+        def model(x):
+            x = x.clone()
+            y = x.view(0)
+            x.resize_(20)
+            x.fill_(2)
+            y.fill_(3)
+            return x, y
+
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
+            for i in range(5):
+                with self.subTest(i):
+                    x = torch.empty(0, device="cuda:0")
+                    rx, ry = model(x)
+                    self.assertEqual(rx, torch.full((20,), 2., device="cuda:0"))
+                    self.assertEqual(ry, torch.empty(0, device="cuda:0"))
 
 
 if __name__ == "__main__":

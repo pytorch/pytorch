@@ -98,12 +98,10 @@ def proxy_call(func_overload, args, kwargs=None):
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
     proxy_res = func_overload(*proxy_args, **proxy_kwargs)
-
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
         args[0].proxy = proxy_res
         proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-
     inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
 
     # Needed to sync up metadata for in-place operators that modify metadata
@@ -255,7 +253,7 @@ def wrap_key(f, inps):
         assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                with no_dispatch():
+                with no_dispatch(), torch.utils._python_dispatch.enable_torch_dispatch_mode(None, ignore_preexisting=True):
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
@@ -281,6 +279,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
+        # We don't want to convert torch.tensor constants into tracing objects.
+        if func_overload == aten.lift.default:
+            return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually

@@ -13,6 +13,8 @@ from torch._utils import (
     _get_devices_properties
 )
 
+__all__ = ['DataParallel', 'data_parallel']
+
 def _check_balance(device_ids):
     imbalance_warn = """
     There is an imbalance between your GPUs. You may want to exclude GPU {} which
