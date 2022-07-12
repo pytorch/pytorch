@@ -36,6 +36,7 @@ from test_pytorch_common import (
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
     skipTraceTest,
+    skipForAllOpsetVersions,
 )
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
@@ -1238,6 +1239,14 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x3 = torch.randn(20, 16, 10, 10, 10)
 
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+
+    def test_numpy_T(self):
+        class NumpyTranspose(torch.nn.Module):
+            def forward(self, x):
+                return x.T
+
+        self.run_test(NumpyTranspose(), torch.randn(4, 7))
+        self.run_test(NumpyTranspose(), torch.tensor(-42.0))
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
@@ -6456,6 +6465,15 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_argsort(self):
+        class ArgSortModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.argsort(x, dim=1, descending=False)
+
+        x = torch.randn(3, 4)
+        self.run_test(ArgSortModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
@@ -9930,6 +9948,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
         self.run_test(Module(), (boxes, scores))
 
+    @unittest.skip(
+        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     # TODO: Fails with vision 0.13. See #77671
     def test_batched_nms(self):
@@ -9967,6 +9988,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             additional_test_inputs=[(boxes, size), (boxes, size_2)],
         )
 
+    @unittest.skip(
+        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    )
     @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
@@ -9975,6 +9999,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         model = ops.RoIAlign((5, 5), 1.0, 2)
         self.run_test(model, (x, single_roi))
 
+    @unittest.skip(
+        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    )
     @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
@@ -9998,6 +10025,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         model4 = ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
         self.run_test(model4, (x, single_roi))
 
+    @unittest.skip(
+        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_pool(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -12051,7 +12081,21 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
     @skipIfUnsupportedMinOpsetVersion(16)
-    def test_grid_sample(self):
+    @common_utils.parametrize(
+        "mode",
+        ("bilinear", "nearest", "bicubic"),
+    )
+    @common_utils.parametrize(
+        "padding_mode",
+        ("zeros", "border", "reflection"),
+    )
+    @common_utils.parametrize(
+        "align_corners",
+        (True, False),
+        name_fn=lambda align_corners: str(align_corners),
+    )
+    def test_grid_sample(self, mode, padding_mode, align_corners):
+
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
 
         class GridSampleModule(torch.nn.Module):
@@ -12068,23 +12112,41 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                     input, grid, self.mode, self.padding_mode, self.align_corners
                 )
 
-        for mode, padding_mode, align_corners in itertools.product(
-            ("bilinear", "nearest", "bicubic"),
-            ("zeros", "border", "reflection"),
-            (True, False),
-        ):
-            atol_rtol = {}
-            if (mode, padding_mode) == ("bicubic", "border"):
-                if align_corners:
-                    atol_rtol.update({"atol": 0.3, "rtol": 0.4})
-                else:
-                    atol_rtol.update({"atol": 0.02, "rtol": 0.02})
-            input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
-            self.run_test(
-                GridSampleModule(mode, padding_mode, align_corners),
-                (input, grid),
-                **atol_rtol,
-            )
+        atol_rtol = {}
+        if (mode, padding_mode) == ("bicubic", "border"):
+            if align_corners:
+                atol_rtol.update({"atol": 0.3, "rtol": 0.4})
+            else:
+                atol_rtol.update({"atol": 0.02, "rtol": 0.02})
+        input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
+        self.run_test(
+            GridSampleModule(mode, padding_mode, align_corners),
+            (input, grid),
+            **atol_rtol,
+        )
+
+    # TODO: The fix of OptionalHasElement is still in master branch, not in release
+    #       Enable the test after it's been released.
+    @skipForAllOpsetVersions()
+    @skipTraceTest()
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_uninitialized_optional(self):
+        class Module(torch.nn.Module):
+            def forward(self, y: Optional[Tensor]) -> Optional[Tensor]:
+                if y is not None:
+                    if y.shape[1] < 5:
+                        if y.size(0) == 1:
+                            y = y + 4
+                        else:
+                            return y
+                return y
+
+        self.run_test(
+            Module(),
+            torch.ones((3, 4), dtype=torch.int),
+            dynamic_axes={"y": {0: "y0", 1: "y1"}},
+            input_names=["y"],
+        )
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_device_eq(self):
