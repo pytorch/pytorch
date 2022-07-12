@@ -661,8 +661,12 @@ init_command = [
 code = 'UFMT'
 # This is a big bang change to reformat every python files in the repo,
 # so it's arguably safer to gradually reformat them in subsequent PR.
-# After that, we can use **/*.py to apply the formatter to everything
-include_patterns = ['tools/linter/**/*.py']
+# After that, we can use **/*.py to apply the formatter to all entries
+# currently enforced by BLACK linter
+include_patterns = [
+    'test/onnx/**/*.py',
+    'tools/linter/**/*.py',
+]
 command = [
     'python3',
     'tools/linter/adapters/ufmt_linter.py',

@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import onnx_test_common
 import parameterized
+
+import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -31,8 +33,6 @@ from pytorch_test_common import (
     skipScriptTest,
     skipTraceTest,
 )
-
-import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import verification
