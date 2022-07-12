@@ -342,7 +342,11 @@ test_vulkan() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    if [[ -f /var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json ]] && [[ -f /var/lib/jenkins/swiftshader/build/Linux/libvulkan.so.1 ]]; then
+        LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    else
+	echo "Swiftshader is not installed"
+    fi
   fi
 }
 
@@ -617,8 +621,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
-  # TODO: run some C++ tests
-  echo "no-op at the moment"
+  test_vulkan
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchdynamo
   test_distributed
