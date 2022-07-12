@@ -1,7 +1,7 @@
 import functools
 
 import torch
-from torch.nn.utils._stateless import functional_call
+from torch.nn.utils.stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 from torch.utils._pytree import tree_flatten

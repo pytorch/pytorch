@@ -460,9 +460,9 @@ class TestExpandedWeightModule(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Module passed must be nn.Module"):
             call_for_per_sample_grads("fail")(input)
         with self.assertRaisesRegex(RuntimeError, r"Batch size passed must be None or an integer"):
-            call_for_per_sample_grads(module, 6.4)(input)
+            call_for_per_sample_grads(module, batch_size=6.4)(input)
         with self.assertRaisesRegex(RuntimeError, r"Batch size must be positive"):
-            call_for_per_sample_grads(module, -64)(input)
+            call_for_per_sample_grads(module, batch_size=-64)(input)
         with self.assertRaisesRegex(RuntimeError, r"incorrect for multiple calls"):
             loss = call_for_per_sample_grads(module)(input).sum()
             loss.backward()  # populate grad_sample fields
