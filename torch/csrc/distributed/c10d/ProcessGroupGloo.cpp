@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupGloo.hpp>
+#include "c10/util/Exception.h"
 
 #ifdef USE_C10D_GLOO
 
@@ -189,6 +190,9 @@ ReduceFunc toFunction(const ReduceOp& r) {
       break;
     case ReduceOp::AVG:
       TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
+      break;
+    case ReduceOp::PREMUL_SUM:
+      TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
       break;
