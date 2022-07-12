@@ -925,10 +925,7 @@ void upsample1d_out_mps(const Tensor& input,
 {
     // Get stream
     using namespace mps;
-    struct CachedGraph : public MPSCachedGraph {
-        CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-        MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-    };
+    using CachedGraph = MPSUnaryCachedGraph;
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
     /* sizes */
@@ -941,7 +938,7 @@ void upsample1d_out_mps(const Tensor& input,
                              ":size" + to_string(out_size) +
                              ":mode" + to_string(requested_mode);
 
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
       if(!cachedGraph) {
         cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
@@ -951,8 +948,8 @@ void upsample1d_out_mps(const Tensor& input,
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
 
-              newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
-              newCachedGraph->outputTensor = [mpsGraph resizeTensor:newCachedGraph->inputTensor
+              newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
+              newCachedGraph->outputTensor_ = [mpsGraph resizeTensor:newCachedGraph->inputTensor_
                                                                size:@[ @(out_size), @(1)]
                                                                mode:requested_mode
                                                                centerResult: true
@@ -963,8 +960,8 @@ void upsample1d_out_mps(const Tensor& input,
           return newCachedGraph;
         }));
       }
-      Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor, input);
-      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+      Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor_, input);
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
           inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
