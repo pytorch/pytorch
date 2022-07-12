@@ -668,12 +668,15 @@ VulkanFence::~VulkanFence() {
 void VulkanFence::wait() {
   // if get_submit_handle() has not been called, then this will no-op
   if (waiting_) {
-    VK_CHECK(vkWaitForFences(
-        device_,
-        1u,
-        &handle_,
-        VK_TRUE,
-        UINT64_MAX));
+    VkResult fence_status;
+    do {
+      fence_status = vkGetFenceStatus(device_, handle_);
+
+      TORCH_CHECK(
+          fence_status != VK_ERROR_DEVICE_LOST,
+          "Vulkan Fence: Device lost while waiting for fence!");
+    }
+    while (fence_status != VK_SUCCESS);
 
     VK_CHECK(vkResetFences(
         device_,
