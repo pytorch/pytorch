@@ -70,6 +70,34 @@ def get_bdim_choices(num_tensors):
     assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])
 
+# NB: This is O(2 ** num_tensors).
+# num_tensors ranges from 1 to 10, with 2-4 being most common.
+# Try not to extravagate it if you're modifying it.
+def get_bdim_choices_batch_norm(num_tensors, _, running_mean=None, running_var=None, *args):
+    choices = []
+    options = (-1, None)
+
+    # instance norm turns these into unbatched 0 tensors, so we cannot batch the input if either is not specified
+    if running_mean == None or running_var == None:
+        choices.append((None,) + (0,) * (num_tensors - 1))
+        for choice in itertools.product(options, repeat=num_tensors - 1):
+            choices.append((None,) + choice)
+
+    else:
+        # running_mean and running_var are specified as tensors. Batch norm doesn't work if the input is batched but
+        # running_mean/var are unbatched, so this tests all other cases
+        choices.append((0,) * num_tensors)
+        for choice in itertools.product(options, repeat=num_tensors):
+            input_bdim = choice[0]
+            running_mean_bdim = choice[1]
+            running_var_bdim = choice[2]
+            if input_bdim and (not running_mean_bdim or not running_var_bdim):
+                continue
+            choices.append(choice)
+
+    assert choices[-1] == (None,) * num_tensors
+    return tuple(choices[:-1])
+
 
 def add_batch_dim(arg, bdim, batch_size=3):
     assert bdim == 0 or bdim == -1
@@ -93,12 +121,7 @@ def construct_in_dims(bdim_choice_for_tensors, is_tensors):
         result.append(next(bdim))
     return tuple(result)
 
-
-def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=2, *, for_batch_norm=False):
-    if for_batch_norm:
-        # TODO: delete this path
-        return get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size)
-
+def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=2):
     flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
     is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
     bdim_choices = get_bdim_choices(sum(is_tensors))
@@ -120,87 +143,41 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=2, *, for
         yield batched_args, in_dims, kwarg_values
 
 
-def get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size=3, bdims=(0, -1)):
-    for_batch_norm = True
-    assert bdims == (0,) or bdims == (0, -1)
+def get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size=2):
+    flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
+    is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
+    num_tensors = sum(is_tensors)
+    if num_tensors == 1:  # if there's only an input, can't batch it since running_mean/var will be seen as unbatched tensors
+        return
+    bdim_choices = get_bdim_choices_batch_norm(num_tensors, *arg_values)
 
-    def add_batch_dim(arg, bdim, batch_size=3):
-        assert bdim == 0 or bdim == -1
-        if isinstance(arg, torch.Tensor):
-            if bdim == 0:
-                shape = [1] * len(arg.shape)
-                shape.insert(bdim, batch_size)
-                return (arg.repeat(shape), bdim)
-            if bdim == -1:
-                arg = arg.unsqueeze(-1).expand(*arg.shape, batch_size).contiguous()
-                return (arg, bdim)
-            assert False
-        else:
-            return (arg, None)
-    for bdim in bdims:
-        batch_choices = []
+    @memoize
+    def get_batched_arg(arg, bdim):
+        assert isinstance(arg, torch.Tensor)
+        assert bdim is not None
+        result, _ = add_batch_dim(arg, bdim, batch_size)
+        return result
 
-        def add_batch_choices(a):
-            if isinstance(a, torch.Tensor):
-                batched_val = add_batch_dim(a, bdim, batch_size)
-                batch_choices.append((batched_val, (a, None)))
-            else:
-                batch_choices.append(((a, None),))
+    for bdim_choice in bdim_choices:
+        flat_in_dims = construct_in_dims(bdim_choice, is_tensors)
 
-        flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
-        if for_batch_norm:
-            # Batch norm is unique because the running_mean and running_var are updated in place.
-            # Therefore, they cannot be unbatched if the input is batched. The case where both are
-            # unbatched is added at the end
-            if len(flat_args) >= 3:
-                add_batch_choices(flat_args[0])  # input can be batched or unbatched
-                batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))  # running_mean must be batched
-                batch_choices.append((add_batch_dim(flat_args[2], bdim, batch_size),))  # running_var must be batched
-                orig_flat_args = flat_args
-                flat_args = orig_flat_args[3:]
-            else:
-                # TODO: None defaults in instance norm create empty tensors that are written to and mean that we must
-                # have unbatched inputs. None in the running mean/running var shouldn't make a tensor
-                batch_choices.append(((flat_args[0], None),))  # input must be unbatched
-                if len(flat_args) == 2:
-                    batch_choices.append((add_batch_dim(flat_args[1], bdim, batch_size),))
-                orig_flat_args = flat_args
-                flat_args = []
-
-        for arg in flat_args:
-            add_batch_choices(arg)
-
-        for batched_values in itertools.product(*batch_choices):
-            batched_args, in_dims = zip(*batched_values)
-
-            if all([i is None for i in in_dims]):
-                continue
-
-            yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
-
-        if for_batch_norm and len(orig_flat_args) >= 2:
-            # Adds the case where input, running_mean, and running_var are all unbatched
-            batch_choices[0] = ((orig_flat_args[0], None),)
-            batch_choices[1] = ((orig_flat_args[1], None),)
-            if len(orig_flat_args) >= 3:
-                batch_choices[2] = ((orig_flat_args[2], None),)
-            for batched_values in itertools.product(*batch_choices):
-                batched_args, in_dims = zip(*batched_values)
-
-                if all([i is None for i in in_dims]):
-                    continue
-
-                batched_args_tuple = pytree.tree_unflatten(batched_args, arg_spec)
-                in_dims_tuple = pytree.tree_unflatten(in_dims, arg_spec)
-                yield batched_args_tuple, in_dims_tuple, kwarg_values
+        flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim)
+                                  for arg, in_dim in zip(flat_args, flat_in_dims))
+        batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
+        in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
+        yield batched_args, in_dims, kwarg_values
 
 
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, opinfo=None, compute_loop_out=True):
     out_dim = 0
     batch_size = 2
     batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
-    for_batch_norm = opinfo is not None and opinfo.name in batch_norm_fns
-    generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size, for_batch_norm=for_batch_norm)
+
+    if opinfo is not None and opinfo.name in batch_norm_fns:
+        generator = get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size)
+    else:
+        generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
+
     for batched_args, in_dims, kwarg_values in generator:
         if compute_loop_out:
             loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
