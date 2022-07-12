@@ -1864,13 +1864,15 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
     return;
   }
 
-  if (upper) {
-    at::triu_out(L, A);
-  } else {
-    at::tril_out(L, A);
-  }
+  L.copy_(A);
 
   cholesky_stub(L.device().type(), L, info, upper);
+
+  if (upper) {
+    L.triu_();
+  } else {
+    L.tril_();
+  }
 
   if (check_errors) {
     at::_linalg_check_errors(info, "linalg.cholesky_ex", A.dim() == 2);
