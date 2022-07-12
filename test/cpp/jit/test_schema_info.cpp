@@ -86,5 +86,46 @@ TEST(FunctionSchemaMayAliasTest, Wildcard) {
   ASSERT_FALSE(schema.may_alias(
       {c10::SchemaArgType::output, 1}, {c10::SchemaArgType::input, 0}));
 }
+
+TEST(SchemaInfoMayAliasTest, AliasingInputs) {
+  SchemaInfo schema(
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", input);
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
+}
+
+TEST(SchemaInfoMayAliasTest, AliasingOutputs) {
+  SchemaInfo schema(
+      "aten::aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)");
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::output, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("min", input);
+  schema.addArgumentValue("max", input);
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::output, 1}));
+}
+
+TEST(SchemaInfoMayAliasTest, AliasingInputOutput) {
+  SchemaInfo schema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", input);
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+}
+
 } // namespace utils
 } // namespace torch

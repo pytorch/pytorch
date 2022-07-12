@@ -9,7 +9,7 @@ namespace utils {
 /**
  * class SchemaInfo
  *
- * Subclass of FunctionSchema that publicizes argument value specific operator
+ * FunctionSchema wrapper that publicizes argument value specific operator
  * behavior (mutation, aliasing, special cases, etc...)
  */
 
@@ -27,6 +27,10 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(c10::string_view name);
 
+  bool may_alias(
+      const c10::SchemaArgument& lhs,
+      const c10::SchemaArgument& rhs);
+
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
   void addArgumentValues(
@@ -43,6 +47,9 @@ struct TORCH_API SchemaInfo {
 
   // Alias map of inputs with each other
   std::vector<std::unordered_set<size_t>> input_alias_map_;
+
+  // Alias map of outputs to inputs
+  std::vector<std::unordered_set<size_t>> output_alias_map_;
 
   c10::FunctionSchema schema_;
 
