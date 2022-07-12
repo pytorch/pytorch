@@ -85,9 +85,7 @@ except ImportError:
     _TORCHDISTX_AVAIL = False
 
 _TORCH_FX_AVAIL = True
-try:
-    from torch import fx
-except ImportError:
+if not hasattr(torch, "fx"):
     _TORCH_FX_AVAIL = False
 if _TORCH_FX_AVAIL:
     from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
