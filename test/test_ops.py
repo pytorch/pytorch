@@ -1230,7 +1230,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs, sample.output_process_fn_grad)
+            composite_compliance.check_backward_formula(
+                op.get_op(), args, kwargs,
+                sample.output_process_fn_grad,
+                op.gradcheck_wrapper)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1248,7 +1251,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper)
 
 
 class TestMathBits(TestCase):
@@ -1495,8 +1499,8 @@ class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
-    ref_ops_names = itertools.chain.from_iterable(
-        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls)
+    ref_ops_names = tuple(itertools.chain.from_iterable(
+        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
     ref_db_names = set(ref_op.name for ref_op in python_ref_db)
 
     # TODO: References that do not have an entry in python_ref_db
@@ -1522,6 +1526,7 @@ class TestRefsOpsInfo(TestCase):
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
+        '_refs.nn.functional.mse_loss',
         '_refs.masked_fill',
         '_refs.transpose',
         '_refs.var',
@@ -1537,6 +1542,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_to',
         '_refs.chunk',
         '_refs.column_stack',
+        '_refs.contiguous',
         '_refs.dsplit',
         '_refs.dstack',
         '_refs.fill',
