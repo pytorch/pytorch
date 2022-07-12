@@ -1,6 +1,5 @@
 from torch.ao.sparsity._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
 import torch
-import pytorch_lightning as pl  # type: ignore[import]
 import torch.nn as nn
 from typing import List
 from torch.ao.sparsity._experimental.data_sparsifier.lightning.callbacks.data_sparsity import PostTrainingDataSparsity
@@ -8,14 +7,14 @@ from torch.ao.sparsity._experimental.data_sparsifier.lightning.callbacks._data_s
 from torch.ao.sparsity._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import run_tests
+import importlib
+import unittest
 
 
 class DummyModel(nn.Module):
     def __init__(self, iC: int, oC: List[int]):
         super().__init__()
         self.linears = nn.Sequential()
-        self.emb = nn.Embedding(1024, 32)
-        self.emb_bag = nn.EmbeddingBag(1024, 32)
         i = iC
         for idx, c in enumerate(oC):
             self.linears.append(nn.Linear(i, c, bias=False))
@@ -24,13 +23,18 @@ class DummyModel(nn.Module):
             i = c
 
 
-class DummyLightningModule(pl.LightningModule):
-    def __init__(self, iC: int, oC: List[int]):
-        super().__init__()
-        self.model = DummyModel(iC, oC)
+def _make_lightning_module(iC: int, oC: List[int]):
+    import pytorch_lightning as pl  # type: ignore[import]
 
-    def forward(self):
-        pass
+    class DummyLightningModule(pl.LightningModule):
+        def __init__(self, ic: int, oC: List[int]):
+            super().__init__()
+            self.model = DummyModel(iC, oC)
+
+        def forward(self):
+            pass
+
+    return DummyLightningModule(iC, oC)
 
 
 class _PostTrainingCallbackTestCase(TestCase):
@@ -73,6 +77,7 @@ class _PostTrainingCallbackTestCase(TestCase):
 
 
 class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
+    @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
     def test_post_training_callback(self):
         sparsifier_args = {
             'sparsity_level': 0.5,
@@ -80,7 +85,7 @@ class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
             'zeros_per_block': 4
         }
         callback = PostTrainingDataSparsity(DataNormSparsifier, sparsifier_args)
-        pl_module = DummyLightningModule(100, [128, 256, 16])
+        pl_module = _make_lightning_module(100, [128, 256, 16])
 
         self.run_all_checks(pl_module, callback, sparsifier_args)
 
