@@ -91,7 +91,7 @@ class TestTransformers(NNTestCase):
         else:
             model(x, src_key_padding_mask=mask)
 
-    @unittest.skipIf(not TEST_FAIRSEQ, "numpy not found")
+    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_decoder_only_layer(self):
         DEFAULT_PADDING_IDX = 0
