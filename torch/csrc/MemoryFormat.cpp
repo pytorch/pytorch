@@ -29,7 +29,7 @@ PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
 }
 
 PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
-  auto* self = (THPMemoryFormat*)_self;
+  auto self = (THPMemoryFormat*)_self;
   return THPUtils_packString(self->name);
 }
 
