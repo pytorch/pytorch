@@ -1731,7 +1731,7 @@ std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper,  int* infos) {
+static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos) {
 #if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
@@ -1739,6 +1739,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper,  int* infos) 
 
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -1752,7 +1753,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper,  int* infos) 
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, ldab, b_working_ptr, ldab, &info);
-    infos[i] = info;
+    infos_data[i] = info;
     if (info != 0) {
       return;
     }
@@ -1765,7 +1766,7 @@ Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool uppe
   auto A_working_copy = cloneBatchedColumnMajor(A);
   auto infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_solve_cpu", [&]{
-    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos.data_ptr<int>());
+    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos);
   });
 
   at::_linalg_check_errors(infos, "cholesky_solve_cpu", self.dim() == 2);
@@ -1863,15 +1864,13 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
     return;
   }
 
-  L.copy_(A);
+  if (upper) {
+    at::triu_out(L, A);
+  } else {
+    at::tril_out(L, A);
+  }
 
   cholesky_stub(L.device().type(), L, info, upper);
-
-  if (upper) {
-    L.triu_();
-  } else {
-    L.tril_();
-  }
 
   if (check_errors) {
     at::_linalg_check_errors(info, "linalg.cholesky_ex", A.dim() == 2);
