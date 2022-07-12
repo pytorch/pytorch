@@ -819,5 +819,21 @@ class TestJitTraceAutocast(JitTestCase):
                 continue
             test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    def test_script_autocast(self):
+        def fn(x):
+            if torch.is_autocast_enabled():
+                return x.relu()
+            else:
+                return x.sin()
+
+        fn_s = torch.jit.script(fn)
+
+        x = torch.rand((4, 4)) - 0.5
+        with torch.cpu.amp.autocast():
+            self.assertEqual(fn_s(x), fn(x))
+
+        with torch.cpu.amp.autocast(enabled=False):
+            self.assertEqual(fn_s(x), fn(x))
+
 if __name__ == "__main__":
     run_tests()

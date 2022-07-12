@@ -1,3 +1,4 @@
+#include <ATen/autocast_mode.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -647,6 +648,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto a = pop(stack);
           auto b = pop(stack);
           push(stack, a != b);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
+        [](Stack& stack) {
+          push(stack, at::autocast::is_enabled());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
