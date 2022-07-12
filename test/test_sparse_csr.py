@@ -12,8 +12,7 @@ from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, parametrize,
      subtest)
 from torch.testing._internal.common_device_type import \
-    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA,
-     skipCUDAIfNoCusparseGeneric, skipCUDAIfNoHipsparseGeneric,
+    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
@@ -1219,8 +1218,7 @@ class TestSparseCSR(TestCase):
                     torch.addmm(s, csr, m2)
 
     @skipCPUIfNoMklSparse
-    @skipCUDAIfNoCusparseGeneric
-    @skipCUDAIfNoHipsparseGeneric
+    @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater else [],
@@ -1281,8 +1279,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
-    @skipCUDAIfNoCusparseGeneric
-    @skipCUDAIfNoHipsparseGeneric
+    @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
