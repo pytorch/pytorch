@@ -46,14 +46,14 @@ class TestTransformers(NNTestCase):
             device = "cuda"
         else:
             device = "cpu"
-        
+
         batch_size = 2
         seqlen = 4
         d_model = 8
         nhead = 8
 
         model = torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True).to(device)
-        src = torch.rand(batch_size, seqlen, d_model).to(device) # bs, seqlen, d_model
+        src = torch.rand(batch_size, seqlen, d_model).to(device)  # bs, seqlen, d_model
         src_mask = torch.zeros(seqlen, seqlen).to(torch.bool).to(device)
 
         model(src, src_mask=src_mask)
