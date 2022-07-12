@@ -3,7 +3,6 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms.transforms as transforms
 import os
-import sys
 # from torch.ao.quantization import QConfigMapping
 
 # Setup warnings
@@ -151,7 +150,7 @@ Prepare models
 """
 
 # Note that this is temporary, we'll expose these functions to torch.quantization after official releasee
-from torch.quantization.quantize_fx import prepare_fx
+from torch.quantization.quantize_fx import prepare_fx, convert_fx
 
 def calibrate(model, data_loader):
     model.eval()
@@ -167,8 +166,8 @@ qconfig1 = get_uniform_qconfig()
 qconfig_dict1 = {"object_type": [(torch.nn.Linear, qconfig1)]}
 prepared_model1 = prepare_fx(float_model, qconfig_dict1)  # fuse modules and insert observers
 calibrate(prepared_model1, data_loader_test)  # run calibration on sample data
+quantized_model1 = convert_fx(prepared_model1)  # convert the calibrated model to a quantized model
 
-stdout_orig = sys.stdout
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)
 print("Model #1 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 
