@@ -121,11 +121,11 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
   const Tensor& source,
   const Scalar& alpha,
   const Tensor& result) {
-  auto numel = index.numel();
 
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
   dim = maybe_wrap_dim(dim, self.dim());
+  auto numel = index.numel();
   auto alpha_f = alpha.to<float>();
 
   if (numel == 0) {
@@ -160,7 +160,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
-          MPSGraphTensor* alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, alpha_f);
+          MPSGraphTensor* alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, alpha_f);
           MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
                                                            indicesTensor:indexTensor
                                                                     axis:dim

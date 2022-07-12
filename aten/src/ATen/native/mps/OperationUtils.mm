@@ -462,7 +462,7 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tens
                                      name:nil];
 }
 
-MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar) {
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar) {
     return [mpsGraph placeholderWithShape:@[@1]
                                  dataType:getMPSScalarType(scalar.type())
                                      name:nil];
