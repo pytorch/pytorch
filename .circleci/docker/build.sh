@@ -139,7 +139,7 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.6.0
+    CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=7
@@ -234,7 +234,7 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm5.0-py3.7)
+  pytorch-linux-focal-rocm5.0-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
@@ -242,7 +242,7 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=5.0
     ;;
-  pytorch-linux-bionic-rocm5.1-py3.7)
+  pytorch-linux-focal-rocm5.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
