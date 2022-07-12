@@ -13,17 +13,19 @@ namespace api {
 // ShaderSource
 //
 
-ShaderSource::ShaderSource(const char* const glsl_src)
+ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
   : type(ShaderSource::Type::GLSL),
     src_code{
      .glsl = {
        glsl_src,
        0u,
      },
-    } {
+    },
+    kernel_name{std::move(name)} {
 }
 
 ShaderSource::ShaderSource(
+    std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size)
   : type(Type::SPIRV),
@@ -32,7 +34,8 @@ ShaderSource::ShaderSource(
        spirv_bin,
        size,
      },
-    } {
+    },
+    kernel_name{std::move(name)} {
 }
 
 bool operator==(
