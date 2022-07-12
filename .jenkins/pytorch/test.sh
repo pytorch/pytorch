@@ -585,6 +585,12 @@ test_dynamo() {
   popd
 }
 
+test_functorch() {
+  pushd ../functorch
+  pytest test
+  popd
+}
+
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -665,6 +671,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
+elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
+  checkout_install_functorch
+  test_functorch
 else
   install_torchvision
   install_torchdynamo

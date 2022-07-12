@@ -95,9 +95,9 @@ TEST(SchemaInfoIsNonDeterministicTest, Basic) {
 TEST(SchemaInfoIsNonDeterministicTest, Dropout) {
   SchemaInfo droupout_schema_info(
       "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  ASSERT_TRUE(droupout_schema_info.is_non_deterministic());
+  ASSERT_TRUE(droupout_schema_info.is_nondeterministic());
   droupout_schema_info.addArgumentValue("train", false);
-  ASSERT_FALSE(droupout_schema_info.is_non_deterministic());
+  ASSERT_FALSE(droupout_schema_info.is_nondeterministic());
 }
 
 TEST(FunctionSchemaMayAliasTest, Basic) {
