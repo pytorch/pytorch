@@ -24,12 +24,11 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: windows-binary-conda
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: windows-binary-conda-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: windows-binary-conda-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:

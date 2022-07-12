@@ -6,7 +6,7 @@ understand the high-level design principles that have developed over
 time in PyTorch. These are not meant to be hard-and-fast rules, but to
 serve as a guide to help trade off different concerns and to resolve
 disagreements that may come up while developing PyTorch. For more
-information on contributing, module ownership, and how to escalate a
+information on contributing, module maintainership, and how to escalate a
 disagreement to the Core Maintainers, please see `PyTorch
 Governance <https://pytorch.org/docs/master/community/governance.html>`__.
 
@@ -135,7 +135,7 @@ Still, working in Python provides easily the best experience for our
 users: it is flexible, familiar, and perhaps most importantly, has a
 huge ecosystem of scientific computing libraries and extensions
 available for use. This fact motivates a few of our most recent
-investments, which attempt to hit a Pareto optimal point close to the
+contributions, which attempt to hit a Pareto optimal point close to the
 Python usability end of the curve:
 
 -  `TorchDynamo <https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361>`__,

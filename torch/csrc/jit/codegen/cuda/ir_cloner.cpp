@@ -128,6 +128,10 @@ void IrCloner::handle(const TransposeOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const ExpandOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const ShiftOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }

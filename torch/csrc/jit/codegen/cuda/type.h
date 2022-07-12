@@ -111,6 +111,7 @@ enum class ExprType {
   WelfordOp,
   MmaOp,
   TransposeOp,
+  ExpandOp,
   ShiftOp,
   GatherOp,
   ViewOp,
@@ -151,6 +152,7 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
+  Imag,
   Silu,
   Lgamma,
   Log,
@@ -160,6 +162,7 @@ enum class UnaryOpType {
   BitCast,
   Neg,
   RandLike,
+  Real,
   Reciprocal,
   Relu,
   Rsqrt,
@@ -286,8 +289,7 @@ enum class MemoryType { Local, Shared, Global };
 enum class IterType {
   Iteration,
   Reduction,
-  BroadcastWithStride,
-  BroadcastWithoutStride,
+  Broadcast,
   Gather,
   Stride,
   VectorComponent

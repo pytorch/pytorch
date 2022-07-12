@@ -359,7 +359,20 @@ struct FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
+  bool is_mutable(size_t index) const {
+    TORCH_INTERNAL_ASSERT(
+        index < arguments().size(),
+        "Invalid index for schema.");
+    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    return aliasInfo && aliasInfo->isWrite();
+  }
+  bool is_mutable(c10::string_view name) const {
+    c10::optional<int> index = argumentIndexWithName(name);
+    TORCH_INTERNAL_ASSERT(
+        index != c10::nullopt, "Schema has no argument named ", name);
 
+    return is_mutable(*index);
+  }
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
@@ -509,6 +522,26 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
         unopt_type->kind() == c10::TypeKind::StringType) &&
         arg.default_value().value().isString()) {
       printQuotedString(out, arg.default_value().value().toStringRef());
+    } else if (type->kind() == TypeKind::ListType && type->castRaw<ListType>()->getElementType()->kind() == c10::TypeKind::IntType) {
+      // We want to faithfully replicate JIT schema.
+      // in native_functions.yaml defaults for int arrays with a single value always look like
+      //   int[2] stride=1
+      // instead of
+      //   int[2] stride=[1, 1]
+      auto default_val = arg.default_value().value().toIntList();
+      if (default_val.size() > 1) {
+        auto all_defaults_the_same = true;
+        for (const auto i : c10::irange(1, default_val.size())) {
+          if (default_val[0] != default_val[i]) all_defaults_the_same = false;
+        }
+        if (all_defaults_the_same) {
+          out << default_val[0];
+        } else {
+          out << arg.default_value().value();
+        }
+      } else {
+        out << arg.default_value().value();
+      }
     } else {
       out << arg.default_value().value();
     }

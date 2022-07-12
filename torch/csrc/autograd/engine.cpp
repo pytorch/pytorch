@@ -54,8 +54,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static std::once_flag flag;
-  std::call_once(
+  static c10::once_flag flag;
+  c10::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
 #endif
 }
@@ -724,7 +724,7 @@ void validate_outputs(
 
     if (!metadata.is_same_shape(grad)) {
       if (metadata.is_expandable_to_shape(grad)) {
-        grad = at::sum_to(std::move(grad), metadata.shape());
+        grad = metadata.reduce_grad(grad);
       } else {
         const auto message = metadata.incompatible_shape_error_message(i, grad);
         AT_ERROR(format_error(message.str()));
@@ -1109,7 +1109,7 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  std::call_once(
+  c10::call_once(
       start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 

@@ -347,7 +347,7 @@ void masked_scatter_cuda_impl(
   auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
   auto mask_data = mask_cont.data_ptr<mask_t>();
 
-  at::cuda::cub::exclusive_sum_in_common_type(
+  at::cuda::cub::mask_exclusive_sum(
       mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
