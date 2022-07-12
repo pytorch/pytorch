@@ -27,7 +27,6 @@ def define_targets(rules):
             "//c10",
             "//third_party/miniz-2.1.0:miniz",
         ],
-        copts = ["-fexceptions"],
     )
 
     #
