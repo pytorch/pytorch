@@ -14,7 +14,8 @@ namespace utils {
 
 struct TORCH_API SchemaInfo {
  public:
-  explicit SchemaInfo(c10::FunctionSchema schema) : schema_(schema) {}
+  explicit SchemaInfo(c10::FunctionSchema schema)
+      : schema_(std::move(schema)) {}
   explicit SchemaInfo(const char* signature)
       : schema_(torch::jit::parseSchema(signature)) {}
 
