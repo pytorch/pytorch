@@ -69,7 +69,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback,
-      bool allow_tf32_cudnn,
       bool allow_tf32_cublas)
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
@@ -79,7 +78,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)},
-        allow_tf32_cudnn_{allow_tf32_cudnn},
         allow_tf32_cublas_{allow_tf32_cublas} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
@@ -88,7 +86,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
-  bool allow_tf32_cudnn_;
   bool allow_tf32_cublas_;
 };
 
@@ -194,9 +191,9 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
-  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
+  libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
-  uint64_t endTimeNS() const;
+  int64_t endTimeNS() const;
   uint64_t endTID() const;
   c10::DeviceType deviceType() const;
 
@@ -236,7 +233,6 @@ struct KinetoObserverContext : public at::ObserverContext {
     // Set in the exit callback.
     approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
 
-    bool allow_tf32_cudnn_;
     bool allow_tf32_cublas_;
   };
 

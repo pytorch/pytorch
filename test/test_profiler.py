@@ -31,7 +31,7 @@ from torch.profiler import (
 from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              ExtraCUDACopyPattern,
                                              ForLoopIndexingPattern,
-                                             FP32TorchOpPattern)
+                                             FP32MatMulPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1116,19 +1116,21 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+def find_node_with_name(nodes, name):
+    for node in nodes:
+        if node.name() == name:
+            return node
+        result = find_node_with_name(node.children, name)
+        if result is not None:
+            return result
+
+class TestTorchTidyProfiler(TestCase):
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
 
-        def find_ones(nodes):
-            for n in nodes:
-                if n.name() == "aten::ones":
-                    return n
-                result = find_ones(n.children)
-                if result:
-                    return result
-
-        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::ones")
         self.assertIsNotNone(node)
 
         self.assertIsInstance(
@@ -1144,6 +1146,25 @@ class TestProfiler(TestCase):
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
+
+    def test_tensor_sizes(self):
+        x = torch.ones(10, 10)
+        y = torch.ones(1, 10)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + y
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        # The alpha scalar has a [] size
+        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
+        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
 
 
 @dataclass(frozen=True)
@@ -1536,7 +1557,7 @@ aten::mm""")
         self.assertEqual(num_matched, [i for i, _ in cases])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_fp32_torchop_pattern(self):
+    def test_profiler_fp32_matmul_pattern(self):
         has_tf32 = 1
         for arch in torch.cuda.get_arch_list():
             arch_no = int(arch[3:])
@@ -1547,7 +1568,7 @@ aten::mm""")
         x = torch.ones((100, 100), device="cuda")
         with profile(with_stack=True) as prof:
             x = x @ x
-        pattern = FP32TorchOpPattern(prof)
+        pattern = FP32MatMulPattern(prof)
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
 
