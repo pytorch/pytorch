@@ -236,6 +236,9 @@ patch_all = composed(
 )
 
 
+N_ITERS = 5
+
+
 class TestDynamoCudaGraphs(TestCase):
     @patch_all
     def test_basic(self):
@@ -243,7 +246,7 @@ class TestDynamoCudaGraphs(TestCase):
             return (x + y) * y
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(5):
+            for i in range(N_ITERS):
                 x = torch.randn(3, device="cuda", requires_grad=True)
                 y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
@@ -257,7 +260,7 @@ class TestDynamoCudaGraphs(TestCase):
             return b
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(5):
+            for i in range(N_ITERS):
                 x = torch.randn(3, device="cuda", requires_grad=True)
                 y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
@@ -270,7 +273,7 @@ class TestDynamoCudaGraphs(TestCase):
             return a * 3
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(5):
+            for i in range(N_ITERS):
                 x = torch.randn(3, device="cuda", requires_grad=True)
                 y = torch.randn((), device="cpu")
                 loss = model(x, y).sum()
@@ -284,7 +287,7 @@ class TestDynamoCudaGraphs(TestCase):
             return x * y
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(5):
+            for i in range(N_ITERS):
                 with self.subTest(i):
                     x = torch.randn(3, device="cuda", requires_grad=True)
                     y = torch.randn(3, device="cuda")
@@ -300,14 +303,14 @@ class TestDynamoCudaGraphs(TestCase):
             c.add_(2)
             return x * y * 0 + c
 
-        with torchdynamo.optimize("aot_autograd"):
-            for i in range(5):
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
+            for i in range(N_ITERS):
                 with self.subTest(i):
                     x = torch.randn(1, device="cuda", requires_grad=True)
                     y = torch.randn(1, device="cuda")
                     loss = model(x, y).sum()
                     self.assertEqual(loss, torch.tensor(3.0, device="cuda"))
-                    loss.backward()
+                    #loss.backward()
 
     @patch_all
     def test_factory(self):
@@ -317,7 +320,7 @@ class TestDynamoCudaGraphs(TestCase):
             return x * y
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(5):
+            for i in range(N_ITERS):
                 with self.subTest(i):
                     y = torch.randn(3, device="cuda:0", requires_grad=True)
                     loss = model(y).sum()
@@ -353,7 +356,7 @@ class TestDynamoCudaGraphs(TestCase):
             return x, y
 
         with torchdynamo.optimize(aot_autograd_cudagraphs):
-            for i in range(1):
+            for i in range(N_ITERS):
                 with self.subTest(i):
                     x = torch.empty(20, device="cuda:0")
                     rx, ry = model(x)
