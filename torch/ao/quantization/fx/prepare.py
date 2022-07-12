@@ -1355,7 +1355,7 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
                     if obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
-                        obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
+                            obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
                         bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
