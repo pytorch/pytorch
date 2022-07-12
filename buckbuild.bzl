@@ -156,6 +156,7 @@ def get_pt_compiler_flags():
     })
 
 _PT_COMPILER_FLAGS = [
+    "-fexceptions",
     "-frtti",
     "-Os",
     "-Wno-unknown-pragmas",
@@ -1116,6 +1117,7 @@ def define_buck_targets(
         deps = [
             C10,
         ],
+        compiler_flags = ["-fexceptions"],
     )
 
     # Base library shared by lite-interpreter and full-jit.
@@ -1844,6 +1846,7 @@ def define_buck_targets(
             ":torch_core",
             C10,
         ],
+        compiler_flags = ["-fexceptions"],
     )
 
     # aten_cpu and aten_native_cpu
