@@ -754,12 +754,12 @@ class TestSparseCompressed(TestCase):
                    shape((2, 3)),
                    r'0 <= compressed_indices\[..., 1:\] - compressed_indices\[..., :\-1\] <= plain_dim` is not satisfied.')
 
-            #yield ('invalid max(plain_indices)',
-            #       tensor([0, 2, 4]),
-            #       tensor([0, 1, 0, 3]),
-            #       values([1, 2, 3, 4]),
-            #       shape((2, 3)),
-            #       r'`0 <= {row|col}_indices < dim` is not satisfied.')
+            yield ('invalid max(plain_indices)',
+                   tensor([0, 2, 4]),
+                   tensor([0, 1, 0, 3]),
+                   values([1, 2, 3, 4]),
+                   shape((2, 3)),
+                   r'`0 <= plain_indices < plain_dim` is not satisfied.')
 
             #yield ('non-coalesced',
             #       tensor([0, 2, 4]),

@@ -110,17 +110,21 @@ _check_cidx_nondecreasing_locally_bounded_sequence(
 }
 
 // Invariants 5.4 and 5.5
-// 0 <= idx < dim,
+// 0 <= plain_index < plain_dim,
 // where idx/dim is either col/ncols or row/nrows.
-template <typename index_t>
+template <CDimName cdim_name, typename index_t>
 INVARIANT_CHECK_FUNC_API
 _check_idx_bounds(
     const index_t& idx,
     const index_t& zero,
     const index_t& dim) {
   const bool invariant = zero <= idx && idx < dim;
-  static constexpr auto message = "`0 <= {row|col}_indices < dim` is not satisfied.";
-  _assert(invariant, message);
+  if (cdim_name == CDimName::CRow) {
+    _assert(invariant, "`0 <= col_indices < ncols` is not satisfied.");
+  }
+  else {
+    _assert(invariant, "`0 <= row_indices < nrows` is not satisfied.");
+  }
 }
 
 // Invariant 5.6
@@ -213,7 +217,7 @@ static void _validate_compressed_sparse_indices_kernel(
         const auto zero = index_t {0};
         KernelLauncher::launch(iter,
             [zero, dim] FUNCAPI (index_t idx) -> index_t {
-              _check_idx_bounds<index_t>(idx, zero, dim);
+              _check_idx_bounds<cdim_name, index_t>(idx, zero, dim);
               return 0;
             }
         );
