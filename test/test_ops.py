@@ -1536,7 +1536,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
         # CompositeImplicitAutograd
-        '_refs.allclose',
         '_refs.atleast_1d',
         '_refs.atleast_2d',
         '_refs.atleast_3d',
