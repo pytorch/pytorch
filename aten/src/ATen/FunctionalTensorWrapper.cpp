@@ -19,11 +19,8 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   level_ = -1;
   // mirror all of the generic tensor metadata onto the wrapper
   copy_generic_tensor_metadata(value_.getIntrusivePtr().get(), this);
-  // TODO: guard these refresh's with a check that
-  // innner tensor has dynamic shapes.
-  // (I think I'll need to rebase on one of Horace's PRs).
-  //refresh_numel();
-  //refresh_contiguous();
+  refresh_numel();
+  refresh_contiguous();
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
   // and these changes need to be reflected in the metadata of the wrapper.
