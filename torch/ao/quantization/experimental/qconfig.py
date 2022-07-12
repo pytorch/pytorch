@@ -6,16 +6,16 @@ import torch
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
 
 # uniform activation and weight
-uniform_qconfig = QConfig(activation=default_observer.with_args(dtype=torch.qint8),
+uniform_qconfig = QConfig(activation=default_observer.with_args(dtype=torch.quint8),
                           weight=default_observer.with_args(dtype=torch.qint8))
 
 # uniform activation, APoT weight
-apot_weight_qconfig = QConfig(activation=default_observer,
-                              weight=APoTFakeQuantize.with_args(b=4, k=2))
+apot_weight_qconfig = QConfig(activation=default_observer.with_args(dtype=torch.quint8),
+                              weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
 
 # APoT activation and uniform weight
-apot_qconfig = QConfig(activation=APoTFakeQuantize.with_args(b=4, k=2),
-                       weight=APoTFakeQuantize.with_args(b=4, k=2))
+apot_qconfig = QConfig(activation=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.quint8),
+                       weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
 
 def get_uniform_qconfig():
     """
