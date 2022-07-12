@@ -2,10 +2,19 @@
 
 # Static Runtime
 
-The premise of this approach is that a small subset of neural networks are well represented by a
-completely flattened dataflow graph.
-TorchScript supports a far more feature programming paradigm,
-so many models will not work out of the box.
+Static Runtime is an optimized CPU inference runtime for PyTorch models.
+It can be used as a drop-in replacement for the TorchScript JIT interpreter
+in either C++ or Python.
+
+Static Runtime is mainly useful if the following conditions are met:
+1. The model has very little control flow.
+2. PyTorch overhead (tensor creation, etc) accounts for
+a non-trivial fraction of the model's runtime. In particular, if
+tensor allocation consumes a significant amount of time, Static
+Runtime can help. Memory for intermediate tensors is coalesced into
+a single slab, so most dynamic allocations are avoided during
+inference.
+3. Inference performance is extremely important.
 
 ## Assumptions
 
