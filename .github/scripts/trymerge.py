@@ -88,15 +88,8 @@ fragment CommitAuthors on PullRequestCommitConnection {
 """
 
 GH_GET_PR_INFO_QUERY = GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
-query ($owner: String!, $name: String!, $number: Int!, $commit: String) {
+query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    object(expression: $commit) {
-      ... on Commit {
-        checkSuites {
-          ...PRCheckSuites
-        }
-      }
-    }
     pullRequest(number: $number) {
       closed
       isCrossRepository
@@ -207,6 +200,21 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   }
 }
 """
+
+GH_GET_COMMIT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
+query ($owner: String!, $name: String!, $commit: String) {
+  repository(name: $name, owner: $owner) {
+    object(expression: $commit) {
+      ... on Commit {
+        checkSuites {
+          ...PRCheckSuites
+        }
+      }
+    }
+  }
+}
+"""
+
 
 GH_GET_COMMIT_NEXT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
 query ($owner: String!, $name: String!, $commit: String, $cursor: String!) {
@@ -422,9 +430,13 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], rc)
 
 
-def gh_get_pr_info(org: str, proj: str, pr_no: int, commit: Optional[str] = None) -> Any:
-    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no, commit=commit)
-    return (rc["data"]['repository']["object"], rc["data"]["repository"]["pullRequest"])
+def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
+    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
+    return rc["data"]["repository"]["pullRequest"]
+
+def gh_get_land_check_info(org: str, proj: str, commit: str) -> Any:
+    rc = gh_graphql(GH_GET_COMMIT_CHECKSUITES, name=proj, owner=org, commit=commit)
+    return rc["data"]["repository"]["object"]
 
 @lru_cache(maxsize=None)
 def gh_get_team_members(org: str, name: str) -> List[str]:
@@ -474,15 +486,13 @@ class GitHubComment:
 
 
 class GitHubPR:
-    def __init__(self, org: str, project: str, pr_num: int, land_check_commit: Optional[str] = None) -> None:
+    def __init__(self, org: str, project: str, pr_num: int) -> None:
         assert isinstance(pr_num, int)
         self.org = org
         self.project = project
         self.pr_num = pr_num
-        self.land_check_commit = land_check_commit
-        [self.land_check_info, self.info] = gh_get_pr_info(org, project, pr_num, land_check_commit)
+        self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
-        self.land_check_conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
@@ -603,54 +613,6 @@ class GitHubPR:
 
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
-
-    def get_land_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
-        if self.land_check_conclusions is not None:
-            return self.land_check_conclusions
-        checksuites = self.land_check_info["checkSuites"]
-        conclusions = {}
-
-        def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
-            for edge_idx, edge in enumerate(edges):
-                node = edge["node"]
-                workflow_run = node["workflowRun"]
-                checkruns = node["checkRuns"]
-                if workflow_run is not None:
-                    conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-                has_failing_check = False
-                while checkruns is not None:
-                    for checkrun_node in checkruns["nodes"]:
-                        if checkrun_node["conclusion"] == 'FAILURE':
-                            has_failing_check = True
-                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
-                    if bool(checkruns["pageInfo"]["hasNextPage"]):
-                        rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
-                                        name=self.project,
-                                        owner=self.org,
-                                        cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
-                                        cr_cursor=checkruns["pageInfo"]["endCursor"],
-                                        commit=self.land_check_commit)
-                        checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
-                    else:
-                        checkruns = None
-                # Github doesn't set conclusion to failure if a job is still pending
-                if workflow_run is not None and has_failing_check:
-                    conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
-
-        add_conclusions(checksuites["edges"])
-        while bool(checksuites["pageInfo"]["hasNextPage"]):
-            rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECKSUITES,
-                            name=self.project,
-                            owner=self.org,
-                            number=self.pr_num,
-                            cursor=checksuites["edges"][-1]["cursor"])
-            info = rc["data"]["repository"]["object"]
-            checksuites = info["checkSuites"]
-            add_conclusions(checksuites["edges"])
-
-        self.land_check_conclusions = conclusions
-        return conclusions
-
 
     def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
         """ Returns dict of checkrun -> [conclusion, url] """
@@ -996,6 +958,52 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
+def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, Tuple[str, str]]:
+    land_check_info = gh_get_land_check_info(org, project, commit)
+    checksuites = land_check_info["checkSuites"]
+    conclusions = {}
+
+    def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
+        for edge_idx, edge in enumerate(edges):
+            node = edge["node"]
+            workflow_run = node["workflowRun"]
+            checkruns = node["checkRuns"]
+            if workflow_run is not None:
+                conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+            has_failing_check = False
+            while checkruns is not None:
+                for checkrun_node in checkruns["nodes"]:
+                    if checkrun_node["conclusion"] == 'FAILURE':
+                        has_failing_check = True
+                    conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                if bool(checkruns["pageInfo"]["hasNextPage"]):
+                    rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
+                                    name=project,
+                                    owner=org,
+                                    cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                                    cr_cursor=checkruns["pageInfo"]["endCursor"],
+                                    commit=commit)
+                    checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
+                else:
+                    checkruns = None
+            # Github doesn't set conclusion to failure if a job is still pending
+            if workflow_run is not None and has_failing_check:
+                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+
+    add_conclusions(checksuites["edges"])
+    while bool(checksuites["pageInfo"]["hasNextPage"]):
+        rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECKSUITES,
+                        name=project,
+                        owner=org,
+                        commit=commit,
+                        cursor=checksuites["edges"][-1]["cursor"])
+        info = rc["data"]["repository"]["object"]
+        checksuites = info["checkSuites"]
+        add_conclusions(checksuites["edges"])
+
+    return conclusions
+
+
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
@@ -1079,8 +1087,8 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
                 )
     return
 
-def validate_land_time_checks(pr: GitHubPR) -> None:
-    checks = pr.get_land_checkrun_conclusions()
+def validate_land_time_checks(org: str, project: str, commit: str) -> None:
+    checks = get_land_checkrun_conclusions(org, project, commit)
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
@@ -1124,7 +1132,7 @@ def merge(pr_num: int, repo: GitRepo,
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
-        commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+        land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
     start_time = time.time()
     last_exception = ''
@@ -1134,7 +1142,7 @@ def merge(pr_num: int, repo: GitRepo,
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
-        pr = GitHubPR(org, project, pr_num, commit)
+        pr = GitHubPR(org, project, pr_num)
         if initial_commit_sha != pr.last_commit()['oid']:
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
@@ -1149,7 +1157,7 @@ def merge(pr_num: int, repo: GitRepo,
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             if land_checks:
-                validate_land_time_checks(pr)
+                validate_land_time_checks(org, project, land_check_commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:

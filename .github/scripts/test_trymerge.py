@@ -12,6 +12,7 @@ import os
 from hashlib import sha256
 
 from trymerge import (find_matching_merge_rule,
+                      get_land_checkrun_conclusions,
                       validate_land_time_checks,
                       gh_graphql,
                       gh_get_team_members,
@@ -98,7 +99,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
     pass
 
 def mock_gh_get_info() -> Any:
-    return ({}, {"closed": False, "isCrossRepository": False})
+    return {"closed": False, "isCrossRepository": False}
 
 
 def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
@@ -262,8 +263,7 @@ class TestGitHubPR(TestCase):
     def test_get_many_land_checks(self, mocked_gql: Any) -> None:
         """ Tests that all checkruns can be fetched for a commit
         """
-        pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
-        conclusions = pr.get_land_checkrun_conclusions()
+        conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
         self.assertGreater(len(conclusions), 100)
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
@@ -271,10 +271,9 @@ class TestGitHubPR(TestCase):
     def test_failed_land_checks(self, mocked_gql: Any) -> None:
         """ Tests that PR with Land Checks fail with a RunTime error
         """
-        pr = GitHubPR("pytorch", "pytorch", 81119, "6882717f73deffb692219ccd1fd6db258d8ed684")
         self.assertRaisesRegex(RuntimeError,
                                ".*Failed to merge; some land checks failed.*",
-                               lambda: validate_land_time_checks(pr))
+                               lambda: validate_land_time_checks('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684'))
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
