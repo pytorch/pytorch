@@ -938,7 +938,7 @@ class OutlierDetector(DetectorBase):
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
             Should be between 0 and 1
             Default: 0.975
-        fraction_batches_used_threshold (float, optional): Threshold to ensure enough batches used in outlier calculations
+        fraction_batches_used_threshold (float, optional): Threshold of fraction of batches per channel to determine outlier
             If fraction is below this, we deem number of samples used to calculate outliers as insignificant and alert user
             regardless of whether we detected outliers or not in channel to take a closer look at channel results
             Should be between 0 and 1
