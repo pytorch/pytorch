@@ -471,6 +471,28 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.model()[res], b)
 
 
+    def test_regular_add_3(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                to = x.to()
+                size = to.size()
+                getitem = size[-1]
+                add = 1 + getitem
+                return add
+
+        b = BasicBlock().forward(torch.rand(2, 4))
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        res = z3.Int(5)
+        self.assertEqual(s.model()[res], b)
+
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
