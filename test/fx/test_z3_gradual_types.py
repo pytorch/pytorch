@@ -9,7 +9,7 @@ from torch.fx.experimental.migrate_gradual_types.constraint_transformation impor
 from torch.fx.experimental.migrate_gradual_types.operation import op_precision, op_matching, op_consistency
 from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints,\
     evaluate_conditional_with_constraints
-from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
+from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D, z3_dyn
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
 import torch
@@ -31,6 +31,40 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class HFOperations(unittest.TestCase):
+
+    def test_index_select(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2050, 1024]), y: Dyn):
+                index_select = x.index_select(0, y)
+                return index_select
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        # print(symbolic_traced)
+        b = BasicBlock().forward(torch.rand(2050, 1024), torch.ones(8).int())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        index_select = z3.Const(3, tensor_type)
+
+        # the second dimension of the result should not be affected since
+        # the index is 0
+        self.assertEqual(s.model()[index_select].arg(1).arg(1), b.shape[1])
+
+        replacement_vector = z3.Const(2, tensor_type)
+
+        # we set the vector to Dyn
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        index_select = z3.Const(3, tensor_type)
+        s.add(replacement_vector == z3_dyn)
+        self.assertEqual(s.check(), z3.sat)
+
+        # this implies that the index at 0 should be dyn
+        self.assertEqual(s.model()[index_select].arg(0).arg(0), 0)
 
     def test_get_attr(self):
         class BasicBlock(torch.nn.Module):
@@ -176,52 +210,6 @@ class HFOperations(unittest.TestCase):
         assert s.model()[get_item_res].arg(3).arg(1) == b.shape[3]
 
 
-    def test_masked_fill(self):
-        class BasicBlock(torch.nn.Module):
-            def __init__(self):
-                super(BasicBlock, self).__init__()
-
-            def forward(self, x: TensorType([2, 4])):
-                size = x.size()
-                getitem = size[-1]
-                arange = torch.arange(getitem)
-                view = x.view(-1, getitem)
-                lt = arange > view
-                masked_fill = x.masked_fill_(lt, 0)
-                return masked_fill
-
-        B = BasicBlock().forward(torch.rand(2, 4))
-        # print(B.shape)
-
-        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
-        # print(symbolic_traced)
-        transformed = transform_all_constraints(symbolic_traced, counter=0)
-        s = z3.Solver()
-        s.add(transformed)
-        self.assertEqual(s.check(), z3.sat)
-        masked_fill_res = z3.Const(10, tensor_type)
-        self.assertEqual(s.model()[masked_fill_res].arg(0).arg(1).as_long(), B.size()[0])
-        self.assertEqual(s.model()[masked_fill_res].arg(1).arg(1).as_long(), B.size()[1])
-
-        # change the annotation to Dyn. This will migrate to an arbitirary type
-        for n in symbolic_traced.graph.nodes:
-            if n.op == 'placeholder':
-                n.type = Dyn
-
-        transformed = transform_all_constraints(symbolic_traced, counter=0)
-        s = z3.Solver()
-        s.add(transformed)
-        self.assertEqual(s.check(), z3.sat)
-
-        for n in symbolic_traced.graph.nodes:
-            if n.op == 'placeholder':
-                n.type = TensorType([Dyn, Dyn, Dyn, Dyn])
-
-        transformed = transform_all_constraints(symbolic_traced, counter=0)
-        s = z3.Solver()
-        s.add(transformed)
-        self.assertEqual(s.check(), z3.sat)
-
 
     def test_layer_norm(self):
 
@@ -300,11 +288,15 @@ class HFOperations(unittest.TestCase):
         # migrate one of the parameters to a fully static shape so we can compare
 
         input = z3.Const(1, tensor_type)
+        input_2 = z3.Const(2, tensor_type)
+        s1, s2 = z3.Ints('s1 s2')
+
         output_long = z3.Const(8, tensor_type)
         s.add(input == tensor_type.tensor2(D(1, 2), D(1, 4)))
+        s.add(input_2 == tensor_type.tensor2(D(1, s1), D(1, s2)))
+
         self.assertEquals(s.check(), z3.sat)
         actual_shape = BasicBlock().forward(torch.rand(2, 4), torch.rand(2, 4)).shape
-
         self.assertEqual(s.model()[output_long].arg(0).arg(1), actual_shape[0])
         self.assertEqual(s.model()[output_long].arg(1).arg(1), actual_shape[1])
 
@@ -665,7 +657,7 @@ class HFOperations(unittest.TestCase):
         # check that the item is correct
         self.assertEquals(s.model()[s1], s.model()[s2])
 
-        # invalid index
+        # invalid index but should still be SAT because input will be Dyn
         class BasicBlock(torch.nn.Module):
             def __init__(self):
                 super(BasicBlock, self).__init__()
@@ -683,7 +675,9 @@ class HFOperations(unittest.TestCase):
         s = z3.Solver()
         s.add(transformed)
 
-        self.assertEquals(s.check(), z3.unsat)
+        self.assertEquals(s.check(), z3.sat)
+        s.add(input != z3_dyn)
+        self.assertEqual(s.check(), z3.unsat)
 
     def test_view_mul(self):
         class BasicBlock(torch.nn.Module):
@@ -881,6 +875,52 @@ class HFOperations(unittest.TestCase):
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
+
+    def test_masked_fill(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                arange = torch.arange(getitem)
+                view = x.view(-1, getitem)
+                lt = arange > view
+                masked_fill = x.masked_fill_(lt, 0)
+                return masked_fill
+
+        B = BasicBlock().forward(torch.rand(2, 4))
+        # print(B.shape)
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        # print(symbolic_traced)
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        masked_fill_res = z3.Const(10, tensor_type)
+        self.assertEqual(s.model()[masked_fill_res].arg(0).arg(1).as_long(), B.size()[0])
+        self.assertEqual(s.model()[masked_fill_res].arg(1).arg(1).as_long(), B.size()[1])
+
+        # change the annotation to Dyn. This will migrate to an arbitirary type
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn, Dyn, Dyn])
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
 
     def test_add_reshape_1(self):
         class BasicBlock(torch.nn.Module):
