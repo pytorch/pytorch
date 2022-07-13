@@ -2680,13 +2680,14 @@ class TestSWAUtils(TestCase):
 
 instantiate_parametrized_tests(TestLRScheduler)
 
-def _diff_fn(p, grad, opt_differentiable_state, opt):
+def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs):
     p = p.clone()
     p.grad = grad
-    opt.update_parameters([p])
+    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt = opt_class([p], **kwargs)
     opt.state.update(opt_differentiable_state)
     opt.step()
-    return p
+    return (p,) + tuple(opt_differentiable_state.values())
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2696,9 +2697,7 @@ class TestDifferentiableOptimizer(TestCase):
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
-        opt = torch.optim.SGD([p], lr=0.9, differentiable=True)
-
-        gradcheck(_diff_fn, (p, grad, state, opt))
+        gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}))
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required
+from .optimizer import Optimizer, required, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
@@ -114,6 +114,7 @@ class SGD(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
 
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -121,9 +122,6 @@ class SGD(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        if not self.defaults['differentiable']:
-            prev_grad = torch.is_grad_enabled()
-            torch.set_grad_enabled(False)
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -165,8 +163,6 @@ class SGD(Optimizer):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
 
-        if not self.defaults['differentiable']:
-            torch.set_grad_enabled(prev_grad)
         return loss
 
 
@@ -201,17 +197,16 @@ def sgd(params: List[Tensor],
     else:
         func = _single_tensor_sgd
 
-    func(
-        params,
-        d_p_list,
-        momentum_buffer_list,
-        weight_decay=weight_decay,
-        momentum=momentum,
-        lr=lr,
-        dampening=dampening,
-        nesterov=nesterov,
-        has_sparse_grad=has_sparse_grad,
-        maximize=maximize)
+    func(params,
+         d_p_list,
+         momentum_buffer_list,
+         weight_decay=weight_decay,
+         momentum=momentum,
+         lr=lr,
+         dampening=dampening,
+         nesterov=nesterov,
+         has_sparse_grad=has_sparse_grad,
+         maximize=maximize)
 
 def _single_tensor_sgd(params: List[Tensor],
                        d_p_list: List[Tensor],
