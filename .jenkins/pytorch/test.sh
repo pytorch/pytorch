@@ -482,32 +482,49 @@ test_xla() {
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
-# Because this function uninstalls the torch built from branch, and install
-# nightly version.
+# Because this function uninstalls the torch built from branch and installs
+# the torch built on its base commit.
 test_forward_backward_compatibility() {
   set -x
+  REPO_DIR=$(pwd)
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    echo "On trunk, we should compare schemas with torch built from the parent commit"
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+  else
+    echo "On pull, we should compare schemas with torch built from the merge base"
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+  fi
+  export SHA_TO_COMPARE
+
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  REPO_DIR=$(pwd)
-  pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-  # install the nightly before the base commit -- fallback to most recent nightly in case of error
-  VERSION=$(cat "${REPO_DIR}/version.txt")
-  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
-  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+
+  # build torch at the base commit to generate a base function schema for comparison
+  git reset --hard "${SHA_TO_COMPARE}"
+  echo "::group::Installing Torch From Base Commit"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -mpip install base_dist/*.whl
+  echo "::endgroup::"
+
+  pushd test/forward_backward_compatibility
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
-  # FC: verify newmodel can be load with old code.
+
+  git reset --hard "${SHA1}"
+  # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"
       return 1
   fi
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
-  rm -r venv
+  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
