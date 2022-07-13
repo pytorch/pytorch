@@ -1087,6 +1087,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     @unittest.skip("It started failing after #80074")
     def test_custom_opsets_inverse(self):
+        # TODO(#81336): Fix and enable the test
         class CustomInverse(torch.nn.Module):
             def forward(self, x):
                 return torch.inverse(x) + x
