@@ -2307,44 +2307,43 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.repeat)
-def repeat(a: Tensor, *shape) -> Tensor:
+def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
     # given to repeat may be "invalid"
-    if len(shape) == 1 and isinstance(shape[0], Sequence):
-        shape = tuple(shape[0])
+    if len(repeat_shape) == 1 and isinstance(repeat_shape[0], Sequence):
+        repeat_shape = tuple(repeat_shape[0])
 
     utils.check(
-        len(shape) >= len(a.shape),
+        len(repeat_shape) >= len(a.shape),
         lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
     )
 
-    if len(shape) == 0:
+    if len(repeat_shape) == 0:
         return torch.clone(a)
 
-    num_new_dimensions = len(shape) - a.ndim
-    padded_shape = [1 for _ in range(num_new_dimensions)]
+    num_new_dimensions = len(repeat_shape) - a.ndim
+    padded_shape = [1] * num_new_dimensions
     for dim_size in a.shape:
         padded_shape.append(dim_size)
 
-    target_shape = []
-    zero_tensor = False
-    for padded_size, repeat_size in zip(padded_shape, shape):
-        if repeat_size == 0:
-            zero_tensor = True
-        target_shape.append(padded_size * repeat_size)
-
-    # add new dimensions to input tensor a
-    xtensor = a.expand(padded_shape)
+    target_shape = tuple(
+        padded_size * repeat_size
+        for padded_size, repeat_size in zip(padded_shape, repeat_shape)
+    )
 
     result = torch.empty(
-        tuple(target_shape),
+        target_shape,
         dtype=a.dtype,
         device=a.device,
         requires_grad=a.requires_grad,
     )
-    if zero_tensor:
+
+    if 0 in repeat_shape:
         return result
+
+    # add new dimensions to input tensor a
+    xtensor = a.expand(padded_shape)
 
     urtensor = result
     for dim, dim_size in enumerate(xtensor.shape):
