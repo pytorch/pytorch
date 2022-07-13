@@ -2,7 +2,7 @@
 # Owner(s): ["module: unknown"]
 
 import copy
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 import logging
 import torch
 from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
@@ -121,8 +121,6 @@ class TestActivationSparsifier(TestCase):
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
-        print("Data Groups: ", activation_sparsifier.data_groups)
-        print("State: ", activation_sparsifier.state)
         assert 'data' in activation_sparsifier.data_groups[layer_name]
         assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
 
@@ -157,6 +155,7 @@ class TestActivationSparsifier(TestCase):
         for _, config in activation_sparsifier.data_groups.items():
             assert 'data' not in config
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_activation_sparsifier(self):
         """Simulates the workflow of the activation sparsifier, starting from object creation
         till squash_mask().
