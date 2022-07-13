@@ -215,7 +215,7 @@ __all__ = [
     "t",
     "tensor_split",
     "transpose",
-    "unfold",
+    "unfold_copy",
     "unsqueeze",
     "view",
     "vsplit",
@@ -2347,23 +2347,27 @@ def repeat(a: Tensor, *shape) -> Tensor:
     if zero_tensor:
         return result
 
-    result_shape = result.shape
-    result_stride = result.stride()
-
     urtensor = result
     for dim, dim_size in enumerate(xtensor.shape):
         # repeat each dimension by using unfold tensor operation
         urtensor = torch.unfold_copy(urtensor, dim, dim_size, max(dim_size, 1))
 
-    # expand dimensions according to urtensor to match repeat size
+    # expand dimensions according to urtensor
     repeat_xtensor = xtensor.expand_as(urtensor)
-    urtensor.copy_(repeat_xtensor)
-    return result
 
-    # cloned_result = torch.clone(repeat_xtensor)
+    # clone tensor to concretize expanded dimensions
+    cloned_result = torch.clone(repeat_xtensor)
+
+    # derive permute order by sorting urtensor strides
+    urtensor_stride = list(enumerate(urtensor.stride()))
+    urtensor_stride.sort(key=lambda item: item[1], reverse=True)
+    order, urtensor_sorted_stride = zip(*urtensor_stride)
+
     # transpose axis so strides are in sorted order
-    # permuted_result = cloned_result.permute()
-    # return permuted_result.reshape(target_shape)
+    permuted_result = cloned_result.permute(order)
+
+    # reshape to get contiguous tensor with correct target shape
+    return permuted_result.reshape(target_shape)
 
 
 def _reshape_view_helper(
@@ -2880,7 +2884,7 @@ swap_axes = transpose
 
 
 @register_decomposition(torch.ops.aten.unfold_copy)
-def unfold(a: TensorLikeType, dimension: int, size: int, step: int):
+def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
     # TODO some special handling to deal with allow dimension == 0 when self.dim() == 0
     # dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
 

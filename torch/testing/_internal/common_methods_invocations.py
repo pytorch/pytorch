@@ -21211,7 +21211,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
-        "_refs.unfold",
+        "_refs.unfold_copy",
         torch_opinfo_name="unfold",
         supports_nvfuser=False,
     ),
