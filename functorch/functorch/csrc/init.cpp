@@ -53,10 +53,7 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(unwrapped));
   auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
   // Ensure that the input is up to date by committing any pending updates to the alias.
-  bool any_updates = wrapped_impl->apply_updates();
-  if (any_updates) {
-    wrapped_impl->regenerate_from_base();
-  }
+  wrapped_impl->sync_();
   auto& wrapped_inner = wrapped_impl->value();
   // It would probably be more reasonable to check that the two tensors are aliased,
   // but we can't do that unless we give BatchedTensorImpl a notion of storage.
