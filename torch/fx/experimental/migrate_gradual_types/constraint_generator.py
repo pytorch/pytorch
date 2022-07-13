@@ -506,51 +506,52 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
 
 @register_inference_rule(torch.ne)
 @register_inference_rule("ne")
-def ne_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    We generate the same constraints as we do for addition. We assume the arguments can only
-    be tensors here, unlike addition where we have scalar addition.
-    """
-
-    # create and store the new variable
-    my_add, counter = gen_tvar(counter)
-    symbols[n] = my_add
-
-    assert isinstance(n.args[0], Node)
-    assert isinstance(n.args[1], Node)
-    return gen_broadcasting_constraints(symbols[n.args[0]], symbols[n.args[1]], symbols, counter, my_add)
-
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         if isinstance(symbols[n.args[0]], TVar) and isinstance(symbols[n.args[1]], TVar):
-            my_add, counter = gen_tvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
             e2 = symbols[n.args[1]]
 
-            return gen_broadcasting_constraints(e1, e2, symbols, counter, my_add)
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, my_output)
         else:
             raise NotImplementedError('Method not yet implemented')
 
     elif isinstance(n.args[0], Node) and isinstance(n.args[1], int):
         if isinstance(symbols[n.args[0]], TVar):
-            my_add, counter = gen_tvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
-            return [BinConstraintT(my_add, e1, op_eq)], counter
+            return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_add, counter = gen_dvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_dvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
             # we will propagate the runtime value here since this is regular addition
-            c = Conj([BinConstraintD(my_add, BinConstraintD(e1, n.args[1], op_add), op_eq),
-                      BinConstraintD(0, my_add, op_leq)])
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e1, n.args[1], op_add), op_eq),
+                      BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
+    elif isinstance(n.args[1], Node) and isinstance(n.args[0], int):
+        if isinstance(symbols[n.args[1]], TVar):
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
+            e2 = symbols[n.args[1]]
+            return [BinConstraintT(my_output, e1, op_eq)], counter
+        elif isinstance(symbols[n.args[1]], DVar):
+            my_output, counter = gen_dvar(counter)
+            symbols[n] = my_output
+            e2 = symbols[n.args[1]]
+
+            # we will propagate the runtime value here since this is regular addition
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e2, n.args[0], op_add), op_eq),
+                      BinConstraintD(0, my_output, op_leq)])
+            return [c], counter
 
         else:
             raise NotImplementedError('Method not yet implemented')
