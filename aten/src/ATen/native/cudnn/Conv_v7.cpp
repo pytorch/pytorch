@@ -632,8 +632,8 @@ void raw_cudnn_convolution_forward_out_32bit(
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   std::cout << "forward with cudnn conv params: \n" << args.params << std::endl;
   std::cout << "suggest_memory_format: \n" << memory_format << std::endl;
   args.idesc.set(input, memory_format);
@@ -698,8 +698,8 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(grad_input, weight);
+  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   args.idesc.set(grad_input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -761,8 +761,8 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, grad_weight);
+  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(grad_weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -874,6 +874,7 @@ void raw_cudnn_convolution_add_relu_out_v7(
   auto dataType = getCudnnDataType(input);
   ConvolutionArgs args{input, output, weight};
   args.handle = getCudnnHandle();
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
   setConvolutionParams(
       &args.params,
       input,
@@ -883,8 +884,8 @@ void raw_cudnn_convolution_add_relu_out_v7(
       dilation,
       groups,
       deterministic,
-      allow_tf32);
-  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+      allow_tf32,
+      memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(output, memory_format);
