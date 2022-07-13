@@ -9636,7 +9636,6 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
-  fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
 
   auto properties = at::cuda::getDeviceProperties(0);
   // Require 70KB of smem to run test
@@ -9644,6 +9643,8 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   if (properties->sharedMemPerBlockOptin < required_smem_size) {
     GTEST_SKIP() << "not enough shared memory space on device to run test";
   }
+
+  fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
 
   auto at_mu = at::mean(aten_input.to(at::kDouble), -1).unsqueeze(1);
   auto at_var = at::var(aten_input.to(at::kDouble), -1, false).unsqueeze(1);
