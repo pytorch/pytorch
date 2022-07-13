@@ -163,6 +163,12 @@ class Sequential(Module):
         self.add_module(str(len(self)), module)
         return self
 
+    def insert(self, index: int, module: Module) -> 'Sequential':
+        for i in range(len(self._modules), index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+        return self
+
 
 class ModuleList(Module):
     r"""Holds submodules in a list.

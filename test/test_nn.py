@@ -1600,6 +1600,16 @@ class TestNN(NNTestCase):
         self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4))
         self.assertEqual(nn.Sequential(l1).append(l2).append(l4), nn.Sequential(l1, l2, l4))
 
+    def test_Sequential_insert(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+        n1 = nn.Sequential(l1, l2, l3)
+        index = 1
+        module = nn.Linear(4, 5)
+        n2 = nn.Sequential(l1, module, l2, l3)
+        self.assertEqual(n1.insert(index, module), n2)
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
