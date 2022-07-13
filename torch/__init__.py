@@ -967,9 +967,19 @@ if sys.executable != 'torch_deploy':
     if not TYPE_CHECKING:
         from . import _meta_registrations
 
-if os.getenv('TORCH_DYNAMO_CUDAGRAPHS') == '1':
+_dynamo = os.getenv('TORCH_DYNAMO')
+if _dynamo is not None:
     import torchdynamo
-    from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
-    torchdynamo.config.cache_size_limit = 1
-    _DYNAMO_CTX = torchdynamo.optimize(aot_autograd_cudagraphs)
+    torchdynamo.config.print_internal_exceptions = False
+    if _dynamo == "cudagraphs":
+        from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
+        torchdynamo.config.cache_size_limit = 1
+        _DYNAMO_CTX = torchdynamo.optimize(aot_autograd_cudagraphs)
+    elif _dynamo == "aot_autograd_eager":
+        from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
+        _DYNAMO_CTX = torchdynamo.optimize(aot_autograd_debug_strategy1)
+    elif _dynamo == "eager":
+        _DYNAMO_CTX = torchdynamo.optimize("eager")
+    else:
+        raise RuntimeError(f"unrecognized TORCH_DYNAMO setting {_dynamo}")
     _DYNAMO_CTX.__enter__()
