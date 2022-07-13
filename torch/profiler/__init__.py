@@ -1,5 +1,5 @@
 r'''
-PyTorch Profiler is a tool that allows the collecton of the performance metrics during the training and inference.
+PyTorch Profiler is a tool that allows the collection of performance metrics during training and inference.
 Profiler's context manager API can be used to better understand what model operators are the most expensive,
 examine their input shapes and stack traces, study device kernel activity and visualize the execution trace.
 

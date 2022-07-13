@@ -58,7 +58,7 @@ class _KinetoProfile(object):
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
 
     .. note::
-        This API is an experimental and subject to change in future.
+        This API is experimental and subject to change in the future.
 
         Enabling shape and stack tracing results in additional overhead.
         When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
