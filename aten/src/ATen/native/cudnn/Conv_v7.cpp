@@ -501,7 +501,9 @@ public:
 
     auto& cache = search::cache();
     perf_t algoPerf;
+    std::cout << "looking for params: \n" << args.params << std::endl;
     if (!only_use_default && cache.find(args.params, &algoPerf)) {
+      printf("found cache hit\n");
       try {
         f(algoPerf);
         return;
@@ -630,6 +632,8 @@ void raw_cudnn_convolution_forward_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  std::cout << "forward with cudnn conv params: \n" << args.params << std::endl;
+  std::cout << "suggest_memory_format: \n" << memory_format << std::endl;
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(output, memory_format);

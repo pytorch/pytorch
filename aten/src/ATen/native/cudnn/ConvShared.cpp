@@ -63,6 +63,7 @@ namespace at { namespace native {
 
 std::ostream& operator<<(std::ostream & out, const ConvolutionParams& params) {
   out << "ConvolutionParams \n"
+    << "    memory_format = " << params.memory_format << "\n"
     << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
     << "    padding = " << ArrayRef<int>{params.padding} << "\n"
     << "    stride = " << ArrayRef<int>{params.stride} << "\n"
