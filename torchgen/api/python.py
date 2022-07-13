@@ -100,7 +100,7 @@ from torchgen.model import (
 #    'requires_grad' field:
 #
 #      const auto options = TensorOptions()
-#          .dtype(_r.scalartype(3))
+#          .dtype(_r.scalartypeOptional(3))
 #          .device(_r.device(5))
 #          .layout(_r.layoutOptional(4))
 #          .requires_grad(_r.toBool(7))
@@ -752,7 +752,7 @@ def signature(
         tensor_options_args.append(
             PythonArgument(
                 name="dtype",
-                type=BaseType(BaseTy.ScalarType),
+                type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None" if pyi else _dtype_default_type_hack(name),
                 default_init="self.scalar_type()" if is_like_or_new_function else None,
             )
@@ -1144,7 +1144,7 @@ def cpp_dispatch_exprs(
 # For certain cases it is intentionally more restrictive than necessary,
 # e.g.: it doesn't accepts doublelist with definite size.
 def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
-    if has_default and str(t) not in ("ScalarType", "Device", "Layout?"):
+    if has_default and str(t) not in ("ScalarType?", "ScalarType", "Device", "Layout?"):
         raise RuntimeError(f"type '{t}' does not supported unpacking with default")
 
     if isinstance(t, BaseType):
@@ -1180,7 +1180,6 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
 
         elif isinstance(t.elem, BaseType):
             if t.elem.name in [
-                BaseTy.ScalarType,
                 BaseTy.Scalar,
                 BaseTy.int,
                 BaseTy.bool,
@@ -1193,6 +1192,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return "memoryformatOptional"
             elif t.elem.name == BaseTy.Generator:
                 return "generator"
+            elif t.elem.name == BaseTy.ScalarType:
+                return "scalartypeWithDefault" if has_default else "scalartypeOptional"
             elif t.elem.name == BaseTy.Layout:
                 return "layoutWithDefault" if has_default else "layoutOptional"
             elif t.elem.name == BaseTy.Device:
@@ -1263,7 +1264,7 @@ def arg_parser_output_exprs(
 
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
-    "dtype": "ScalarType",
+    "dtype": "ScalarType?",
     "device": "Device",
     "layout": "Layout?",
     "pin_memory": "bool",

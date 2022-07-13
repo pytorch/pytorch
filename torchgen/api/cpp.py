@@ -367,11 +367,14 @@ def argument(
         else:
             default = None
             # Enforced by NativeFunction.__post_init__
-            assert "options" not in cpp_no_default_args
-            if all(x.default == "None" for x in a.all()):
+            if all(
+                x.default == "None" and x.name not in cpp_no_default_args
+                for x in a.all()
+            ):
                 default = "{}"
-            elif a.dtype.default == "long":
+            elif a.dtype.default == "long" and a.dtype.name not in cpp_no_default_args:
                 default = "at::kLong"  # TODO: this is wrong
+
             return [
                 Binding(
                     nctype=NamedCType("options", BaseCType(tensorOptionsT)),
