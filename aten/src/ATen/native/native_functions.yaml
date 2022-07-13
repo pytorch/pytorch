@@ -6452,6 +6452,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: view_symint
+    MkldnnCPU: mkldnn_view_symint
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
