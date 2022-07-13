@@ -2883,10 +2883,8 @@ swap_axes = transpose
 def _get_unfold_copy_shape_stride(
     a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
 ):
-    # TODO some special handling to deal with allow dimension == 0 when self.dim() == 0
-    # dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
-
     a_ndim = len(a_shape)
+    dimension = utils.canonicalize_dim(a_ndim, dimension)
     max_size = 1 if a_ndim == 0 else a_shape[dimension]
     last_stride = 1 if a_ndim == 0 else a_stride[dimension]
 
