@@ -124,6 +124,7 @@ class TestActivationSparsifier(TestCase):
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
+        print(layer_name, activation_sparsifier.data_groups[layer_name].keys())
         assert 'data' in activation_sparsifier.data_groups[layer_name]
         assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
 
@@ -290,7 +291,23 @@ class TestActivationSparsifier(TestCase):
             'mask_fn': _vanilla_norm_sparsifier
         }
         sparse_config_layer2 = {'sparsity_level': 0.1}
+
+        register_layer3_args = {
+            'layer': model.identity1,
+            'mask_fn': _vanilla_norm_sparsifier
+        }
+        sparse_config_layer3 = {'sparsity_level': 0.3}
+
+        register_layer4_args = {
+            'layer': model.identity2,
+            'features': [0, 10, 20],
+            'feature_dim': 1,
+            'mask_fn': _vanilla_norm_sparsifier
+        }
+        sparse_config_layer4 = {'sparsity_level': 0.1}
+
         layer_args_list = [(register_layer1_args, sparse_config_layer1), (register_layer2_args, sparse_config_layer2)]
+        layer_args_list += [(register_layer3_args, sparse_config_layer3), (register_layer4_args, sparse_config_layer4)]
 
         # Registering..
         for layer_args in layer_args_list:
