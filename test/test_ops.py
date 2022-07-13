@@ -1586,6 +1586,7 @@ class TestRefsOpsInfo(TestCase):
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
+        assert False
         path = op.split('.')
         module_path = '.'.join(path[:-1])
         op_name = path[-1]
