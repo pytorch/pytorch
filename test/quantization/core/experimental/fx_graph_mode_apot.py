@@ -150,7 +150,7 @@ Prepare models
 """
 
 # Note that this is temporary, we'll expose these functions to torch.quantization after official releasee
-from torch.quantization.quantize_fx import prepare_fx, convert_fx
+from torch.quantization.quantize_fx import prepare_qat_fx, convert_fx
 
 def calibrate(model, data_loader):
     model.eval()
@@ -164,7 +164,7 @@ Model with uniform activation, uniform weight
 from torch.ao.quantization.experimental.qconfig import get_uniform_qconfig, get_apot_weights_qconfig, get_apot_qconfig
 qconfig1 = get_uniform_qconfig()
 qconfig_dict1 = {"object_type": [(torch.nn.Linear, qconfig1)]}
-prepared_model1 = prepare_fx(float_model, qconfig_dict1)  # fuse modules and insert observers
+prepared_model1 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict1)  # fuse modules and insert observers
 calibrate(prepared_model1, data_loader_test)  # run calibration on sample data
 quantized_model1 = convert_fx(prepared_model1)  # convert the calibrated model to a quantized model
 
@@ -176,7 +176,7 @@ Model with uniform activation, APoT weight
 """
 qconfig2 = get_apot_weights_qconfig()
 qconfig_dict2 = {"object_type": [(torch.nn.Linear, qconfig2)]}
-prepared_model2 = prepare_fx(float_model, qconfig_dict2)  # fuse modules and insert observers
+prepared_model2 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict2)  # fuse modules and insert observers
 calibrate(prepared_model2, data_loader_test)  # run calibration on sample data
 
 top1, top5 = evaluate(prepared_model2, criterion, data_loader_test)
@@ -188,7 +188,7 @@ Model with APoT activation and weight
 """
 qconfig3 = get_apot_qconfig()
 qconfig_dict3 = {"object_type": [(torch.nn.Linear, qconfig3)]}
-prepared_model3 = prepare_fx(float_model, qconfig_dict3)  # fuse modules and insert observers
+prepared_model3 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict3)  # fuse modules and insert observers
 calibrate(prepared_model3, data_loader_test)  # run calibration on sample data
 
 top1, top5 = evaluate(prepared_model3, criterion, data_loader_test)
