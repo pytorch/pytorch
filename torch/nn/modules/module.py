@@ -1266,13 +1266,13 @@ class Module:
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if name in self._parameters:
-            return self._parameters[name]  # type:ignore[return]
+            return self._parameters[name]  # type:ignore[return-value]
         if name in self._buffers:
-            return self._buffers[name]  # type:ignore[return]
+            return self._buffers[name]  # type:ignore[return-value]
         if name in self._modules:
-            return self._modules[name]  # type:ignore[return]
+            return self._modules[name]  # type:ignore[return-value]
         if name in self.__dict__:
-            return self.__dict__[name]  # type:ignore[return]
+            return self.__dict__[name]  # type:ignore[return-value]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
