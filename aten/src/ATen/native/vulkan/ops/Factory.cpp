@@ -23,7 +23,7 @@ Tensor empty_memory_format(
           .device(device)
           .pinned_memory(pin_memory)
           .memory_format(memory_format),
-    });
+  });
 }
 
 Tensor empty_strided(
@@ -34,19 +34,18 @@ Tensor empty_strided(
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(
-      sizes,
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      c10::MemoryFormat::Contiguous);
+      sizes, dtype, layout, device, pin_memory, c10::MemoryFormat::Contiguous);
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), at::native::vulkan::ops::empty_memory_format);
-  m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(at::native::vulkan::ops::empty_strided));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::empty.memory_format"),
+      at::native::vulkan::ops::empty_memory_format);
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::empty_strided"),
+      TORCH_FN(at::native::vulkan::ops::empty_strided));
 }
 
 #endif /* USE_VULKAN_API */

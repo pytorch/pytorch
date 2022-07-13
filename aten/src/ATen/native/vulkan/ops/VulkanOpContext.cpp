@@ -8,9 +8,7 @@ namespace ops {
 VulkanOpContext::VulkanOpContext(
     c10::impl::GenericList packed_context,
     c10::impl::GenericList unpacked_context)
-  : packed_{ packed_context },
-    unpacked_{ unpacked_context } {
-}
+    : packed_{packed_context}, unpacked_{unpacked_context} {}
 
 VulkanOpContext VulkanOpContext::create(
     c10::impl::GenericList packed_context,

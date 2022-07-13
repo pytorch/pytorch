@@ -1,5 +1,5 @@
-#include <ATen/native/vulkan/ops/Tensor.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
@@ -43,9 +43,10 @@ api::utils::uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    api::utils::safe_downcast<uint32_t>(width),
-    api::utils::safe_downcast<uint32_t>(height),
-    api::utils::safe_downcast<uint32_t>(api::utils::div_up(depth, INT64_C(4))),
+      api::utils::safe_downcast<uint32_t>(width),
+      api::utils::safe_downcast<uint32_t>(height),
+      api::utils::safe_downcast<uint32_t>(
+          api::utils::div_up(depth, INT64_C(4))),
   };
 }
 
@@ -59,16 +60,15 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : view_(new vTensorStorage{
-      context,
-      sizes,
-      options,
-    }) {
-}
+    : view_(new vTensorStorage{
+          context,
+          sizes,
+          options,
+      }) {}
 
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
-    const api::PipelineStageFlags stage) const & {
+    const api::PipelineStageFlags stage) const& {
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
 
   return view_->image_;
@@ -88,14 +88,15 @@ api::VulkanImage& vTensor::image(
 //
 
 api::VulkanImage allocate_image(
-    api::Context* const context_ptr, api::utils::uvec3& extents) {
+    api::Context* const context_ptr,
+    api::utils::uvec3& extents) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   api::ImageSampler::Properties sampler_props{
-    VK_FILTER_NEAREST,
-    VK_SAMPLER_MIPMAP_MODE_NEAREST,
-    VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+      VK_FILTER_NEAREST,
+      VK_SAMPLER_MIPMAP_MODE_NEAREST,
+      VK_SAMPLER_ADDRESS_MODE_REPEAT,
+      VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
   };
 
   VkSampler sampler = adapter_ptr->sampler_cache().retrieve(sampler_props);
@@ -108,13 +109,13 @@ vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : context_(context),
-    extents_(image_extents(sizes)),
-    options_(options),
-    sizes_(sizes),
-    strides_(sizes.size()),
-    image_(allocate_image(context_, extents_)),
-    last_access_{} {
+    : context_(context),
+      extents_(image_extents(sizes)),
+      options_(options),
+      sizes_(sizes),
+      strides_(sizes.size()),
+      image_(allocate_image(context_, extents_)),
+      last_access_{} {
   ops::verify(options);
 }
 
