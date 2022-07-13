@@ -15,9 +15,7 @@ void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
       // pipeline barrier
       pipeline_barrier,
       // images
-      src.image(
-          pipeline_barrier,
-          api::PipelineStage::TRANSFER),
+      src.image(pipeline_barrier, api::PipelineStage::TRANSFER),
       dst.image(
           pipeline_barrier,
           api::PipelineStage::TRANSFER,
@@ -40,9 +38,9 @@ void copy_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
     float* data_ptr = mapping.template data<float>();
 
     memcpy(
-      data_ptr,
-      src.contiguous().data_ptr<float>(),
-      std::min(src.nbytes(), src.nbytes()));
+        data_ptr,
+        src.contiguous().data_ptr<float>(),
+        std::min(src.nbytes(), src.nbytes()));
   }
   utils::pack_staging_to_vtensor(staging.buffer(), dst);
 }
@@ -78,9 +76,7 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
     float* data_ptr = mapping.template data<float>();
 
     memcpy(
-        dst.data_ptr<float>(),
-        data_ptr,
-        std::min(src.nbytes(), dst.nbytes()));
+        dst.data_ptr<float>(), data_ptr, std::min(src.nbytes(), dst.nbytes()));
   }
 
   context->fences().return_fence(fence);
@@ -113,12 +109,10 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     // Vulkan -> CPU
     if (self.device().is_cpu()) {
       copy_vulkan_to_cpu(v_src, self);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Unsupported!");
     }
-  }
-  else {
+  } else {
     TORCH_INTERNAL_ASSERT(
         false,
         "Invalid code path taken! Either the source or the destination tensor "

@@ -350,7 +350,7 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`).
-  caffe2::TypeMeta dtype() const noexcept {
+  caffe2::TypeMeta dtype() const {
     return impl_->dtype();
   }
 
