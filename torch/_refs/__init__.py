@@ -2136,30 +2136,17 @@ def constant_pad_nd(
         new_shape.append(new_dim)
 
     memory_format = utils.suggest_memory_format(input)
-    if memory_format == torch.contiguous_format:
-        output = torch.empty(
-            new_shape,
-            dtype=input.dtype,
-            device=input.device,
-            requires_grad=input.requires_grad,
-        )
-    elif memory_format in (torch.channels_last, torch.channels_last_3d):
-        strides = utils.make_channels_last_strides_for(new_shape)
-        output = torch.empty_strided(
-            new_shape,
-            strides,
-            dtype=input.dtype,
-            device=input.device,
-            requires_grad=input.requires_grad,
-        )
-    else:
-        raise RuntimeError(f"Unhandled memory format {memory_format}")
+    output = torch.empty(
+        new_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+        memory_format=memory_format,
+    )
 
-    # NOTE: _refs.fill is out-of-place
-    if value == 0:
-        output = fill(output, False)
-    else:
-        output = fill(output, value)
+    if value == 0 and input.dtype == torch.bool:
+        value = False
+    output = torch.fill(output, value)
 
     c_output = output
     for i in range(l_diff, l_inp):
@@ -3020,7 +3007,6 @@ def full(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    memory_format: Optional[torch.memory_format] = None,
 ) -> TensorLikeType:
     e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     return fill(e, fill_value)

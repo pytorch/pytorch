@@ -714,7 +714,8 @@ inline at::Device toDevice(PyObject* obj) {
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return torch::tensors::get_default_device();
+    return at::Device(backendToDeviceType(
+        dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   return toDevice(args[i]);
 }
