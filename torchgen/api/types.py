@@ -595,11 +595,9 @@ class NativeSignature:
     prefix: str = ""
 
     @classmethod
-    def from_function(kls, func: NativeFunction, prefix: str = ""):
+    def from_function(cls, func: NativeFunction, prefix: str = "") -> "NativeSignature":
         return NativeSignature(
-            func=func.func,
-            cpp_no_default_args=func.cpp_no_default_args,
-            prefix=prefix
+            func=func.func, cpp_no_default_args=func.cpp_no_default_args, prefix=prefix
         )
 
     def name(self) -> str:
