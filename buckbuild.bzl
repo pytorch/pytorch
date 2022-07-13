@@ -2018,6 +2018,7 @@ def define_buck_targets(
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
+            "aten/src/ATen/core/function_schema.cpp",
             "aten/src/ATen/core/operator_name.cpp",
             "aten/src/ATen/core/register_symbols.cpp",
             "aten/src/ATen/core/tensor_type.cpp",
