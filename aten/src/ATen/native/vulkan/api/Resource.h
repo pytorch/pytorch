@@ -49,7 +49,9 @@ class VulkanBuffer final {
   explicit VulkanBuffer();
 
   explicit VulkanBuffer(
-      const VmaAllocator, const VkDeviceSize, const MemoryProperties&);
+      const VmaAllocator,
+      const VkDeviceSize,
+      const MemoryProperties&);
 
   VulkanBuffer(const VulkanBuffer&) = delete;
   VulkanBuffer& operator=(const VulkanBuffer&) = delete;
@@ -104,7 +106,9 @@ class VulkanBuffer final {
 
 class MemoryMap final {
  public:
-  explicit MemoryMap(const VulkanBuffer& buffer, const MemoryAccessFlags access);
+  explicit MemoryMap(
+      const VulkanBuffer& buffer,
+      const MemoryAccessFlags access);
 
   MemoryMap(const MemoryMap&) = delete;
   MemoryMap& operator=(const MemoryMap&) = delete;
@@ -121,7 +125,7 @@ class MemoryMap final {
   void* data_;
 
  public:
-  template<typename T>
+  template <typename T>
   T* data() {
     return reinterpret_cast<T*>(data_);
   }
@@ -274,10 +278,10 @@ class VulkanImage final {
 
   Package package() const {
     return {
-      handles_.image,
-      layout_,
-      handles_.image_view,
-      handles_.sampler,
+        handles_.image,
+        layout_,
+        handles_.image_view,
+        handles_.sampler,
     };
   }
 
@@ -363,11 +367,12 @@ class MemoryAllocator final {
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
-      const VkDeviceSize, const bool gpu_only = true);
+      const VkDeviceSize,
+      const bool gpu_only = true);
 
   VulkanBuffer create_staging_buffer(const VkDeviceSize);
 
-  template<typename Block>
+  template <typename Block>
   VulkanBuffer create_params_buffer(const Block& block);
 };
 
@@ -425,10 +430,7 @@ struct FencePool final {
 
   std::stack<VulkanFence> pool_;
 
-  explicit FencePool(const VkDevice device)
-    : device_(device),
-      pool_{} {
-  }
+  explicit FencePool(const VkDevice device) : device_(device), pool_{} {}
 
   // Returns an rvalue reference to a fence, so that it can be moved
   inline VulkanFence get_fence() {
@@ -453,13 +455,13 @@ struct FencePool final {
 // Impl
 //
 
-template<typename Block>
+template <typename Block>
 inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
   const VulkanBuffer::MemoryProperties mem_props{
-    VMA_MEMORY_USAGE_CPU_TO_GPU,
-    0u,
-    0u,
-    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU,
+      0u,
+      0u,
+      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
   };
 
   VulkanBuffer uniform_buffer(allocator_, sizeof(Block), mem_props);
