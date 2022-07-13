@@ -117,7 +117,7 @@ If you wish to implement your own custom Observer to use with the ModelReport AP
 
 Since you are also implementing your own detector in this case, it is up to you to determine where your observers should be placed in the model, and what type of information you wish to extract from them to generate your report.
 
-## Folder Structure
+# Folder Structure
 
 ./: the main folder all the model report code is under
 - `__init__.py`: File to mark ModelReport as package directory
@@ -134,7 +134,7 @@ Since you are also implementing your own detector in this case, it is up to you 
   - Main class users are interacting with to go through the ModelReport worflow
   - API described in detail in [Overview section](#modelreport-overview)
 
-## Tests
+# Tests
 
 Tests for the ModelReport API are found in the `test_model_report_fx.py` file found [here](https://github.com/pytorch/pytorch/blob/master/test/quantization/fx/test_model_report_fx.py).
 
