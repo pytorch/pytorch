@@ -12,6 +12,7 @@ from typing_extensions import Literal
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
+
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch, _type_utils, errors  # noqa: F401
 from torch.onnx._globals import GLOBALS
