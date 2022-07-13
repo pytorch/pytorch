@@ -61,12 +61,23 @@ def int_inference_rule(n: Node, symbols, constraints, counter):
     raise NotImplementedError('Not yet implemented')
 
 
-# TODO
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
+    If the attribute is "device" then the tensor shape is preserved
     """
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], str)
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+
+    input = symbols[n.args[0]]
+    attr = n.args[1]
+
+    if attr == 'device':
+        return [BinConstraintT(input, output, op_eq)], counter
+    else:
+        raise NotImplementedError('Not yet implemented')
 
 @register_inference_rule("expand")
 def expand_inference_rule(n: Node, symbols, constraints, counter):
@@ -860,14 +871,9 @@ class ConstraintGenerator:
             return [c1, c2], counter
 
         elif n.op == 'call_function':
-            if n.target == getattr:
-                assert getattr in _INFERENCE_RULES
-                return _INFERENCE_RULES[n.target](n, self.traced, self.symbol_dict, self.constraints)
-
-            elif n.target in _INFERENCE_RULES:
+            if n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n, self.symbol_dict, self.constraints, counter)
             else:
-                # print(n)
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'call_module':
