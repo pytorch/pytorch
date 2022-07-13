@@ -835,6 +835,45 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("min", min)
 #undef NVFUSER_PYTHON_BINDING_REDUCTION_OP
 
+#define NVFUSER_PYTHON_BINDING_CAST_OP(op_str, op_name)                        \
+  nvf_ops.def(                                                                 \
+      op_str,                                                                  \
+      [](nvfuser::FusionDefinition::Operators& self,                           \
+         nvfuser::Tensor* arg, NvfDataType dtype)                              \
+         -> nvfuser::Tensor* {                                                 \
+        nvfuser::Tensor* output =                                              \
+          new nvfuser::Tensor(self.fusion_definition->recording_state.size()); \
+        self.fusion_definition->recording_state.emplace_back(output);          \
+        self.fusion_definition->recording.emplace_back(                        \
+          new nvfuser::CastOpRecord<NvfTensorView*, NvfTensorView*>(           \
+            {arg->index}, {output->index},                                     \
+            static_cast<NvfTensorView*(*)(NvfDataType, NvfTensorView*)>(       \
+                torch::jit::fuser::cuda::op_name),                             \
+            dtype));                                                           \
+        return output;                                                         \
+      },                                                                       \
+      py::return_value_policy::reference);                                     \
+  nvf_ops.def(                                                                 \
+      op_str,                                                                  \
+      [](nvfuser::FusionDefinition::Operators& self,                           \
+         nvfuser::Scalar* arg, NvfDataType dtype)                              \
+         -> nvfuser::Scalar* {                                                 \
+        nvfuser::Scalar* output =                                              \
+          new nvfuser::Scalar(self.fusion_definition->recording_state.size()); \
+        self.fusion_definition->recording_state.emplace_back(output);          \
+        self.fusion_definition->recording.emplace_back(                        \
+          new nvfuser::CastOpRecord<NvfVal*, NvfVal*>(                         \
+            {arg->index}, {output->index},                                     \
+            static_cast<NvfVal*(*)(NvfDataType, NvfVal*)>(                     \
+                torch::jit::fuser::cuda::op_name),                             \
+            dtype));                                                           \
+        return output;                                                         \
+      },                                                                       \
+      py::return_value_policy::reference);                                     \
+
+  NVFUSER_PYTHON_BINDING_CAST_OP("to_dtype", castOp)
+#undef NVFUSER_PYTHON_BINDING_CAST_OP
+
 /*
   nvf_ops.def_static(
       "var",
@@ -847,11 +886,6 @@ void initNvFuserPythonBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  // Broadcast operations
-  nvf_ops.def_static(
-      "broadcast",
-      &torch::jit::fuser::cuda::broadcast,
-      py::return_value_policy::reference);
   // TODO: We don't have a way to realize a tensor if the operation creates
   // the output of a fusion.
   nvf_ops.def_static(
@@ -886,19 +920,6 @@ void initNvFuserPythonBindings(PyObject* module) {
 
         return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
       },
-      py::return_value_policy::reference);
-
-  // Cast Operations
-  nvf_ops.def_static(
-      "cast",
-      py::overload_cast<torch::jit::fuser::cuda::DataType, TensorView*>(
-          &torch::jit::fuser::cuda::castOp),
-      py::return_value_policy::reference);
-  nvf_ops.def_static(
-      "cast",
-      py::overload_cast<
-          torch::jit::fuser::cuda::DataType,
-          torch::jit::fuser::cuda::Val*>(&torch::jit::fuser::cuda::castOp),
       py::return_value_policy::reference);
 */
 }

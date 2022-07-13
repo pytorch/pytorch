@@ -80,6 +80,27 @@ struct OpRecord : RecordFunctor {
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
+template<class OutType, class ArgType>
+struct CastOpRecord : RecordFunctor {
+  CastOpRecord(std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::function<OutType(NvfDataType, ArgType)> fusion_op,
+      NvfDataType dtype) :
+    RecordFunctor(std::move(_args), std::move(_outputs)),
+    fusion_op_(fusion_op),
+    dtype_(dtype) {}
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = dynamic_cast<ArgType>(fd.fusion_state.at(args.at(0)));
+    auto output = fusion_op_(dtype_, arg);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+
+ private:
+  std::function<OutType(NvfDataType, ArgType)> fusion_op_;
+  NvfDataType dtype_;
+};
+
 struct ReductionOpRecord : RecordFunctor {
   ReductionOpRecord(std::vector<size_t> _args,
       std::vector<size_t> _outputs,
