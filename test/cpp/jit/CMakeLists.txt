@@ -80,6 +80,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_peephole_optimize.cpp
   ${JIT_TEST_ROOT}/test_qualified_name.cpp
   ${JIT_TEST_ROOT}/test_save_load.cpp
+  ${JIT_TEST_ROOT}/test_schema_info.cpp
   ${JIT_TEST_ROOT}/test_schema_matching.cpp
   ${JIT_TEST_ROOT}/test_stack_opt.cpp
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
