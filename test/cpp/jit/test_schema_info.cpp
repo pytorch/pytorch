@@ -173,6 +173,49 @@ TEST(SchemaInfoMayAliasTest, AliasingInputOutput) {
       {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
 }
 
+TEST(SchemaInfoMayAliasTest, MultipleWildcardInputs) {
+  SchemaInfo schema(
+      "aten::test.Tensor(Tensor(a) a, Tensor(*) b, Tensor(*) c) -> (Tensor(a), Tensor(*))");
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 1}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 2}, {c10::SchemaArgType::output, 1}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 2}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 1}));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("a", input);
+  schema.addArgumentValue("b", input);
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 1}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 2}, {c10::SchemaArgType::output, 1}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::input, 2}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 1}));
+  ASSERT_TRUE(schema.may_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+}
+
+TEST(SchemaInfoMayAliasTest, MismatchingTypes) {
+  SchemaInfo schema(
+      "aten::test.Tensor(Tensor(a) a) -> int(a)");
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+}
+
 TEST(FunctionSchemaMayContainAliasTest, Basic) {
   c10::FunctionSchema schema = torch::jit::parseSchema(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
@@ -210,6 +253,19 @@ TEST(FunctionSchemaMayContainAliasTest, InputAndOutputContainers) {
       {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}, false));
   ASSERT_TRUE(schema.may_contain_alias(
       {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}, false));
+}
+
+TEST(SchemaInfoInitTest, InvalidSchemaAliases) {
+  SchemaInfo schema(
+      "aten::test.Tensor(Tensor(a) a, Tensor(*) b, Tensor(*) c) -> (Tensor(a), Tensor(*))");
+  ASSERT_THROW(
+      SchemaInfo(
+          "aten::test.Tensor(Tensor(a) a, Tensor(*) b, Tensor(*) c) -> (Tensor(a), Tensor(a))"),
+      c10::Error);
+  ASSERT_THROW(
+      SchemaInfo(
+          "aten::test.Tensor(Tensor(a) a, Tensor(a) b, Tensor(*) c) -> (Tensor(a), Tensor(*))"),
+      c10::Error);
 }
 } // namespace utils
 } // namespace torch
