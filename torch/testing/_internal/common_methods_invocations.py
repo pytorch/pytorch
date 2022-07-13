@@ -15700,8 +15700,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                         # TODO: FIXME tolerance is too high
                         DecorateInfo(unittest.skip('Skipped!'), 'TestGradients'),
-                        # Pre-existing condition - (nan vs nan) comparison
-                        DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
@@ -17606,8 +17604,6 @@ op_db: List[OpInfo] = [
                         # nan vs nan comparisons
                         # https://github.com/pytorch/pytorch/issues/74279
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                        # Pre-existing condition - (nan vs nan) comparison
-                        DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                     )),
     OpInfo('zero_',
            op=lambda x: torch.zero_(x.clone()),
@@ -17635,8 +17631,6 @@ op_db: List[OpInfo] = [
                         # nan vs 0 comparisons
                         # https://github.com/pytorch/pytorch/issues/74279
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                        # Pre-existing condition - (nan vs nan) comparison
-                        DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                     )),
     BinaryUfuncInfo('special.zeta',
                     aten_name='special_zeta',

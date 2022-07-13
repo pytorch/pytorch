@@ -479,7 +479,7 @@ def check_backward_formula(op: Callable, args, kwargs,
             def unwrap(e):
                 return e.elem if isinstance(e, CCT) else e
 
-            torch.testing.assert_close(tuple(map(unwrap, actual)), expected)
+            torch.testing.assert_close(tuple(map(unwrap, actual)), expected, equal_nan=True)
 
 # Checks if the forward AD formula is composite compliant by testing
 # all possible permutations of {primals, tangents} being
