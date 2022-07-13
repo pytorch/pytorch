@@ -37,9 +37,7 @@ struct ShaderDuration final {
 
 class QueryPool final {
  public:
-  explicit QueryPool(
-      const VkDevice,
-      const QueryPoolConfig&);
+  explicit QueryPool(const VkDevice, const QueryPoolConfig&);
 
   QueryPool(const QueryPool&) = delete;
   QueryPool& operator=(const QueryPool&) = delete;
@@ -81,7 +79,6 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
-
 };
 
 } // namespace api

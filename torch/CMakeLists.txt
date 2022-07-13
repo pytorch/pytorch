@@ -117,6 +117,13 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       -Wno-writable-strings)
 endif()
 
+if(USE_ITT)
+  list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/itt.cpp
+  )
+  list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
+endif()
+
 if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
