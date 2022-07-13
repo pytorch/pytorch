@@ -413,7 +413,7 @@ static PyObject* THPVariable_randint(
       auto size = r.intlist(1);
       auto generator = r.generator(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
+      auto dtype = r.scalartypeOptional(4);
       auto device = r.device(6);
       const auto options = TensorOptions()
                                .dtype(dtype)
@@ -440,7 +440,7 @@ static PyObject* THPVariable_randint(
       auto size = r.intlist(2);
       auto generator = r.generator(3);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(5, at::ScalarType::Long);
+      auto dtype = r.scalartypeOptional(5);
       auto device = r.device(7);
       const auto options = TensorOptions()
                                .dtype(dtype)
