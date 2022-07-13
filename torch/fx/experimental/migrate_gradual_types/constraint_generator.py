@@ -39,28 +39,6 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
     return Conj([c1, c2, *nat_constraints]), counter
 
 
-# TODO
-@register_inference_rule("long")
-def long_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-# TODO
-@register_inference_rule("type_as")
-def type_as_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-# TODO
-@register_inference_rule("int")
-def int_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -118,7 +96,9 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
 
 @register_inference_rule("to")
-def to_inference_rule(n: Node, symbols, constraints, counter):
+@register_inference_rule("int")
+@register_inference_rule("long")
+def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
@@ -126,7 +106,29 @@ def to_inference_rule(n: Node, symbols, constraints, counter):
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
+    assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
+
+
+@register_inference_rule("type_as")
+def type_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    We generate the constraint: input = output
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+
+    from_arg = symbols[n.args[0]]
+    to_arg = symbols[n.args[1]]
+
+    assert isinstance(from_arg, TVar)
+    assert isinstance(to_arg, TVar)
+
+    return [BinConstraintT(from_arg, to_arg, op_consistency),
+            BinConstraintT(output, to_arg, op_eq)], counter
 
 @register_inference_rule("masked_fill_")
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
@@ -649,6 +651,7 @@ def relu_inference_rule(n: Node, module_instance, symbols, constraints, counter)
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
+    assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
 
 @register_inference_rule(torch.nn.Linear)
