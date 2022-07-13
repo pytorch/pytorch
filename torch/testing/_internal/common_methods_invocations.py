@@ -8970,7 +8970,8 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
-           reference_inputs_func=reference_inputs_addcmul_addcdiv),
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -8983,7 +8984,8 @@ op_db: List[OpInfo] = [
                             'test_variant_consistency_eager'),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
-           reference_inputs_func=reference_inputs_addcmul_addcdiv),
+           reference_inputs_func=partial(
+               reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
