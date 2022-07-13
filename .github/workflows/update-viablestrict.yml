@@ -40,6 +40,7 @@ jobs:
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch
+        if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
         run: |

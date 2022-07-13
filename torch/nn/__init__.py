@@ -1,6 +1,10 @@
 from .modules import *  # noqa: F403
-from .parameter import Parameter, UninitializedParameter, UninitializedBuffer
-from .parallel import DataParallel
+from .parameter import (
+    Parameter as Parameter,
+    UninitializedParameter as UninitializedParameter,
+    UninitializedBuffer as UninitializedBuffer,
+)
+from .parallel import DataParallel as DataParallel
 from . import init
 from . import functional
 from . import utils
