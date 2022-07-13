@@ -821,10 +821,28 @@ def squeeze(g, self, dim=None):
     if input_rank is not None and dim < 0:
         adjusted_dim += input_rank
     dim_size = symbolic_helper._get_tensor_dim_size(self, adjusted_dim)
+    if (dim < 0 and input_rank is None) or dim_size is None:
+        # If onnx shape inference is not on, export always as dynamic.
+        # Because we cannot tell if observed static shape is also static at runtime.
+        # create "cond" node (condition is shape[i]==1)
+        dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
+        size = symbolic_helper._size_helper(g, self, dim_constant)
+        const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+        cond = g.op("Equal", size, const_one)
+        # create the "If" node and add the "then" and "else" blocks to it.
+        if_node_outputs = g.op("If", cond)
+        if_node = if_node_outputs.node()
+        if_block = utils._add_block(if_node)
+        squeeze_ = symbolic_helper._squeeze_helper(if_block, self, [dim])
+        utils._add_output_to_block(if_block, squeeze_)
+        else_block = utils._add_block(if_node)
+        identity_ = else_block.op("Identity", self)
+        utils._add_output_to_block(else_block, identity_)
+        return if_node_outputs
 
     # For static input shape
     dim = adjusted_dim
-    if dim_size is not None and dim_size > 1:
+    if dim_size > 1:
         warnings.warn(
             "This model contains a squeeze operation on dimension "
             + str(dim)
