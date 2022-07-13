@@ -3020,6 +3020,7 @@ def full(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    memory_format: Optional[torch.memory_format] = None,
 ) -> TensorLikeType:
     e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     return fill(e, fill_value)
