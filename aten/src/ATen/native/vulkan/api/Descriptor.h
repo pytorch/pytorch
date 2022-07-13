@@ -98,8 +98,7 @@ struct DescriptorPoolConfig final {
 
 class DescriptorPool final {
  public:
-  explicit DescriptorPool(
-      const VkDevice, const DescriptorPoolConfig&);
+  explicit DescriptorPool(const VkDevice, const DescriptorPoolConfig&);
 
   DescriptorPool(const DescriptorPool&) = delete;
   DescriptorPool& operator=(const DescriptorPool&) = delete;
