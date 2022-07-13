@@ -1,9 +1,12 @@
 import inspect
+from queue import Queue
 from functools import wraps
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import torch.nn as nn
+import torch.fx as fx
 from torch.fx._compatibility import compatibility
+from torch.fx.passes.infra.pass_base import PassResult
 
 @compatibility(is_backward_compatible=False)
 def inplace_wrapper(fn: Callable) -> Callable:
@@ -18,11 +21,35 @@ def inplace_wrapper(fn: Callable) -> Callable:
     Returns:
         wrapped_fn (Callable[Module, PassResult])
     """
+    if fn is None:
+        return None
 
     @wraps(fn)
     def wrapped_fn(gm):
         fn(gm)
-        return gm
+        return PassResult(gm, True)
+
+    return wrapped_fn
+
+def pass_result_wrapper(fn: Callable) -> Callable:
+    """
+    Temporary wrapper for passes which currently do not return a PassResult.
+    This wrapper makes them return a PassResult containing the modified object
+    and True for the "modified" flag.
+
+    Args:
+        fn (Callable[Module, Any])
+
+    Returns:
+        wrapped_fn (Callable[Module, PassResult])
+    """
+    if fn is None:
+        return None
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        gm = fn(gm)
+        return PassResult(gm, True)
 
     return wrapped_fn
 
@@ -55,54 +82,76 @@ def topological_sort_passes(
     if len(constraints) == 0:
         return passes, False
 
-    # Construct a graph
-    graph: Dict[Callable, List[Callable]] = {}
-    visited: Dict[Callable, Any] = {}
-    res: List[Callable] = []
-    for p in passes:
-        graph[p] = []
-        visited[p] = None
-
-    circular_dependency = False
-    for i, a in enumerate(passes):
-        for j, b in enumerate(passes):
-            if i == j:
+    # Contruct a graph mapping nodes to a list of their users
+    graph: Dict[Callable, List[Callable]] = {p : [] for p in passes}
+    indegree_map: Dict[Callable, int] = {p : 0 for p in passes}
+    candidates: Queue = Queue()
+    for a in passes:
+        for b in passes:
+            if a == b:
                 continue
 
             for constraint in constraints:
                 if not constraint(a, b):
-                    if b in graph[a]:
-                        circular_dependency = True
                     graph[b].append(a)
+                    indegree_map[a] += 1
 
-    time = 1
+        if indegree_map[a] == 0:
+            candidates.put(a)
 
-    # Topologically sort the graph
-    def topological_sort_util(graph, p):
-        nonlocal time
+    visited: Dict[Callable, bool] = {p : False for p in passes}
+    sorted_passes: List[Callable] = []
+    circular_dependency = False
+
+    def break_cycles():
+        """
+        In the case where `candidates` is empty but there are still unvisited
+        nodes due to cycles, we will loop through the nodes that have not been
+        visited and add the last node with the min number of in-degree edges to
+        `candidates`.
+        """
+        if not candidates.empty():
+            return
+
         nonlocal circular_dependency
 
-        visited[p] = (time, 0)
-        time += 1
+        min_degree = -1
+        min_degree_pass = None
+        for p in passes:
+            if visited[p]:
+                assert indegree_map[p] == 0
+                continue
 
-        for dep in graph[p]:
-            if not visited[dep]:
-                topological_sort_util(graph, dep)
-            elif visited[dep][1] == 0:
-                circular_dependency = True
+            if min_degree == -1:
+                min_degree = indegree_map[p]
+                min_degree_pass = p
+            elif min_degree > indegree_map[p]:
+                min_degree = indegree_map[p]
+                min_degree_pass = p
 
-        res.append(p)
-        visited[p] = (visited[p][0], time)
-        time += 1
+        if min_degree_pass:
+            circular_dependency = True
+            candidates.put(min_degree_pass)
+            indegree_map[min_degree_pass] = 0
 
-    for p in passes[::-1]:
-        if not visited[p]:
-            topological_sort_util(graph, p)
+    break_cycles()
 
-    res.reverse()
-    return res, circular_dependency
+    while not candidates.empty():
+        p = candidates.get()
+        sorted_passes.append(p)
+        visited[p] = True
 
-@compatibility(is_backward_compatible=True)
+        for n in graph[p]:
+            if not visited[n]:
+                indegree_map[n] -= 1
+                if indegree_map[n] == 0:
+                    candidates.put(n)
+
+        break_cycles()
+
+    return sorted_passes, circular_dependency
+
+@compatibility(is_backward_compatible=False)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
     Defines a partial order ('depends on' function) where `this` must occur
@@ -149,12 +198,11 @@ class PassManager:
             True if A depends on B and False otherwise. See implementation of
             `this_before_that_pass_constraint` for example.
         steps (int): Max number of times we run the passes (default = 1).
-        enable_debug_pass (bool): Set to true to enable the debug passes
         run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
     """
 
-    passes: List[Callable[[nn.Module], nn.Module]] = []
+    passes: List[Callable[[nn.Module], PassResult]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -165,6 +213,7 @@ class PassManager:
         constraints=None,
         steps=None,
         run_checks_after_each_pass: bool = False,
+        suppress_check_failures: bool = False,
     ):
         if passes:
             self.passes = passes
@@ -173,7 +222,8 @@ class PassManager:
         if steps:
             self.steps = steps
 
-        self.run_checks_after_each_pass = run_checks_after_each_pass,
+        self.run_checks_after_each_pass = run_checks_after_each_pass
+        self.suppress_check_failures = suppress_check_failures
 
     def add_pass(self, _pass: Callable):
         """
@@ -212,6 +262,8 @@ class PassManager:
         self.passes, circular_dep = topological_sort_passes(self.passes, self.constraints)
         if circular_dep and self.steps == 1:
             raise RuntimeError("Circular dependency detected within the constraints and steps was set to 1")
+        else:
+            self._validated = True
 
     def add_checks(self, check: Callable) -> None:
         """
@@ -229,12 +281,11 @@ class PassManager:
     def check(self, module: nn.Module) -> None:
         pass
 
-    def __call__(self, module: nn.Module) -> nn.Module:
+    def __call__(self, module: nn.Module) -> PassResult:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
-        the graph module to ensure that it still maintains the same required
-        invariants.
+        the graph module if `run_checks_after_each_pass` is set.
 
         If the module is a graph module, we will run the list of passes until
         the graph stops changing, or until `steps` number of times.
@@ -248,6 +299,7 @@ class PassManager:
 
         # Run the set of passes `steps` number of times or until the graph stops
         # changing
+        overall_modified = False
         for _ in range(self.steps):
             modified = False
 
@@ -255,15 +307,19 @@ class PassManager:
             for fn in self.passes:
                 res = fn(module)
 
-                module = res
+                module = res.graph_module
+                modified = modified or res.modified
+
+                if isinstance(module, fx.GraphModule):
+                    module.recompile()
 
                 # Check graph invariants
                 if self.run_checks_after_each_pass:
                     self.check(module)
 
-            # TODO(angelayi): If the graph no longer changes, then we can stop
-            # running these passes
+            # If the graph no longer changes, then we can stop running these passes
+            overall_modified = overall_modified or modified
             if not modified:
                 break
 
-        return module
+        return PassResult(module, overall_modified)

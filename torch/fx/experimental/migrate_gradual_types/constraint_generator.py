@@ -1,17 +1,20 @@
 import torch
 import operator
-from typing import Callable, Dict
+from typing import Callable, Dict, Iterable
 
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
-    Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem
-from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_matching, op_consistency, op_leq, op_precision
+    Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F
+from torch.fx.experimental.migrate_gradual_types.operation import \
+    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt
 from torch.fx.node import Target, Node
-from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar
+from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar, \
+    gen_bvar
 
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
+
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 MAX_TENSOR_RANK = 4
@@ -56,12 +59,6 @@ def int_inference_rule(n: Node, symbols, constraints, counter):
     """
     raise NotImplementedError('Not yet implemented')
 
-# TODO
-@register_inference_rule("ne")
-def ne_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(getattr)
@@ -126,7 +123,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
     return [Disj([c1, Disj(c2)])], counter
 
 
-# TODO
+
 @register_inference_rule("view")
 def view_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -139,8 +136,8 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
     symbols[n] = my_view
 
     src_var = symbols[n.args[0]]
-    t2 = n.args[1:]  # target shape
-    t2_type = TensorType([Dyn if elem == -1 else symbols[elem] for elem in t2])  # type: ignore[union-attr]
+    t2 = [symbols[elem] if isinstance(elem, Node) else elem for elem in n.args[1:]]  # target shape
+    t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
     c1 = BinConstraintT(my_view, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)
 
@@ -191,13 +188,51 @@ def size_inference_rule(n: Node, symbols, constraints, counter):
         raise NotImplementedError
 
 
+def range_check(i, n):
+    """
+    Checks if an index i is within range of a size n list
+    Args:
+        i: index
+        n: list size
 
-# TODO
+    Returns: Boolean
+    """
+    if i >= 0:
+        return T() if i < n else F()
+    else:
+        return T() if i >= n else F()
+
+
 @register_inference_rule(torch.cumsum)
 def cumsum_inference_rule(n: Node, symbols, constraints, counter):
     """
+    Input and output shapes should be equal
+    We should verify that the index is valid
     """
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node)
+    arg_1 = n.args[1] if len(n.args) > 1 else n.kwargs["dim"]
+    assert isinstance(arg_1, int)
+
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+    input = symbols[n.args[0]]
+
+    input_dyn = BinConstraintT(input, Dyn, op_eq)
+    output_dyn = BinConstraintT(output, Dyn, op_eq)
+    c1 = Conj([input_dyn, output_dyn])
+    c2 = []
+    for i in range(1, MAX_TENSOR_RANK + 1):
+        new_dims, counter = gen_tensor_dims(i, counter)
+
+        nat_constraints = gen_nat_constraints(new_dims)
+
+        c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims), op_eq),
+                           BinConstraintT(output, TensorType(new_dims), op_eq)] +
+                          [range_check(arg_1, i)] + nat_constraints)
+
+        c2.append(c_tensor_i)
+    dyn_or_tensor = Disj([c1, Disj(c2)])
+    return [dyn_or_tensor], counter
 
 
 @register_inference_rule(_assert_is_none)
@@ -235,6 +270,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # added as a conjunction to the disjuction of c2
     c3 = BinConstraintD(0, get_item_output, op_leq)
 
+    # print(Disj([c1, Conj([Disj(c2), c3])]))
     return [Disj([c1, Conj([Disj(c2), c3])])], counter
 
 @register_inference_rule(operator.mul)
@@ -252,48 +288,132 @@ def mul_inference_rule(n: Node, symbols, constraints, counter):
     else:
         raise NotImplementedError('Case not yet implemented')
 
-# TODO
+
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
-# TODO
+    # We make sure this node will not be used again. We do not
+    # generate a constraint about that node. Only about the operands.
+
+    e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
+    e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
+    gt_constraint = BinConstraintD(e1, e2, op_gt)
+
+    my_gt, counter = gen_bvar(counter)
+    equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
+    return [equality_constraint], counter
+
+
 @register_inference_rule(operator.lt)
 def lt_inference_rule(n: Node, symbols, constraints, counter):
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
-# TODO
+    # We make sure this node will not be used again. We do not
+    # generate a constraint about that node. Only about the operands.
+    # assert len(n.users) == 0
+    # print(len(n.users))
+
+    e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
+    e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
+    return [BinConstraintD(e1, e2, op_lt)], counter
+
+
 @register_inference_rule(torch.full)
 def full_inference_rule(n: Node, symbols, constraints, counter):
-    raise NotImplementedError('Not yet implemented')
+    full, counter = gen_tvar(counter)
+    symbols[n] = full
+    res = []
 
-# TODO
+    assert isinstance(n.args[0], Iterable)
+    for arg in n.args[0]:
+        res.append(symbols[arg])
+    c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
+    return [c], counter
+
+
+# TODO normalize index
 @register_inference_rule(torch.arange)
 def arange_inference_rule(n: Node, symbols, constraints, counter):
-    raise NotImplementedError('Not yet implemented')
+    start = 0
+    step = 1
+
+    if len(n.args) == 1:
+        end = symbols[n.args[0]]
+    else:
+        raise NotImplementedError('Not yet implemented')
+
+    # int((end - start) / step)
+    d1, counter = gen_dvar(counter)
+    size_constraint = BinConstraintD(d1, BinConstraintD(BinConstraintD(end, start, op_sub), step, op_div), op_eq)
+    arange, counter = gen_tvar(counter)
+    symbols[n] = arange
+
+    # either the a parameter is a number or it is Dyn
+    c1 = Disj([BinConstraintD(end, Dyn, op_eq),
+               BinConstraintD(start, Dyn, op_eq),
+               BinConstraintD(step, Dyn, op_eq)])
+    c2 = BinConstraintD(d1, Dyn, op_eq)
+    both_dyn = Conj([c1, c2])
+
+    c11 = Conj([BinConstraintD(end, Dyn, op_neq),
+                BinConstraintD(start, Dyn, op_neq),
+                BinConstraintD(step, Dyn, op_neq)])
+    c22 = BinConstraintD(d1, Dyn, op_neq)
+    both_numbers = Conj([c11, c22, size_constraint])
+
+    return [BinConstraintT(arange, TensorType([d1]), op_eq), Disj([both_dyn, both_numbers])], counter
+
+def gen_broadcasting_constraints(arg1, arg2, symbols, counter, output_var):
+    # retrive arg variables
+    e1 = symbols[arg1]  # n.args[0]
+    e2 = symbols[arg2]  # n.args[1]
+
+    # additional vars that don't correspond to expressions
+    e11, counter = gen_tvar(counter)
+    e22, counter = gen_tvar(counter)
+
+    # generate constraints
+    c1 = TGreatestUpperBound(output_var, e11, e22)
+    c2 = ApplyBroadcasting(e11, e22, e1, e2)
+    c3 = BinConstraintT(e11, e22, op_consistency)
+    return [c1, c2, c3], counter
+
+
+@register_inference_rule(torch.ne)
+@register_inference_rule("ne")
+def ne_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    We generate the same constraints as we do for addition. We assume the arguments can only
+    be tensors here, unlike addition where we have scalar addition.
+    """
+
+    # create and store the new variable
+    my_add, counter = gen_tvar(counter)
+    symbols[n] = my_add
+
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+    return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
 
+    # create and store the new variable
+    my_add, counter = gen_tvar(counter)
+    symbols[n] = my_add
+
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
-        # create and store the new variable
-        my_add, counter = gen_tvar(counter)
-        symbols[n] = my_add
+        return gen_broadcasting_constraints(n.args[0], n.args[1], symbols, counter, my_add)
 
-        # retrive arg variables
+    elif isinstance(n.args[0], Node) and isinstance(n.args[1], int):
         e1 = symbols[n.args[0]]
-        e2 = symbols[n.args[1]]
+        # scalar addition
+        return [BinConstraintT(my_add, e1, op_eq)], counter
 
-        # additional vars that don't correspond to expressions
-        e11, counter = gen_tvar(counter)
-        e22, counter = gen_tvar(counter)
-
-        # generate constraints
-        c1 = TGreatestUpperBound(my_add, e11, e22)
-        c2 = ApplyBroadcasting(e11, e22, e1, e2)
-        c3 = BinConstraintT(e11, e22, op_consistency)
-        return [c1, c2, c3], counter
     else:
         # TODO generate add constraints for scalar addition
         raise NotImplementedError('Addition not yet implemented')
@@ -331,6 +451,40 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
         const.append(c)
 
     return [Disj([both_dyn, *const])], counter
+
+
+@register_inference_rule(torch.nn.LayerNorm)
+def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, counter):
+    """
+    Input and output shapes should be equal.
+    Input should be consistent with the normalized_shape
+    """
+    assert isinstance(n.args[0], Node)
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+    input = symbols[n.args[0]]
+
+    input_dyn = BinConstraintT(input, Dyn, op_eq)
+    output_dyn = BinConstraintT(output, Dyn, op_eq)
+
+    c1 = Conj([input_dyn, output_dyn])
+
+    c2 = []
+    for i in range(1, MAX_TENSOR_RANK + 1):
+        new_dims_rhs, counter = gen_tensor_dims(i, counter)
+        nat_constraints = gen_nat_constraints(new_dims_rhs)
+
+        c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims_rhs), op_eq),
+                           BinConstraintT(output, TensorType(new_dims_rhs), op_eq)] +
+                          add_layer_norm_constraints(new_dims_rhs, list(module_instance.normalized_shape)) +
+                          nat_constraints)
+        c2.append(c_tensor_i)
+
+
+    return [Disj([c1, Disj(c2)])], counter
+
+    # return [BinConstraintT(input, output, op_eq),
+    #         BinConstraintT(input, normalized_shape, op_consistency)], counter
 
 @register_inference_rule(torch.nn.Dropout)
 @register_inference_rule(torch.nn.ReLU)
@@ -375,6 +529,26 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
 
 
     return [Disj([c1, Disj(c2)])], counter
+
+def add_layer_norm_constraints(input_dim, normalized_dim):
+    """
+    The constraints say that the type has te form: [*, 1024, 1024]
+     while the normalized_dim have the form [1024, 1024]
+    Args:
+        input_dim: Input shape of layer norm
+        normalized_dim: normalized_dim parameter of the module instance
+
+    """
+
+    # in this case we return false since there's a pattern mismatch
+    if len(normalized_dim) > len(input_dim):
+        return [F()]
+
+    else:
+        constraints = []
+        for i, n in zip(reversed(input_dim), reversed(normalized_dim)):
+            constraints.append(BinConstraintD(i, n, op_consistency))
+        return constraints
 
 
 def add_linear_constraints(dims1, dims2, module_instance):
@@ -524,6 +698,7 @@ class ConstraintGenerator:
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
+
         return Conj(all_constraints), counter
 
     def generate_constraints_node(self, n: Node, counter):
@@ -570,10 +745,9 @@ class ConstraintGenerator:
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
-        # TODO
+        # TODO: verify that no constraint should be generated here
         elif n.op == 'get_attr':
-            # t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
-            raise NotImplementedError('Not yet implemented')
+            return [], counter
 
         elif n.op == 'output':
             return [], counter

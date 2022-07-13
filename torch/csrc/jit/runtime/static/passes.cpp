@@ -872,6 +872,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR(
           "torcharrow::inference_wrapper_run_flat",
           "static_runtime::fused_inference_wrapper_run_flat"),
+      OP_PAIR(
+          "torcharrow::variadic_inference_wrapper_run_flat",
+          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
@@ -1350,6 +1353,34 @@ void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
   for (auto* node : to_delete) {
     node->destroy();
   }
+}
+
+void UseInPlaceGetRealInputsFromOptionalInputsV2(
+    std::shared_ptr<Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  const std::string original_pattern = R"IR(
+    graph(%optional_input: (Tensor, Tensor?, Tensor?)?[], %include_last_offsets: bool[]):
+        %x : (Tensor, Tensor?, Tensor?)[] = remote_collection::get_real_inputs_from_optional_inputs_v2(%optional_input, %include_last_offsets)
+        return (%x))IR";
+
+  const std::string new_pattern = R"IR(
+    graph(%optional_input: (Tensor, Tensor?, Tensor?)?[], %include_last_offsets: bool[]):
+        %x : (Tensor, Tensor?, Tensor?)[] = static_runtime::get_real_inputs_from_optional_inputs_v2_inplace(%optional_input, %include_last_offsets)
+        return (%x))IR";
+
+  auto isSingleUse = [](Value* value) { return value->uses().size() == 1; };
+
+  auto filter = [&isSingleUse](
+                    const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto* real_node = match.nodes_map.at(vmap.at("x")->node());
+    return isSingleUse(real_node->input(0));
+  };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(original_pattern, new_pattern);
+  fuse.runOnGraph(graph, filter);
+#endif
 }
 
 void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
