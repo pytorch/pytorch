@@ -214,3 +214,11 @@ There are three ways to disable nvfuser. Listed below with descending priorities
 - Force using NNC instead of nvfuser for GPU fusion with env variable `export PYTORCH_JIT_USE_NNC_NOT_NVFUSER=1`.
 - Disabling nvfuser with torch API `torch._C._jit_set_nvfuser_enabled(False)`.
 - Disable nvfuser with env variable `export PYTORCH_JIT_ENABLE_NVFUSER=0`.
+
+4. Is there any more knobs to tune nvfuser fusion?
+
+Some opt-out features in nvfuser are exposed via env var `PYTORCH_NVFUSER_DISABLE`. e.g. `fallback` to disable aten fallback during compilation failure and `fma` to disable fused multiply-add, you would set `export PYTORCH_NVFUSER_DISABLE="fallback,fma"`. Note that disabling fma would usually regress on performance so we strongly encourage to not disable it.
+
+There's also opt-in features via env var `PYTORCH_NVFUSER_ENABLE`.
+- `complex` would enable complex floating type support in nvfuser (currently experimental and turned off by default to avoid functional regression);
+- `linear_decomposition` enables decomposition of the bias add in linear layer. Similarly, `conv_decomposition` enables decomposition of the bias add in conv layer. In some small benchmark models, we noticed that such decompositions added more overhead in compilation that out-weighs the benefit of faster kernel. Hence we decided to change these to be opt-in instead.
