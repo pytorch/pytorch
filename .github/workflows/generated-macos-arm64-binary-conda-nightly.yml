@@ -137,7 +137,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12
@@ -241,7 +241,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12
@@ -345,4 +345,4 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml

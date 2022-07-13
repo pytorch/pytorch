@@ -255,7 +255,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -482,7 +482,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -709,7 +709,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -933,7 +933,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -1160,7 +1160,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -1387,7 +1387,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -1611,7 +1611,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -1838,7 +1838,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -2065,7 +2065,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -2289,7 +2289,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -2516,7 +2516,7 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
@@ -2743,4 +2743,4 @@ jobs:
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml

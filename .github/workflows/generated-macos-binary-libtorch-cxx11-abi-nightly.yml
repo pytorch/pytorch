@@ -141,7 +141,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
@@ -251,7 +251,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
@@ -361,7 +361,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
@@ -471,4 +471,4 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       use_s3: False
-    uses: ./.github/workflows/_upload.yml
+    uses: ./.github/workflows/_binary-upload.yml
