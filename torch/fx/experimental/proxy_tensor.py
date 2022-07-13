@@ -338,7 +338,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                 with maybe_disable_fake_tensor_mode():
                     constant = args[0].clone()
             else:
-                constant = False
+                constant = None
             return wrap_output(inner_res, proxy_res, constant=constant)
 
 

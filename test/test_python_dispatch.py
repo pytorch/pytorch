@@ -1143,8 +1143,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             __torch_function__ = torch._C._disabled_torch_function_impl
 
         a = SubTensor(torch.randn(2))
-        mode = PoliteMode()
-        with mode:
+        with PoliteMode() as mode:
             a.abs()
 
         self.assertEqual(mode.pre_count, 2)
@@ -1161,7 +1160,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 raise RuntimeError("arf")
 
-        with FailEverythingMode().push() as m:
+        with FailEverythingMode() as m:
             self.assertRaises(RuntimeError, lambda: torch.ones([2, 3]))
             with enable_torch_dispatch_mode(None, replace=m):
                 torch.ones([2, 3])
