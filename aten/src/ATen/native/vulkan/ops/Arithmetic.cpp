@@ -66,9 +66,8 @@ Tensor arithmetic_scalar(
       v_self.options(),
   };
 
-  const float other_val = alpha_arg
-      ? other.to<float>() * alpha_arg->to<float>()
-      : other.to<float>();
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
   const struct Block final {
     uvec3 extents;
     float other;
@@ -102,9 +101,7 @@ Tensor arithmetic_scalar(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -124,9 +121,8 @@ Tensor& arithmetic_scalar_(
 
   vTensor& v_self = convert(self_arg);
 
-  const float other_val = alpha_arg
-      ? other.to<float>() * alpha_arg->to<float>()
-      : other.to<float>();
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
   const struct Block final {
     uvec3 extents;
     float other;
@@ -228,12 +224,8 @@ Tensor arithmetic_tensor(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_other.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -296,9 +288,7 @@ Tensor& arithmetic_tensor_(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
-      v_other.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -333,7 +323,10 @@ Tensor add_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& add_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
@@ -372,7 +365,10 @@ Tensor sub_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& sub_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }
