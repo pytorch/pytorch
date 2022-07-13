@@ -2329,6 +2329,9 @@
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
+- func: full.memory_format(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  cpp_no_default_args: ['dtype', 'layout', 'device', 'pin_memory', 'memory_format']
+
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -3576,6 +3579,9 @@
   device_guard: False
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: ones.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  cpp_no_default_args: ['dtype', 'layout', 'device', 'pin_memory', 'memory_format']
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -5170,6 +5176,9 @@
     CUDA: _efficientzerotensor_cuda
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: zeros.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  cpp_no_default_args: ['dtype', 'layout', 'device', 'pin_memory', 'memory_format']
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
