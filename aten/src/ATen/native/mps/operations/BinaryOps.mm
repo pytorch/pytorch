@@ -94,13 +94,13 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
     Placeholder selfPlaceholder;
     Placeholder otherPlaceholder;
 
-    if (is_self_scalar) {
+    if (is_self_scalar && !self.is_mps()) {
       feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), getMPSScalarType(self.scalar_type()));
     } else {
       selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
-    if (is_other_scalar) {
+    if (is_other_scalar && !other.is_mps()) {
       feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), getMPSScalarType(other.scalar_type()));
     } else {
       otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);

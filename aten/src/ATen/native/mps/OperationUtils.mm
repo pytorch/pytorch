@@ -60,30 +60,8 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   return gen;
 }
 
-void runMPSGraph(
-    MPSStream* mpsStream,
-    MPSGraph* mpsGraph,
-    NSDictionary* feeds,
-    NSDictionary* results) {
-  dispatch_sync(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->commit(true);
-      id<MTLCommandQueue> commandQueue = mpsStream->commandQueue();
-      MPSGraphExecutionDescriptor *executionDescriptor = [[MPSGraphExecutionDescriptor new] autorelease];
-
-      executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
-                                                MPSGraphTensorData *> * resultsDictionary,
-                                                NSError * _Nullable error) {
-      };
-
-      [mpsGraph runAsyncWithMTLCommandQueue:commandQueue
-                                feeds:feeds
-                     targetOperations:nil
-                    resultsDictionary:results
-                  executionDescriptor:executionDescriptor];
-
-    }
-  });
+void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {
@@ -142,19 +120,21 @@ std::string getMPSTypeString(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return "MPSDataTypeFloat32";
+      return "Float32";
     case ScalarType::Half:
-      return "MPSDataTypeFloat16";
+      return "Float16";
     case ScalarType::Int:
-      return "MPSDataTypeInt32";
+      return "Int32";
     case ScalarType::Long:
-      return "MPSDataTypeInt64";
+      return "Int64";
     case ScalarType::Short:
-      return "MPSDataTypeInt16";
+      return "Int16";
+    case ScalarType::Char:
+      return "UInt8";
     case ScalarType::Byte:
-      return "MPSDataTypeInt8";
+      return "Int8";
     case ScalarType::Bool:
-      return "MPSDataTypeBool";
+      return "Bool";
     default:
       return "Undefined";
   }
@@ -337,6 +317,9 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scal
       break;
     case MPSDataTypeInt8:
       v.i = scalar.to<int8_t>();
+      break;
+    case MPSDataTypeUInt8:
+      v.i = scalar.to<uint8_t>();
       break;
     case MPSDataTypeBool:
       v.b = scalar.to<bool>();
