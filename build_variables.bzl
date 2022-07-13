@@ -132,6 +132,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
+    "torch/csrc/profiler/itt_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -1022,6 +1023,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Dict.cpp",
     "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
+    "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
