@@ -534,7 +534,7 @@ class _PyTreeCodeGen(CodeGen):
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
-        if self.pytree_info is None or hasattr(self, '_in_spec') == False:
+        if self.pytree_info is None or hasattr(self, '_in_spec') is False:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
         has_orig_self = (function_args[0] == 'self')
