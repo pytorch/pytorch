@@ -2134,7 +2134,6 @@ def expand(a: Tensor, *shape) -> Tensor:
     )
 
 
-@register_decomposition(torch.ops.aten.expand_as)
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
