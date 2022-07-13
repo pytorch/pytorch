@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod, op_gt, op_lt
 from torch.fx.tensor_type import TensorType, Dyn
 
 
@@ -127,13 +127,14 @@ class BinConstraintD(BinaryConstraint):
     Binary constraints about dimensions
     """
     def __init__(self, lhs, rhs, op):
-        assert is_algebraic_expression(lhs) or is_dim(lhs)
-        assert is_algebraic_expression(rhs) or is_dim(rhs)
+        assert is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)
+        assert is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)
 
         super().__init__(lhs, rhs, op)
 
     def __eq__(self, other):
         return super().__eq__(other)
+
 
 
 class TGreatestUpperBound(Constraint):
@@ -405,12 +406,38 @@ class DVar:
             return False
 
 
+class BVar:
+    """
+    Boolean variable
+    """
+    def __init__(self, c):
+        """
+        :param c: character or number
+        """
+        self.c = c
+
+    def __repr__(self):
+        return f'BV({self.c})'
+
+    def __eq__(self, other):
+        if isinstance(other, BVar):
+            return self.c == other.c
+        else:
+            return False
+
+
 def is_algebraic_expression(constraint):
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_add, op_sub, op_div, op_mul, op_mod]
     else:
         return isinstance(constraint, Prod)
 
+
+def is_bool_expr(constraint):
+    if isinstance(constraint, BinConstraintD):
+        return constraint.op in [op_gt, op_lt]
+    else:
+        return isinstance(constraint, BVar)
 
 def is_dim(d):
     return isinstance(d, DVar) or isinstance(d, int) or d == Dyn
