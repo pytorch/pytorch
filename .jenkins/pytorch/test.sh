@@ -586,6 +586,8 @@ test_dynamo() {
 }
 
 test_functorch() {
+  # functorch testing dependency
+  pip install networkx==2.8.4
   pushd ../functorch
   pytest test
   popd
