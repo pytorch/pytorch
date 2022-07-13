@@ -110,10 +110,6 @@ class TestFunctionalization(TestCase):
             out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
             self.assertEqual(out_ref_, out_functional_unwrapped)
 
-    def test_save_for_backwards_segfault(self):
-        inp = torch._to_functional_tensor(LoggingTensor(torch.randn(2, 2))).requires_grad_(True)
-        inp.exp()
-
     def test_multiple_views_of_same_base(self):
         def f(x):
             y = x.view(-1)
