@@ -105,7 +105,9 @@ def argument(
         ]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return argument(a.argument, is_out=is_out, cpp_no_default_args=cpp_no_default_args)
+        return argument(
+            a.argument, is_out=is_out, cpp_no_default_args=cpp_no_default_args
+        )
     elif isinstance(a, TensorOptionsArguments):
         default = None
         if should_default:
