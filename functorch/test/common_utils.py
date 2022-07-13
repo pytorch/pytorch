@@ -45,6 +45,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
 # - Don't hash tensors in a global context, that'll keep them around forever
 def memoize(fn):
     memo = {}
+
     def wrapped(*args):
         if args not in memo:
             memo[args] = fn(*args)
@@ -78,7 +79,7 @@ def get_bdim_choices_batch_norm(num_tensors, _, running_mean=None, running_var=N
     options = (-1, None)
 
     # instance norm turns these into unbatched 0 tensors, so we cannot batch the input if either is not specified
-    if running_mean == None or running_var == None:
+    if running_mean is None or running_var is None:
         choices.append((None,) + (0,) * (num_tensors - 1))
         for choice in itertools.product(options, repeat=num_tensors - 1):
             choices.append((None,) + choice)
