@@ -1,11 +1,9 @@
 # Owner(s): ["module: onnx"]
-import unittest
-
 import onnxruntime
-from test_pytorch_onnx_onnxruntime import ort_compare_with_pytorch, run_ort
 
 import torch
-from torch._C import parse_ir
+from torch.onnx import verification
+from torch.testing._internal import common_utils
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -17,17 +15,14 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     It also does not interact with actual PyTorch modules nor
     PyTorch tensor inputs.
     """
-    from torch.onnx.symbolic_helper import (
-        _set_onnx_shape_inference,
-        _set_opset_version,
-    )
-    from torch.onnx.utils import _optimize_graph
 
     # Shape inference is required because some ops' symbolic functions
     # generate sub-graphs based on inputs' types.
-    _set_onnx_shape_inference(True)
-    _set_opset_version(opset_version)
-    graph = _optimize_graph(graph, operator_export_type, params_dict={})
+    torch.onnx.symbolic_helper._set_onnx_shape_inference(True)
+    torch.onnx.symbolic_helper._set_opset_version(opset_version)
+    graph = torch.onnx.utils._optimize_graph(
+        graph, operator_export_type, params_dict={}
+    )
     proto, _, _, _ = graph._export_onnx(
         {},
         opset_version,
@@ -56,7 +51,7 @@ class _TestJITIRToONNX:
     ort_providers = ["CPUExecutionProvider"]
 
     def run_test(self, graph_ir, example_inputs):
-        graph = parse_ir(graph_ir)
+        graph = torch._C.parse_ir(graph_ir)
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
         onnx_proto = _jit_graph_to_onnx_model(
@@ -65,9 +60,11 @@ class _TestJITIRToONNX:
         ort_sess = onnxruntime.InferenceSession(
             onnx_proto, providers=self.ort_providers
         )
-        ort_outs = run_ort(ort_sess, example_inputs)
+        ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
+        verification._compare_ort_pytorch_outputs(
+            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+        )
 
     def test_example_ir(self):
         graph_ir = """
@@ -86,7 +83,7 @@ def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
         str(name),
-        (unittest.TestCase,),
+        (common_utils.TestCase,),
         dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
     )
 
@@ -94,4 +91,4 @@ def MakeTestCase(opset_version: int) -> type:
 TestJITIRToONNX_opset14 = MakeTestCase(14)
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

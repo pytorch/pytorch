@@ -28,6 +28,23 @@
 #include <tuple>
 
 namespace at {
+
+namespace detail {
+  void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
+    if (opt_dtype.has_value()) {
+      auto dtype = opt_dtype.value();
+      TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype), name, ": dtype should"
+          " be floating point or complex, but got ", dtype);
+      TORCH_CHECK(isComplexType(self_dtype) == isComplexType(dtype),
+          name, ": dtype should be ", isComplexType(self_dtype) ? "complex" : "real",
+          " for ", isComplexType(self_dtype) ? "complex" : "real", " inputs, but got ", dtype);
+      TORCH_CHECK(promoteTypes(self_dtype, dtype) == dtype,
+          name, ": the dtype of the input ", "(", self_dtype, ") should be convertible ",
+          "without narrowing to the specified dtype (", dtype, ")");
+    }
+  }
+}
+
 namespace meta {
 
 #define ADDMM_META() \
@@ -38,7 +55,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -56,7 +73,82 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+}
+
+TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  at::native::checkFloatingOrComplex(self, "linalg.vector_norm");
+
+  auto dim = opt_dim.value_or(IntArrayRef{});
+  // Casting a large integer to a double will just introduce an error for
+  // values larger than 10^53 (same for negative numbers), so that's fine.
+  auto ord = scalar_ord.toDouble();
+
+  // For more context, see issue 52783
+  // If the tensor is empty and norm < 0 || norm == infty
+  //   - We cannot reduce the whole tensor
+  //   - We cannot reduce over an empty dimension
+  if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
+    // dim=None or dim=() reduces the whole tensor
+    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
+      "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
+      "tensor because the operation does not have an identity");
+    for (auto dim_num : dim) {
+      TORCH_CHECK(self.size(dim_num) != 0,
+        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on the dimension ", dim_num ,
+        "because this dimension is empty and the operation does not have an identity");
+    }
+  }
+
+  at::detail::check_linalg_norm_dtype(opt_dtype, self.scalar_type(), "linalg.vector_norm");
+
+  auto mask = at::native::make_dim_mask(dim, self.dim());
+  auto shape = at::native::shape_from_dim_mask(self, std::move(mask), keepdim);
+  auto options = self.options()
+                     .dtype(toRealValueType(opt_dtype.value_or(self.scalar_type())));
+
+  set_output_raw_strided(0, shape, {}, options);
+}
+
+TORCH_META_FUNC(_linalg_det)(const Tensor& A) {
+  at::native::squareCheckInputs(A, "linalg.det");
+  at::native::checkFloatingOrComplex(A, "linalg.det");
+
+  auto shape = A.sizes();
+  auto ndim = shape.size();
+
+  // det
+  set_output_contiguous(0, shape.slice(0, ndim - 2), A.options());
+
+  // LU
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
+  set_output_strided(1, shape, LU_strides, A.options());
+
+  // pivots
+  set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
+}
+
+TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
+  at::native::squareCheckInputs(A, "linalg.slogdet");
+  at::native::checkFloatingOrComplex(A, "linalg.slogdet", /*low_precision*/false);
+
+  auto shape= A.sizes();
+  auto ndim = shape.size();
+
+  auto shape_outputs = shape.slice(0, ndim - 2);
+
+  // sign
+  set_output_contiguous(0, shape_outputs, A.options());
+
+  // logabsdet
+  set_output_contiguous(1, shape_outputs, A.options().dtype(toRealValueType(A.scalar_type())));
+
+  // LU
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
+  set_output_strided(2, shape, LU_strides, A.options());
+
+  // pivots
+  set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
 }
 
 template <typename Meta>
@@ -79,7 +171,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch2.options());
+  meta.set_output_raw_strided(0, output_size, {}, batch2.options());
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
@@ -119,30 +211,43 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
 namespace native {
 
 DEFINE_DISPATCH(addr_stub);
-DEFINE_DISPATCH(linalg_vector_norm_stub);
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.det ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
-  const auto n = lu.size(-1);
-  auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
+Tensor lu_det_P(const Tensor& pivots) {
+  return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
     // take 0 to 1 and 1 to -1
     .mul_(-2)
     .add_(1);
-  return det_P;
 }
 
-// Given a pivoted LU factorization A = P L U,
-// det(A) = det(P) * det(L) * det(U).
-std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  auto det = det_P * at::prod(lu.diagonal(0, -2 ,-1), /*dim=*/-1);
+// Auxiliary function that returns the LU decomposition to use it in the backward
+TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivots) {
+  // info is an aux tensor
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
-  return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
+  // det = det_P * prod(diag(LU))
+  at::mul_out(const_cast<Tensor&>(result), lu_det_P(pivots), at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
+}
+
+Tensor linalg_det(const Tensor& A) {
+  return std::get<0>(at::_linalg_det(A));
+}
+
+Tensor& linalg_det_out(const Tensor& A, Tensor& result) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  at::_linalg_det_out(result, LU, pivots, A);
+  return result;
 }
 
 // torch.det, alias for torch.linalg.det
@@ -150,90 +255,59 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor linalg_det(const Tensor& self) {
-  squareCheckInputs(self, "linalg.det");
-  checkFloatingOrComplex(self, "linalg.det");
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.slogdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  return std::get<0>(at::_det_lu_based_helper(self));
+// Auxiliary function that returns the LU decomposition to use it in the backward
+TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
+  // info is an aux tensor
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
+
+  auto diag_U = LU.diagonal(0, -2, -1);
+  // sign
+  at::mul_out(const_cast<Tensor&>(sign), diag_U.sgn().prod(-1), lu_det_P(pivots));
+
+  // logabsdet
+  at::sum_out(const_cast<Tensor&>(logabsdet), diag_U.abs().log_(), -1);
 }
 
-Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("torch.linalg.det", out, self, "out");
-  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-
-  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
-  at::native::resize_output(out, out_sizes);
-
-  auto det = at::native::linalg_det(self);
-  out.copy_(det);
-  return out;
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {
+  auto out = at::_linalg_slogdet(A);
+  return std::make_tuple(std::move(std::get<0>(out)), std::move(std::get<1>(out)));
 }
 
-Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self, "logdet");
-  checkFloatingOrComplex(self, "logdet");
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  at::_linalg_slogdet_out(sign, logabsdet, LU, pivots, A);
+  return std::tie(sign, logabsdet);
+}
 
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+// Alias
+std::tuple<Tensor, Tensor> slogdet(const Tensor& A) {
+  return at::linalg_slogdet(A);
+}
 
-  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
-  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
-  if (self.dim() > 2) {
-    auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
-  } else if (det_sign.item<double>() < 0) {
-    logdet_vals.fill_(NAN);
+std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  return at::linalg_slogdet_out(sign, logabsdet, A);
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor logdet(const Tensor& A) {
+  squareCheckInputs(A, "logdet");
+  checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
+  Tensor sign, logabsdet;
+  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
+
+  if (A.is_complex()) {
+    return sign.log() + logabsdet;
+  } else {
+    return at::where(sign == -1., NAN, logabsdet);
   }
-  return logdet_vals;
-}
-
-std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self, "linalg.slogdet");
-  ScalarType t = self.scalar_type();
-  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-              "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
-
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = _lu_det_P(lu, pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
-  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  // Since abslogdet_val cannot take nan, no special case handling is required.
-  // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
-  return std::make_tuple(det_sign, abslogdet_val);
-}
-
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  checkSameDevice("linalg.slogdet", sign, input, "sign");
-  checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
-  checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
-  ScalarType real_dtype = toRealValueType(input.scalar_type());
-  // logabsdet is always real-valued here
-  checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
-
-  Tensor sign_tmp, logabsdet_tmp;
-  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
-
-  at::native::resize_output(sign, sign_tmp.sizes());
-  sign.copy_(sign_tmp);
-  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
-  logabsdet.copy_(logabsdet_tmp);
-
-  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
-}
-
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  return at::linalg_slogdet(self);
 }
 
 namespace {
@@ -507,10 +581,12 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }
 
-// Computes the rank of 'input' and saves the result in-place in 'result'
+namespace {
+
+// Computes the rank of 'input' and saves the result in-place in 'result'.
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-Tensor& linalg_matrix_rank_out(
+Tensor& matrix_rank_impl(
     const Tensor& input,
     const optional<Tensor>& atol_opt,
     const optional<Tensor>& rtol_opt,
@@ -525,17 +601,8 @@ Tensor& linalg_matrix_rank_out(
   ScalarType output_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
-  // Matrices or batch of matrices are allowed
-  TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
-
   checkNotComplexTolerance(atol, "torch.linalg.matrix_rank", "atol");
   checkNotComplexTolerance(rtol, "torch.linalg.matrix_rank", "rtol");
-
-  // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to input.shape[0:input.ndim-2]
-  // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
-  at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
@@ -564,6 +631,36 @@ Tensor& linalg_matrix_rank_out(
   return result;
 }
 
+Tensor get_matrix_rank_result_tensor(const Tensor& input) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  // For Composite Compliance, allocate `result` of correct shape to
+  // avoid resizing in `out` variant.
+  // See also `NOTE [matrix rank output shape]`
+  auto result_shape =
+      IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  Tensor result =
+      at::empty(result_shape, input.options().dtype(ScalarType::Long));
+
+  return result;
+}
+
+}  // anonymous namespace
+
+Tensor& linalg_matrix_rank_out(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian,
+    Tensor& result) {
+  // Matrices or batch of matrices are allowed
+  checkIsMatrix(input, "torch.linalg.matrix_rank", "input");
+  auto result_shape =
+    IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+  at::native::resize_output(result, result_shape);
+  return matrix_rank_impl(input, atol_opt, rtol_opt, hermitian, result);
+}
+
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
@@ -572,15 +669,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optio
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, atol, rtol, hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
@@ -599,15 +698,17 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, 
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+  return matrix_rank_impl(input, tol, at::zeros({}, tol.options()), hermitian, result);
 }
 
 Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
-  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
-  return result;
+  auto result = get_matrix_rank_result_tensor(input);
+
+  Tensor atol_tensor, rtol_tensor;
+  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, tol, 0.0);
+
+  return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
@@ -1226,14 +1327,15 @@ static void addmm_impl_cpu_(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
+        using opmath_t = at::opmath_type<scalar_t>;
         at::native::cpublas::gemm(
             transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
-            alpha.to<scalar_t>(),
+            alpha.to<opmath_t>(),
             a.data_ptr<scalar_t>(), lda,
             b.data_ptr<scalar_t>(), ldb,
-            beta.to<scalar_t>(),
+            beta.to<opmath_t>(),
             c.data_ptr<scalar_t>(), ldc);
       });
 
@@ -1922,6 +2024,19 @@ inline Tensor _blob_to_Tensor(
   return _move_memory_if_cuda_input(tensor, in);
 }
 
+template <typename scalar_t>
+inline Tensor _linear_combination(
+    const Tensor& t,
+    std::initializer_list<scalar_t> blob) {
+  // _blob_to_Tensor converts blob to a 2D tensor for _compute_linear_combination.
+  // If this tensor is of shape (1, *), the result of _compute_linear_combination
+  // is going to be of shape (1, *t.shape) so we squeeze(0) so that
+  // for any t with t.dim() >= 1: t.dim() == _compute_linear_combination(t, ...).dim().
+  return at::native::_compute_linear_combination(
+      t, _blob_to_Tensor<scalar_t>(blob, t))
+    .squeeze(0);
+}
+
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -1953,15 +2068,15 @@ Tensor compute_T4(const Tensor& A) {
     // contains A^2
     As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 3),
-      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+      {1 / 2.0, 1 / 6.0, 1 / 24.0}
     )
   );
 
   // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
-  return at::native::_compute_linear_combination(
-    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, 0.0, 1.0}
   );
 }
 
@@ -1988,10 +2103,10 @@ Tensor compute_T8(const Tensor& A) {
     view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       // extract {A, A^2} from As
       As.narrow(0, 1, 2),
-      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+      {x1, x2}
     )
   );
 
@@ -2001,20 +2116,19 @@ Tensor compute_T8(const Tensor& A) {
   _matmul_impl(
     view_out,
     // x3 * A2 + A4
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 2, 2),
-      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+      {x3, 1.0}
     ),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 4),
-      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+      {x4, x5, x6, x7}
     )
   );
 
   // return I + A + y2 * A2 + A8;
-  return at::native::_compute_linear_combination(
-    As,
-    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, y2, 0.0, 1.0}
   );
 }
 
@@ -2354,47 +2468,265 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
+TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, const Tensor& result) {
+  // Casting a large integer to a double will just introduce an error for
+  // values larger than 10^53 (same for negative numbers), so that's fine.
+  auto ord = scalar_ord.toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef{});
+  // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
+
+  // https://github.com/pytorch/pytorch/issues/52648
+  // Reductions always use `std::abs` to compute the absolute value. In the backward of this
+  // function, we need to locate the index that was selected as the largest value. To do so
+  // we do self.abs() == result to locate the index of the largest element.
+  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // results to the std::abs(std::complex<T>) implementation.
+  // As such, to be able to compute the correct index in the backward, we need to use self.abs()
+  // both in the forward and in the backward
+  Tensor self_;
+  if (self.is_cpu() && self.is_complex() && std::abs(ord) == INFINITY) {
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype).abs();
+    } else {
+      self_ = self.abs();
+    }
+  } else {
+    self_ = self;
+  }
+
+  auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
+  norm_stub(iter.device_type(), iter, ord);
+}
+
+void _linalg_matrix_norm_checks(const Tensor& A, IntArrayRef dim, optional<ScalarType> opt_dtype) {
+  at::native::checkFloatingOrComplex(A, "linalg.matrix_norm");
+  TORCH_CHECK(A.dim() >= 2,
+              "linalg.matrix_norm: input tensor must be a matrix or a batch of matrices");
+
+  // dim
+  TORCH_CHECK(dim.size() == 2, "linalg.matrix_norm: dim must be a 2-tuple of ints");
+  TORCH_CHECK(dim[0] != dim[1], "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
+
+  // dtype
+  at::detail::check_linalg_norm_dtype(opt_dtype, A.scalar_type(), "linalg.matrix_norm");
+}
+
+Tensor linalg_matrix_norm(
+    const Tensor& A,
+    const Scalar& scalar_ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  _linalg_matrix_norm_checks(A, dim, opt_dtype);
+
+  auto ord = scalar_ord.toDouble();
+  auto abs_ord = std::abs(ord);
+  TORCH_CHECK(abs_ord == 2. || abs_ord == 1. || abs_ord == INFINITY, "linalg.matrix_norm: Order ", ord, " not supported.");
+
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, A.dim());
+
+  auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
+  if (abs_ord == 2.) {
+    // Move dims to the end
+    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A.dim());
+
+    auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+    auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1);
+    if (keepdim) {
+      auto permutation_reverse = create_reverse_permutation(permutation);
+      result = result.unsqueeze(-1).permute(permutation_reverse);
+    }
+    return result;
+  } else {  // 1, -1, inf, -inf
+    // The infty norm is like the 1 norm on the transposed matrix
+    if (abs_ord == INFINITY) {
+      std::swap(dim_[0], dim_[1]);
+    }
+
+    // If the first reduction removes one dim from the front (dim_[0] < dim_[1]), after this
+    // reduction dim_[1] will be off by one
+    if (!keepdim && (dim_[0] < dim_[1])) {
+      dim_[1]--;
+    }
+    return max_min(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
+  }
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& A,
+    const Scalar& ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  checkSameDevice("linalg.matrix_norm", A, result);
+  auto out = at::linalg_matrix_norm(A, ord, dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
+}
+
+// fro / nuc
+Tensor linalg_matrix_norm(
+    const Tensor& A,
+    c10::string_view ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  _linalg_matrix_norm_checks(A, dim, opt_dtype);
+  TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
+
+  auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+
+  if (ord == "fro") {
+    return at::linalg_vector_norm(A_, 2, dim, keepdim);
+  } else {  // nuc
+    auto dim_ = dim.vec();
+    maybe_wrap_dims(dim_, A_.dim());
+    // Move dims to the end
+    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A_.dim());
+    auto result = at::linalg_svdvals(A_.permute(permutation)).sum(-1, keepdim);
+    if (keepdim) {
+      auto permutation_reverse = create_reverse_permutation(permutation);
+      result = result.unsqueeze(-1).permute(permutation_reverse);
+    }
+    return result;
+  }
+}
+
+Tensor& linalg_matrix_norm_out(
+    const Tensor& A,
+    c10::string_view ord,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  checkSameDevice("linalg.matrix_norm", A, result);
+  auto out = at::linalg_matrix_norm(A, ord, dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
+}
+
+// Numerical or None norms
+Tensor linalg_norm(const Tensor& X, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  if (opt_dim.has_value()) {
+    TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
+              "dim is specified, it must be of length 1 or 2. Got ", *opt_dim);
+  } else {
+    if (opt_ord.has_value()) {
+      TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
+                  "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");
+    }
+  }
+
+  // If ord=None, we'll always use the 2-norm or frob norm (which are the same) so we go through
+  // vector_norm
+  if (opt_ord.has_value() &&
+       ((opt_dim.has_value() && opt_dim->size() == 2) ||
+        (!opt_dim.has_value() && X.dim() == 2))) {
+    using Int = IntArrayRef::value_type;
+    auto dim = opt_dim.has_value() ? opt_dim.value().vec() : std::vector<Int>{0, 1};
+    return at::linalg_matrix_norm(X, *opt_ord, dim, keepdim, opt_dtype);
+  } else {
+    auto scalar_ord = opt_ord.value_or(Scalar(2.));
+    return at::linalg_vector_norm(X, scalar_ord, opt_dim, keepdim, opt_dtype);
+  }
+}
+
+Tensor& linalg_norm_out(const Tensor& X, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  checkSameDevice("linalg.norm", X, result);
+  auto out = at::linalg_norm(X, opt_ord, opt_dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
+}
+
+// Frobenius and nuclear norms
+Tensor linalg_norm(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  if (opt_dim.has_value()) {
+    TORCH_CHECK(opt_dim->size() == 1 || opt_dim ->size() == 2, "linalg.norm: If ",
+              "dim is specified, it mut be of length 1 or 2. Got ", *opt_dim);
+  } else {
+    TORCH_CHECK(X.dim() == 1 || X.dim() == 2, "linalg.norm: If ",
+                "dim is not specified but ord is, the input must be 1D or 2D. Got ", X.dim(), "D.");
+  }
+  using Int = IntArrayRef::value_type;
+  auto dim = opt_dim.has_value() ? opt_dim.value().vec() : std::vector<Int>{0, 1};
+  return at::linalg_matrix_norm(X, ord, dim, keepdim, opt_dtype);
+}
+
+Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  checkSameDevice("linalg.norm", X, result);
+  auto out = at::linalg_norm(X, ord, opt_dim, keepdim, opt_dtype);
+  TORCH_CHECK(out.scalar_type() == result.scalar_type(),
+              "linalg.norm expected out tensor dtype ", out.scalar_type(),
+              " but got: ", result.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//                              Frobenius Norm                                //
+//             Just used in linalg.norm. It should not be removed.            //
+////////////////////////////////////////////////////////////////////////////////
+
 Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
-  //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
-  Tensor result = at::empty({0}, options);
-  return at::native::frobenius_norm_out(self, dim, keepdim, result);
+  TORCH_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  Tensor result;
+  if (dim.size() == 1 || dim.size() == 0) {
+    result = at::norm(self, 2, dim, keepdim);
+  } else {
+    auto dim_ = dim.vec();
+    maybe_wrap_dims(dim_, self.dim());
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    if (self.is_complex()) {
+      result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
+    } else {
+      result = at::sqrt(at::sum((self * self), dim_, keepdim));
+    }
+  }
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == toRealValueType(self.scalar_type()));
+  TORCH_INTERNAL_ASSERT(result.layout() == c10::Layout::Strided);
+  return result;
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  Tensor result_;
-  if (dim.size() == 1 || dim.size() == 0) {
-    result_ = at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()){
-      result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
-  }
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
+  auto result_ = at::native::frobenius_norm(self, dim, keepdim);
+  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//                                Nuclear Norm                                //
+//             Just used in linalg.norm. It should not be removed.            //
+////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   TORCH_CHECK(
@@ -2412,12 +2744,8 @@ Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
   return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
 }
 
-Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options().dtype(toRealValueType(self.scalar_type())));
-  return at::native::nuclear_norm_out(self, dim, keepdim, result);
-}
-
-Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+namespace {
+Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());
@@ -2430,323 +2758,25 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
+  return result_;
+}
+} // anonymous namespace
+
+Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  return nuclear_norm_impl(self, dim, keepdim).to(toRealValueType(self.scalar_type()));
+}
+
+Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+  auto result_ = nuclear_norm_impl(self, dim, keepdim);
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
 
-// Creates a vector of length ndim with values equal to its indices
-// (e.g. [0, 1, 2, ..., ndim-1])
-static std::vector<int64_t> make_dim_list(int64_t ndim) {
-  std::vector<int64_t> dim_list(ndim);
-  for (const auto ind : c10::irange(ndim)) {
-    dim_list[ind] = ind;
-  }
-  return dim_list;
-}
+////////////////////////////////////////////////////////////////////////////////
+//                              linalg.cond                                   //
+////////////////////////////////////////////////////////////////////////////////
 
-// Checks for valid arguments to linalg_norm when type(ord) == str
-static void check_str_ord_valid(const c10::string_view str_ord, OptionalIntArrayRef opt_dim, int64_t ndim) {
-  TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
-  bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
-  TORCH_CHECK(dims_valid, "order \"", str_ord,
-    "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
-}
-
-// Performs second dimension reduction for matrix norms
-static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
-  if (ord > 0) {
-    return self.amax(dim, keepdim);
-  } else {
-    return self.amin(dim, keepdim);
-  }
-}
-
-// Performs matrix norm
-static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const optional<Scalar>& opt_ord,
-                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result_;
-  auto ord = opt_ord.value_or(2.0).toDouble();
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "matrix norm only supports strided layout, got: ", self.layout());
-
-  TORCH_CHECK(dim.size() == 2, "_linalg_norm_matrix: 'dim' must either specify 2 dimensions. ",
-    "Got 'dim' specifying ", dim.size(), " dims");
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-  TORCH_CHECK(dim_[0] != dim_[1],
-    "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
-
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
-  TORCH_CHECK(
-      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
-      "Can only calculate the mean of floating and complex types. Got ",
-      toString(scalarType), " instead.");
-
-  Tensor self_;
-  if (opt_dtype.has_value()) {
-    self_ = self.to(scalarType);
-  } else {
-    self_ = self;
-  }
-
-  if (std::abs(ord) == 2) {
-    // Need to shift the reduction dims to the back, because at::linalg_svdvals will only operate on
-    // the last 2 dimensions
-    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-    auto permutation_reverse = create_reverse_permutation(permutation);
-
-    result_ = at::linalg_svdvals(self_.permute(permutation));
-    result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
-
-    if (keepdim) {
-      result_ = result_.unsqueeze(-1).permute(permutation_reverse);
-    }
-  } else {
-    // abs(p) == infinity and abs(p) == 1 will perform identical reductions, except
-    // that the order of the two dims is swapped. So we can swap the dims if
-    // abs(p) == infinity to simplify the rest of the operation's logic.
-    if (std::abs(ord) == INFINITY) {
-      std::swap(dim_[0], dim_[1]);
-    }
-    // If the dim of the second reduction is greater than that of the first reduction
-    // and we are not keeping the dims, then the fact that the output of the first
-    // reduction will have one fewer dimension means that the second reduction dim
-    // will be off by one, so we need to correct that.
-    if ((dim_[1] > dim_[0]) && !keepdim) {
-      dim_[1]--;
-    }
-    if (std::abs(ord) == 1 || std::abs(ord) == INFINITY) {
-      result_ = self_.abs().sum(dim_[0], keepdim);
-      result_ = _norm_min_max(result_, ord, dim_[1], keepdim);
-    } else {
-      TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
-    }
-  }
-  at::native::resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
-}
-
-static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const optional<Scalar>& opt_num_ord, optional<c10::string_view> opt_str_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  // Callers must give the ord argument as either a number, a string, or neither.
-  // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
-  TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
-  if (opt_dtype.has_value()) {
-    auto dtype = opt_dtype.value();
-    TORCH_CHECK(dtype == result.scalar_type(), "provided dtype must match dtype of result, but got",
-      "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
-  }
-  int64_t ndim = self.dim();
-  if (opt_str_ord.has_value()) {
-    // 'ord' is string
-    auto str_ord = opt_str_ord.value();
-    check_str_ord_valid(str_ord, opt_dim, ndim);
-    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
-    if (str_ord == "fro") {
-      at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
-    } else if (str_ord == "nuc") {
-      if (opt_dim.has_value()) {
-        at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
-      } else {
-        at::nuclear_norm_out(result, self_, keepdim);
-      }
-    }
-  } else {
-    // 'ord' is int or None
-    std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
-    if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      Tensor result_ = at::linalg_vector_norm(
-          self, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
-      // TODO: Resize and copy should be avoided with
-      //       https://github.com/pytorch/pytorch/issues/52712
-      at::native::resize_output(result, result_.sizes());
-      result.copy_(result_);
-    } else if (dim_.size() == 2) {
-      _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
-    } else {
-      TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
-        "not 1-D or 2-D");
-    }
-  }
-  return result;
-}
-
-static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  // Casting a large integer to a double will introduce some error, but for
-  // practical purposes, it won't matter since a large order will usually
-  // give an infinite result
-  auto ord = scalar_ord.toDouble();
-
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
-              "linalg.vector_norm only supports CPU and CUDA device types, but got: ",
-              self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "linalg.vector_norm only supports strided layout, but got: ", self.layout());
-
-  if (opt_dtype.has_value() && isComplexType(self.scalar_type())) {
-    TORCH_CHECK(isComplexType(opt_dtype.value()),
-      "linalg.vector_norm expected complex 'dtype', since input is complex, ",
-      "but got ", opt_dtype.value());
-  }
-
-  checkFloatingOrComplex(self, "linalg.vector_norm");
-  ScalarType in_dtype = opt_dtype.value_or(self.scalar_type());
-
-  IntArrayRef dim = opt_dim.value_or(IntArrayRef{});
-
-  if (self.numel() == 0) {
-    // TODO: The question about how to handle negative orders when the input
-    // is empty has not been settled yet. For now, we raise an error. Issue:
-    // https://github.com/pytorch/pytorch/issues/52783
-    TORCH_CHECK(ord >= 0,
-      "linalg.vector_norm of negative order cannot be performed on an empty tensor");
-
-    // For NumPy compatibility, we can only perform order infinity reduction
-    // (max/min) on a tensor with zero elements if the dimensions to reduce are
-    // nonzero. Otherwise, throw an error.
-    if (ord == INFINITY) {
-      bool has_identity = true;
-
-      if (dim.size() == 0) {
-        has_identity = false;
-      } else {
-        for (int64_t dim_num : dim) {
-          if (self.size(dim_num) == 0) {
-            has_identity = false;
-            break;
-          }
-        }
-      }
-      TORCH_CHECK(has_identity,
-        "linalg.vector_norm cannot compute the infinity norm on an empty ",
-        "dimension because the operation does not have an identity");
-    }
-  }
-  Tensor self_;
-  if (self.device().type() == c10::kCPU && isComplexType(self.scalar_type()) && std::abs(ord) == INFINITY) {
-    // TODO: This at::abs() call is used so that the at::abs() call in the
-    // backward function produces an identical result for complex inputs.
-    // However, it would be ideal if we could incorporate this into
-    // linalg_vector_norm_stub. See issue:
-    // https://github.com/pytorch/pytorch/issues/52648
-    self_ = self.to(in_dtype).abs();
-    in_dtype = toRealValueType(in_dtype);
-  } else {
-    self_ = self;
-  }
-  ScalarType out_dtype = opt_dtype.value_or(toRealValueType(self.scalar_type()));
-  TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
-    "linalg.vector_norm expected out tensor dtype ", out_dtype,
-    " but got: ", result.scalar_type());
-  // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
-  auto iter = isComplexType(self.scalar_type()) ?
-      make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
-      make_reduction("vector_norm", result, self_, dim, keepdim, out_dtype);
-
-  linalg_vector_norm_stub(iter.device_type(), iter, ord);
-  return result;
-}
-
-Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType out_dtype = opt_dtype.value_or(toRealValueType(self.scalar_type()));
-  Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
-  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
-}
-
-Tensor& linalg_vector_norm_out(const Tensor& self, const Scalar& ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
-}
-
-namespace {
-
-// Only performs checks not performed by linalg.norm
-void check_linalg_matrix_norm_args(
-    const Tensor& self,
-    IntArrayRef dim,
-    optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      self.ndimension() >= 2,
-      "linalg.matrix_norm(): input tensor must be a matrix or batch of matrices");
-  ScalarType in_dtype = dtype.value_or(self.scalar_type());
-  TORCH_CHECK(
-      in_dtype == kFloat || in_dtype == kDouble || in_dtype == kComplexFloat ||
-          in_dtype == kComplexDouble,
-      "linalg.matrix_norm(): only supports the float, double, cfloat and cdouble dtypes, but got: ",
-      toString(in_dtype));
-  TORCH_CHECK(
-      dim.size() == 2, "linalg.matrix_norm(): dim must be a 2-tuple of ints");
-}
-
-} // namespace
-
-Tensor linalg_matrix_norm(
-    const Tensor& self,
-    const Scalar& ord,
-    IntArrayRef dim,
-    bool keepdim,
-    optional<ScalarType> dtype) {
-  check_linalg_matrix_norm_args(self, dim, dtype);
-  return at::native::linalg_norm(self, ord, dim, keepdim, dtype);
-}
-
-Tensor& linalg_matrix_norm_out(
-    const Tensor& self,
-    const Scalar& ord,
-    IntArrayRef dim,
-    bool keepdim,
-    optional<ScalarType> dtype,
-    Tensor& result) {
-  check_linalg_matrix_norm_args(self, dim, dtype);
-  return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
-}
-
-Tensor linalg_matrix_norm(
-    const Tensor& self,
-    c10::string_view ord,
-    IntArrayRef dim,
-    bool keepdim,
-    optional<ScalarType> dtype) {
-  check_linalg_matrix_norm_args(self, dim, dtype);
-  return at::native::linalg_norm(self, ord, dim, keepdim, dtype);
-}
-
-Tensor& linalg_matrix_norm_out(
-    const Tensor& self,
-    c10::string_view ord,
-    IntArrayRef dim,
-    bool keepdim,
-    optional<ScalarType> dtype,
-    Tensor& result) {
-  check_linalg_matrix_norm_args(self, dim, dtype);
-  return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
-}
-
-// Numerical or None norms
-Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
-  Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(
-      self, opt_ord, opt_dim, keepdim, opt_dtype, result);
-}
-
-// Frobenius and nuclear norms
-Tensor linalg_norm(const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
-  Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(
-      self, ord, opt_dim, keepdim, opt_dtype, result);
-}
-
-// Numerical or None norms
-Tensor& linalg_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
-}
-
-// Frobenius and nuclear norms
-Tensor& linalg_norm_out(const Tensor& self, c10::string_view ord, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
-}
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
 Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {

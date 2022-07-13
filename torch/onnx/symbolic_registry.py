@@ -4,10 +4,23 @@ import itertools
 import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
-import torch._C
-from torch.onnx import _constants
+from torch import _C
+from torch.onnx import _constants, errors
 
-_SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
+__all__ = [
+    "get_op_supported_version",
+    "get_ops_in_version",
+    "get_registered_op",
+    "is_registered_op",
+    "is_registered_version",
+    "register_op",
+    "register_ops_helper",
+    "register_ops_in_version",
+    "register_version",
+    "unregister_op",
+]
+
+_SymbolicFunction = Callable[..., Union[_C.Value, Tuple[_C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
@@ -29,9 +42,7 @@ def _import_symbolic_opsets():
     for opset_version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
     ):
-        module = importlib.import_module(
-            "torch.onnx.symbolic_opset{}".format(opset_version)
-        )
+        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset_version}")
         global _symbolic_versions
         _symbolic_versions[opset_version] = module
 
@@ -50,23 +61,24 @@ def register_ops_helper(domain: str, version: int, iter_version: int):
 
 
 def register_ops_in_version(domain: str, version: int):
-    # iterates through the symbolic functions of
-    # the specified opset version, and the previous
-    # opset versions for operators supported in
-    # previous versions.
+    """Iterates through the symbolic functions of the specified opset version, and the
+    previous opset versions for operators supported in previous versions.
 
-    # Opset 9 is the base version. It is selected as the base version because
-    #   1. It is the first opset version supported by PyTorch export.
-    #   2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
-    #      that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
-    #      we chose to handle them as special cases separately.
-    # Backward support for opset versions beyond opset 7 is not in our roadmap.
+    Opset 9 is the base version. It is selected as the base version because
+        1. It is the first opset version supported by PyTorch export.
+        2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
+            that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
+            we chose to handle them as special cases separately.
 
-    # For opset versions other than 9, by default they will inherit the symbolic functions defined in
-    # symbolic_opset9.py.
-    # To extend support for updated operators in different opset versions on top of opset 9,
-    # simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
-    # Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+    Backward support for opset versions beyond opset 7 is not in our roadmap.
+
+    For opset versions other than 9, by default they will inherit the symbolic functions defined in
+    symbolic_opset9.py.
+
+    To extend support for updated operators in different opset versions on top of opset 9,
+    simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
+    Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+    """
     iter_version = version
     while iter_version != 9:
         register_ops_helper(domain, version, iter_version)
@@ -150,26 +162,7 @@ def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFuncti
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     if not is_registered_op(opname, domain, version):
-        raise UnsupportedOperatorError(domain, opname, version)
+        raise errors.UnsupportedOperatorError(
+            domain, opname, version, get_op_supported_version(opname, domain, version)
+        )
     return _registry[(domain, version)][opname]
-
-
-class UnsupportedOperatorError(RuntimeError):
-    def __init__(self, domain: str, opname: str, version: int):
-        supported_version = get_op_supported_version(opname, domain, version)
-        if domain in {"", "aten", "prim", "quantized"}:
-            msg = f"Exporting the operator {domain}::{opname} to ONNX opset version {version} is not supported. "
-            if supported_version is not None:
-                msg += (
-                    f"Support for this operator was added in version {supported_version}, "
-                    "try exporting with this version."
-                )
-            else:
-                msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
-        else:
-            msg = (
-                f"ONNX export failed on an operator with unrecognized namespace {domain}::{opname}. "
-                "If you are trying to export a custom operator, make sure you registered "
-                "it with the right domain and version."
-            )
-        super().__init__(msg)

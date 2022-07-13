@@ -845,11 +845,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
     if (!frame.record_function) {
-      auto step_callbacks =
-          at::getStepCallbacks(at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (!step_callbacks.empty()) {
+      auto step_callbacks = at::getStepCallbacksUnlessEmpty(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (C10_UNLIKELY(step_callbacks.has_value())) {
         auto rec_fn =
-            std::make_unique<at::RecordFunction>(std::move(step_callbacks));
+            std::make_unique<at::RecordFunction>(std::move(*step_callbacks));
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rec_fn->isActive());
         if (rec_fn->needsInputs()) {
           rec_fn->before(

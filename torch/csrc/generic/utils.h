@@ -11,20 +11,19 @@
 struct THPStorage;
 struct THSPTensor;
 
-typedef class THPPointer<THPStorage>     THPStoragePtr;
+typedef class THPPointer<THPStorage> THPStoragePtr;
 
-#if (!defined(THC_GENERIC_FILE)) && \
-    (!defined(THQUANTIZED))
-template<>
+#if (!defined(THC_GENERIC_FILE)) && (!defined(THQUANTIZED))
+template <>
 struct THPUtils_typeTraits<scalar_t> {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) ||   \
     defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
     defined(THC_REAL_IS_HALF)
-  static constexpr const char *python_type_str = "float";
+  static constexpr const char* python_type_str = "float";
 #elif defined(TH_REAL_IS_COMPLEX) || defined(THC_REAL_IS_COMPLEX)
-  static constexpr const char *python_type_str = "complex";
+  static constexpr const char* python_type_str = "complex";
 #else
-  static constexpr const char *python_type_str = "int";
+  static constexpr const char* python_type_str = "int";
 #endif
 };
 #endif

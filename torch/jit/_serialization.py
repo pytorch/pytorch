@@ -187,6 +187,7 @@ def validate_map_location(map_location=None):
 def get_ff_module():
     try:
         import torch._C_flatbuffer as ff
+
         return ff
     except ImportError:
         print("Please include //caffe2:_C_flatbuffer as dependency.")
@@ -208,7 +209,7 @@ def jit_module_from_flatbuffer(f):
         return wrap_cpp_module(ff._load_jit_module_from_bytes(f.read()))
 
 
-def save_jit_module_to_flatbuffer(m, f):
+def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
     r"""
     Save an offline version of this module for use in a separate process. The
     saved module serializes all of the methods, submodules, parameters, and
@@ -246,12 +247,17 @@ def save_jit_module_to_flatbuffer(m, f):
         # Save to file
         torch.jit.save_jit_module_to_flatbuffer(m, 'scriptmodule.ff')
     """
+
+    extra_files = _extra_files
+    if extra_files is None:
+        extra_files = {}
+
     ff = get_ff_module()
     if isinstance(f, str) or isinstance(f, pathlib.Path):
         f = str(f)
-        ff._save_jit_module(m._c, f)
+        ff._save_jit_module(m._c, f, extra_files)
     else:
-        s = ff._save_jit_module_to_bytes(m._c)
+        s = ff._save_jit_module_to_bytes(m._c, extra_files)
         f.write(s)
 
 
@@ -278,7 +284,7 @@ def get_flatbuffer_module_info(path_or_file):
     """
     ff = get_ff_module()
     if isinstance(path_or_file, str) or isinstance(path_or_file, pathlib.Path):
-        with open(path_or_file, 'rb') as f:
+        with open(path_or_file, "rb") as f:
             all_bytes = f.read()
     else:
         all_bytes = path_or_file.read()

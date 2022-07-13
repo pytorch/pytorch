@@ -13,6 +13,7 @@ import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
+    convert_to_reference,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -295,7 +296,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_mod(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(1, 1, 1, 1),))
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -322,7 +323,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 return F.linear(x, self.w, self.b)
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(1, 1, 1, 1),))
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -340,7 +341,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_fusion(self):
         m = LinearReluFunctional().eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(4, 4),))
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -363,7 +364,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             ),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(1, 1, 1, 1),))
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
@@ -380,7 +381,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 return z
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1), torch.randn(1))
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
@@ -392,8 +394,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # different counts of matchable nodes fails
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         m2 = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
-        mp1 = prepare_fx(m1, {'': torch.ao.quantization.default_qconfig})
-        mp2 = prepare_fx(m2, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp1 = prepare_fx(m1, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
+        mp2 = prepare_fx(m2, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
@@ -402,8 +405,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # verify that matching graphs with non-matching node types fails
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         m2 = nn.Sequential(nn.Linear(1, 1)).eval()
-        mp1 = prepare_fx(m1, {'': torch.ao.quantization.default_qconfig})
-        mp2 = prepare_fx(m2, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp1 = prepare_fx(m1, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
+        example_inputs = (torch.randn(1, 1),)
+        mp2 = prepare_fx(m2, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
@@ -421,7 +426,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 return x2
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1),)
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -456,7 +462,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 return a1
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1),)
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -495,11 +502,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         m = M().eval()
         # prevent conv2 from getting quantized, so we can test
         # modules with equal types
-        qconfig_dict = {
-            '': torch.ao.quantization.default_qconfig,
-            'module_name': [('conv2', None)],
-        }
-        mp = prepare_fx(m, qconfig_dict)
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping().set_module_name("conv2", None)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -519,10 +524,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # all of these should be matched
         expected_types = {
             conv_name_1:
-                ((nn.Conv2d, torch.ao.quantization.MinMaxObserver), (nnq.Conv2d, nnq.Conv2d)),
+                ((nn.Conv2d, torch.ao.quantization.HistogramObserver), (nnq.Conv2d, nnq.Conv2d)),
             conv_name_0:
-                ((nn.Conv2d, torch.ao.quantization.MinMaxObserver), (nn.Conv2d, nn.Conv2d)),
-            mul_name_0: ((torch.mul, torch.ao.quantization.MinMaxObserver), (toq.mul, toq.mul)),
+                ((nn.Conv2d, torch.ao.quantization.HistogramObserver), (nn.Conv2d, nn.Conv2d)),
+            mul_name_0: ((torch.mul, torch.ao.quantization.HistogramObserver), (toq.mul, toq.mul)),
             relu_name_0: ((F.relu, torch.ao.quantization.FixedQParamsObserver), (F.relu, F.relu)),
             sigmoid_name_0:
                 ((torch.sigmoid, torch.ao.quantization.FixedQParamsObserver), (torch.sigmoid, torch.sigmoid)),
@@ -540,9 +545,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m1 = M().eval()
         m2 = M().eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        m1p = prepare_fx(m1, qconfig_dict)
-        m2p = prepare_fx(m2, qconfig_dict)
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+        example_inputs = (torch.randn(1),)
+        m1p = prepare_fx(m1, qconfig_mapping, example_inputs=example_inputs)
+        m2p = prepare_fx(m2, qconfig_mapping, example_inputs=example_inputs)
         results = get_matching_subgraph_pairs(m1p, m2p)
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         sigmoid_name_0 = 'base_op_' + get_base_name_for_op(
@@ -732,9 +738,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 x = _wrapped_hardswish(x)
                 return x
 
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        m1 = prepare_fx(M1().eval(), qconfig_dict)
-        m2 = prepare_fx(M2().eval(), qconfig_dict)
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        m1 = prepare_fx(M1().eval(), qconfig_mapping, example_inputs=example_inputs)
+        m2 = prepare_fx(M2().eval(), qconfig_mapping, example_inputs=example_inputs)
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
         add_op_to_sets_of_related_ops(
@@ -749,7 +756,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         expected_types = {
             hardswish_name_0:
-                ((F.hardswish, torch.ao.quantization.MinMaxObserver), (_wrapped_hardswish, _wrapped_hardswish)),
+                ((F.hardswish, torch.ao.quantization.HistogramObserver), (_wrapped_hardswish, _wrapped_hardswish)),
         }
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1, m2)
@@ -760,7 +767,8 @@ class TestFXGraphMatcher(QuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.Linear(1, 1),
         ).eval()
-        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -782,7 +790,8 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
-        mp = prepare_fx(copy.deepcopy(m), {'': torch.ao.quantization.default_qconfig})
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+        mp = prepare_fx(copy.deepcopy(m), {'': torch.ao.quantization.default_qconfig}, example_inputs=example_inputs)
         # assume success if no exceptions
         results_m_mp = get_matching_subgraph_pairs(torch.fx.symbolic_trace(m), mp)
         mp_copy = copy.deepcopy(mp)
@@ -796,9 +805,11 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).float()
+        example_inputs = (torch.randn(1, 3, 224, 224),)
         mp = prepare_qat_fx(
             copy.deepcopy(m),
-            {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')})
+            {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
+            example_inputs=example_inputs)
         # assume success if no exceptions
         results_m_mp = get_matching_subgraph_pairs(torch.fx.symbolic_trace(m), mp)
         mp_copy = copy.deepcopy(mp)
@@ -809,12 +820,12 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
 
 class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     def _test_extract_weights(
-        self, m, results_len=0, qconfig_dict=None, prepare_fn=prepare_fx
+        self, m, example_inputs, results_len=0, qconfig_dict=None, prepare_fn=prepare_fx
     ):
         m = torch.fx.symbolic_trace(m)
         if qconfig_dict is None:
             qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
@@ -843,12 +854,12 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         prepare_fn=prepare_fx,
     ):
         if qconfig_dict is None:
-            qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+            qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
         if prepare_fn == prepare_fx:
             m.eval()
         else:
             m.train()
-        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict, example_inputs=data)
         mp(*data)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
@@ -906,12 +917,12 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         prepare_fn=prepare_fx, compare_fp32_vs_fp32_prepared=True,
     ):
         if qconfig_dict is None:
-            qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+            qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
         if prepare_fn == prepare_fx:
             m.eval()
         else:
             m.train()
-        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict, example_inputs=data)
         mp(*data)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
@@ -969,26 +980,30 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     @skipIfNoFBGEMM
     def test_extract_weights_mod_ptq(self):
         m = AllConvAndLinearFusionModules().eval()
-        self._test_extract_weights(m, results_len=14)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        self._test_extract_weights(m, example_inputs, results_len=14)
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod_qat(self):
         m = AllConvAndLinearFusionModules().train()
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
+        example_inputs = (torch.randn(1, 1, 1, 1),)
         self._test_extract_weights(
-            m, results_len=14, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
+            m, example_inputs, results_len=14, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_linear_fun_ptq(self):
         m = LinearReluLinearFunctional().eval()
-        self._test_extract_weights(m, results_len=2)
+        example_inputs = (torch.randn(1, 4),)
+        self._test_extract_weights(m, example_inputs, results_len=2)
 
     @skipIfNoFBGEMM
     def test_extract_weights_linear_fun_qat(self):
         m = LinearReluLinearFunctional().train()
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
+        example_inputs = (torch.randn(1, 4),)
         self._test_extract_weights(
-            m, results_len=2, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
+            m, example_inputs, results_len=2, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_conv_fun_ptq(self):
@@ -999,7 +1014,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         b2d = torch.randn(1)
         b3d = torch.randn(1)
         m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).eval()
-        self._test_extract_weights(m, results_len=6)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        self._test_extract_weights(m, example_inputs, results_len=6)
 
     @skipIfNoFBGEMM
     def test_extract_weights_conv_fun_qat(self):
@@ -1011,8 +1027,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         b3d = torch.randn(1)
         m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).train()
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
+        example_inputs = (torch.randn(1, 1, 1, 1),)
         self._test_extract_weights(
-            m, results_len=6, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
+            m, example_inputs, results_len=6, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_dynamic(self):
@@ -1023,7 +1040,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 (nn.Linear, default_dynamic_qconfig),
             ],
         }
-        self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
+        example_inputs = (torch.randn(1, 1),)
+        self._test_extract_weights(m, example_inputs, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_extract_weights_fqn(self):
@@ -1032,7 +1050,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
         results = extract_weights('a', mp, 'b', mq)
         fqn_a_0 = results['_0_0']['weight']['a'][0]['fqn']
@@ -1110,7 +1129,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
         mp_ns, mq_ns = add_loggers('a', mp, 'b', mq, OutputLogger)
         datum = torch.randn(1, 1, 1, 1)
@@ -1186,8 +1206,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Sequential(nn.Conv2d(1, 1, 1)),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
         mp_shadows_mq = add_shadow_loggers('a', mp, 'b', mq, OutputLogger)
         datum = torch.randn(1, 1, 1, 1)
@@ -1254,7 +1275,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_linear_fp16_weights(self):
         qconfig_dict = {'': torch.ao.quantization.float16_static_qconfig}
         m = LinearReluFunctional().eval()
-        self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
+        example_inputs = (torch.randn(1, 4),)
+        self._test_extract_weights(m, example_inputs, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_linear_fp16_activations(self):
@@ -1292,7 +1314,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_linear_fp16_vs_linear_fp16_shadow_activations(self):
         m = LinearFunctional().eval()
         qconfig_dict = {'': torch.ao.quantization.float16_static_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 4),)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mq1 = convert_fx(copy.deepcopy(mp))
         mq2 = convert_fx(copy.deepcopy(mp))
         mq1_shadows_mq2 = _add_shadow_loggers_impl(
@@ -1332,8 +1355,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         Verify that shadowing works where both modules are int8
         """
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
-        mp(torch.randn(4, 1, 4, 4))
+        example_inputs = (torch.randn(4, 1, 4, 4),)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp(*example_inputs)
         mq1 = convert_fx(copy.deepcopy(mp))
         mq2 = convert_fx(mp)
         mq1_shadows_mq2 = add_shadow_loggers('a', mq1, 'b', mq2, OutputLogger)
@@ -1377,7 +1401,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         prepare_custom_config_dict = {
             'non_traceable_module_class': [M1],
         }
-        mp1 = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        example_inputs = (torch.randn(1),)
+        mp1 = prepare_fx(
+            m,
+            qconfig_dict,
+            example_inputs=example_inputs,
+            prepare_custom_config=prepare_custom_config_dict)
         mp2 = copy.deepcopy(mp1)
         unmatchable_types_map = get_unmatchable_types_map()
         unmatchable_types_map['mods_unmatchable'].add(M1)
@@ -1419,8 +1448,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         # quantize without tracing through UserModule
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         prepare_custom_config_dict = {'non_traceable_module_name': ['user_module']}
-        mp = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
-        mp(torch.randn(1, 1, 1))
+        example_inputs = (torch.randn(1, 1, 1),)
+        mp = prepare_fx(
+            m,
+            qconfig_dict,
+            example_inputs=example_inputs,
+            prepare_custom_config=prepare_custom_config_dict)
+        mp(*example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
 
         # weight extraction should not crash
@@ -1660,9 +1694,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = _wrapped_linear(x, self.w1, self.b1)
                 return x
 
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        m1 = prepare_fx(M1().eval(), qconfig_dict)
-        m2 = prepare_fx(M2().eval(), qconfig_dict)
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+        example_inputs = (torch.randn(1, 1),)
+        m1 = prepare_fx(M1().eval(), qconfig_mapping, example_inputs=example_inputs)
+        m2 = prepare_fx(M2().eval(), qconfig_mapping, example_inputs=example_inputs)
         data = torch.randn(1, 1)
 
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
@@ -1731,7 +1766,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Sigmoid(),
         ).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
 
         # extract weights
@@ -1767,7 +1803,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_extend_logger_results_with_comparison(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(
+            m, qconfig_dict, example_inputs=example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
 
         # extract weights
@@ -1792,7 +1830,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_int8_shadows_fp32_simple(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1), nn.ReLU()).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(
+            m, qconfig_dict, example_inputs=example_inputs)
         mp(torch.randn(1, 1, 1, 1))
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
         mq_ref = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
@@ -1846,8 +1886,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         m = M().eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
-        mp(torch.randn(1, 1, 1, 1))
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp(*example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
         mq_ref = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
         mp_shadows_mq = add_shadow_loggers(
@@ -1862,18 +1903,18 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_loggers_preserve_qat_numerics(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1))
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
-        mp = prepare_qat_fx(m, qconfig_dict)
-        mp(torch.randn(1, 1, 1, 1))
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_qat_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp(*example_inputs)
         mc = convert_fx(copy.deepcopy(mp))
         mp.apply(torch.ao.quantization.disable_observer)
 
-        datum = torch.randn(1, 1, 1, 1)
-        ref_fp32 = mp(datum)
-        ref_int8 = mc(datum)
+        ref_fp32 = mp(*example_inputs)
+        ref_int8 = mc(*example_inputs)
 
         mp_ns, mc_ns = add_loggers('fp32', mp, 'int8', mc, OutputLogger)
-        ref_fp32_ns = mp_ns(datum)
-        ref_int8_ns = mc_ns(datum)
+        ref_fp32_ns = mp_ns(*example_inputs)
+        ref_int8_ns = mc_ns(*example_inputs)
         self.assertEqual(ref_fp32, ref_fp32_ns)
         self.assertEqual(ref_int8, ref_int8_ns)
 
@@ -1881,17 +1922,17 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_shadow_loggers_preserve_qat_numerics(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1))
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
-        mp = prepare_qat_fx(m, qconfig_dict)
-        mp(torch.randn(1, 1, 1, 1))
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = prepare_qat_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp(*example_inputs)
         mc = convert_fx(copy.deepcopy(mp))
         mp.apply(torch.ao.quantization.disable_observer)
 
-        datum = torch.randn(1, 1, 1, 1)
-        ref_fp32 = mp(datum)
-        ref_int8 = mc(datum)
+        ref_fp32 = mp(*example_inputs)
+        ref_int8 = mc(*example_inputs)
 
         mc_shadows_mp = add_shadow_loggers('int8', mc, 'fp32', mp, OutputLogger)
-        ref_shadow = mc_shadows_mp(datum)
+        ref_shadow = mc_shadows_mp(*example_inputs)
         self.assertEqual(ref_fp32, ref_shadow)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -1940,9 +1981,10 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     def test_fp16_shadows_fp32(self):
         m = LinearReluFunctional().eval()
+        example_inputs = (torch.randn(1, 4),)
         qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
-        mp = prepare_fx(copy.deepcopy(m), qconfig_dict)
-        mq = convert_fx(mp, is_reference=True)
+        mp = prepare_fx(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
+        mq = convert_to_reference(mp)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
     def test_mul_add_cat_stack_skips_shadowing(self):
@@ -1990,6 +2032,34 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 1, 4, 4),),
             results_len=0)
 
+    def test_linear_kwargs_shadow(self):
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                self.b1 = nn.Parameter(torch.zeros(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(input=x, weight=self.w1, bias=self.b1)
+                return x
+
+        # note: FX graph mode quantization does not have good support
+        # for kwargs-only right now, so we pass in two unquantized
+        # models
+        m = M().eval()
+        mt = torch.fx.symbolic_trace(m)
+        mt_copy = copy.deepcopy(mt)
+
+        mt_shadows_mt_copy = add_shadow_loggers(
+            'a', mt, 'b', mt_copy, OutputLogger)
+
+        mt_shadows_mt_copy(torch.randn(4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mt_shadows_mt_copy, OutputLogger, 'b')
+        self.assertTrue(len(act_compare_dict) == 1)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
@@ -2005,7 +2075,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         )
         for m, in test_cases:
             m.eval()
-            self._test_extract_weights(m, results_len=1)
+            example_inputs = (torch.randn(1, 3, 5, 5),)
+            self._test_extract_weights(m, example_inputs, results_len=1)
 
     @skipIfNoFBGEMM
     def test_compare_weights_linear(self):
@@ -2018,15 +2089,19 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         )
         for m, qconfig_dict in test_cases:
             m.eval()
+            example_inputs = (torch.randn(1, 3, 5, 5),)
             res = self._test_extract_weights(
-                m, results_len=1, qconfig_dict=qconfig_dict)
+                m, example_inputs, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_compare_weights_lstm_dynamic(self):
         qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        example_inputs = (lstm_input, lstm_hidden)
         m = LSTMwithHiddenDynamicModel().eval()
         res = self._test_extract_weights(
-            m, results_len=1, qconfig_dict=qconfig_dict)
+            m, example_inputs, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_compare_activations_conv(self):

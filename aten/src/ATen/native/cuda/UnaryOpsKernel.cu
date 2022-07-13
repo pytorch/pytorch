@@ -13,6 +13,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/complex.h>
@@ -103,7 +104,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
             const T one = T{1};
             return one / std::sqrt(x);
       }); // rsqrt_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "rsqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/rsqrt_name,
               /*return_dtype=*/scalar_t,
@@ -111,10 +112,10 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
               /*arity=*/1>(iter, rsqrt_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "rsqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "rsqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
-          return rsqrt_wrapper(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return rsqrt_wrapper(static_cast<opmath_t>(a));
         });
       });
     #endif
@@ -141,7 +142,7 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
           T sqrt_kernel(T x) {
             return std::sqrt(x);
       }); // sqrt_string
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sqrt_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/sqrt_name,
               /*return_dtype=*/scalar_t,
@@ -149,9 +150,10 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
               /*arity=*/1>(iter, sqrt_string);
       });
     #else
-      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "sqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return std::sqrt(a);
+          using opmath_t = at::opmath_type<scalar_t>;
+          return ::sqrt(static_cast<opmath_t>(a));
         });
       });
     #endif

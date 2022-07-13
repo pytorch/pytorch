@@ -4,7 +4,7 @@ import shutil
 import traceback
 
 import onnx
-import test_onnx_common
+import onnx_test_common
 from onnx import numpy_helper
 from test_nn import new_module_tests
 
@@ -53,7 +53,7 @@ def gen_module(testcase):
 
 
 def print_stats(FunctionalModule_nums, nn_module):
-    print("{} functional modules detected.".format(FunctionalModule_nums))
+    print(f"{FunctionalModule_nums} functional modules detected.")
     supported = []
     unsupported = []
     not_fully_supported = []
@@ -74,18 +74,18 @@ def print_stats(FunctionalModule_nums, nn_module):
     # Semi-Supported Ops: Part of related test cases of these ops have been exported
     # Unsupported Ops: None of related test cases of these ops have been exported
     for info, l in [
-        ["{} Fully Supported Operators:".format(len(supported)), supported],
+        [f"{len(supported)} Fully Supported Operators:", supported],
         [
-            "{} Semi-Supported Operators:".format(len(not_fully_supported)),
+            f"{len(not_fully_supported)} Semi-Supported Operators:",
             not_fully_supported,
         ],
-        ["{} Unsupported Operators:".format(len(unsupported)), unsupported],
+        [f"{len(unsupported)} Unsupported Operators:", unsupported],
     ]:
         fun(info, l)
 
 
 def convert_tests(testcases, sets=1):
-    print("Collect {} test cases from PyTorch.".format(len(testcases)))
+    print(f"Collect {len(testcases)} test cases from PyTorch.")
     failed = 0
     FunctionalModule_nums = 0
     nn_module = {}
@@ -110,7 +110,7 @@ def convert_tests(testcases, sets=1):
             onnx_model = onnx.load_from_string(f.getvalue())
             onnx.checker.check_model(onnx_model)
             onnx.helper.strip_doc_string(onnx_model)
-            output_dir = os.path.join(test_onnx_common.pytorch_converted_dir, test_name)
+            output_dir = os.path.join(onnx_test_common.pytorch_converted_dir, test_name)
 
             if os.path.exists(output_dir):
                 shutil.rmtree(output_dir)
@@ -120,19 +120,19 @@ def convert_tests(testcases, sets=1):
 
             for i in range(sets):
                 output = module(input)
-                data_dir = os.path.join(output_dir, "test_data_set_{}".format(i))
+                data_dir = os.path.join(output_dir, f"test_data_set_{i}")
                 os.makedirs(data_dir)
 
                 for index, var in enumerate([input]):
                     tensor = numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "input_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"input_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
                 for index, var in enumerate([output]):
                     tensor = numpy_helper.from_array(var.data.numpy())
                     with open(
-                        os.path.join(data_dir, "output_{}.pb".format(index)), "wb"
+                        os.path.join(data_dir, f"output_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
                 input = gen_input(t)
@@ -151,7 +151,7 @@ def convert_tests(testcases, sets=1):
     )
     print(
         "PyTorch converted cases are stored in {}.".format(
-            test_onnx_common.pytorch_converted_dir
+            onnx_test_common.pytorch_converted_dir
         )
     )
     print_stats(FunctionalModule_nums, nn_module)

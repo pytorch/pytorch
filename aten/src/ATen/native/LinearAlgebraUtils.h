@@ -8,6 +8,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TransposeType.h>
 #include <limits>
 #include <type_traits>
 #include <sstream>
@@ -120,6 +121,48 @@ static inline int64_t batchCount(const Tensor& batched_matrices) {
 static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
+
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
+static inline void checkIsMatrix(const Tensor& A, const char* const f_name, const char* const arg_name = "A") {
+  TORCH_CHECK(A.dim() >= 2, f_name, ": The input tensor ", arg_name, " must have at least 2 dimensions.");
+}
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
+  checkIsMatrix(self, f_name, arg_name);
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              f_name,
+              ": ", arg_name, " must be batches of square matrices, "
+              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
+}
+
+static inline void checkInputsSolver(const Tensor& A,
+                                     const Tensor& B,
+                                     const bool left,
+                                     const char* const f_name) {
+  squareCheckInputs(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
+              f_name, ": Incompatible shapes of A and B for the equation ",
+              left ? "AX = B" : "XA = B",
+              " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
+}
+
+static inline bool is_row_or_column_contiguous(const Tensor& t) {
+  // This could be made more general, similar to how it's checked in matmul, which would allow to
+  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // We choose to be conservative for simplicity
+  return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
+}
+
+static inline TransposeType to_transpose_type(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {        return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {        return TransposeType::Transpose; }
+  }
+}
+
 
 // This function is designed to be used with linear algebra methods that minimize
 // L(ax - b) = 0, where L is generally the identity map (`solve`, for example)
@@ -243,7 +286,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 
   TORCH_CHECK(A.size(-1) == A.size(-2),
               "A must be batches of square matrices, "
-              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+              "but they are ", A.size(-2), " by ", A.size(-1), " matrices");
 
   TORCH_CHECK(A.size(-1) == self.size(-2),
               "Incompatible matrix sizes for ", name, ": each A "
@@ -251,18 +294,14 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
-static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
-  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              f_name,
-              ": A must be batches of square matrices, "
-              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
-}
-
-static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
-  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
-              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name, const bool allow_low_precision_dtypes=true) {
+  auto dtype = t.scalar_type();
+  TORCH_CHECK((at::isFloatingType(dtype) || at::isComplexType(dtype)),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", dtype);
+  if (!allow_low_precision_dtypes) {
+    TORCH_CHECK(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
+                f_name, ": Low precision dtypes not supported. Got ", dtype);
+  }
 }
 
 /*
@@ -295,7 +334,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     } else if (name.find("solve") != name.npos) {
       // solve, linalg_solve, cholesky_solve, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
-          ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
+          ": The solver failed because the input matrix is singular.");
     } else if (name.find("cholesky") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");

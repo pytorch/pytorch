@@ -226,11 +226,12 @@ class TestFSDPWrap(FSDPTest):
         "backward_prefetch",
         [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
     )
+    @parametrize("forward_prefetch", [True, False])
     @parametrize(
         "fsdp_init_mode",
         [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
     )
-    def test_main_wrap_api(self, cpu_offload, backward_prefetch, fsdp_init_mode):
+    def test_main_wrap_api(self, cpu_offload, backward_prefetch, forward_prefetch, fsdp_init_mode):
 
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
             # they don't work together, expected
@@ -266,6 +267,7 @@ class TestFSDPWrap(FSDPTest):
             ),
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
+            forward_prefetch=forward_prefetch,
         )
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()
@@ -283,6 +285,7 @@ class TestFSDPWrap(FSDPTest):
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
             self._check_backward_prefetch(module, backward_prefetch)
+            self._check_forward_prefetch(module, forward_prefetch)
 
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
@@ -375,9 +378,9 @@ class TestAutoWrap(TestCase):
             auto_wrap_policy=my_auto_wrap_policy
         )
         self.assertTrue(isinstance(fsdp_model, FSDP))
-        for layer in fsdp_model.module.module.transformer.encoder.layers:
+        for layer in fsdp_model.module.transformer.encoder.layers:
             self.assertTrue(isinstance(layer, FSDP))
-        for layer in fsdp_model.module.module.transformer.decoder.layers:
+        for layer in fsdp_model.module.transformer.decoder.layers:
             self.assertTrue(isinstance(layer, FSDP))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")

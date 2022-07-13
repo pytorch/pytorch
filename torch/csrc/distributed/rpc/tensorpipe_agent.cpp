@@ -41,7 +41,7 @@ std::vector<c10::Device> getDevicesForTensors(
     const std::string& remoteName) {
   // If the deviceMap is overridden, use that instead.
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
+      "TensorPipe RPC backend only supports CPU tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
@@ -51,9 +51,7 @@ std::vector<c10::Device> getDevicesForTensors(
   devices.reserve(tensors.size());
   bool hasMappedDevice = false;
   for (const auto& t : tensors) {
-    if (t.device().is_meta()) {
-      devices.emplace_back(c10::kMeta);
-    } else if (t.device().is_cpu()) {
+    if (t.device().is_cpu()) {
       const auto deviceIter = deviceMap.find(c10::kCPU);
       if (deviceIter == deviceMap.end()) {
         devices.emplace_back(c10::kCPU);
@@ -115,7 +113,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
-    if (!tensor.is_cpu() && !tensor.is_meta()) {
+    if (!tensor.is_cpu()) {
       c10::Device device = tensor.device();
       if (!impl.has_value()) {
         impl.emplace(device.type());
@@ -648,7 +646,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu() && !device.is_meta()) {
+      if (!device.is_cpu()) {
         GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
         if (std::find(devices_.begin(), devices_.end(), device) ==
             devices_.end()) {
@@ -1413,7 +1411,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   }
 
   const auto errStr = c10::str(
-      "TensorPipe RPC backend only supports CPU and Meta tensors by default, please "
+      "TensorPipe RPC backend only supports CPU tensors by default, please "
       "move your tensors to CPU before sending them over RPC, or call "
       "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
       "configure device mapping. ",
@@ -1425,7 +1423,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   if (iter == deviceMaps.end()) {
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
-          t.device().is_cpu() || t.device().is_meta(),
+          t.device().is_cpu(),
           errStr,
           ", but found tensor on device: ",
           t.device());

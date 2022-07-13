@@ -23,6 +23,11 @@ class FusedReductionBroadcastInfo : public PolymorphicBase {
   FusedReductionBroadcastInfo(WelfordOp* welford, bool with_broadcast)
       : reductions_({welford}), with_broadcast_({with_broadcast}) {}
 
+  FusedReductionBroadcastInfo(
+      GroupedReductionOp* grouped_rop,
+      bool with_broadcast)
+      : reductions_({grouped_rop}), with_broadcast_({with_broadcast}) {}
+
   const std::vector<Expr*>& reductions() const {
     return reductions_;
   }
@@ -32,8 +37,7 @@ class FusedReductionBroadcastInfo : public PolymorphicBase {
   }
 
  private:
-  // Holds ReductionOp or WelfordOp. Can be multiple in the case of
-  // horizontal fusion
+  // Holds ReductionOp, WelfordOp or GroupedReductionOp.
   std::vector<Expr*> reductions_;
   // True each reduction also broadcasts
   std::vector<bool> with_broadcast_;
@@ -60,7 +64,7 @@ class FusionInspector : private IterVisitor {
     /// this reduction.
     // Only consider when out is on register as that is assumed in the
     // fused reduction kernel.
-    auto out = rop->out()->as<TensorView>();
+    auto out = ir_utils::getTvOutput(rop);
     if (out->getMemoryType() == MemoryType::Local &&
         out->domain()->hasGridReduction()) {
       reduction_dep_[out].insert(rop);
@@ -72,10 +76,18 @@ class FusionInspector : private IterVisitor {
     /// this reduction.
     // Only consider when out is on register as that is assumed in the
     // fused reduction kernel.
-    auto out = wop->out()->as<TensorView>();
+    auto out = ir_utils::getTvOutput(wop);
     if (out->getMemoryType() == MemoryType::Local &&
         out->domain()->hasGridReduction()) {
       reduction_dep_[out].insert(wop);
+    }
+  }
+
+  void handle(GroupedReductionOp* grouped_rop) final {
+    auto out = ir_utils::getTvOutput(grouped_rop);
+    if (out->getMemoryType() == MemoryType::Local &&
+        out->domain()->hasGridReduction()) {
+      reduction_dep_[out].insert(grouped_rop);
     }
   }
 
@@ -120,8 +132,14 @@ class FusionInspector : private IterVisitor {
 
       if (preceding_expr->isA<ReductionOp>()) {
         fusion_list_.emplace_back(preceding_expr->as<ReductionOp>(), true);
-      } else {
+      } else if (preceding_expr->isA<GroupedReductionOp>()) {
+        fusion_list_.emplace_back(
+            preceding_expr->as<GroupedReductionOp>(), true);
+      } else if (preceding_expr->isA<WelfordOp>()) {
         fusion_list_.emplace_back(preceding_expr->as<WelfordOp>(), true);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Invalid preceding expr: ", preceding_expr->toString());
       }
 
       fused_exprs_.insert(preceding_expr);
@@ -221,7 +239,7 @@ class FusionTransformer {
       Expr* fused_expr = nullptr;
 
       if (auto reduction = dynamic_cast<ReductionOp*>(expr)) {
-        TORCH_INTERNAL_ASSERT(!reduction->isFused());
+        TORCH_INTERNAL_ASSERT(!reduction->isAllreduce());
 
         auto red_op_type = reduction->getReductionOpType();
         auto init = reduction->init();
@@ -233,7 +251,7 @@ class FusionTransformer {
         fused_expr =
             IrBuilder::create<ReductionOp>(red_op_type, init, out, in, true);
       } else if (auto welford = dynamic_cast<WelfordOp*>(expr)) {
-        TORCH_INTERNAL_ASSERT(!welford->isFused());
+        TORCH_INTERNAL_ASSERT(!welford->isAllreduce());
 
         auto out_avg = welford->outAvg();
         auto out_var = welford->outVar();
@@ -258,6 +276,20 @@ class FusionTransformer {
             in_var,
             in_n,
             true);
+      } else if (auto grouped_rop = dynamic_cast<GroupedReductionOp*>(expr)) {
+        TORCH_INTERNAL_ASSERT(!grouped_rop->isAllreduce());
+
+        auto op_types = grouped_rop->getReductionOpTypes();
+        auto init_vals = grouped_rop->initVals();
+        auto outputs = grouped_rop->outputs();
+        auto inputs = grouped_rop->inputs();
+
+        fusion_->removeExpr(grouped_rop);
+
+        fused_expr = IrBuilder::create<GroupedReductionOp>(
+            op_types, init_vals, outputs, inputs, true);
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Invalid expr: ", expr->toString());
       }
 
       TORCH_INTERNAL_ASSERT(fused_expr != nullptr);
@@ -293,7 +325,7 @@ class FusionTransformer {
 
 } // namespace
 
-void fuseReductions(Fusion* fusion) {
+void fuseReductionsAndBroadcasts(Fusion* fusion) {
   auto fusion_list = FusionInspector::run(fusion);
   FusionTransformer::run(fusion, fusion_list);
 }

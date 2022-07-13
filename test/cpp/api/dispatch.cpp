@@ -1,22 +1,21 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
 #include <ATen/native/Pow.h>
 #include <c10/util/irange.h>
+#include <test/cpp/api/support.h>
+#include <torch/torch.h>
 #include <torch/types.h>
 #include <torch/utils.h>
-#include <test/cpp/api/support.h>
-#include <iostream>
-#include <vector>
-#include <type_traits>
 #include <cstdlib>
-
+#include <iostream>
+#include <type_traits>
+#include <vector>
 
 struct DispatchTest : torch::test::SeedingFixture {};
 
 TEST_F(DispatchTest, TestAVX2) {
-  const std::vector<int> ints {1, 2, 3, 4};
-  const std::vector<int> result {1, 4, 27, 256};
+  const std::vector<int> ints{1, 2, 3, 4};
+  const std::vector<int> result{1, 4, 27, 256};
   const auto vals_tensor = torch::tensor(ints);
   const auto pows_tensor = torch::tensor(ints);
 #ifdef _WIN32
@@ -31,8 +30,8 @@ TEST_F(DispatchTest, TestAVX2) {
 }
 
 TEST_F(DispatchTest, TestAVX512) {
-  const std::vector<int> ints {1, 2, 3, 4};
-  const std::vector<int> result {1, 4, 27, 256};
+  const std::vector<int> ints{1, 2, 3, 4};
+  const std::vector<int> result{1, 4, 27, 256};
   const auto vals_tensor = torch::tensor(ints);
   const auto pows_tensor = torch::tensor(ints);
 #ifdef _WIN32
@@ -47,8 +46,8 @@ TEST_F(DispatchTest, TestAVX512) {
 }
 
 TEST_F(DispatchTest, TestDefault) {
-  const std::vector<int> ints {1, 2, 3, 4};
-  const std::vector<int> result {1, 4, 27, 256};
+  const std::vector<int> ints{1, 2, 3, 4};
+  const std::vector<int> result{1, 4, 27, 256};
   const auto vals_tensor = torch::tensor(ints);
   const auto pows_tensor = torch::tensor(ints);
 #ifdef _WIN32

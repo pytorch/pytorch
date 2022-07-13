@@ -68,6 +68,8 @@ libkineto::ActivityType toActivityType(const KinetoActivityType type) {
       return libkineto::ActivityType::CPU_OP;
     case KinetoActivityType::CPU_INSTANT_EVENT:
       return libkineto::ActivityType::CPU_INSTANT_EVENT;
+    case KinetoActivityType::PYTHON_FUNCTION:
+      return libkineto::ActivityType::PYTHON_FUNCTION;
     default:
       TORCH_INTERNAL_ASSERT(
           type == KinetoActivityType::USER_ANNOTATION,
@@ -90,9 +92,8 @@ void TraceWrapper::addCPUActivity(
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
   auto type = toActivityType(kineto_type);
-  cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, type, name));
-  auto& act = cpu_trace_->activities.back();
+  cpu_trace_->emplace_activity(cpu_trace_->span, type, name);
+  auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
   act.id = correlation_id;
@@ -122,7 +123,7 @@ TraceWrapper::operator bool() const {
 }
 
 ActivityTraceWrapper::ActivityTraceWrapper(
-    std::unique_ptr<interface_trace_t> trace)
+    std::unique_ptr<interface_trace_t>&& trace)
     : trace_(std::move(trace)), saved_{false} {}
 
 ActivityTraceWrapper::operator bool() const {
@@ -152,18 +153,18 @@ class ExperimentalConfigWrapper {
  public:
   explicit ExperimentalConfigWrapper(
       const torch::profiler::impl::ExperimentalConfig& config)
-    : config_(config) {}
+      : config_(config) {}
 
-  bool assertValid(
-    const ActivitySet& activities) {
+  bool assertValid(const ActivitySet& activities) {
     // Kineto supports reading performance events per kernel/iteration
     // using CUPTI Range based profiler API. In this mode however we
     // do not trace CPU or GPU events.
     bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
-    if (cupti_range_profiler && activities.count(
-          torch::autograd::profiler::ActivityType::CPU)) {
-      LOG(WARNING) << "Cannot run range profiler with CPU activities, please only"
-                   << " use CUDA activity type";
+    if (cupti_range_profiler &&
+        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
+      LOG(WARNING)
+          << "Cannot run range profiler with CPU activities, please only"
+          << " use CUDA activity type";
       return false;
     }
     return cupti_range_profiler;
@@ -171,30 +172,30 @@ class ExperimentalConfigWrapper {
 
   void prepareTraceWithExperimentalOptions() {
 #ifdef USE_KINETO
-  std::set<libkineto::ActivityType> k_activities{
-    libkineto::ActivityType::CUDA_PROFILER_RANGE};
+    std::set<libkineto::ActivityType> k_activities{
+        libkineto::ActivityType::CUDA_PROFILER_RANGE};
 
-  const size_t num_metrics = config_.profiler_metrics.size();
-  std::stringstream configss;
+    const size_t num_metrics = config_.profiler_metrics.size();
+    std::stringstream configss;
 
-  LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
+    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
 
-  configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-           << "CUPTI_PROFILER_METRICS=";
+    configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
+             << "CUPTI_PROFILER_METRICS=";
 
-  for (int i = 0; i < num_metrics; i++) {
-    configss << config_.profiler_metrics[i];
-    if (num_metrics > 1 && i < (num_metrics-1)) {
-      configss << ",";
+    for (int i = 0; i < num_metrics; i++) {
+      configss << config_.profiler_metrics[i];
+      if (num_metrics > 1 && i < (num_metrics - 1)) {
+        configss << ",";
+      }
     }
-  }
-  configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
-           << (config_.profiler_measure_per_kernel ? "true" : "false")
-           << "\n";
-  LOG(INFO) << "Generated config = " << configss.str();
+    configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
+             << (config_.profiler_measure_per_kernel ? "true" : "false")
+             << "\n";
+    LOG(INFO) << "Generated config = " << configss.str();
 
-  libkineto::api().activityProfiler().prepareTrace(
-      k_activities, configss.str());
+    libkineto::api().activityProfiler().prepareTrace(
+        k_activities, configss.str());
 #endif // USE_KINETO
   }
 

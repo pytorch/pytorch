@@ -48,7 +48,7 @@ struct TORCH_API GraphFunction : public Function {
     }
     optimized_graph = graph_->copy();
     if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph);
+      preoptimizeGraph(*optimized_graph, force_no_amp_);
     }
     return *optimized_graph;
   }
@@ -62,6 +62,12 @@ struct TORCH_API GraphFunction : public Function {
   // created for this function
   void _set_initial_executor_execution_mode(ExecutorExecutionMode mode) {
     executor_execution_mode_ = mode;
+  }
+  // private/unstable api. sets flag of whether or not to ignore amp.
+  // will not affect executor if there is an existing executor
+  // created for this function
+  void _set_ignore_amp(bool ignore_amp) {
+    force_no_amp_ = ignore_amp;
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -149,6 +155,9 @@ struct TORCH_API GraphFunction : public Function {
   // TODO: add more executors
   mutable c10::optional<ExecutorExecutionMode> executor_execution_mode_;
 
+  // if invoked on a graph that has already traced through amp
+  // don't invoke amp pass
+  mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
   mutable std::array<
       c10::optional<std::shared_ptr<Graph>>,

@@ -23,7 +23,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 
-at::Tensor parseHookResult(const c10::IValue& result) override;
+  at::Tensor parseHookResult(const c10::IValue& result) override;
 
  private:
   // Only needed for stateful communication.

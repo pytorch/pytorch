@@ -142,6 +142,10 @@ if(USE_ROCM)
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
+if(USE_EXPERIMENTAL_CUDNN_V8_API)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
+endif()
+
 if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
@@ -247,6 +251,9 @@ if(USE_DISTRIBUTED)
     if(USE_NCCL)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     endif()
+    if(USE_UCC)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_ucc)
+    endif()
     # Same for MPI.
     if(USE_MPI)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
@@ -268,6 +275,7 @@ if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   if(NOT MSVC)
     target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
+    target_compile_options(torch_python_obj PRIVATE -Wno-unused-local-typedefs)
   endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
@@ -278,6 +286,9 @@ if(USE_DEPLOY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(USE_GLOO AND USE_C10D_GLOO)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
+    endif()
+    if(USE_UCC AND USE_C10D_UCC)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_UCC)
     endif()
     if(USE_NCCL AND USE_C10D_NCCL)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
@@ -379,6 +390,7 @@ endif()
 
 if(NOT MSVC)
   target_compile_options(torch_python PRIVATE -Wno-unused-variable)
+  target_compile_options(torch_python PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 # Required workaround for generated sources
