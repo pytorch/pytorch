@@ -19,10 +19,10 @@ Features described in this documentation are classified by release status:
   of time).
 
   *Beta:*  These features are tagged as Beta because the API may change based on
-  user feedback, because the performance needs to improve, or because
+  user feedback, the performance needs to improve, or
   coverage across operators is not yet complete. For Beta features, we are
   committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
+  However, we are not committing to backwards compatibility.
 
   *Prototype:*  These features are typically not available as part of
   binary distributions like PyPI or Conda, except sometimes behind run-time
