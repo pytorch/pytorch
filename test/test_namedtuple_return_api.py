@@ -16,12 +16,12 @@ all_operators_with_namedtuple_return = {
     'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
-    'linalg_svd', '_linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
+    'linalg_svd', '_linalg_svd', 'linalg_slogdet', '_linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
     'frexp', 'lu_unpack', 'histogram', 'histogramdd',
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
-    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', '_linalg_solve'
+    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
 }
 
 
@@ -72,9 +72,9 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
             op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
-            op(operators=['linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
-            op(operators=['_linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
-            op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
+            op(operators=['linalg_svd', '_linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
+            op(operators=['slogdet', 'linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
+            op(operators=['_linalg_slogdet'], input=(), names=('sign', 'logabsdet', 'LU', 'pivots'), hasout=True),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
@@ -83,10 +83,10 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
-            op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
-            op(operators=['_linalg_solve'], input=(a,), names=('result', 'LU', 'pivots'), hasout=True),
+            op(operators=['linalg_solve_ex'], input=(a,), names=('result', 'info'), hasout=True),
+            op(operators=['_linalg_solve_ex'], input=(a,), names=('result', 'LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_lu_factor'], input=(), names=('LU', 'pivots'), hasout=True),
             op(operators=['linalg_lu_factor_ex'], input=(), names=('LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_ldl_factor'], input=(), names=('LD', 'pivots'), hasout=True),
