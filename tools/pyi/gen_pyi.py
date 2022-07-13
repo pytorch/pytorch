@@ -1,21 +1,22 @@
 import argparse
 import collections
 from pprint import pformat
+from typing import Dict, List, Sequence
 
-from torchgen.model import Variant
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
 from torchgen.gen import parse_native_yaml
+
+from torchgen.model import Variant
 from torchgen.utils import FileManager
-from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import (
-    should_generate_py_binding,
-    load_signatures,
     group_overloads,
+    load_signatures,
+    should_generate_py_binding,
 )
 
 """
