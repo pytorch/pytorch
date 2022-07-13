@@ -1251,7 +1251,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper)
 
 
 class TestMathBits(TestCase):
@@ -1535,6 +1536,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
         # CompositeImplicitAutograd
+        '_refs.allclose',
         '_refs.atleast_1d',
         '_refs.atleast_2d',
         '_refs.atleast_3d',
