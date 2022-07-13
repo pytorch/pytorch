@@ -10,16 +10,16 @@ from torch._C import parse_schema
 
 
 # How to run this test locally:
-# - Have two virtual environments (eg conda env), one without a PyTorch installed from source (venv_nightly)
-# one with your local changes (venv_yours).
+# 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
+#   one with your local changes (venv_yours).
 # In venv_nightly:
-# 1. First ensure that Pytorch is uninstalled, but all prereqs are installed
-# 2. Install torch nightly build with
+# 2. First ensure that Pytorch is uninstalled, but all prereqs are installed
+# 3. Install torch nightly build with
 #    `pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html`
-# 3. Generate original schemas with
+# 4. Generate original schemas with
 #    `python test/forward_backward_compatibility/dump_all_function_schemas.py --filename nightly_schemas.txt`
 # Now in venv_yours:
-# 4. Run this test with
+# 5. Run this test with
 #    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
 
 # The date specifies how long the allowlist exclusion should apply to.
