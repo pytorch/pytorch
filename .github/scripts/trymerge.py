@@ -161,7 +161,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
     }
   }
 }
-
 """
 
 GH_GET_PR_NEXT_FILES_QUERY = """
@@ -214,7 +213,6 @@ query ($owner: String!, $name: String!, $commit: String) {
   }
 }
 """
-
 
 GH_GET_COMMIT_NEXT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
 query ($owner: String!, $name: String!, $commit: String, $cursor: String!) {
@@ -288,7 +286,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
   }
 }
 """
-
 
 GH_GET_PR_PREV_COMMENTS = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
