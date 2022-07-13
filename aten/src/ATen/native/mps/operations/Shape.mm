@@ -916,5 +916,77 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_mps) (
     using namespace mps;
     upsample_out_mps(input, output_size, scales_h, scales_w, output, MPSGraphResizeBilinear, align_corners);
 }
+
+void upsample1d_out_mps(const Tensor& input,
+                      IntArrayRef output_size,
+                      c10::optional<double> scales,
+                      const Tensor& output,
+                      MPSGraphResizeMode requested_mode)
+{
+    // Get stream
+    using namespace mps;
+    using CachedGraph = MPSUnaryCachedGraph;
+    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+    /* sizes */
+    int64_t out_size = output_size[0];
+    @autoreleasepool {
+      MPSShape* input_shape = getMPSShape(input);
+      NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
+      string key = string("upsample_1d:") + mps::getMPSShapeString(input_shape) + ":" +
+                             getMPSTypeString(input.scalar_type()) +
+                             ":size" + to_string(out_size) +
+                             ":mode" + to_string(requested_mode);
+
+      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+      if(!cachedGraph) {
+        cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+          CachedGraph *newCachedGraph = nil;
+
+          @autoreleasepool {
+              MPSGraph* mpsGraph = make_mps_graph();
+              newCachedGraph = new CachedGraph(mpsGraph);
+
+              newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
+              newCachedGraph->outputTensor_ = [mpsGraph resizeTensor:newCachedGraph->inputTensor_
+                                                               size:@[ @(out_size), @(1)]
+                                                               mode:requested_mode
+                                                               centerResult: true
+                                                               alignCorners: true
+                                                               layout: MPSGraphTensorNamedDataLayoutCHW
+                                                               name:nil];
+          }
+          return newCachedGraph;
+        }));
+      }
+      Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor_, input);
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+          inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+      };
+      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+          outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+      };
+      runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    }
+}
+
+
+TORCH_IMPL_FUNC(upsample_nearest1d_out_mps) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    c10::optional<double> scales,
+    const Tensor& output)
+{
+    using namespace mps;
+    upsample1d_out_mps(input, output_size, scales, output, MPSGraphResizeNearest);
+}
+
+
+
+
+
 } // namespace native
 } // namespace at
