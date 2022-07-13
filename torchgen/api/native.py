@@ -28,7 +28,7 @@ from torchgen.api import cpp
 from torchgen import local
 from torchgen.utils import assert_never
 
-from typing import Union, Sequence, List, Optional
+from typing import Union, Sequence, List, Optional, Set
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the
@@ -76,7 +76,10 @@ def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
 
 
 def argument(
-    a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool
+    a: Union[Argument, SelfArgument, TensorOptionsArguments],
+    *,
+    is_out: bool,
+    cpp_no_default_args: Set[str],
 ) -> List[Binding]:
     # Ideally, we NEVER default native functions.  However, there are a number
     # of functions that call native:: directly and rely on the defaulting
@@ -86,7 +89,11 @@ def argument(
     should_default = not is_out
     if isinstance(a, Argument):
         default: Optional[str] = None
-        if should_default and a.default is not None:
+        if (
+            should_default
+            and a.default is not None
+            and a.name not in cpp_no_default_args
+        ):
             default = cpp.default_expr(a.default, a.type)
         return [
             Binding(
@@ -98,7 +105,7 @@ def argument(
         ]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return argument(a.argument, is_out=is_out)
+        return argument(a.argument, is_out=is_out, cpp_no_default_args=cpp_no_default_args)
     elif isinstance(a, TensorOptionsArguments):
         default = None
         if should_default:
@@ -110,25 +117,27 @@ def argument(
             Binding(
                 nctype=NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))),
                 name="dtype",
-                default=default,
+                default=default if a.dtype.name not in cpp_no_default_args else None,
                 argument=a,
             ),
             Binding(
                 nctype=NamedCType("layout", OptionalCType(BaseCType(layoutT))),
                 name="layout",
-                default=default,
+                default=default if a.layout.name not in cpp_no_default_args else None,
                 argument=a,
             ),
             Binding(
                 nctype=NamedCType("device", OptionalCType(BaseCType(deviceT))),
                 name="device",
-                default=default,
+                default=default if a.device.name not in cpp_no_default_args else None,
                 argument=a,
             ),
             Binding(
                 nctype=NamedCType("pin_memory", OptionalCType(BaseCType(boolT))),
                 name="pin_memory",
-                default=default,
+                default=default
+                if a.pin_memory.name not in cpp_no_default_args
+                else None,
                 argument=a,
             ),
         ]
@@ -136,8 +145,14 @@ def argument(
         assert_never(a)
 
 
-def arguments(func: FunctionSchema) -> List[Binding]:
+def arguments(func: FunctionSchema, cpp_no_default_args: Set[str]) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(func.arguments.non_out)
     args.extend(func.arguments.out)
-    return [r for arg in args for r in argument(arg, is_out=func.is_out_fn())]
+    return [
+        r
+        for arg in args
+        for r in argument(
+            arg, is_out=func.is_out_fn(), cpp_no_default_args=cpp_no_default_args
+        )
+    ]

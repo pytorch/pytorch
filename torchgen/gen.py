@@ -875,7 +875,7 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature(f.func)
+        native_sig = NativeSignature.from_function(f)
 
         native_tensor_args = [
             a
