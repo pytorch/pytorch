@@ -82,5 +82,8 @@ void UpdateReliable(
     torch::jit::Value* output,
     const std::pair<bool, bool>& input_reliable);
 
+void UpdateReliable(
+    torch::jit::Node* n);
+
 } // namespace jit
 } // namespace torch
