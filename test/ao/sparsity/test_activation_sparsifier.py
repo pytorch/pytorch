@@ -2,7 +2,6 @@
 # Owner(s): ["module: unknown"]
 
 import copy
-from torch.nn.modules import activation
 from torch.testing._internal.common_utils import TestCase
 import logging
 import torch

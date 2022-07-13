@@ -132,7 +132,6 @@ THIRD_PARTY_LIBS = {
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
     "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
-    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
@@ -1133,7 +1132,6 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             C10,
-            third_party("libkineto_headers"),
         ],
     )
 
@@ -2020,6 +2018,7 @@ def define_buck_targets(
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
+            "aten/src/ATen/core/function_schema.cpp",
             "aten/src/ATen/core/operator_name.cpp",
             "aten/src/ATen/core/register_symbols.cpp",
             "aten/src/ATen/core/tensor_type.cpp",
