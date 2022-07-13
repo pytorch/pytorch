@@ -140,7 +140,7 @@ class TestSummonFullParams(FSDPTest):
         model = FSDP(raw_model.cuda(self.rank), mixed_precision=mixed_precision)
         self.assertEqual(expected_shard_size, self.get_model_param_count(model))
 
-        # we're assuming a single flatenned param
+        # we're assuming a single flattened param
         self.assertEqual(1, len(list(model.parameters())))
 
         my_shard = torch.clone(next(model.parameters()))
