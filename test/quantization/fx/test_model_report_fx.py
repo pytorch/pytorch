@@ -1525,6 +1525,12 @@ class TestFxDetectOutliers(QuantizationTestCase):
             for i in range(30):
                 example_input = model.get_outlier_inputs()[0]
                 example_input = example_input.to(torch.float)
+
+                # make 2 of the batches to have zero channel
+                if i % 14 == 0:
+                    # make one channel constant
+                    example_input[0][1] = torch.zeros_like(example_input[0][1])
+
                 prepared_for_callibrate_model(example_input)
 
             # now get the report by running it through ModelReport instance
@@ -1559,6 +1565,12 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
                 # for the first one ensure the per channel max values are what we set
                 if module_fqn == "linear.0":
+
+                    # check that the non-zero channel count, at least 2 should be there
+                    # for the first module
+                    counts_info = module_dict[OutlierDetector.CONSTANT_COUNTS_KEY]
+                    assert sum(counts_info) >= 2
+
                     # half of the recorded max values should be what we set
                     matched_max = sum([val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY]])
                     self.assertEqual(matched_max, param_size / 2)
