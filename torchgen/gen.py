@@ -32,6 +32,7 @@ from torchgen.model import (
     NativeFunctionsViewGroup,
     ViewSchemaKind,
     BaseOperatorName,
+    DEFAULT_KERNEL_NAMESPACE,
 )
 from torchgen.native_function_generation import (
     pre_group_native_functions,
@@ -64,6 +65,7 @@ from torchgen.utils import (
     FileManager,
     assert_never,
     make_file_manager,
+    NamespaceHelper,
 )
 from torchgen.context import (
     method_with_native_function,
@@ -109,37 +111,6 @@ T = TypeVar("T")
 #                         HELPER FUNCTIONS
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-
-class NamespaceHelper:
-    """A helper for constructing the namespace open and close strings for a nested set of namespaces.
-
-    e.g. for namespace_str torch::lazy,
-
-    prologue:
-    namespace torch {
-    namespace lazy {
-
-    epilogue:
-    } // namespace lazy
-    } // namespace torch
-    """
-
-    def __init__(self, namespace_str: str):
-        # cpp_namespace can be a colon joined string such as torch::lazy
-        cpp_namespaces = namespace_str.split("::")
-        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
-        self.epilogue_ = "\n".join(
-            [f"}} // namespace {n}" for n in reversed(cpp_namespaces)]
-        )
-
-    @property
-    def prologue(self) -> str:
-        return self.prologue_
-
-    @property
-    def epilogue(self) -> str:
-        return self.epilogue_
 
 
 # A custom loader for YAML to let us also keep track of line numbers
@@ -1374,6 +1345,88 @@ def get_grouped_native_functions(
     )
 
 
+# Return native function declarations grouped by their namespaces.
+def get_native_function_declarations(
+    *,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    backend_indices: Dict[DispatchKey, BackendIndex],
+) -> List[str]:
+    declarations: List[str] = []
+    ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
+    newline = "\n"
+    for f in grouped_native_functions:
+        native_function_namespaces = set()
+        for backend_idx in backend_indices.values():
+            backend_metadata = backend_idx.get_kernel(f)
+            namespace = (
+                backend_metadata.cpp_namespace
+                if backend_metadata
+                else DEFAULT_KERNEL_NAMESPACE
+            )
+            native_function_namespaces.add(namespace)
+            assert (
+                len(native_function_namespaces) == 1
+            ), "Codegen only supports one namespace per operator."
+            ns_grouped_kernels[namespace].extend(
+                dest.compute_native_function_declaration(f, backend_idx)
+            )
+
+    for namespace, kernels in ns_grouped_kernels.items():
+        ns_helper = NamespaceHelper(
+            namespace_str=namespace,
+            entity_name="",
+            max_level=3,
+        )
+        # Convert to a set first to remove duplicate kernel names. Backends are
+        # allowed to repeat kernel names; only generate the declaration once!
+        ordered_kernels = list(OrderedDict.fromkeys(kernels))
+        declarations.extend(
+            f"""
+{ns_helper.prologue}
+{newline.join(ordered_kernels)}
+{ns_helper.epilogue}
+        """.split(
+                newline
+            )
+        )
+    return declarations
+
+
+# Return native function schema registration code for aten and other namespaces.
+def get_native_function_schema_registrations(
+    *,
+    native_functions: Sequence[NativeFunction],
+    schema_selector: SelectiveBuilder,
+) -> Tuple[List[str], str]:
+    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_function in native_functions:
+        ns_native_functions[native_function.namespace].append(native_function)
+    schema_registrations = ""
+    aten_schema_registrations = []
+    custom_namespace = None
+    for namespace, funcs in ns_native_functions.items():
+
+        schema_registrations_body = list(
+            mapMaybe(RegisterSchema(schema_selector), funcs)
+        )
+        # NB: we have to separate aten namespace registration from other namespaces,
+        # because in the template we hardcoded an operator for ATen already.
+        if namespace == "aten":
+            aten_schema_registrations = schema_registrations_body
+        else:
+            assert custom_namespace is None or namespace == custom_namespace, (
+                "Only one custom namespace (other than 'aten') is currently supported, "
+                f" but getting {namespace} and {custom_namespace}"
+            )
+            custom_namespace = namespace
+            tab = "\t"
+            schema_registrations += f"""
+TORCH_LIBRARY({custom_namespace}, m) {{
+  {tab.join(schema_registrations_body)}
+}};"""
+    return (aten_schema_registrations, schema_registrations)
+
+
 def gen_aggregated_headers(
     *,
     native_functions: Sequence[NativeFunction],
@@ -1450,27 +1503,15 @@ def gen_aggregated_headers(
             ),
         },
     )
+    declarations = get_native_function_declarations(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+    )
     cpu_fm.write(
         "NativeFunctions.h",
         lambda: {
             "NativeFunctions_includes": ["#include <ATen/NativeMetaFunctions.h>"],
-            "NativeFunctions_declarations": list(
-                concatMap(
-                    # Convert to a set first to remove duplicate kernel names.
-                    # Backends are allowed to repeat kernel names; only generate the declaration once!
-                    lambda f: list(
-                        OrderedDict.fromkeys(
-                            concatMap(
-                                lambda backend_idx: dest.compute_native_function_declaration(
-                                    f, backend_idx
-                                ),
-                                backend_indices.values(),
-                            )
-                        )
-                    ),
-                    grouped_native_functions,
-                )
-            ),
+            "NativeFunctions_declarations": declarations,
         },
     )
 
@@ -1598,7 +1639,9 @@ def gen_per_operator_headers(
                     ),
                 },
             )
-
+        declarations = get_native_function_declarations(
+            grouped_native_functions=grouped_functions, backend_indices=backend_indices
+        )
         ops_fm.write_with_template(
             f"{name}_native.h",
             "NativeFunction.h",
@@ -1606,23 +1649,7 @@ def gen_per_operator_headers(
                 "extra_includes": (
                     f"#include <ATen/ops/{name}_meta.h>" if is_structured else []
                 ),
-                "native_function_declarations": list(
-                    concatMap(
-                        # Convert to a set first to remove duplicate kernel names.
-                        # Backends are allowed to repeat kernel names; only generate the declaration once!
-                        lambda f: list(
-                            OrderedDict.fromkeys(
-                                concatMap(
-                                    lambda backend_idx: dest.compute_native_function_declaration(
-                                        f, backend_idx
-                                    ),
-                                    backend_indices.values(),
-                                )
-                            )
-                        ),
-                        grouped_functions,
-                    )
-                ),
+                "native_function_declarations": declarations,
             },
         )
 
@@ -2098,32 +2125,12 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
 
-    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
-    for native_function in native_functions:
-        ns_native_functions[native_function.namespace].append(native_function)
-    schema_registrations = ""
-    aten_schema_registrations = []
-    custom_namespace = None
-    for namespace, funcs in ns_native_functions.items():
-
-        schema_registrations_body = list(
-            mapMaybe(RegisterSchema(schema_selector), funcs)
-        )
-        # NB: we have to separate aten namespace registration from other namespaces,
-        # because in the template we hardcoded an operator for ATen already.
-        if namespace == "aten":
-            aten_schema_registrations = schema_registrations_body
-        else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
-            custom_namespace = namespace
-            tab = "\t"
-            schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
-  {tab.join(schema_registrations_body)}
-}};"""
+    (
+        aten_schema_registrations,
+        schema_registrations,
+    ) = get_native_function_schema_registrations(
+        native_functions=native_functions, schema_selector=schema_selector
+    )
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
