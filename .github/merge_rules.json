@@ -166,10 +166,24 @@
       "name": "MPS",
       "patterns": [
          "test/test_mps.py",
+         "aten/src/ATen/native/native_functions.yaml",
          "aten/src/ATen/mps/**",
          "aten/src/ATen/native/mps/**"
       ],
       "approved_by": ["kulinseth", "razarmehr"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
+      "name": "Distributions",
+      "patterns": [
+          "torch/distributions/**",
+          "test/distributions/**"
+      ],
+      "approved_by": ["fritzo", "neerajprad", "alicanb", "vishwakftw"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",

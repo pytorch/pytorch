@@ -9,6 +9,8 @@ from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Optional
 
+__all__ = ['LinearPackedParams', 'Linear']
+
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod, op_gt, op_lt
 from torch.fx.tensor_type import TensorType, Dyn
 
 
@@ -127,13 +127,14 @@ class BinConstraintD(BinaryConstraint):
     Binary constraints about dimensions
     """
     def __init__(self, lhs, rhs, op):
-        assert is_algebraic_expression(lhs) or is_dim(lhs)
-        assert is_algebraic_expression(rhs) or is_dim(rhs)
+        assert is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)
+        assert is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)
 
         super().__init__(lhs, rhs, op)
 
     def __eq__(self, other):
         return super().__eq__(other)
+
 
 
 class TGreatestUpperBound(Constraint):
@@ -206,6 +207,34 @@ class CanReshape(Constraint):
     def __eq__(self, other):
         if isinstance(other, CanReshape):
             return self.src == other.src and self.target == other.target
+        else:
+            return False
+
+
+class GetItem(Constraint):
+
+    def __init__(self, tensor_size, index, res, input_var):
+        """
+        Constraint for getting item given a tensor size
+        :param tensor_size: actual number
+        :param index: actual number representing the index
+        :param res: variable to carry the item we get
+        :param input_var: a tensor variable from which we will get item
+        """
+        self.res = res
+        self.tensor_size = tensor_size
+        self.index = index
+        self.input_var = input_var
+
+    def __repr__(self):
+        return f' {self.res} = GetItem({self.input_var}, tensor_size: {self.tensor_size}, {self.index})'
+
+    def __eq__(self, other):
+        if isinstance(other, GetItem):
+            return self.res == other.res and \
+                self.tensor_size == other.tensor_size and\
+                self.index == other.index and\
+                self.input_var == other.input_var
         else:
             return False
 
@@ -377,12 +406,38 @@ class DVar:
             return False
 
 
+class BVar:
+    """
+    Boolean variable
+    """
+    def __init__(self, c):
+        """
+        :param c: character or number
+        """
+        self.c = c
+
+    def __repr__(self):
+        return f'BV({self.c})'
+
+    def __eq__(self, other):
+        if isinstance(other, BVar):
+            return self.c == other.c
+        else:
+            return False
+
+
 def is_algebraic_expression(constraint):
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_add, op_sub, op_div, op_mul, op_mod]
     else:
         return isinstance(constraint, Prod)
 
+
+def is_bool_expr(constraint):
+    if isinstance(constraint, BinConstraintD):
+        return constraint.op in [op_gt, op_lt]
+    else:
+        return isinstance(constraint, BVar)
 
 def is_dim(d):
     return isinstance(d, DVar) or isinstance(d, int) or d == Dyn
