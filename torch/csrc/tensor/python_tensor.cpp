@@ -448,6 +448,10 @@ c10::DispatchKey get_default_dispatch_key() {
   return backendToDispatchKey(default_backend);
 }
 
+at::Device get_default_device() {
+  return at::Device(c10::backendToDeviceType(default_backend));
+}
+
 ScalarType get_default_scalar_type() {
   return get_default_dtype_as_scalartype();
 }
