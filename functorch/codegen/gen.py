@@ -1,8 +1,5 @@
 import os
 import argparse
-import pathlib
-
-import torchgen
 from torchgen.gen import FileManager, parse_native_yaml
 from torchgen.gen import get_torchgen_root
 from gen_vmap_plumbing import gen_all_vmap_plumbing

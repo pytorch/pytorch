@@ -141,8 +141,8 @@ class TestMemoryEfficientOpAuthoring(TestCase):
             mean = torch.mean(x, dim, keepdim=True)
             centered = x - mean
             var = torch.sum(centered * centered, dim, keepdim=True) / x.size(-1)
-            rvar = 1./torch.sqrt(var+eps)
-            normed = (x-mean) * rvar
+            rvar = 1. / torch.sqrt(var + eps)
+            normed = (x - mean) * rvar
             return normed * weight + bias
 
         bs = 10

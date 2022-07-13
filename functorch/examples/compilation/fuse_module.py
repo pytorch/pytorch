@@ -2,7 +2,6 @@ import timeit
 from functorch.compile import compiled_module, tvm_compile
 import torch.nn as nn
 import torch
-from functools import partial
 
 
 def nop(f, _):

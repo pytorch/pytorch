@@ -1,12 +1,7 @@
-import torch
-
 import functorch
-from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
-import unittest
 from unittest.mock import patch
 import functools
-
-from functorch.compile import aot_function, nop
+from torch.testing._internal.common_utils import run_tests
 import test_compile_cache
 import test_pythonkey
 
@@ -41,7 +36,7 @@ def make_functionalize_test(cls):
     return FunctionalizeTest
 
 
-FunctionalizeTestCompileCache = make_functionalize_test(test_compile_cache.TestCompileCache) 
+FunctionalizeTestCompileCache = make_functionalize_test(test_compile_cache.TestCompileCache)
 FunctionalizeTestCompileCacheStaticArgs = make_functionalize_test(test_compile_cache.TestCompileCacheStaticArgs)
 FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_pythonkey.TestAOTAutograd)
 FunctionalizeTestPythonKeyContiguous = make_functionalize_test(test_pythonkey.TestContiguous)

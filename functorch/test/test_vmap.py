@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     subtest
 )
 from torch.testing._internal.common_device_type import \
-     toleranceOverride, tol
+    toleranceOverride, tol
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
@@ -2687,7 +2687,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 self.assertEqual(loop_out, batched_out)
 
     def test_conj_bit(self):
-        x = torch.tensor([1+1j, 2+1j])
+        x = torch.tensor([1 + 1j, 2 + 1j])
 
         def foo(x):
             assert not x.is_conj()
@@ -4053,7 +4053,7 @@ class TestRandomness(TestCase):
             lambda t, _: torch.normal(0., torch.abs(t), **kwargs),
             lambda t, _: torch.normal(t, 1., **kwargs),
             lambda t, _: torch.bernoulli(t - 0.5, **kwargs),
-            lambda t, _: torch.bernoulli(t, 0.5,  **kwargs),
+            lambda t, _: torch.bernoulli(t, 0.5, **kwargs),
             lambda t, _: torch._standard_gamma(t, **kwargs),
             lambda t, _: torch._sample_dirichlet(t, **kwargs),
             lambda t, _: torch.poisson(t, **kwargs),
