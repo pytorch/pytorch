@@ -487,7 +487,7 @@ test_xla() {
 test_forward_backward_compatibility() {
   set -x
   REPO_DIR=$(pwd)
-  if [[ "${BASE_SHA}" = "${SHA1}" ]]; then
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
     echo "On trunk, we should compare schemas with torch built from the parent commit"
     SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
   else
