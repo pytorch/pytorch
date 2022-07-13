@@ -173,6 +173,12 @@ class TestTransformers(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
+            # all 0 src_mask
+            src_mask = torch.zeros([5, 5]).to(device) == 1
+            result = model(encoder_input, mask=src_mask)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+
             # all 0
             mask = torch.zeros([2, 5]).to(device) == 1
             result = model(encoder_input, src_key_padding_mask=mask)
