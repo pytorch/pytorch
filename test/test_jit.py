@@ -11140,7 +11140,9 @@ dedent """
         self.assertEqual(out.dtype, torch.int64)
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
             FileCheck().check("Long(*, *, requires_grad=0, device=cpu)") \
-                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Double(*, *, requires_grad=0, device=cpu)") \
+                       .run(randint.graph_for())
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
