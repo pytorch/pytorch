@@ -744,7 +744,7 @@ def tanh(a):
 def trunc(a):
     return prims.trunc(a)
 
-
+@register_decomposition(torch.Tensor.bfloat16)
 def bfloat16(a: Tensor, *, memory_format: torch.memory_format = torch.preserve_format):
     if a.dtype == torch.bfloat16:
         return a
