@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -3107,7 +3108,7 @@ Tensor view(const Tensor& self,
 
 Tensor view_symint(const Tensor& self,
             c10::SymIntArrayRef size) {
-  return view(self, c10::asIntArrayRefSlow(size));
+  return self.view(c10::asIntArrayRefSlow(size));
 }
 
 Tensor alias(const Tensor& self) {
