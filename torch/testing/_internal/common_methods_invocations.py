@@ -6385,7 +6385,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         elif self.name in ['fft.hfft2', 'fft.irfft2']:
             shapes = ((2, 8, 9), (33,))
         elif self.name in ['fft.hfftn', 'fft.irfftn']:
-            shapes = ((2, 2, 33), (33,))
+            shapes = ((2, 2, 9), (17,))
         else:
             shapes = ((2, 8, 16), (32,))
         nd_tensor = partial(make_tensor, shapes[0], device=device,
@@ -6464,19 +6464,11 @@ class SpectralFuncInfo(OpInfo):
                  decorators=None,
                  **kwargs):
         decorators = list(decorators) if decorators is not None else []
-        higher_tol = ('fft.hfftn',)
-        if name in higher_tol:
-            decorators += [
-                skipCPUIfNoFFT,
-                DecorateInfo(toleranceOverride({torch.chalf: tol(4e-1, 4e-1)}),
-                             "TestCommon", "test_complex_half_reference_testing")
-            ]
-        else:
-            decorators += [
-                skipCPUIfNoFFT,
-                DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
-                             "TestCommon", "test_complex_half_reference_testing")
-            ]
+        decorators += [
+            skipCPUIfNoFFT,
+            DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
+                         "TestCommon", "test_complex_half_reference_testing")
+        ]
 
         super().__init__(name=name,
                          dtypes=dtypes,
