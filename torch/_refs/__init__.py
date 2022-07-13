@@ -239,6 +239,7 @@ __all__ = [
     #
     # Test-related functions
     #
+    "allclose",
     "equal",  # TODO: add OpInfo
 ]
 
@@ -1161,6 +1162,34 @@ igammac = _make_elementwise_binary_reference(
 )
 
 
+def _check_close_args(
+    name: str,
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float,
+    atol: float,
+) -> None:
+    check(
+        a.dtype == b.dtype,
+        lambda: "{0}: Attempting to compare tensors of different dtypes {1} and {2}!".format(
+            name, a.dtype, b.dtype
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "{0}: rtol must be greater than or equal to zero, but got {1}!".format(
+            name, rtol
+        ),
+    )
+    check(
+        atol >= 0,
+        lambda: "{0}: atol must be greater than or equal to zero, but got {1}!".format(
+            name, atol
+        ),
+    )
+
+
 # CompositeImplicitAutograd - don't register decomp
 def isclose(
     a: TensorLikeType,
@@ -1169,25 +1198,7 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    check(
-        a.dtype == b.dtype,
-        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
-            a.dtype, b.dtype
-        ),
-        ValueError,
-    )
-    check(
-        rtol >= 0,
-        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(
-            rtol
-        ),
-    )
-    check(
-        atol >= 0,
-        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(
-            atol
-        ),
-    )
+    _check_close_args(name="torch.isclose", a=a, b=b, rtol=rtol, atol=atol)
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -3021,6 +3032,24 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     assert isinstance(value, TensorLike)
     return where(mask, prims.to_dtype(value, a.dtype), a)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def allclose(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
+    equal_nan: bool = False,
+) -> bool:
+    """
+    Reference implementation of torch.allclose
+    """
+    _check_close_args(name="torch.allclose", a=a, b=b, rtol=rtol, atol=atol)
+
+    return bool(
+        torch.all(torch.isclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)).item()
+    )
 
 
 # TODO: add OpInfo for torch.equal and refs.equal
