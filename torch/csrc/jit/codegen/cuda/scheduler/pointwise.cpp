@@ -592,15 +592,11 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       ir_utils::getReductionOps(fusion /*, ignore_trivial=true */).empty(),
       "This scheduler only handles pointwise ops.");
 
-  // For intermediate outputs, apply cacheFork
-  auto outs = fusion->outputs();
-  for (const auto output : outs) {
-    if (!output->uses().empty() && output->definition() != nullptr) {
-      if (output->getValType().value() == ValType::TensorView) {
-        output->as<TensorView>()->cacheFork();
-      }
-    }
-  }
+  // Cache inputs
+  auto cached_inputs = scheduler_utils::cacheInputs(fusion, true);
+
+  // Cache and fork outputs
+  auto cached_outputs = scheduler_utils::cacheAndForkOutputs(fusion, true);
 
   std::vector<TensorView*> input_tvs;
   {
@@ -636,31 +632,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr,
       "Could not find a fully broadcasted output to reference schedule on.");
-
-  // Caches of inputs
-  std::vector<TensorView*> cached_inputs;
-
-  // Output, cacheBefore of output
-  std::vector<std::pair<TensorView*, TensorView*>> cached_outputs;
-
-  // Track what should be vectorized versus unrolled
-  std::unordered_set<TensorView*> vectorized_tensor;
-
-  // Figure out which inputs to cache for unrolling or vectorization
-  for (auto inp : input_tvs) {
-    if (inp->uses().empty() || inp->isFusionOutput()) {
-      continue;
-    }
-    cached_inputs.emplace_back(inp->cacheAfter());
-  }
-
-  // Figure out which outputs to cache for unrolling or vectorization
-  for (auto out : output_tvs) {
-    if (out->definition() == nullptr) {
-      continue;
-    }
-    cached_outputs.emplace_back(std::make_pair(out, out->cacheBefore()));
-  }
 
   auto all_tvs = ir_utils::allTvs(fusion);
 
@@ -929,8 +900,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // Compute at cached outputs
   //[BIDx, Unswitch, Vectorization, TIDx]
   for (auto entry : cached_outputs) {
-    auto cached_output = entry.second;
-    auto output = entry.first;
+    auto cached_output = entry.first;
+    auto output = entry.second;
 
     auto unswitch_it = std::find_if(
         output->domain()->domain().begin(),
