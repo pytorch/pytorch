@@ -4,21 +4,20 @@ import os
 import pathlib
 import sys
 from dataclasses import dataclass
-from typing import Union, Sequence, List
+from typing import List, Sequence, Union
 
 import yaml
-from typing_extensions import Literal
 
-from torchgen.api import cpp
-from torchgen.api import unboxing
+from torchgen.api import cpp, unboxing
 from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
-from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
-from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
+from torchgen.gen import cpp_string, get_custom_build_selector, parse_native_yaml
+from torchgen.model import Argument, NativeFunction, NativeFunctionsGroup, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
+from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
+from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
