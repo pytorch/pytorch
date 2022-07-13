@@ -210,8 +210,7 @@ TEST(SchemaInfoMayAliasTest, MultipleWildcardInputs) {
 }
 
 TEST(SchemaInfoMayAliasTest, MismatchingTypes) {
-  SchemaInfo schema(
-      "aten::test.Tensor(Tensor(a) a) -> int(a)");
+  SchemaInfo schema("aten::test.Tensor(Tensor(a) a) -> int(a)");
   ASSERT_FALSE(schema.may_alias(
       {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
 }
