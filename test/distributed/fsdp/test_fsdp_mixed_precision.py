@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
 import contextlib
+import sys
 from functools import partial
 from itertools import product
 
@@ -10,29 +10,28 @@ import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    CPUOffload,
-    MixedPrecision,
-    BackwardPrefetch,
-    ShardingStrategy,
-)
+from torch.distributed.fsdp import BackwardPrefetch, CPUOffload
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
     FSDPTest,
+    TransformerWithSharedParams,
     subtest_name,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
     sandcastle_skip_if,
 )
-from torch.testing._internal.common_cuda import CUDA11OrLater
 
 try:
     import torchvision
@@ -494,19 +493,24 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
         )
         with patch_reduce_scatter(test_reduce_scatter, param_dtype):
-            model = self._get_wrapped_model(
-                group=torch.distributed.distributed_c10d._get_default_group(),
-                config={"mixed_precision": mp_config}
+            # TODO: `test_mp_embedding_reduce()` fails if we do not wrap the
+            # entire `TransformerWithSharedParams` with a single top-level FSDP
+            model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
             )
-            optim = torch.optim.SGD(model.parameters(), lr=0.1)
+            fsdp_model = FSDP(model, mixed_precision=mp_config)
+            optim = torch.optim.SGD(fsdp_model.parameters(), lr=0.1)
             for _ in range(6):
-                inp = model.module.get_input(torch.device("cuda"))
+                inp = fsdp_model.module.get_input(torch.device("cuda"))
                 # This would fail if we casted integer module inputs such as for
                 # embedding tables.
-                output = model(*inp)
-                loss = model.module.get_loss(inp, output).cuda()
+                output = fsdp_model(*inp)
+                loss = fsdp_model.module.get_loss(inp, output).cuda()
                 self.assertEqual(loss.dtype, param_dtype)
-                model.module.run_backward(loss)
+                fsdp_model.module.run_backward(loss)
                 optim.step()
 
     @skip_if_lt_x_gpu(2)
