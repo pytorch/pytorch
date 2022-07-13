@@ -18,6 +18,7 @@
 #
 import os
 from os import path
+import re
 # import sys
 import pkgutil
 
@@ -645,8 +646,7 @@ def patched_make_field(self, types, domain, items, **kw):
                 typename = fieldtype[0].astext()
                 builtin_types = ['int', 'long', 'float', 'bool', 'type']
                 for builtin_type in builtin_types:
-                    if typename == builtin_type:
-                        typename = 'python:' + builtin_type
+                    re.sub(fr'\b{builtin_type}\b', f'python:{builtin_type}', typename)
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis, **kw))
             else:
