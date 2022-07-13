@@ -1,9 +1,9 @@
+import functools
+from typing import Callable
+
 from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo as NFWDI
 from torchgen.context import native_function_manager
 from torchgen.utils import T
-
-import functools
-from typing import Callable
 
 # Like tools.api.context.with_native_function, but for
 # NativeFunctionWithDifferentiabilityInfo.

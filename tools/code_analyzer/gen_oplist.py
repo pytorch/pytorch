@@ -4,15 +4,15 @@ import json
 import os
 import sys
 from functools import reduce
-from typing import Set, List, Any
+from typing import Any, List, Set
 
 import yaml
+from tools.lite_interpreter.gen_selected_mobile_ops_header import (
+    write_selected_mobile_ops,
+)
 from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,
-)
-from tools.lite_interpreter.gen_selected_mobile_ops_header import (
-    write_selected_mobile_ops,
 )
 
 
