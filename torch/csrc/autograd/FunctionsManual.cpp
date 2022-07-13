@@ -4153,8 +4153,16 @@ Tensor linalg_det_backward(
     // We could use the singular formula for all inputs but we try to filter out
     // some inputs via the masking, as computing an SVD is about 100 times
     // slower than computing an lu_solve on GPU
-    return masked_fmap(
-        det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    // For tensor subclasses, we can't call masked_fmap as it calls
+    // index({mask}) which needs to call item to compute the number of elements
+    // in the result.
+
+    if (areAnyTensorSubclassLike({A, d, grad})) {
+      return singular(A, d, grad);
+    } else {
+      return masked_fmap(
+          det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    }
   }
 }
 
