@@ -1153,10 +1153,13 @@ at::IntArrayRef strides_or_error(
         "Please either use a strided tensor or set requires_grad=False for '",
         input_name,
         "'");
-    if (input.is_mkldnn())
+    if (input.is_mkldnn()) {
       return IntArrayRef({});
-    if (input.is_sparse_csr())
+    }
+    if (input.layout() == c10::kSparseCsr ||
+        input.layout() == c10::kSparseCsc) {
       return IntArrayRef({});
+    }
     return input.strides();
   } else {
     return IntArrayRef({});
