@@ -141,7 +141,8 @@ class AllocationInserter : public kir::ExprMutator {
             nullptr,
             false,
             nullptr,
-            false);
+            false,
+            DoubleBufferLoopStage::NotApplicable);
       } else {
         new_loop = IrBuilder::create<kir::ForLoop>(id);
       }

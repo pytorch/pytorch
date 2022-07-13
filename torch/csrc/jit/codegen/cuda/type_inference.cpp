@@ -445,6 +445,8 @@ class NaiveTypePropagator {
         break;
       }
       case prim::unsqueeze_copy:
+      case prim::expand_copy:
+      case prim::expand_as_copy:
       case prim::squeeze_copy:
       case prim::reshape_copy:
       case prim::view_copy:
