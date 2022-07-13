@@ -975,6 +975,7 @@ class OutlierDetector(DetectorBase):
     REF_PERCENTILE_KEY = "reference_percentile"
     CHANNEL_AXIS_KEY = "channel_axis"
     MAX_VALS_KEY = "per_channel_max"
+    CONSTANT_COUNTS_KEY = "constant_batch_counts"
 
     def __init__(
         self,
@@ -1069,7 +1070,10 @@ class OutlierDetector(DetectorBase):
         return obs_fqn_to_info
 
     def _calculate_outlier_info(
-            self, percentile_ratios: torch.Tensor, counted_batches: torch.Tensor, total_batches: int
+        self,
+        percentile_ratios: torch.Tensor,
+        counted_batches: torch.Tensor,
+        total_batches: int,
     ) -> Dict[str, List[bool]]:
         r"""
         Gives info on whether the percentile ratios cacluated would be considered outliers
@@ -1120,6 +1124,7 @@ class OutlierDetector(DetectorBase):
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
             the channel axis used to determine individual channels
+            the constant batch counts per channel
             the per channel max values
         """
         # return dictionary mapping observer fqns to desired info
@@ -1134,6 +1139,7 @@ class OutlierDetector(DetectorBase):
                 # get the number of batches and calculated ratio thresholds
                 num_batches: torch.Tensor = pre_obs.percentile_batches_tracked
                 average_ratios: torch.Tensor = pre_obs.average_percentile_ratio
+                channel_batch_cnts: torch.Tensor = pre_obs.constant_channels
                 total_batches: int = pre_obs.num_batches_tracked
 
                 # also get the max values
@@ -1164,6 +1170,7 @@ class OutlierDetector(DetectorBase):
                     self.NUM_BATCHES_KEY: num_batches,
                     self.OUTLIER_KEY: outlier_calcs[self.OUTLIER_KEY],
                     self.IS_SUFFICIENT_BATCHES_KEY: outlier_calcs[self.IS_SUFFICIENT_BATCHES_KEY],
+                    self.CONSTANT_COUNTS_KEY: channel_batch_cnts,
                     self.MAX_VALS_KEY: max_vals
                 }
 
@@ -1188,6 +1195,7 @@ class OutlierDetector(DetectorBase):
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
                 the channel axis used to determine individual channels
+                the constant batch counts per channel
                 the per channel max values
         """
         # generate the information dictionary of outlier information
@@ -1206,6 +1214,10 @@ class OutlierDetector(DetectorBase):
         note_string = "Note: outlier detection is only reliable for {}. We recommend {} to ensure the most accurate results."
         note_distribution = "stationary distributions"
         note_rec = "running the static vs. dynamic detector to ensure activation data before modules above is stationary"
+
+        # suggestion for constant batch check since that can make it no outliers
+        constant_str = "\tFor channel {}, we found {} constant value batches. {}\n"
+        constant_suggestion = "We recommend taking a look at the dict and data to see how frequent this occured and why."
 
         # compile the suggestion string
         for module_fqn in info_dict:
@@ -1227,6 +1239,20 @@ class OutlierDetector(DetectorBase):
                     max_value_found_str = channel_max_value_str.format(mod_info[self.MAX_VALS_KEY][index])
                     channel_str = channel_suggestion_str.format(index, max_value_found_str)
                     outlier_string += channel_str
+
+                # also check if we found constant batch
+                if mod_info[self.CONSTANT_COUNTS_KEY][index] != 0:
+                    # make sure we add a module level highlight.
+                    if not added_model_desc:
+                        # add the module level description
+                        outlier_string += module_suggestion_str.format(module_fqn, self.ch_axis)
+                        added_model_desc = True
+
+                    constant_values_for_channel = mod_info[self.CONSTANT_COUNTS_KEY][index]
+                    formatted_str = constant_str.format(index, constant_values_for_channel, constant_suggestion)
+                    outlier_string += formatted_str
+                    # we also added at least one thing to description
+                    added_module = True
 
 
         # if found outlier, give suggestion, else give default response
