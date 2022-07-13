@@ -35,33 +35,46 @@ import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
 aten = torch.ops.aten
 
-# Version of autograd.grad that handles outputs that don't depend on inputs
 
-
-def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
+# Version of autograd.grad with some differences:
+#   - pytree inputs is allowed (but leaves of the pytree have to all
+#     be tensors)
+#   - if an input is not used as part of derivatives, we will return a
+#     zero-filled tensor for the result
+def _autograd_grad(
+    outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True
+):
     inputs, inputs_spec = tree_flatten(inputs)
-    result = [torch.zeros_like(inp) for inp in inputs]
-    diff_argnums = tuple(i for i, inp in enumerate(inputs) if inp.requires_grad)
-    inputs = tuple(inputs[i] for i in diff_argnums)
+    diff_inputs = tuple(inp for inp in inputs if inp.requires_grad)
     if grad_outputs is None:
         diff_outputs = tuple(out for out in outputs if out.requires_grad)
     else:
-        something = [(out, go) for out, go in zip(outputs, grad_outputs)
-                     if out.requires_grad]
-        if len(something) == 0:
+        diff_grad_outputs = [
+            (out, go) for out, go in zip(outputs, grad_outputs) if out.requires_grad
+        ]
+        if len(diff_grad_outputs) == 0:
             diff_outputs, grad_outputs = (), ()
         else:
-            diff_outputs, grad_outputs = zip(*something)
-    if len(diff_outputs) == 0:
-        return tuple(torch.zeros_like(inp) for inp in inputs)
-    grad_inputs = torch.autograd.grad(diff_outputs, inputs, grad_outputs,
-                                      retain_graph=retain_graph,
-                                      create_graph=create_graph,
-                                      allow_unused=True)
-    grad_inputs = tuple(torch.zeros_like(inp) if gi is None else gi
-                        for gi, inp in zip(grad_inputs, inputs))
-    for idx, grad_inp in zip(diff_argnums, grad_inputs):
-        result[idx] = grad_inp
+            diff_outputs, grad_outputs = zip(*diff_grad_outputs)
+    grad_inputs = torch.autograd.grad(
+        diff_outputs,
+        diff_inputs,
+        grad_outputs,
+        retain_graph=retain_graph,
+        create_graph=create_graph,
+        allow_unused=True,
+    )
+    result = []
+    grad_inputs_iter = iter(grad_inputs)
+    for inp in inputs:
+        if inp.requires_grad:
+            grad_input = next(grad_inputs_iter)
+            if grad_input is None:
+                result.append(torch.zeros_like(inp))
+            else:
+                result.append(grad_input)
+        else:
+            result.append(torch.zeros_like(inp))
     return tree_unflatten(result, inputs_spec)
 
 
