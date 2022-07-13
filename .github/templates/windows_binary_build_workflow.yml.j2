@@ -57,7 +57,6 @@ jobs:
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     steps:
       !{{ common.setup_ec2_windows() }}

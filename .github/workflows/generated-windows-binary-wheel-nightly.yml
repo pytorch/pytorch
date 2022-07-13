@@ -35,7 +35,6 @@ jobs:
   wheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -259,7 +258,6 @@ jobs:
   wheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -486,7 +484,6 @@ jobs:
   wheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -713,7 +710,6 @@ jobs:
   wheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -937,7 +933,6 @@ jobs:
   wheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1164,7 +1159,6 @@ jobs:
   wheel-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1391,7 +1385,6 @@ jobs:
   wheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1615,7 +1608,6 @@ jobs:
   wheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1842,7 +1834,6 @@ jobs:
   wheel-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2069,7 +2060,6 @@ jobs:
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2293,7 +2283,6 @@ jobs:
   wheel-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2520,7 +2509,6 @@ jobs:
   wheel-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder

@@ -35,7 +35,6 @@ jobs:
   libtorch-cpu-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -271,7 +270,6 @@ jobs:
   libtorch-cpu-shared-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -507,7 +505,6 @@ jobs:
   libtorch-cpu-static-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -743,7 +740,6 @@ jobs:
   libtorch-cpu-static-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -979,7 +975,6 @@ jobs:
   libtorch-cuda11_3-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1218,7 +1213,6 @@ jobs:
   libtorch-cuda11_3-shared-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1457,7 +1451,6 @@ jobs:
   libtorch-cuda11_3-static-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1696,7 +1689,6 @@ jobs:
   libtorch-cuda11_3-static-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1935,7 +1927,6 @@ jobs:
   libtorch-cuda11_6-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2174,7 +2165,6 @@ jobs:
   libtorch-cuda11_6-shared-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2413,7 +2403,6 @@ jobs:
   libtorch-cuda11_6-static-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2652,7 +2641,6 @@ jobs:
   libtorch-cuda11_6-static-without-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
-    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
