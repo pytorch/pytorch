@@ -16,3 +16,8 @@
   desc: |
           This tag indicates that the operator doesn't have an explicit entry in
           native_functions.yaml, and instead was generated automatically by the codegen.
+- tag: nondeterministic
+  desc: |
+          This tag indicates that the operator is nondeterministic meaning that if the
+          operator is run twice with the same arguments, the outputs will not necessarily be
+          identical.
