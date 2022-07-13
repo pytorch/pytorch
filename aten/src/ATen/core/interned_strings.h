@@ -219,6 +219,7 @@ namespace c10 {
   _(cuda, _current_device)           \
   _(cuda, synchronize)               \
   _(aten, has_torch_function)        \
+  _(aten, is_autocast_enabled)       \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
