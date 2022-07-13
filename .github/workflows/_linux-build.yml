@@ -21,6 +21,13 @@ on:
         type: boolean
         default: false
         description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     outputs:
       docker-image:
@@ -128,7 +135,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
