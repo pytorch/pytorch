@@ -19,26 +19,15 @@ DEFINE_DISPATCH(qcat_relu_nhwc_stub);
 
 namespace {
 
-// qcat will run into fast path if
-//   a. nhwc inputs, dim = 1 and all inputs are channels last contiguous
-//   b. dim is last dim and all inputs are contiguous
-//
-//   from physical memory point of view a. and b. are the same
-//
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
-  bool is_channels_last_fast_path = dim == 1;
+  bool is_fast_path = dim == 1;
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
-    is_channels_last_fast_path &= qx.dim() == 4;
-    is_channels_last_fast_path &= qx.is_contiguous(c10::MemoryFormat::ChannelsLast);
+    is_fast_path &= qx.dim() == 4;
+    is_fast_path &= qx.is_contiguous(c10::MemoryFormat::ChannelsLast);
   }
-
-  bool is_contiguous_fast_path = dim == qxs[0].dim() - 1;
-  for (const at::Tensor& qx : qxs) {
-    is_contiguous_fast_path &= qx.is_contiguous();
-  }
-  return is_channels_last_fast_path || is_contiguous_fast_path;
+  return is_fast_path;
 }
 
 bool is_valid_quantization_scheme(const Tensor& t) {
