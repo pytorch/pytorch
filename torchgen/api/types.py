@@ -591,16 +591,7 @@ class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    cpp_no_default_args: Set[str]
     prefix: str = ""
-
-    @classmethod
-    def from_function(kls, func: NativeFunction, prefix: str = ""):
-        return NativeSignature(
-            func=func.func,
-            cpp_no_default_args=func.cpp_no_default_args,
-            prefix=prefix
-        )
 
     def name(self) -> str:
         return self.prefix + native.name(self.func)
@@ -623,7 +614,7 @@ class NativeSignature:
         return f"{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})"
 
     def arguments(self) -> List[Binding]:
-        return native.arguments(self.func, cpp_no_default_args=self.cpp_no_default_args)
+        return native.arguments(self.func)
 
     def returns_type(self) -> CType:
         return native.returns_type(self.func.returns)
@@ -754,7 +745,7 @@ def kernel_signature(
     if backend_index.external:
         return DispatcherSignature.from_schema(f.func, prefix=prefix)
     else:
-        return NativeSignature.from_function(f, prefix=prefix)
+        return NativeSignature(f.func, prefix)
 
 
 # Functions only, no types

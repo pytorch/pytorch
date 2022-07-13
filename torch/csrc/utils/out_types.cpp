@@ -7,7 +7,7 @@ namespace utils {
 // consistent with the out tensor's options
 void check_out_type_matches(
     const at::Tensor& result,
-    c10::optional<at::ScalarType> scalarType,
+    at::ScalarType scalarType,
     bool scalarType_is_none,
     c10::optional<at::Layout> layout,
     const at::Device& device,
@@ -15,16 +15,25 @@ void check_out_type_matches(
   if (scalarType_is_none && !layout && device_is_none) { // common case
     return;
   }
-  if (!scalarType_is_none && result.scalar_type() != scalarType.value()) {
+  if (!scalarType_is_none && result.scalar_type() != scalarType) {
     AT_ERROR(
         "dtype ",
-        *scalarType,
+        scalarType,
         " does not match dtype of out parameter (",
         result.scalar_type(),
         ")");
   }
+  auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto device_type_arg =
       device_is_none ? result.device().type() : device.type();
+  if (result.scalar_type() != scalarType_arg) {
+    AT_ERROR(
+        "scalar type ",
+        scalarType_arg,
+        " does not match scalar type of out parameter (",
+        result.scalar_type(),
+        ")");
+  }
   if (layout && result.layout() != *layout) {
     AT_ERROR(
         "layout ",
