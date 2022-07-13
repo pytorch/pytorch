@@ -5,7 +5,7 @@
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 from typing import Any, Callable, Dict, Generic, Iterator, List, Optional, TypeVar, Union
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, default_collate
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
