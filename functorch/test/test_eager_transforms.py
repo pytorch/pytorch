@@ -365,7 +365,7 @@ class TestGradTransform(TestCase):
         vjp_fn(result)
 
     def test_conj_bit(self):
-        x = torch.tensor(1+1j)
+        x = torch.tensor(1 + 1j)
 
         def foo(x):
             assert not x.is_conj()
@@ -1647,8 +1647,8 @@ class TestHessian(TestCase):
         A = 0.1 * torch.randn(b, d, d, device=device)
 
         def loss(A, x1, x2):
-            x2_hat = (A@(x1.T)).T
-            res = x2-x2_hat
+            x2_hat = (A @ (x1.T)).T
+            res = x2 - x2_hat
             res_sqr = res**2
             return res_sqr.sum()
 
@@ -2528,7 +2528,7 @@ class TestExamplesCorrectness(TestCase):
             else:
                 loss = inner_loss(params, x1, y1)
                 grads = torch.autograd.grad(loss, params, create_graph=True)
-            new_params = [(params[i] - alpha*grads[i]) for i in range(len(params))]
+            new_params = [(params[i] - alpha * grads[i]) for i in range(len(params))]
 
             v_f = net(new_params, x2)
             return mse_loss(v_f, y2)
@@ -2537,7 +2537,7 @@ class TestExamplesCorrectness(TestCase):
 
         # Compute with vmap+grad
         inner_losses = vmap(partial(get_loss_for_task, True))(task[0], task[1], task[2], task[3])
-        loss2 = sum(inner_losses)/len(inner_losses)
+        loss2 = sum(inner_losses) / len(inner_losses)
         result_grads = torch.autograd.grad(loss2, params)
 
         # Compute without vmap+grad
@@ -2545,7 +2545,7 @@ class TestExamplesCorrectness(TestCase):
             get_loss_for_task(False, task[0][i], task[1][i], task[2][i], task[3][i])
             for i in range(num_tasks)
         ]
-        loss2 = sum(inner_losses)/len(inner_losses)
+        loss2 = sum(inner_losses) / len(inner_losses)
         expected_grads = torch.autograd.grad(loss2, params)
 
         self.assertEqual(result_grads, expected_grads)

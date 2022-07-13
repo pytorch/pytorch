@@ -13,7 +13,7 @@ import functools
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
-     toleranceOverride, tol
+    toleranceOverride, tol
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
@@ -28,7 +28,6 @@ from common_utils import (
     opsToleranceOverride,
     check_vmap_fallback,
 )
-import unittest
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
@@ -773,8 +772,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('linalg.eigh'),  # _linalg_eigh doesn't have batching rule
         xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
-        xfail('logdet'), # _linalg_slogdet doesn't have batching rule
-        xfail('linalg.slogdet'), # _linalg_slogdet doesn't have batching rule
+        xfail('logdet'),  # _linalg_slogdet doesn't have batching rule
+        xfail('linalg.slogdet'),  # _linalg_slogdet doesn't have batching rule
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1133,6 +1132,7 @@ class TestOperators(TestCase):
                 self.assertFalse(op.supports_fwgrad_bwgrad,
                                  f"{op.name} now supports forward over reverse without a decomposition. " +
                                  "Please remove the decomposition version")
+
                 def is_differentiable(t):
                     return isinstance(t, torch.Tensor) and t.dtype == torch.float32
                 args = (cotangents, *primals)
@@ -1148,7 +1148,7 @@ class TestOperators(TestCase):
                 self.assertEqual(result, expected)
 
     def _make_extremal_inputs(self, shape, device):
-        if shape == None:
+        if shape is None:
             return (None,)
         return (
             torch.full(shape, -1000., device=device),
