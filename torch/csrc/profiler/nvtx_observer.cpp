@@ -129,7 +129,7 @@ template <bool report_input_shapes>
 std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
   if (NVTXThreadLocalState::getTLS() != nullptr) {
     auto input_op_ids = getInputTensorOpIds(fn);
-    torch::profiler::impl::cudaStubs()->nvtxRangePushA(
+    torch::profiler::impl::cudaStubs()->rangePush(
         torch::profiler::impl::getNvtxStr(
             fn.name(),
             fn.seqNr(),
@@ -164,7 +164,7 @@ void pushNVTXCallbacks(
               ? &enterNVTX</*report_input_shapes=*/true>
               : &enterNVTX</*report_input_shapes=*/false>,
           [](const at::RecordFunction& fn, at::ObserverContext* ctx) {
-            torch::profiler::impl::cudaStubs()->nvtxRangePop();
+            torch::profiler::impl::cudaStubs()->rangePop();
             updateOutputTensorTracker(fn);
           })
           .needsInputs(config.report_input_shapes)
