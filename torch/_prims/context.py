@@ -26,7 +26,6 @@ def torch_to_refs_map():
         (torch.nn, torch._refs.nn),
         (torch.nn.functional, torch._refs.nn.functional),
         (torch.special, torch._refs.special),
-        (torch.fft, torch._refs.fft),
     ]
     r: Dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
