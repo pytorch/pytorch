@@ -11,6 +11,12 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize import is_activation_post_process
 
+# Names for observer insert keys
+DEFAULT_TARGET_NODE_KEY = "target_node"
+DEFAULT_OBSERVER_INSERT_KEY = "observer_to_insert"
+DEFAULT_POST_KEY = "is_post_observer"
+DEFAULT_OBS_ARGS_KEY = "observer_args"
+
 # Adding base class for detectors
 class DetectorBase(ABC):
     r""" Base Detector Module
@@ -295,8 +301,8 @@ class DynamicStaticDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
 
@@ -316,20 +322,20 @@ class DynamicStaticDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args
+                    DEFAULT_TARGET_NODE_KEY: targeted_node,
+                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(),
+                    DEFAULT_POST_KEY: False,
+                    DEFAULT_OBS_ARGS_KEY: targeted_node.args
                 }
 
                 # add entry for post-observer
                 post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
 
                 obs_fqn_to_info[post_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(),
-                    "insert_post": True,
-                    "observer_args": (targeted_node,)
+                    DEFAULT_TARGET_NODE_KEY: targeted_node,
+                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(),
+                    DEFAULT_POST_KEY: True,
+                    DEFAULT_OBS_ARGS_KEY: (targeted_node,)
                 }
 
         return obs_fqn_to_info
@@ -620,8 +626,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
 
@@ -641,10 +647,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(ch_axis=self.ch_axis),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args,
+                    DEFAULT_TARGET_NODE_KEY: targeted_node,
+                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
+                    DEFAULT_POST_KEY: False,
+                    DEFAULT_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info
@@ -1044,8 +1050,8 @@ class OutlierDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
         # observer for this detector is ModelReportObserver
@@ -1064,10 +1070,10 @@ class OutlierDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args,
+                    DEFAULT_TARGET_NODE_KEY: targeted_node,
+                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    DEFAULT_POST_KEY: False,
+                    DEFAULT_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info

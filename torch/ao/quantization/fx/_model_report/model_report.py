@@ -1,7 +1,13 @@
 from typing import Any, Dict, Set, Tuple
 
 import torch
-from torch.ao.quantization.fx._model_report.detector import DetectorBase
+from torch.ao.quantization.fx._model_report.detector import (
+    DetectorBase,
+    DEFAULT_OBS_ARGS_KEY,
+    DEFAULT_OBSERVER_INSERT_KEY,
+    DEFAULT_POST_KEY,
+    DEFAULT_TARGET_NODE_KEY
+)
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 
@@ -145,10 +151,10 @@ class ModelReport:
 
         # now insert all the observers at their desired locations
         for observer_fqn in insert_observers_fqns:
-            target_node = insert_observers_fqns[observer_fqn]["target_node"]
-            insert_obs = insert_observers_fqns[observer_fqn]["insert_observer"]
-            insert_post = insert_observers_fqns[observer_fqn]["insert_post"]
-            observer_args = insert_observers_fqns[observer_fqn]["observer_args"]
+            target_node = insert_observers_fqns[observer_fqn][DEFAULT_TARGET_NODE_KEY]
+            insert_obs = insert_observers_fqns[observer_fqn][DEFAULT_OBSERVER_INSERT_KEY]
+            insert_post = insert_observers_fqns[observer_fqn][DEFAULT_POST_KEY]
+            observer_args = insert_observers_fqns[observer_fqn][DEFAULT_OBS_ARGS_KEY]
             self._insert_observer_around_module(
                 model, observer_fqn, target_node, insert_obs, observer_args, insert_post
             )
