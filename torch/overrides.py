@@ -279,8 +279,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor,
-        Tensor.sym_size
+        Tensor.to_padded_tensor
     }
 
 
@@ -924,6 +923,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
+        torch.linalg.vecdot: lambda input, other, dim=-1, out=None: -1,
         torch.view_as_real: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
@@ -967,6 +967,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.linalg.solve: lambda A, B, left=True, out=None: -1,
+        torch.linalg.solve_ex: lambda A, B, left=True, check_errors=False, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -1858,6 +1859,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)

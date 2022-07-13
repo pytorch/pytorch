@@ -11,6 +11,7 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -294,7 +295,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     event_post_process_cb_ = std::move(cb);
   }
 
-  torch::profiler::impl::kineto::ActivityTraceWrapper finalizeTrace() {
+  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
+  finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
     materializeOpEvents();
@@ -319,9 +321,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       auto trace = torch::profiler::impl::kineto::stopTrace();
       TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
       addTraceEvents(trace);
-      return trace;
+      return std::make_unique<
+          torch::profiler::impl::kineto::ActivityTraceWrapper>(
+          std::move(trace));
     } else {
-      return torch::profiler::impl::kineto::ActivityTraceWrapper();
+      return nullptr;
     }
   }
 
@@ -623,7 +627,8 @@ void reportBackendEventToActiveKinetoProfiler(
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (config.state == ProfilerState::NVTX) {
+  if (config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::ITT) {
     return;
   }
   TORCH_CHECK(
@@ -642,6 +647,9 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
+  TORCH_CHECK(
+      config.state != ProfilerState::ITT,
+      "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
       GlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
@@ -658,6 +666,9 @@ void enableProfiler(
   TORCH_CHECK(!profilerEnabled(), "Profiler is already enabled on this thread");
   if (config.state == ProfilerState::NVTX) {
     torch::profiler::impl::pushNVTXCallbacks(config, scopes);
+    return;
+  } else if (config.state == ProfilerState::ITT) {
+    torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
   }
 
@@ -702,7 +713,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX),
+           config.state == ProfilerState::NVTX ||
+           config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {
@@ -754,7 +766,8 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
-    torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+    std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+        trace,
     std::vector<experimental_event_t>&& event_tree)
     : trace_start_us_(start_time),
       events_(std::move(events)),
@@ -764,7 +777,7 @@ ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
 void ProfilerResult::save(const std::string& path) {
-  trace_.save(path);
+  trace_->save(path);
 }
 
 } // namespace profiler
