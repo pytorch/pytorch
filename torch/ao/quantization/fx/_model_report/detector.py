@@ -13,8 +13,8 @@ from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
 DETECTOR_TARGET_NODE_KEY = "target_node"
-DETECTOR_OBSERVER_INSERT_KEY = "observer_to_insert"
-DETECTOR_POST_KEY = "is_post_observer"
+DETECTOR_OBS_TO_INSERT_KEY = "observer_to_insert"
+DETECTOR_IS_POST_OBS_KEY = "is_post_observer"
 DETECTOR_OBS_ARGS_KEY = "observer_args"
 
 # Adding base class for detectors
@@ -323,8 +323,8 @@ class DynamicStaticDetector(DetectorBase):
 
                 obs_fqn_to_info[pre_obs_fqn] = {
                     DETECTOR_TARGET_NODE_KEY: targeted_node,
-                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(),
-                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(),
+                    DETECTOR_IS_POST_OBS_KEY: False,
                     DETECTOR_OBS_ARGS_KEY: targeted_node.args
                 }
 
@@ -333,8 +333,8 @@ class DynamicStaticDetector(DetectorBase):
 
                 obs_fqn_to_info[post_obs_fqn] = {
                     DETECTOR_TARGET_NODE_KEY: targeted_node,
-                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(),
-                    DETECTOR_POST_KEY: True,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(),
+                    DETECTOR_IS_POST_OBS_KEY: True,
                     DETECTOR_OBS_ARGS_KEY: (targeted_node,)
                 }
 
@@ -648,8 +648,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
                 obs_fqn_to_info[pre_obs_fqn] = {
                     DETECTOR_TARGET_NODE_KEY: targeted_node,
-                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
-                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
+                    DETECTOR_IS_POST_OBS_KEY: False,
                     DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
@@ -1070,8 +1070,8 @@ class OutlierDetector(DetectorBase):
 
                 obs_fqn_to_info[pre_obs_fqn] = {
                     DETECTOR_TARGET_NODE_KEY: targeted_node,
-                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
-                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    DETECTOR_IS_POST_OBS_KEY: False,
                     DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
