@@ -126,12 +126,6 @@ new_local_repository(
     path = "third_party/fmt",
 )
 
-new_local_repository(
-    name = "kineto",
-    build_file = "//third_party:kineto.BUILD",
-    path = "third_party/kineto",
-)
-
 new_patched_local_repository(
     name = "tbb",
     patches = [
