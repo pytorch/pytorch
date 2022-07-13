@@ -31,6 +31,8 @@
 #include <stdint.h>
 #include <unordered_map>
 
+#include <iostream>
+
 // Note [behavior of cudnnFind and cudnnGet]
 // You'll notice that by default, in the ConvolutionDescriptor, we do the following:
 //
