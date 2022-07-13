@@ -2,6 +2,7 @@
 # Owner(s): ["module: unknown"]
 
 import copy
+from torch.nn.modules import activation
 from torch.testing._internal.common_utils import TestCase
 import logging
 import torch
@@ -124,7 +125,8 @@ class TestActivationSparsifier(TestCase):
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
-        print(layer_name, activation_sparsifier.data_groups[layer_name].keys())
+        print("Data Groups: ", activation_sparsifier.data_groups)
+        print("State: ", activation_sparsifier.state)
         assert 'data' in activation_sparsifier.data_groups[layer_name]
         assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
 
@@ -289,7 +291,7 @@ class TestActivationSparsifier(TestCase):
         num_data_points = 5
         for _ in range(0, num_data_points):
             rand_data = torch.randn(16, 1, 28, 28)
-            model(rand_data)
+            activation_sparsifier.model(rand_data)
             data_list.append(rand_data)
 
         data_agg_actual = self._check_pre_forward_hook(activation_sparsifier, data_list)
