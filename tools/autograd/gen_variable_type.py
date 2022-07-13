@@ -42,6 +42,7 @@ from torchgen.api.types import (
     Binding,
     DispatcherSignature,
     intArrayRefT,
+    symIntArrayRefT,
     ListCType,
     MutRefCType,
     OptionalCType,
@@ -1086,6 +1087,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
+                expr = expr + ".vec()"
+            elif type == BaseCType(symIntArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
