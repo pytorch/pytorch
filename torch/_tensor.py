@@ -946,34 +946,10 @@ class Tensor(torch._C._TensorBase):
             ellipsis_idx)
 
     def unflatten(self, dim, sizes):
-        r"""Expands the dimension :attr:`dim` of the :attr:`self` tensor over multiple dimensions
-        of sizes given by :attr:`sizes`.
+        r"""
+        unflatten(dim, sizes) -> Tensor
 
-        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Tuple[int]` as well
-          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (Tuple[(name: str, size: int)])
-          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
-          of elements in the original dim being unflattened.
-
-        Args:
-            dim (Union[int, str]): Dimension to unflatten
-            sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
-
-        Examples:
-            >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
-            torch.Size([3, 2, 2, 1])
-            >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from the size of dimension 1
-            torch.Size([3, 2, 2, 1])
-            >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
-            tensor([[[-1.1772,  0.0180],
-                    [ 0.2412,  0.1431]],
-                    [[-1.1819, -0.8899],
-                    [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
-            >>> torch.randn(2, names=('A',)).unflatten('A', (('B1', -1), ('B2', 1)))
-            tensor([[-0.8591],
-                    [ 0.3100]], names=('B1', 'B2'))
-
-        .. warning::
-            The named tensor API is experimental and subject to change.
+        See :func:`torch.unflatten`.
 
         """
         if has_torch_function_unary(self):

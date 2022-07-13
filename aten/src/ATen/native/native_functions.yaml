@@ -2216,10 +2216,10 @@
   variants: function, method
 
 - func: unflatten.int(Tensor(a) self, int dim, int[] sizes, Dimname[]? names=None) -> Tensor(a)
-  variants: method
+  variants: function, method
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
-  variants: method
+  variants: function, method
 
 - func: fill.Scalar(Tensor self, Scalar value) -> Tensor
   variants: function
