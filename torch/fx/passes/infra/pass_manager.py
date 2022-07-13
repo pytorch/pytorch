@@ -1,6 +1,7 @@
 import inspect
+from queue import Queue
 from functools import wraps
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 import warnings
 
 import torch
@@ -104,54 +105,76 @@ def topological_sort_passes(
     if len(constraints) == 0:
         return passes, False
 
-    # Construct a graph
-    graph: Dict[Callable, List[Callable]] = {}
-    visited: Dict[Callable, Any] = {}
-    res: List[Callable] = []
-    for p in passes:
-        graph[p] = []
-        visited[p] = None
-
-    circular_dependency = False
-    for i, a in enumerate(passes):
-        for j, b in enumerate(passes):
-            if i == j:
+    # Contruct a graph mapping nodes to a list of their users
+    graph: Dict[Callable, List[Callable]] = {p : [] for p in passes}
+    indegree_map: Dict[Callable, int] = {p : 0 for p in passes}
+    candidates: Queue = Queue()
+    for a in passes:
+        for b in passes:
+            if a == b:
                 continue
 
             for constraint in constraints:
                 if not constraint(a, b):
-                    if b in graph[a]:
-                        circular_dependency = True
                     graph[b].append(a)
+                    indegree_map[a] += 1
 
-    time = 1
+        if indegree_map[a] == 0:
+            candidates.put(a)
 
-    # Topologically sort the graph
-    def topological_sort_util(graph, p):
-        nonlocal time
+    visited: Dict[Callable, bool] = {p : False for p in passes}
+    sorted_passes: List[Callable] = []
+    circular_dependency = False
+
+    def break_cycles():
+        """
+        In the case where `candidates` is empty but there are still unvisited
+        nodes due to cycles, we will loop through the nodes that have not been
+        visited and add the last node with the min number of in-degree edges to
+        `candidates`.
+        """
+        if not candidates.empty():
+            return
+
         nonlocal circular_dependency
 
-        visited[p] = (time, 0)
-        time += 1
+        min_degree = -1
+        min_degree_pass = None
+        for p in passes:
+            if visited[p]:
+                assert indegree_map[p] == 0
+                continue
 
-        for dep in graph[p]:
-            if not visited[dep]:
-                topological_sort_util(graph, dep)
-            elif visited[dep][1] == 0:
-                circular_dependency = True
+            if min_degree == -1:
+                min_degree = indegree_map[p]
+                min_degree_pass = p
+            elif min_degree > indegree_map[p]:
+                min_degree = indegree_map[p]
+                min_degree_pass = p
 
-        res.append(p)
-        visited[p] = (visited[p][0], time)
-        time += 1
+        if min_degree_pass:
+            circular_dependency = True
+            candidates.put(min_degree_pass)
+            indegree_map[min_degree_pass] = 0
 
-    for p in passes[::-1]:
-        if not visited[p]:
-            topological_sort_util(graph, p)
+    break_cycles()
 
-    res.reverse()
-    return res, circular_dependency
+    while not candidates.empty():
+        p = candidates.get()
+        sorted_passes.append(p)
+        visited[p] = True
 
-@compatibility(is_backward_compatible=True)
+        for n in graph[p]:
+            if not visited[n]:
+                indegree_map[n] -= 1
+                if indegree_map[n] == 0:
+                    candidates.put(n)
+
+        break_cycles()
+
+    return sorted_passes, circular_dependency
+
+@compatibility(is_backward_compatible=False)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
     Defines a partial order ('depends on' function) where `this` must occur
@@ -198,7 +221,6 @@ class PassManager:
             True if A depends on B and False otherwise. See implementation of
             `this_before_that_pass_constraint` for example.
         steps (int): Max number of times we run the passes (default = 1).
-        enable_debug_pass (bool): Set to true to enable the debug passes
         run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
     """
@@ -263,6 +285,8 @@ class PassManager:
         self.passes, circular_dep = topological_sort_passes(self.passes, self.constraints)
         if circular_dep and self.steps == 1:
             raise RuntimeError("Circular dependency detected within the constraints and steps was set to 1")
+        else:
+            self._validated = True
 
     def add_checks(self, check: Callable) -> None:
         """
@@ -284,11 +308,14 @@ class PassManager:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
-        the graph module to ensure that it still maintains the same required
-        invariants.
+        the graph module if `run_checks_after_each_pass` is set.
 
         If the module is a graph module, we will run the list of passes until
         the graph stops changing, or until `steps` number of times.
+
+        If **kwargs is passed in and `run_checks_after_each_pass` is set, we
+        will check between each pass that the result of the graph module is
+        still the same between passes.
         """
         # Order the passes based on the constraints
         if not self._validated:
