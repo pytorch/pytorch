@@ -498,6 +498,22 @@ Tensor full(IntArrayRef size, const Scalar& fill_value,
   return result.fill_(fill_value);
 }
 
+Tensor full(IntArrayRef size, const Scalar& fill_value,
+            c10::optional<ScalarType> dtype,
+            c10::optional<Layout> layout,
+            c10::optional<Device> device,
+            c10::optional<bool> pin_memory,
+            c10::optional<MemoryFormat> memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).memory_format(memory_format);
+
+  TORCH_CHECK(options.layout() != kSparse,
+              "full(...) is not implemented for sparse layout");
+
+  auto result = at::empty(size, infer_full_options(fill_value, options));
+  return result.fill_(fill_value);
+}
+
 Tensor& full_out(IntArrayRef size, const Scalar& fill_value, Tensor& result) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
@@ -604,6 +620,15 @@ Tensor ones(IntArrayRef size,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::full(size, /*fill_value=*/1., dtype, layout, device, pin_memory);
+}
+
+Tensor ones(IntArrayRef size,
+            c10::optional<ScalarType> dtype,
+            c10::optional<Layout> layout,
+            c10::optional<Device> device,
+            c10::optional<bool> pin_memory,
+            c10::optional<MemoryFormat> memory_format) {
+  return native::full(size, /*fill_value=*/1., dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor& ones_out(IntArrayRef size, Tensor& result) {
@@ -1074,6 +1099,19 @@ Tensor zeros(IntArrayRef size,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty(size, options);
+  return result.zero_();
+}
+
+Tensor zeros(IntArrayRef size,
+             c10::optional<ScalarType> dtype,
+             c10::optional<Layout> layout,
+             c10::optional<Device> device,
+             c10::optional<bool> pin_memory,
+             c10::optional<MemoryFormat> memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).memory_format(memory_format);
 
   auto result = at::empty(size, options);
   return result.zero_();

@@ -97,7 +97,7 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 }
 """
     # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(g.view_copy.func)
+    view_copy_sig = NativeSignature.from_function(g.view_copy)
 
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
@@ -142,7 +142,7 @@ def gen_symint_view_copy_kernel(
     view_copy: NativeFunction, view_copy_symint: NativeFunction
 ) -> str:
     # view_copy.symint is a native signature, since we're generating an at::native:: kernel
-    view_copy_symint_sig = NativeSignature(view_copy_symint.func)
+    view_copy_symint_sig = NativeSignature.from_function(view_copy_symint)
 
     # view_copy is a dispatcher signature, since we're calling into the at::_ops API
     view_copy_sig = DispatcherSignature(view_copy.func)
