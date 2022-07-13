@@ -6464,11 +6464,19 @@ class SpectralFuncInfo(OpInfo):
                  decorators=None,
                  **kwargs):
         decorators = list(decorators) if decorators is not None else []
-        decorators += [
-            skipCPUIfNoFFT,
-            DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
-                         "TestCommon", "test_complex_half_reference_testing")
-        ]
+        higher_tol = ('fft.hfftn',)
+        if name in higher_tol:
+            decorators += [
+                skipCPUIfNoFFT,
+                DecorateInfo(toleranceOverride({torch.chalf: tol(4e-1, 4e-1)}),
+                             "TestCommon", "test_complex_half_reference_testing")
+            ]
+        else:
+            decorators += [
+                skipCPUIfNoFFT,
+                DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
+                             "TestCommon", "test_complex_half_reference_testing")
+            ]
 
         super().__init__(name=name,
                          dtypes=dtypes,
