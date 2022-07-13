@@ -12,10 +12,10 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
-DEFAULT_TARGET_NODE_KEY = "target_node"
-DEFAULT_OBSERVER_INSERT_KEY = "observer_to_insert"
-DEFAULT_POST_KEY = "is_post_observer"
-DEFAULT_OBS_ARGS_KEY = "observer_args"
+DETECTOR_TARGET_NODE_KEY = "target_node"
+DETECTOR_OBSERVER_INSERT_KEY = "observer_to_insert"
+DETECTOR_POST_KEY = "is_post_observer"
+DETECTOR_OBS_ARGS_KEY = "observer_args"
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -322,20 +322,20 @@ class DynamicStaticDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    DEFAULT_TARGET_NODE_KEY: targeted_node,
-                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(),
-                    DEFAULT_POST_KEY: False,
-                    DEFAULT_OBS_ARGS_KEY: targeted_node.args
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(),
+                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args
                 }
 
                 # add entry for post-observer
                 post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
 
                 obs_fqn_to_info[post_obs_fqn] = {
-                    DEFAULT_TARGET_NODE_KEY: targeted_node,
-                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(),
-                    DEFAULT_POST_KEY: True,
-                    DEFAULT_OBS_ARGS_KEY: (targeted_node,)
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(),
+                    DETECTOR_POST_KEY: True,
+                    DETECTOR_OBS_ARGS_KEY: (targeted_node,)
                 }
 
         return obs_fqn_to_info
@@ -647,10 +647,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    DEFAULT_TARGET_NODE_KEY: targeted_node,
-                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
-                    DEFAULT_POST_KEY: False,
-                    DEFAULT_OBS_ARGS_KEY: targeted_node.args,
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
+                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info
@@ -944,7 +944,7 @@ class OutlierDetector(DetectorBase):
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
             Should be between 0 and 1
             Default: 0.975
-        statistical_threshold (float, optional): Fraction of batches to determine outliers per channel should be above this
+        fraction_batches_used_threshold (float, optional): Threshold to ensure enough batches used in outlier calculations
             If fraction is below this, we deem number of samples used to calculate outliers as insignificant and alert user
             regardless of whether we detected outliers or not in channel to take a closer look at channel results
             Should be between 0 and 1
@@ -962,7 +962,7 @@ class OutlierDetector(DetectorBase):
         Should be between 0 and 1
         The calculations behind value choice: https://drive.google.com/file/d/1N2wdtXWI-kOH8S7HH4-PYB_NmqzZil4p/view?usp=sharing
 
-    * :attr:`statistical_threshold`: The fraction of batches to determine outliers for each channel should be above this
+    * :attr:`fraction_batches_used_threshold`: The fraction of batches to determine outliers for each channel should be above this
         Some batches may not be used because of 0-based errors, so this is to ensure a good amount of the total batches are used
         Should be between 0 and 1
 
@@ -977,20 +977,19 @@ class OutlierDetector(DetectorBase):
     # names for dict keys
     OUTLIER_KEY = "outliers_detected"
     NUM_BATCHES_KEY = "batches_used"
-    SUFFICIENT_BATCHES_KEY = "sufficient_batches"
+    IS_SUFFICIENT_BATCHES_KEY = "is_sufficient_batches"
     COMP_METRIC_KEY = "percentile_ratios"
     RATIO_THRES_KEY = "ratio_threshold"
     REF_PERCENTILE_KEY = "reference_percentile"
     CHANNEL_AXIS_KEY = "channel_axis"
     MAX_VALS_KEY = "per_channel_max"
-    CONSTANT_CHANNEL_KEY = "constant_channels"
     CONSTANT_COUNTS_KEY = "constant_batch_counts"
 
     def __init__(
         self,
         ratio_threshold: float = 3.5,
         reference_percentile: float = 0.975,
-        statistical_threshold: float = 0.95,
+        fraction_batches_used_threshold: float = 0.95,
         ch_axis: int = 1,
     ):
         # initialize the variables of interest
@@ -998,9 +997,9 @@ class OutlierDetector(DetectorBase):
 
         # make sure passed in percentile is valid
         assert reference_percentile >= 0 and reference_percentile <= 1
-        assert statistical_threshold >= 0 and statistical_threshold <= 1
+        assert fraction_batches_used_threshold >= 0 and fraction_batches_used_threshold <= 1
         self.reference_percentile = reference_percentile
-        self.statistical_threshold = statistical_threshold
+        self.fraction_batches_used_threshold = fraction_batches_used_threshold
         self.ch_axis = ch_axis
 
     def get_detector_name(self) -> str:
@@ -1070,10 +1069,10 @@ class OutlierDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    DEFAULT_TARGET_NODE_KEY: targeted_node,
-                    DEFAULT_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
-                    DEFAULT_POST_KEY: False,
-                    DEFAULT_OBS_ARGS_KEY: targeted_node.args,
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBSERVER_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    DETECTOR_POST_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info
@@ -1083,7 +1082,6 @@ class OutlierDetector(DetectorBase):
         percentile_ratios: torch.Tensor,
         counted_batches: torch.Tensor,
         total_batches: int,
-        constant_channels: torch.Tensor,
     ) -> Dict[str, List[bool]]:
         r"""
         Gives info on whether the percentile ratios cacluated would be considered outliers
@@ -1093,15 +1091,13 @@ class OutlierDetector(DetectorBase):
             percentile_ratios (torch.Tensor): The average percentile_ratios per channel calculated by the observer
             counted_batches (torch.Tensor): The number of batches used for average calculation per tensor
             total_batches (int): The total number of batches that passed through observer in this epoch
-            constant_channels (torch.Tensor): The counts for constant batches per channel
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
-            "sufficient_batches": if o_r was >= statistical_threshold:
+            "is_sufficient_batches": if o_r was >= fraction_batches_used_threshold:
                 where o_r = counted_batches / total_batches
-            "constant_channels": if non_constant_per_channel != total_batches for each channel
         """
-        outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
+        outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.IS_SUFFICIENT_BATCHES_KEY: []}
 
         # get both as flattened lists for easy mapping
         ratios_list: List = percentile_ratios.tolist()
@@ -1109,19 +1105,13 @@ class OutlierDetector(DetectorBase):
 
         # calculate whether channels were statistically significant
         significant_size = [
-            batch_size / total_batches >= self.statistical_threshold for batch_size in num_batches_list
+            batch_size / total_batches >= self.fraction_batches_used_threshold for batch_size in num_batches_list
         ]
-        outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
-
-        # calculate whether there were constant batches through channels
-        is_constant_channel = [
-            True if channel_batch_count != 0 else False for channel_batch_count in constant_channels
-        ]
+        outlier_dict[self.IS_SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate for each channel whether it's an outlier or not based on ratio
         outlier_detected = [ratio > self.ratio_threshold for ratio in ratios_list]
         outlier_dict[self.OUTLIER_KEY] = outlier_detected
-        outlier_dict[self.CONSTANT_CHANNEL_KEY] = is_constant_channel
 
         # return the dictionary with the two lists
         return outlier_dict
@@ -1137,12 +1127,11 @@ class OutlierDetector(DetectorBase):
         Returns a dict mapping relavent module fqns to:
             whether there were outliers found in activation before
             the number of batches used for each channel
-            whether fraction of applicable batches used is above statistical_threshold
+            whether fraction of applicable batches used is above fraction_batches_used_threshold
             their p_r metric compared to the threshold
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
             the channel axis used to determine individual channels
-            whether each channel had any constant value batches
             the constant batch counts per channel
             the per channel max values
         """
@@ -1178,7 +1167,7 @@ class OutlierDetector(DetectorBase):
                         # if it's less than 1 we have the flip it as well
                         average_ratios[index] = 1 / ratio_val
 
-                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches, total_batches, channel_batch_cnts)
+                outlier_calcs = self._calculate_outlier_info(average_ratios, num_batches, total_batches)
 
                 # calculate whether ratios were outliers
                 info_dict[fqn] = {
@@ -1188,8 +1177,7 @@ class OutlierDetector(DetectorBase):
                     self.COMP_METRIC_KEY: average_ratios,
                     self.NUM_BATCHES_KEY: num_batches,
                     self.OUTLIER_KEY: outlier_calcs[self.OUTLIER_KEY],
-                    self.SUFFICIENT_BATCHES_KEY: outlier_calcs[self.SUFFICIENT_BATCHES_KEY],
-                    self.CONSTANT_CHANNEL_KEY: outlier_calcs[self.CONSTANT_CHANNEL_KEY],
+                    self.IS_SUFFICIENT_BATCHES_KEY: outlier_calcs[self.IS_SUFFICIENT_BATCHES_KEY],
                     self.CONSTANT_COUNTS_KEY: channel_batch_cnts,
                     self.MAX_VALS_KEY: max_vals
                 }
@@ -1210,12 +1198,11 @@ class OutlierDetector(DetectorBase):
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
                 the number of batches used for each channel
-                whether fraction of applicable batches used is above statistical_threshold
+                whether fraction of applicable batches used is above fraction_batches_used_threshold
                 their p_r metric compared to the threshold
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
                 the channel axis used to determine individual channels
-                whether each channel had any constant value batches
                 the constant batch counts per channel
                 the per channel max values
         """
@@ -1262,14 +1249,14 @@ class OutlierDetector(DetectorBase):
                     outlier_string += channel_str
 
                 # also check if we found constant batch
-                if mod_info[self.CONSTANT_CHANNEL_KEY][index]:
+                if mod_info[self.CONSTANT_COUNTS_KEY][index] != 0:
                     # make sure we add a module level highlight.
                     if not added_model_desc:
                         # add the module level description
                         outlier_string += module_suggestion_str.format(module_fqn, self.ch_axis)
                         added_model_desc = True
 
-                    constant_values_for_channel = mod_info[self.CONSTANT_COUNTS_KEY]
+                    constant_values_for_channel = mod_info[self.CONSTANT_COUNTS_KEY][index]
                     formatted_str = constant_str.format(index, constant_values_for_channel, constant_suggestion)
                     outlier_string += formatted_str
                     # we also added at least one thing to description
