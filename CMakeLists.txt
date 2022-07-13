@@ -44,6 +44,10 @@ if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+  else()
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
+    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 endif()
 
@@ -308,6 +312,14 @@ option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_UCC "Use UCC. Only available if USE_DISTRIBUTED is on." OFF
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_UCC "Use system-wide UCC" OFF
+    "USE_UCC" OFF)
+cmake_dependent_option(
+    USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
