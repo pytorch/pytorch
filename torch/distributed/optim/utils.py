@@ -28,9 +28,9 @@ functional_optim_map = {
 # Interface to insert a new functional optimizer to functional_optim_map
 # Example::
 #     >>> import the new functional optimizer
-#     >>> from xyz import new_optimizer
+#     >>> from xyz import fn_optimizer
 #     >>> from torch.distributed.optim.utils import register_functional_optim
-#     >>>     register_functional_optim(new_optimizer,new_optimizer)
+#     >>>     register_functional_optim(key,fn_optimizer)
 
 def register_functional_optim(key,optim):
     if key not in functional_optim_map:
