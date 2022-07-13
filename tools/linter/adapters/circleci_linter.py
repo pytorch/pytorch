@@ -2,15 +2,15 @@
 Checks that the configuration in .circleci/config.yml has been properly regenerated.
 """
 
-import os
 import argparse
+import json
+import logging
+import os
 import subprocess
 import sys
-import logging
 import time
 from enum import Enum
 from typing import List, NamedTuple, Optional
-import json
 
 
 CHECKED_IN_FILE = "config.yml"
