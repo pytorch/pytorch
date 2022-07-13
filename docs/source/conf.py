@@ -646,7 +646,7 @@ def patched_make_field(self, types, domain, items, **kw):
                 typename = fieldtype[0].astext()
                 builtin_types = ['int', 'long', 'float', 'bool', 'type']
                 for builtin_type in builtin_types:
-                    re.sub(fr'\b{builtin_type}\b', f'python:{builtin_type}', typename)
+                    typename = re.sub(fr'\b{builtin_type}\b', f'python:{builtin_type}', typename)
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis, **kw))
             else:
