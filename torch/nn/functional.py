@@ -2950,6 +2950,7 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
+    dim: Optional[int] = 1    
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input logits and target.
 
@@ -3016,6 +3017,8 @@ def cross_entropy(
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
+    if dim is not None:
+        input = input.swapaxes(dim, 1)
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             cross_entropy,
