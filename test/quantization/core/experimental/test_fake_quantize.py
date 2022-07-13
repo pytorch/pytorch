@@ -51,7 +51,7 @@ class TestFakeQuantize(unittest.TestCase):
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
         # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
-        X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
+        X_to_apot, mask = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
         X_expected = dequantize_APoT(X_to_apot)
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
