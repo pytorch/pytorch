@@ -79,20 +79,24 @@ bool SchemaInfo::is_mutable(size_t index) {
   return std::any_of(
       input_alias_map_[index].begin(),
       input_alias_map_[index].end(),
-      [this](size_t index) {
+      [this](size_t aliasing_index) {
         if (batch_norm_schema == this->schema_ &&
-            (this->schema_.arguments()[index].name() == "running_mean" ||
-             this->schema_.arguments()[index].name() == "running_var")) {
+            (this->schema_.arguments()[aliasing_index].name() ==
+                 "running_mean" ||
+             this->schema_.arguments()[aliasing_index].name() ==
+                 "running_var")) {
           return value_map_.count("training") &&
               value_map_.at("training").toBool();
         } else if (
             instance_norm_schema == this->schema_ &&
-            (this->schema_.arguments()[index].name() == "running_mean" ||
-             this->schema_.arguments()[index].name() == "running_var")) {
+            (this->schema_.arguments()[aliasing_index].name() ==
+                 "running_mean" ||
+             this->schema_.arguments()[aliasing_index].name() ==
+                 "running_var")) {
           return value_map_.count("use_input_stats") &&
               value_map_.at("use_input_stats").toBool();
         } else {
-          return this->schema_.is_mutable(index);
+          return this->schema_.is_mutable(aliasing_index);
         }
       });
 }
