@@ -60,7 +60,6 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
-from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -72,6 +71,7 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+    ParamInfo,
 )
 from .wrap import (
     _or_policy,
@@ -85,6 +85,12 @@ try:
     from torchdistx import deferred_init, fake
 except ImportError:
     _TORCHDISTX_AVAIL = False
+
+_TORCH_FX_AVAIL = True
+if not hasattr(torch, "fx"):
+    _TORCH_FX_AVAIL = False
+if _TORCH_FX_AVAIL:
+    from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 
 
 __all__ = [
@@ -938,7 +944,11 @@ class FullyShardedDataParallel(nn.Module):
         auto_wrap_policy = kwargs["auto_wrap_policy"]
         module = kwargs["module"]
         assert hasattr(auto_wrap_policy, "tracing_config")
-        if isinstance(
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
             auto_wrap_policy.tracing_config,
             TracingConfig
         ):
@@ -962,6 +972,10 @@ class FullyShardedDataParallel(nn.Module):
                         "tracer.trace failed inside _init_param_exec_order_wrap_policy"
                         f" with the error: {e}."
                     )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
@@ -970,7 +984,7 @@ class FullyShardedDataParallel(nn.Module):
         self._param_exec_order_prep_stage: bool = True
         # A list that stores the flatten parameters and its name based on the parameter execution order
         self._fsdp_params_exec_order: List[FlatParameter] = []
-        if isinstance(
+        if _TORCH_FX_AVAIL and isinstance(
             auto_wrap_policy.tracing_config,
             TracingConfig
         ):
@@ -987,10 +1001,6 @@ class FullyShardedDataParallel(nn.Module):
                     for flat_param in module_to_fsdp[m].params:
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
-        else:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should either be an instance of TracingConfig or be None"
 
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
@@ -1945,8 +1955,12 @@ class FullyShardedDataParallel(nn.Module):
 
         # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
         # processing buffers.
+        sharded_param_info = [
+            ParamInfo(info[0], info[2], info[3])
+            for info in self._fsdp_wrapped_module.orig_flat_param[0]._shared_param_infos
+        ]
         for module_name, _, param_name in (
-            self._fsdp_wrapped_module.orig_flat_param[0].param_info
+            self._fsdp_wrapped_module.orig_flat_param[0].param_info + sharded_param_info
         ):
             module_name = module_name.replace(f"{FPW_MODULE}.", "")
             module_name = module_name.replace(f"{FPW_MODULE}", "")

@@ -1,12 +1,14 @@
 # Owner(s): ["oncall: fx"]
-
+import operator
 import unittest
 from torch.fx import GraphModule, symbolic_trace
+from torch.fx.experimental.meta_tracer import symbolic_trace as meta_symbolic_trace
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, T
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
 from torch.fx.experimental.migrate_gradual_types.operation import op_precision, op_matching, op_consistency
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints
+from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints,\
+    evaluate_conditional_with_constraints
 from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
@@ -29,6 +31,151 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class HFOperations(unittest.TestCase):
+
+    def test_cumsum(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4, 3])):
+                t = torch.cumsum(x, 3)
+                return t
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        # should be unsat since the index is not valid for this annotation
+        self.assertEqual(s.check(), z3.unsat)
+
+        # modify the annotation to Dyn which should give sat
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        # # modify the annotation to the right tensor size
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([1, 2, 3, 4])
+
+        # verify that the input is equal to the output
+        B = BasicBlock().forward(torch.rand(1, 2, 3, 4))
+        res_shape = B.shape
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        # confirm the output matches the expected tensor
+        result = z3.Const(2, tensor_type)
+        self.assertEqual(s.model()[result].arg(0).arg(1), res_shape[0])
+        self.assertEqual(s.model()[result].arg(1).arg(1), res_shape[1])
+        self.assertEqual(s.model()[result].arg(2).arg(1), res_shape[2])
+        self.assertEqual(s.model()[result].arg(3).arg(1), res_shape[3])
+
+        # confirm the output is not dyn
+        self.assertNotEqual(s.model()[result].arg(0).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(1).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(2).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(3).arg(0).as_long(), 0)
+
+
+    def test_cumsum_kwargs(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4, 3])):
+                t = torch.cumsum(x, dim=3)
+                return t
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        # should be unsat since the index is not valid for this annotation
+        self.assertEqual(s.check(), z3.unsat)
+
+        # modify the annotation to Dyn which should give sat
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+
+    def test_arange(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                arange = torch.arange(getitem)
+                return arange
+
+        B = BasicBlock().forward(torch.rand(2, 4))
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        arange_result = z3.Const(5, tensor_type)
+        self.assertNotEqual(s.model()[arange_result].arg(0).arg(0).as_long(), 0)
+        self.assertEqual(s.model()[arange_result].arg(0).arg(1).as_long(), B.size()[0])
+
+        # change the annotation to Dyn. This will migrate to an arbitirary type
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn, Dyn, Dyn])
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+    def test_scalar_add(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                arange = torch.arange(getitem)
+                add = arange + 1
+                return add
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        arange_result = z3.Const(5, tensor_type)
+        add_result = z3.Const(6, tensor_type)
+        self.assertEqual(s.model()[arange_result], s.model()[add_result])
 
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
@@ -78,6 +225,7 @@ class HFOperations(unittest.TestCase):
 
         self.assertEquals(s.check(), z3.sat)
 
+
     def test_size_two_args(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -109,6 +257,7 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
         self.assertEqual(s.model()[d5], s.model()[d2])
         self.assertEqual(s.model()[d1], s.model()[d4])
+
 
     def test_size_getitem(self):
         class BasicBlock(torch.nn.Module):
@@ -168,7 +317,6 @@ class HFOperations(unittest.TestCase):
 
         self.assertEquals(s.check(), z3.unsat)
 
-
     def test_view_mul(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -183,7 +331,6 @@ class HFOperations(unittest.TestCase):
                 mul = embed_tokens * 32.0
                 return mul
 
-        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long)).size()
 
         # print(B)
 
@@ -208,6 +355,142 @@ class HFOperations(unittest.TestCase):
 
         mul_result = z3.Const(12, tensor_type)
         assert s.model()[mul_result] == s.model()[embedding_result]
+
+    def test_gt(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem_1 = size[-1]
+                gt = getitem_1 > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+        res = z3.Bool(4)
+        self.assertEqual(s.model()[res], True)
+
+    def test_view(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                view = x.view(-1, 8)
+                return view
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+    def test_conditional(self):
+        """
+        This test case is for the HFmodels interface.
+        A function takes a node and a graph and considers
+        the conditional the node represents and its negation
+        and solves each formula with the remaining sets of constraints
+        Returns:
+
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                getitem_1 = size[-1]
+                gt = getitem_1 > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.gt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.unsat)
+
+        # change the annotation to Dyn
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        # here, both should be SAT since the input is Dyn
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
+
+        # change the annotation to TensorType[Dyn, Dyn]
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn])
+
+        # here, both should be SAT as well
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
+
+    def test_conditional_2(self):
+        """
+        This test case is for the HFmodels interface.
+        A function takes a node and a graph and considers
+        the conditional the node represents and its negation
+        and solves each formula with the remaining sets of constraints
+        Returns the opposite result of the above testcase
+
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                getitem_1 = size[-1]
+                lt = getitem_1 < 1
+                return lt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.lt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+        self.assertEqual(positive, z3.unsat)
+        self.assertEqual(negative, z3.sat)
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
