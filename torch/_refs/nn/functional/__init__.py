@@ -507,6 +507,7 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
     else:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
+
 @register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
@@ -544,6 +545,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
 
 @register_decomposition(torch.ops.aten.relu6)
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
