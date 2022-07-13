@@ -4,8 +4,6 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from .gen_inplace_or_view_type import VIEW_FUNCTIONS
-
 from typing import List, Sequence, Tuple
 
 from torchgen.api.autograd import (
@@ -16,25 +14,27 @@ from torchgen.api.autograd import (
     uses_single_grad,
 )
 from torchgen.api.types import (
-    Binding,
+    ArrayRefCType,
     BaseCType,
-    OptionalCType,
-    tensorT,
-    longT,
+    Binding,
+    boolT,
     doubleT,
+    intArrayRefT,
+    ListCType,
+    longT,
+    MutRefCType,
+    OptionalCType,
+    optionalIntArrayRefT,
     scalarT,
     stringT,
-    boolT,
-    intArrayRefT,
     tensorListT,
-    MutRefCType,
-    ListCType,
-    ArrayRefCType,
-    optionalIntArrayRefT,
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.utils import FileManager
 from torchgen.model import Argument
+from torchgen.utils import FileManager
+
+from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
