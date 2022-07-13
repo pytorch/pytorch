@@ -1581,6 +1581,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
     }
 
     @parametrize("op", ref_ops_names)

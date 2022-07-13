@@ -11293,6 +11293,7 @@ op_db: List[OpInfo] = [
                    check_batched_forward_grad=False,
                    supports_out=False),
     UnaryUfuncInfo('conj_physical',
+                   decomp_aten_name='_conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                     torch.half, torch.chalf),
@@ -20245,6 +20246,11 @@ python_ref_db = [
         torch_opinfo_name="ceil",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.conj_physical",
+        torch_opinfo_name="conj_physical",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.cos",
         torch_opinfo_name="cos",
     ),
@@ -21054,6 +21060,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.conj",
+        torch_opinfo_name="conj",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
