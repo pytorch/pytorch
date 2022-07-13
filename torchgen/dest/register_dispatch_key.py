@@ -739,7 +739,7 @@ resize_out(out, sizes, strides, options);
         )
 
         # Signature of the wrapper function we'll register to the dispatcher
-        sig = NativeSignature(f.func, prefix="wrapper_")
+        sig = NativeSignature.from_function(f, prefix="wrapper_")
 
         if self.target is Target.NAMESPACED_DECLARATION:
             result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
