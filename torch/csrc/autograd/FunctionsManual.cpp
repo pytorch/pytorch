@@ -4068,11 +4068,11 @@ Tensor masked_fmap(
     return f2(t, ts...);
   } else {
     // Equivalent to
-    // ret = t.new_empty(t.shape)
+    // ret = torch.empty_like(t)
     // ret[mask] = f1(t1[mask], ..., tn[mask])
     // ret[~mask] = f2(t1[~mask], ..., tn[~mask])
     auto not_mask = mask.logical_not();
-    return t.new_empty(t.sizes())
+    return at::empty_like(t)
         .index_put_({mask}, f1(t_masked, ts.index({mask})...))
         .index_put_(
             {not_mask}, f2(t.index({not_mask}), ts.index({not_mask})...));
