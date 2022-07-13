@@ -17,6 +17,10 @@ class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    device_list = ['cpu']  # TODO: is there a way to do parametrize for this?
+    if TEST_CUDA:
+        device_list.append('cuda')
+
     @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")  # TODO: make this work for both cuda and cpu
     def test_self_attn_TxT_attn_mask(self):
@@ -44,16 +48,8 @@ class TestTransformers(NNTestCase):
 
             self.assertEqual(output_mask_4d, output_mask_TxT)
 
-    @parametrize("use_cuda", [True, False])
-    def test_transformerencoderlayer_src_mask(self, use_cuda=False):
-        if use_cuda and not TEST_CUDA:
-            return  # skip if want to use cuda but no cuda
-
-        if TEST_CUDA:
-            device = "cuda"
-        else:
-            device = "cpu"
-
+    @parametrize("device", device_list)
+    def test_transformerencoderlayer_src_mask(self, device):
         batch_size = 2
         seqlen = 4
         d_model = 8
@@ -94,21 +90,68 @@ class TestTransformers(NNTestCase):
         mask = torch.Tensor([[0, 1]]).to(torch.bool)
 
         if with_no_grad:
-            with torch.no_grad():
-                model(x, src_key_padding_mask=mask)
+            cm = torch.no_grad()
         else:
+            cm = contextlib.nullcontext()
+        with cm:
             model(x, src_key_padding_mask=mask)
+
+    @parametrize("with_no_grad", [True, False])
+    @parametrize("training", [True, False])
+    @parametrize("enable_nested_tensor", [False])
+    @parametrize("device", device_list)
+    def test_transformerencoder_square_input(self, with_no_grad, training, enable_nested_tensor, device):
+        """
+        Test for edge cases when input of shape (batch size, sequence length, embedding dimension) has
+        batch size == sequence length
+        """
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(d_model=4, nhead=2, dim_feedforward=16, dropout=0.0, batch_first=True),
+            num_layers=2,
+            enable_nested_tensor=enable_nested_tensor
+        ).to(device)
+
+        with torch.no_grad():
+            # set constant weights of the model
+            for idx, p in enumerate(model.parameters()):
+                x = p.data
+                sz = x.view(-1).size(0)
+                shape = x.shape
+                x = torch.cos(torch.arange(0, sz).float().view(shape))
+                p.data.copy_(x)
+
+        if training:
+            model = model.train()
+        else:
+            model = model.eval()
+        x = torch.arange(0, 16).reshape(2, 2, 4).to(torch.float).to(device)
+        src_mask = torch.Tensor([[0, 1], [0, 0]]).to(torch.bool).to(device)
+
+        if with_no_grad:
+            cm = torch.no_grad()
+        else:
+            cm = contextlib.nullcontext()
+        with cm:
+            result = model(x, mask=src_mask)
+
+        ref_output = torch.Tensor([[[2.420306205749512, 0.017629241570830, -0.607857942581177, -0.085519507527351],
+                                    [2.420306205749512, 0.017629241570830, -0.607857942581177, -0.085519507527351]],
+                                    [[2.419836044311523, 0.017548924311996, -0.608187675476074, -0.085347734391689],
+                                    [2.419836044311523, 0.017548924311996, -0.608187675476074, -0.085347734391689]]]
+                                ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
     @parametrize("batch_first", [True, False])
     @parametrize("training", [True, False])
     @parametrize("enable_nested_tensor", [True, False])
-    def test_transformerencoder(self, batch_first, training, enable_nested_tensor):
-        def get_a_test_layer(use_cuda, activation, batch_first=False):
+    @parametrize("device", device_list)
+    def test_transformerencoder(self, batch_first, training, enable_nested_tensor, device):
+        def get_a_test_layer(activation, batch_first=False):
             d_model = 4
             nhead = 2
             dim_feedforward = 16
             dropout = 0.0
-            device = torch.device("cuda" if use_cuda else "cpu")
 
             layer = nn.TransformerEncoderLayer(
                 d_model,
@@ -132,14 +175,12 @@ class TestTransformers(NNTestCase):
 
         # this is a deterministic test for TransformerEncoder
         activation = F.relu
-        use_cuda = torch.cuda.is_available()
-        device = torch.device("cuda" if use_cuda else "cpu")
 
         def _test(batch_first, training, enable_nested_tensor):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
-            encoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
+            encoder_layer = get_a_test_layer(activation=activation,
                                              batch_first=batch_first)
 
             model = nn.TransformerEncoder(encoder_layer, 1).to(device)
