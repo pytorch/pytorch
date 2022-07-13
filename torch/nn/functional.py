@@ -2950,7 +2950,7 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
-    dim: Optional[int] = None,   
+    dim: Optional[int] = None,  
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input logits and target.
 
