@@ -14,9 +14,10 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/native/quantized/cudnn/utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -50,7 +51,7 @@ struct CacheKey {
   int8_t bias_alignment;
   bool kReluFused;
 };
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
+std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
@@ -90,16 +91,11 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 template <int kSpatialDim>
 template <bool kReluFused>
 void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
-  if (quantized_output.numel() == 0) {
-    return;
-  }
-  at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  // TODO: combine empty & fill_ using full_like or full
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   auto act_scale = input.q_scale();
   auto weight_scale = maybe_padded_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, kSpatialDim + 2);
+
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
@@ -135,7 +131,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // set the datatype for output tensor to int32 or fp32
   key.params.dataType = CUDNN_DATA_INT32;
   key.input_alignment = cudnn_utils::getAlignment(input);
-  key.output_alignment = cudnn_utils::getAlignment(conv_output);
+  key.output_alignment = cudnn_utils::getAlignment(quantized_output);
   key.weight_alignment = cudnn_utils::getAlignment(maybe_padded_weight_);
   if (bias_.has_value()) {
     key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
@@ -144,42 +140,31 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   }
   key.kReluFused = kReluFused;
 
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
-    auto workspace_size = 0;
-    auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
-    std::vector<void *> data_ptrs;
-    std::vector<int64_t> uids;
-    data_ptrs.reserve(10);
-    uids.reserve(10);
-    data_ptrs = {input.data_ptr<int8_t>(), conv_output.data_ptr(), maybe_padded_weight_.data_ptr<int8_t>(),
+  auto run = [&](const cudnn_frontend::ExecutionPlan& plan_desc) {
+    auto workspace_size = plan_desc.getWorkspaceSize();
+    auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+    at::SmallVector<void *, 7> data_ptrs;
+    at::SmallVector<int64_t, 7> uids;
+    data_ptrs = {input.data_ptr<int8_t>(), maybe_padded_weight_.data_ptr<int8_t>(),
                  requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
-    uids = {'x', 'y', 'w', 's', 'r'};
+    uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         broadcasted_bias.value().data_ptr(), conv_output.data_ptr()});
-      uids.insert(uids.end(), {'b', 'c', 'd', 'e'});
-      if (kReluFused) {
-        data_ptrs.emplace_back(conv_output.data_ptr()),
-        uids.emplace_back('f');
-      }
-    } else {
-      if (kReluFused) {
-        data_ptrs.emplace_back(conv_output.data_ptr());
-        uids.emplace_back('f');
-      }
+                                         broadcasted_bias.value().data_ptr()});
+      uids.insert(uids.end(), {'b', 'c', 'd'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(uids.size(), data_ptrs.data())
       .setUids(uids.size(), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc->get_backend_descriptor(), variant_pack_desc));
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
   };
 
   auto search = execution_plan_cache.find(key);
   if (search != execution_plan_cache.end()) {
-    cudnn_frontend::ManagedOpaqueDescriptor plan_desc = search->second;
+    cudnn_frontend::ExecutionPlan plan_desc = search->second;
     run(plan_desc);
     return;
   }
@@ -188,7 +173,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // output is a fp32 tensor
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
-      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'y', key.output_alignment))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'y', key.output_alignment, true))
       .setwDesc(cudnn_utils::getTensorDescriptor(maybe_padded_weight_.sizes(), maybe_padded_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding_vec, stride_vec, dilation_vec))
       .build();
@@ -213,13 +199,14 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
       .build());
 
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
-    // where the 1st and 2nd summands is conv_output and broadcasted_bias, resp.
+    // where the 1st and 2nd summands is output of conv_op and broadcasted_bias, resp.
     // output is a fp32 tensor
     // we use inplace operation here where the output is assigned to the input
     sum_conv_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(conv_op.getOutputTensor())
       .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
-      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'e', key.output_alignment))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'e', key.output_alignment, true))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
       .build());
   }
@@ -233,8 +220,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'f', key.output_alignment))
-      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(at::native::getCudnnDataType(conv_output)))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'f', key.output_alignment, true))
+      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(CUDNN_DATA_FLOAT))
       .build());
   }
 
@@ -244,7 +232,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : tensor2requant_ptr)
     .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', cudnn_utils::getAlignment(quantized_output)))
+    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', key.output_alignment))
     .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
@@ -287,9 +275,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
         .setHandle(handle)
         .setEngineConfig(cfg)
         .build();
-      auto plan_desc = plan.get_desc();
-      run(plan_desc);
-      execution_plan_cache[key] = plan_desc;
+      run(plan);
+      execution_plan_cache.emplace(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }

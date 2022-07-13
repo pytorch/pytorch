@@ -3,8 +3,8 @@
 #include <Python.h>
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
 namespace lazy {
@@ -42,5 +42,5 @@ std::vector<SourceLocation> GetPythonFrames() {
   return frames;
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

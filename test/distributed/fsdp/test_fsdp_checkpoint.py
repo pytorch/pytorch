@@ -27,6 +27,25 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint
 
+_save_on_cpu_called = False
+def get_patched_save_on_cpu():
+    orig_save_on_cpu = torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+
+    def patched_save_on_cpu(*args, **kwargs):
+        global _save_on_cpu_called
+        _save_on_cpu_called = True
+        return orig_save_on_cpu(*args, **kwargs)
+
+    return patched_save_on_cpu
+
+@contextlib.contextmanager
+def patch_save_on_cpu(new_save_on_cpu):
+    orig_save_on_cpu = torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+    torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = new_save_on_cpu
+    try:
+        yield
+    finally:
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = orig_save_on_cpu
 
 class TestFSDPCheckpoint(FSDPTest):
     class SequentialModule(nn.Module):
@@ -113,35 +132,26 @@ class TestFSDPCheckpoint(FSDPTest):
         # flag set.
         inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
 
+        global _save_on_cpu_called
         models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
-
-        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
-
-        for i in range(2):
-            losses = []
-            outputs = []
-            for m in models:
-                check_offload = m != baseline and i == 0 and offload_activations
-                profiler_ctx = (
-                    torch.profiler.profile(use_cuda=True)
-                    if check_offload
-                    else contextlib.suppress()
-                )
-                with profiler_ctx as prof:
+        with patch_save_on_cpu(get_patched_save_on_cpu()):
+            for i in range(2):
+                losses = []
+                outputs = []
+                for m in models:
+                    check_offload = m != baseline and i == 0 and offload_activations
+                    if check_offload:
+                        self.assertFalse(_save_on_cpu_called)
                     out = m(inp)
+                    if check_offload:
+                        self.assertTrue(_save_on_cpu_called)
+                        _save_on_cpu_called = False
+                    loss = out.sum()
+                    loss.backward()
+                    losses.append(loss)
+                    outputs.append(out)
 
-                if check_offload:
-                    event_names = [event.name for event in prof.events()]
-                    offload_occured = any(
-                        offload_to_cpu_event in name for name in event_names
-                    )
-                    self.assertTrue(offload_occured)
-                loss = out.sum()
-                loss.backward()
-                losses.append(loss)
-                outputs.append(out)
-
-            self._verify_parity(losses, outputs, models)
+                self._verify_parity(losses, outputs, models)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -150,69 +160,65 @@ class TestFSDPCheckpoint(FSDPTest):
     )
     @parametrize("offload_activations", [True, False])
     def test_basic_checkpoint_end_to_end(self, cpu_offload, offload_activations):
-        seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
-        # Runs FSDP with no checkpointing
-        fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
-        # Runs checkpoint-wrapped FSDP
-        checkpointed_fsdp = checkpoint_wrapper(
-            FSDP(deepcopy(seq), cpu_offload=cpu_offload),
-            offload_to_cpu=offload_activations,
-        )
-        # Runs FSDP-wrapped checkpointed module
-        fsdp_wrapped_checkpoint = FSDP(
-            checkpoint_wrapper(deepcopy(seq), offload_to_cpu=offload_activations),
-            cpu_offload=cpu_offload,
-        )
-        # Runs FSDP with manual calls to checkpoint.
-        fsdp_call_checkpoint = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
-        # note that reentrant-based checkpointing requires inputs to have grad
-        # flag set.
+        global _save_on_cpu_called
+        with patch_save_on_cpu(get_patched_save_on_cpu()):
+            seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
+            # Runs FSDP with no checkpointing
+            fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
+            # Runs checkpoint-wrapped FSDP
+            checkpointed_fsdp = checkpoint_wrapper(
+                FSDP(deepcopy(seq), cpu_offload=cpu_offload),
+                offload_to_cpu=offload_activations,
+            )
+            # Runs FSDP-wrapped checkpointed module
+            fsdp_wrapped_checkpoint = FSDP(
+                checkpoint_wrapper(deepcopy(seq), offload_to_cpu=offload_activations),
+                cpu_offload=cpu_offload,
+            )
+            # Runs FSDP with manual calls to checkpoint.
+            fsdp_call_checkpoint = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
+            # note that reentrant-based checkpointing requires inputs to have grad
+            # flag set.
 
-        inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
+            inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
 
-        models = [
-            fsdp_only_seq,
-            checkpointed_fsdp,
-            fsdp_wrapped_checkpoint,
-            fsdp_call_checkpoint,
-        ]
-
-        offload_to_cpu_event = "Memcpy DtoH" if torch.version.cuda else "CopyDeviceToHost"
-
-        for i in range(6):
-            losses = []
-            outputs = []
-            for m in models:
-                check_offload = m != fsdp_only_seq and i == 0 and offload_activations
-                profiler_ctx = (
-                    torch.profiler.profile(use_cuda=True)
-                    if check_offload
-                    else contextlib.suppress()
-                )
-                with profiler_ctx as prof:
+            models = [
+                fsdp_only_seq,
+                checkpointed_fsdp,
+                fsdp_wrapped_checkpoint,
+                fsdp_call_checkpoint,
+            ]
+            # Ensure _save_on_cpu is not yet called
+            self.assertFalse(_save_on_cpu_called)
+            for i in range(6):
+                losses = []
+                outputs = []
+                for m in models:
+                    check_offload = m != fsdp_only_seq and i == 0 and offload_activations
                     if m == fsdp_call_checkpoint:
+                        # _save_on_cpu should not be called yet
+                        self.assertFalse(_save_on_cpu_called)
                         offload_ctx = (
-                            torch.autograd.graph.save_on_cpu(pin_memory=True)
+                            get_patched_save_on_cpu()(pin_memory=True)
                             if offload_activations
                             else contextlib.suppress()
                         )
                         with offload_ctx:
                             out = checkpoint(m, inp)
                     else:
+                        # _save_on_cpu should not be called yet
+                        self.assertFalse(_save_on_cpu_called)
                         out = m(inp)
 
-                if check_offload:
-                    event_names = [event.name for event in prof.events()]
-                    offload_occured = any(
-                        offload_to_cpu_event in name for name in event_names
-                    )
-                    self.assertTrue(offload_occured)
-                loss = out.sum()
-                loss.backward()
-                losses.append(loss)
-                outputs.append(out)
+                    if check_offload:
+                        self.assertTrue(_save_on_cpu_called)
+                    loss = out.sum()
+                    loss.backward()
+                    losses.append(loss)
+                    outputs.append(out)
+                    _save_on_cpu_called = False
 
-            self._verify_parity(losses, outputs, models)
+                self._verify_parity(losses, outputs, models)
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
 

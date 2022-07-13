@@ -12,7 +12,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
 
@@ -1678,7 +1678,9 @@ class TestFrozenOptimizations(JitTestCase):
         scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction", "amt"])
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
-    @unittest.skipIf(True, "Caching allocator leak sometimes causes failures")
+    # During freezing this creates tensors constants that are attached to the frozen graph,
+    # which is then kept alive by the compilation unit (which causes a leak)
+    @skipCUDAMemoryLeakCheckIf(True)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_conv_bn_folding_autocast_scenario_cuda(self):
         # CUDA conv takes input tensors which must all be the same dtype,

@@ -1552,6 +1552,23 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
     ``True``.
 
+    .. warning::
+
+        :func:`torch.lu` is deprecated in favor of :func:`torch.linalg.lu_factor`
+        and :func:`torch.linalg.lu_factor_ex`. :func:`torch.lu` will be removed in a
+        future PyTorch release.
+        ``LU, pivots, info = torch.lu(A, compute_pivots)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots = torch.linalg.lu_factor(A, compute_pivots)
+
+        ``LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)
+
     .. note::
         * The returned permutation matrix for every matrix in the batch is
           represented by a 1-indexed vector of size ``min(A.shape[-2], A.shape[-1])``.

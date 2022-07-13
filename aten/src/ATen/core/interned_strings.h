@@ -14,6 +14,7 @@ namespace c10 {
 
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
+  _(namespaces, prims)               \
   _(namespaces, aten)                \
   _(namespaces, cuda)                \
   _(namespaces, onnx)                \
@@ -51,6 +52,7 @@ namespace c10 {
   _(prim, reshape_copy)              \
   _(prim, squeeze_copy)              \
   _(prim, unsqueeze_copy)            \
+  _(prim, flatten_copy)              \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \

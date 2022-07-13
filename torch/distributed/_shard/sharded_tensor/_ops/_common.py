@@ -1,52 +1,10 @@
 import functools
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
     Shard,
     ShardedTensor,
 )
-from torch.distributed._shard.partial_tensor import _PartialTensor
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
-from torch.utils._pytree import tree_map
-
-def _basic_validation(op, args=(), kwargs=None):
-    """
-    Common validation across all ops go in here.
-    """
-    if len(args) == 0 and (kwargs is None or len(kwargs) == 0):
-        raise ValueError(f" No input for '{op.__name__}'!")
-
-    # Validate types
-    has_distributed_tensor = False
-
-    def is_distributed_tensor(e):
-        nonlocal has_distributed_tensor
-        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor) or isinstance(e, ShardedTensor):
-            has_distributed_tensor = True
-
-    tree_map(is_distributed_tensor, args)
-    tree_map(is_distributed_tensor, kwargs)
-
-    if not has_distributed_tensor:
-        raise TypeError(
-            f"torch function '{op.__name__}', with args: {args} and "
-            f"kwargs: {kwargs} are called without any distributed tensor!"
-        )
-
-    # Validate all distributed tensors use the same PG.
-    cur_pg = None
-
-    def validate_pg(e):
-        nonlocal cur_pg
-        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor) or isinstance(e, ShardedTensor):
-            if cur_pg is not None and e._process_group is not cur_pg:
-                raise RuntimeError(
-                    'All distributed tensors should use the '
-                    'same ProcessGroup if used together in an op.'
-                )
-            cur_pg = e._process_group
-
-    tree_map(validate_pg, args)
-    tree_map(validate_pg, kwargs)
+from torch.distributed._shard.common_op_utils import _basic_validation
 
 def _sharded_op_common(op, early_stop_func, extra_check):
     """
@@ -55,7 +13,7 @@ def _sharded_op_common(op, early_stop_func, extra_check):
 
     Example::
         >>> op = torch.transpose
-        >>> @sharded_op_impl(op)
+        >>> @_sharded_op_impl(op)
         >>> @_sharded_op_common(op, early_stop_func, extra_check)
         >>> def sharded_tensor_op(types, args, kwargs, process_group):
         >>>   ....
@@ -124,7 +82,7 @@ def _register_sharded_op_on_local_shards(
         func (Callable): registered implementation for sharded op for
         ``__torch_function__`` dispatch.
     """
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     @_sharded_op_common(op, early_stop_func, extra_check)
     def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
         st = args[0]

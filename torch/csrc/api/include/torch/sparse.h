@@ -3,6 +3,5 @@
 #include <ATen/ATen.h>
 
 namespace torch {
-namespace sparse {
-
-}} // torch::sparse
+namespace sparse {}
+} // namespace torch

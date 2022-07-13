@@ -64,16 +64,22 @@ class RNNCellBase(nn.RNNCellBase):
             assert weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
                 Exception(f"qscheme: {weight_qscheme} is not support in {self._get_name()}")
             if weight_qscheme is not None:
-                self.register_buffer(
-                    key + "_scale",
-                    torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
-                self.register_buffer(
-                    key + "_zero_point",
-                    torch.tensor(weight_qparams["zero_point"], dtype=torch.int, device=device))
+                scale = weight_qparams["scale"]
+                scale_tensor = scale.clone().detach() \
+                    if isinstance(scale, torch.Tensor) else \
+                    torch.tensor(scale, dtype=torch.float, device=device)
+                self.register_buffer(key + "_scale", scale_tensor)
+                zp = weight_qparams["zero_point"]
+                zp_tensor = zp.clone().detach() \
+                    if isinstance(zp, torch.Tensor) else \
+                    torch.tensor(zp, dtype=torch.int, device=device)
+                self.register_buffer(key + "_zero_point", zp_tensor)
                 if weight_qscheme == torch.per_channel_affine:
-                    self.register_buffer(
-                        key + "_axis",
-                        torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
+                    axis = weight_qparams["axis"]
+                    axis_tensor = axis.clone().detach() \
+                        if isinstance(axis, torch.Tensor) else \
+                        torch.tensor(axis, dtype=torch.int, device=device)
+                    self.register_buffer(key + "_axis", axis_tensor)
                 else:
                     # added for TorchScriptability, not used
                     self.register_buffer(

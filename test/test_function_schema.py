@@ -15,6 +15,12 @@ class TestFunctionSchema(TestCase):
             self.assertEqual(parsed_schema, schema)
             self.assertTrue(parsed_schema.is_backward_compatible_with(schema))
 
+    def test_out_schema(self):
+        schema_with_out = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertTrue(schema_with_out.arguments[-1].is_out)
+        schema_without_out = parse_schema('any.not_out(Tensor self, Tensor b) -> Tensor')
+        self.assertFalse(schema_without_out.arguments[-1].is_out)
+
     def test_backward_compatible_structure(self):
         old_schema = parse_schema('any.over(Tensor self, *, Tensor b) -> Tensor')
         # BC: A new schema without changes.

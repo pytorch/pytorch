@@ -18,16 +18,16 @@ from torch.distributed.algorithms.join import (
     Joinable,
     JoinHook,
 )
-from torch.distributed.utils import (
-    _verify_param_shape_across_processes,
-    _sync_module_states,
-    _to_kwargs,
-)
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():
+    from torch.distributed.utils import (
+        _verify_param_shape_across_processes,
+        _sync_module_states,
+        _to_kwargs,
+    )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
@@ -39,6 +39,7 @@ from ..modules import Module
 from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
+__all__ = ['DistributedDataParallel']
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ class LstmFlatteningResult(nn.LSTM):
 
 class LstmFlatteningResultWithSeqLength(nn.Module):
     def __init__(self, input_size, hidden_size, layers, bidirect, dropout, batch_first):
-        super(LstmFlatteningResultWithSeqLength, self).__init__()
+        super().__init__()
 
         self.batch_first = batch_first
         self.inner_model = nn.LSTM(
@@ -29,7 +29,7 @@ class LstmFlatteningResultWithSeqLength(nn.Module):
 
 class LstmFlatteningResultWithoutSeqLength(nn.Module):
     def __init__(self, input_size, hidden_size, layers, bidirect, dropout, batch_first):
-        super(LstmFlatteningResultWithoutSeqLength, self).__init__()
+        super().__init__()
 
         self.batch_first = batch_first
         self.inner_model = nn.LSTM(

@@ -15,6 +15,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <array>
 #include <initializer_list>
@@ -72,6 +73,17 @@ class SymIntArrayRef final {
   template <size_t N>
   /* implicit */ constexpr SymIntArrayRef(const c10::SymInt (&Arr)[N])
       : wrapped_symint_array_ref(Arr) {}
+
+  static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
+    for (size_t i = 0; i < array_ref.size(); ++i) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          SymInt::check_range(array_ref[i]),
+          "IntArrayRef contains int that cannot be representative as a SymInt",
+          array_ref[i]);
+    }
+    return SymIntArrayRef(
+        reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
+  }
 
   /// @}
   /// @name Simple Operations
@@ -176,7 +188,10 @@ class SymIntArrayRef final {
   /// @}
 };
 
-TORCH_API at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
+TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
+TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
+    c10::SymIntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 

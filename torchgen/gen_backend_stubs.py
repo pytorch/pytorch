@@ -8,7 +8,6 @@ from typing import List, Dict, Union, Sequence, Optional
 from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
-    NamespaceHelper,
 )
 from torchgen.model import (
     BackendIndex,
@@ -19,7 +18,14 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target, concatMap, context, YamlLoader, FileManager
+from torchgen.utils import (
+    Target,
+    concatMap,
+    context,
+    YamlLoader,
+    FileManager,
+    NamespaceHelper,
+)
 from torchgen.context import native_function_manager
 from torchgen.code_template import CodeTemplate
 import torchgen.dest as dest
@@ -61,6 +67,7 @@ def parse_backend_yaml(
         "supported",
         "autograd",
         "full_codegen",
+        "non_native",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -98,6 +105,9 @@ def parse_backend_yaml(
     full_codegen = yaml_values.pop("full_codegen", [])
     supported.extend(full_codegen)
 
+    # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    non_native = yaml_values.pop("non_native", {})
+
     assert (
         len(yaml_values.keys()) == 0
     ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
@@ -119,7 +129,9 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
             # TODO: allow structured external backends later.
-            m = BackendMetadata(kernel=kernel_name, structured=False)
+            m = BackendMetadata(
+                kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
+            )
             metadata[op_name] = m
         return BackendIndex(
             dispatch_key=dispatch_key,
@@ -259,7 +271,10 @@ def error_on_missing_kernels(
             native_f
         )
 
-    kernel_defn_regex = rf"{class_name}::([\w\d]*)\([^\)]*\)\s*{{"
+    # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
+    # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
+    # here, then we get a nicer error message. If we miss it, you get a linker error.
+    kernel_defn_regex = rf"{class_name}::\s*([\w\d]*)\("
     actual_backend_kernel_name_counts = Counter(
         re.findall(kernel_defn_regex, backend_defns)
     )
@@ -369,7 +384,6 @@ def gen_dispatcher_registrations(
     fm: FileManager,
     output_dir: str,
     class_name: str,
-    cpp_namespace: str,
     backend_indices: Dict[DispatchKey, BackendIndex],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_dispatch_key: DispatchKey,
@@ -399,7 +413,6 @@ def gen_dispatcher_registrations(
                 Target.REGISTRATION,
                 selector,
                 rocm=False,
-                cpp_namespace=cpp_namespace,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
             ),
@@ -458,7 +471,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                         Target.ANONYMOUS_DEFINITION,
                         selector,
                         rocm=False,
-                        cpp_namespace=cpp_namespace,
                         class_method_name=f"{class_name}",
                         skip_dispatcher_op_registration=False,
                     ),
@@ -544,7 +556,6 @@ def run(
             fm,
             output_dir,
             class_name,
-            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,

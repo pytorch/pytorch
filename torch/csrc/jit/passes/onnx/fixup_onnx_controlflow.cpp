@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 
-#include <aten/src/ATen/InitialTensorOptions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -410,9 +410,8 @@ void InferShapeTypeForUninitializedOutput(
       const_node->i_(attr::dtype, onnx_type);
       const_node->output()->setType(other_output->type());
     } else {
-      std::cerr
-          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found."
-          << std::endl;
+      TORCH_WARN(
+          "UninitializedOutput - Invalid elem Type of ListTensor found.");
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {

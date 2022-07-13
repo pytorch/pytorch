@@ -128,8 +128,8 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
 }
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
-    TORCH_INTERNAL_ASSERT(false, "as_strided has not been implemented in the functionalization pass yet");
-    return Tensor();
+    // Pessimism: we can't reapply views for as_strided_scatter.
+    return base.as_strided_scatter(mutated_view, size, stride, storage_offset);
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -142,7 +142,7 @@ Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor&
 }
 
 Tensor FunctionalInverses::expand_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, c10::expectIntArrayRef(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
+    return at::sum_to(mutated_view, c10::asIntArrayRefSlow(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
 }
 
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
