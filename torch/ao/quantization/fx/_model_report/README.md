@@ -63,14 +63,14 @@ This README will be updated with a link to the tutorial upon completion of the t
 ## Implementing Your Own Detector
 
 The main way to add functionality to the ModelReport API is to add more Detectors.
-Detectors each have a specific focus in terms of the type of information they collect information on.
+Detectors each have a specific focus in terms of the type of information they collect.
 For example, the `DynamicStaticDetector` figures out whether Dynamic or Static Quantization is appropriate for different layers.
 Meanwhile, the `InputWeightEqualizationDetector` determines whether Input-Weight Equalization should be applied for each layer.
 
 
 ### Requirements to Implement Detector
 All Detectors inherit from the `DetectorBase` class, and all of them (including any custom detectors you create) will need to implement 3 methods:
-- `determine_observer_insert_points(self, model)` -> `Dict`: determines which observers you want into insert into a model to gather statistics and where in the model. All of them return a dictionary mapping unique observer fully qualified names (fqns), which is where we want to insert them, to a dictionary of location and argument information in the format:
+- `determine_observer_insert_points(self, model)` -> `Dict`: determines which observers you want to insert into a model to gather statistics and where in the model. All of them return a dictionary mapping unique observer fully qualified names (fqns), which is where we want to insert them, to a dictionary of location and argument information in the format:
 
 ```python
 return_dict = {
