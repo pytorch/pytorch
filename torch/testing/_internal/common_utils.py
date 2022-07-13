@@ -11,6 +11,7 @@ import platform
 import re
 import gc
 import types
+import collections
 import math
 from functools import partial
 import inspect
@@ -299,8 +300,8 @@ class parametrize(_TestParametrizer):
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
         self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
-        if inspect.isgenerator(arg_values):
-            raise ValueError("arg_values is a generator which is exhaustive. Non exhaustive iterable is supposed to be passed.")
+        if isinstance(arg_values, (types.GeneratorType, collections.Iterator)):
+            raise ValueError(f"arg_values is of type {type(arg_values)} which is exhaustive. Non exhaustive iterable is supposed to be passed. E.g. list, tuple")
         self.arg_values = arg_values
         self.name_fn = name_fn
 
