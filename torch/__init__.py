@@ -966,3 +966,10 @@ if sys.executable != 'torch_deploy':
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
+
+if os.getenv('TORCH_DYNAMO_CUDAGRAPHS') == '1':
+    import torchdynamo
+    from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
+    torchdynamo.config.cache_size_limit = 1
+    _DYNAMO_CTX = torchdynamo.optimize(aot_autograd_cudagraphs)
+    _DYNAMO_CTX.__enter__()
