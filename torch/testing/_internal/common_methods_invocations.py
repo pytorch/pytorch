@@ -21489,6 +21489,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.allclose",
         torch_opinfo_name="allclose",
+        supports_nvfuser=False,
+    ),
     #
     # FFT OpInfos
     #
