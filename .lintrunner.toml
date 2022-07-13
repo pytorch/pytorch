@@ -674,9 +674,6 @@ command = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
-    'tools/pyi/gen_pyi.py',  # Formatting this file surfaces a circular dependency
-                             # error in torchgen.api.types (pytorch/issues/81294),
-                             # so we ignore this for now till the issue is fixed
 ]
 init_command = [
     'python3',
