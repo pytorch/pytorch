@@ -135,6 +135,15 @@ install_centos() {
                    rocprofiler-dev \
                    roctracer-dev
 
+  # precompiled miopen kernels; search for all unversioned packages
+  # if search fails it will abort this script; use true to avoid case where search fails
+  MIOPENKERNELS=$(yum -q search miopenkernels | grep miopenkernels- | awk '{print $1}'| grep -F kdb. || true)
+  if [[ "x${MIOPENKERNELS}" = x ]]; then
+    echo "miopenkernels package not available"
+  else
+    yum install -y ${MIOPENKERNELS}
+  fi
+
   install_magma
 
   # Cleanup
