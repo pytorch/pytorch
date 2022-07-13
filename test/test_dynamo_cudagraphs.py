@@ -11,6 +11,7 @@ import functools
 
 try:
     import torchdynamo
+    from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
 
     TEST_DYNAMO = True
 except ImportError:
@@ -21,8 +22,6 @@ TEST_CUDA = torch.cuda.is_available()
 if not TEST_CUDA or not TEST_DYNAMO:
     print("CUDA or dynamo not available, skipping tests", file=sys.stderr)
     TestCase = object  # noqa: F811
-
-from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
 
 
 def composed(*decs):
