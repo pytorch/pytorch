@@ -257,7 +257,7 @@ def wrap_key(f, inps):
         assert (len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                with no_dispatch(), torch.utils._python_dispatch.enable_torch_dispatch_mode(None, ignore_preexisting=True):
+                with no_dispatch():
                     flat_args[idx] = ProxyTensor(
                         flat_inps[idx],
                         arg,
