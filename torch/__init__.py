@@ -971,6 +971,7 @@ _dynamo = os.getenv('TORCH_DYNAMO')
 if _dynamo is not None:
     import torchdynamo
     torchdynamo.config.print_internal_exceptions = False
+    # torchdynamo.config.fake_tensor_propagation = False
     if _dynamo == "cudagraphs":
         from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
         torchdynamo.config.cache_size_limit = 1
