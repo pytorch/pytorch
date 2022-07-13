@@ -2332,37 +2332,36 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
         for padded_size, repeat_size in zip(padded_shape, repeat_shape)
     )
 
-    result = torch.empty(
-        target_shape,
-        dtype=a.dtype,
-        device=a.device,
-        requires_grad=a.requires_grad,
-    )
-
+    # return an empty tensor if one of the repeat_shape dimensions is zero
     if 0 in repeat_shape:
-        return result
+        return torch.empty(
+            target_shape,
+            dtype=a.dtype,
+            device=a.device,
+            requires_grad=a.requires_grad,
+        )
 
-    # add new dimensions to input tensor a
-    xtensor = a.expand(padded_shape)
+    urtensor_shape = target_shape
+    urtensor_stride = utils.make_contiguous_strides_for(target_shape)
+    for dim, dim_size in enumerate(padded_shape):
+        # repeat each dimension by using unfold_copy operation
+        urtensor_shape, urtensor_stride = _get_unfold_copy_shape_stride(
+            urtensor_shape, urtensor_stride, dim, dim_size, max(dim_size, 1)
+        )
 
-    urtensor = result
-    for dim, dim_size in enumerate(xtensor.shape):
-        # repeat each dimension by using unfold tensor operation
-        urtensor = torch.unfold_copy(urtensor, dim, dim_size, max(dim_size, 1))
+    # derive permute order by sorting urtensor strides
+    enumerated_stride = list(enumerate(urtensor_stride))
+    enumerated_stride.sort(key=lambda item: item[1], reverse=True)
+    permute_order, sorted_stride = zip(*enumerated_stride)
 
-    # expand dimensions according to urtensor
-    repeat_xtensor = xtensor.expand_as(urtensor)
+    # add new and expand dimensions according to urtensor
+    repeat_xtensor = a.expand(urtensor_shape)
 
     # clone tensor to concretize expanded dimensions
     cloned_result = torch.clone(repeat_xtensor)
 
-    # derive permute order by sorting urtensor strides
-    urtensor_stride = list(enumerate(urtensor.stride()))
-    urtensor_stride.sort(key=lambda item: item[1], reverse=True)
-    order, urtensor_sorted_stride = zip(*urtensor_stride)
-
     # transpose axis so strides are in sorted order
-    permuted_result = cloned_result.permute(order)
+    permuted_result = cloned_result.permute(permute_order)
 
     # reshape to get contiguous tensor with correct target shape
     return permuted_result.reshape(target_shape)
@@ -2881,13 +2880,15 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unfold_copy)
-def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
+def _get_unfold_copy_shape_stride(
+    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
+):
     # TODO some special handling to deal with allow dimension == 0 when self.dim() == 0
     # dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
 
-    max_size = 1 if a.ndim == 0 else a.shape[dimension]
-    last_stride = 1 if a.ndim == 0 else a.stride()[dimension]
+    a_ndim = len(a_shape)
+    max_size = 1 if a_ndim == 0 else a_shape[dimension]
+    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
 
     utils.check(
         size <= max_size,
@@ -2907,16 +2908,23 @@ def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
     new_size = []
     new_stride = []
 
-    for d, (a_size, a_stride) in enumerate(zip(a.shape, a.stride())):
+    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
         if d == dimension:
-            new_size.append((a_size - size) // step + 1)
-            new_stride.append(step * a_stride)
+            new_size.append((dim_size - size) // step + 1)
+            new_stride.append(step * dim_stride)
         else:
-            new_size.append(a_size)
-            new_stride.append(a_stride)
+            new_size.append(dim_size)
+            new_stride.append(dim_stride)
     new_size.append(size)
     new_stride.append(last_stride)
+    return new_size, new_stride
 
+
+@register_decomposition(torch.ops.aten.unfold_copy)
+def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
+    new_size, new_stride = _get_unfold_copy_shape_stride(
+        a.shape, a.stride(), dimension, size, step
+    )
     return a.as_strided(new_size, new_stride)
 
 
