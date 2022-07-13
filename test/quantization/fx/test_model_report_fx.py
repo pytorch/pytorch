@@ -1546,7 +1546,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
                 # because we ran 30 times, we should have at least a couple be significant
                 # could be less because some channels could possibly be all 0
-                sufficient_batches_info = module_dict[OutlierDetector.SUFFICIENT_BATCHES_KEY]
+                sufficient_batches_info = module_dict[OutlierDetector.IS_SUFFICIENT_BATCHES_KEY]
                 assert sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2
 
                 # half of them should be outliers, because we set a really high value every 2 channels

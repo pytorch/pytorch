@@ -938,7 +938,7 @@ class OutlierDetector(DetectorBase):
         reference_percentile (float, optional): The denominator to find the relative scale of the 100th percentile
             Should be between 0 and 1
             Default: 0.975
-        statistical_threshold (float, optional): Fraction of batches to determine outliers per channel should be above this
+        fraction_batches_used_threshold (float, optional): Fraction of batches to determine outliers per channel should be above this
             If fraction is below this, we deem number of samples used to calculate outliers as insignificant and alert user
             regardless of whether we detected outliers or not in channel to take a closer look at channel results
             Should be between 0 and 1
@@ -954,7 +954,7 @@ class OutlierDetector(DetectorBase):
     * :attr:`reference_percentile`: The denominator of the top fraction to find the relative scale of the 100th percentile
         Should be between 0 and 1
 
-    * :attr:`statistical_threshold`: The fraction of batches to determine outliers for each channel should be above this
+    * :attr:`fraction_batches_used_threshold`: The fraction of batches to determine outliers for each channel should be above this
         Some batches may not be used because of 0-based errors, so this is to ensure a good amount of the total batches are used
         Should be between 0 and 1
 
@@ -969,7 +969,7 @@ class OutlierDetector(DetectorBase):
     # names for dict keys
     OUTLIER_KEY = "outliers_detected"
     NUM_BATCHES_KEY = "batches_used"
-    SUFFICIENT_BATCHES_KEY = "sufficient_batches"
+    IS_SUFFICIENT_BATCHES_KEY = "is_sufficient_batches"
     COMP_METRIC_KEY = "percentile_ratios"
     RATIO_THRES_KEY = "ratio_threshold"
     REF_PERCENTILE_KEY = "reference_percentile"
@@ -980,7 +980,7 @@ class OutlierDetector(DetectorBase):
         self,
         ratio_threshold: float = 3.5,
         reference_percentile: float = 0.975,
-        statistical_threshold: float = 0.95,
+        fraction_batches_used_threshold: float = 0.95,
         ch_axis: int = 1,
     ):
         # initialize the variables of interest
@@ -988,9 +988,9 @@ class OutlierDetector(DetectorBase):
 
         # make sure passed in percentile is valid
         assert reference_percentile >= 0 and reference_percentile <= 1
-        assert statistical_threshold >= 0 and statistical_threshold <= 1
+        assert fraction_batches_used_threshold >= 0 and fraction_batches_used_threshold <= 1
         self.reference_percentile = reference_percentile
-        self.statistical_threshold = statistical_threshold
+        self.fraction_batches_used_threshold = fraction_batches_used_threshold
         self.ch_axis = ch_axis
 
     def get_detector_name(self) -> str:
@@ -1082,10 +1082,10 @@ class OutlierDetector(DetectorBase):
 
         Returns a dictionary mapping:
             "outliers_detected" : list of bools per channel that are true if it is considered an outlier
-            "sufficient_batches": if o_r was >= statistical_threshold:
+            "is_sufficient_batches": if o_r was >= fraction_batches_used_threshold:
                 where o_r = counted_batches / total_batches
         """
-        outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.SUFFICIENT_BATCHES_KEY: []}
+        outlier_dict: Dict[str, List[bool]] = {self.OUTLIER_KEY: [], self.IS_SUFFICIENT_BATCHES_KEY: []}
 
         # get both as flattened lists for easy mapping
         ratios_list: List = percentile_ratios.tolist()
@@ -1093,9 +1093,9 @@ class OutlierDetector(DetectorBase):
 
         # calculate whether channels were statistically significant
         significant_size = [
-            batch_size / total_batches >= self.statistical_threshold for batch_size in num_batches_list
+            batch_size / total_batches >= self.fraction_batches_used_threshold for batch_size in num_batches_list
         ]
-        outlier_dict[self.SUFFICIENT_BATCHES_KEY] = significant_size
+        outlier_dict[self.IS_SUFFICIENT_BATCHES_KEY] = significant_size
 
         # calculate for each channel whether it's an outlier or not based on ratio
         outlier_detected = [ratio > self.ratio_threshold for ratio in ratios_list]
@@ -1115,7 +1115,7 @@ class OutlierDetector(DetectorBase):
         Returns a dict mapping relavent module fqns to:
             whether there were outliers found in activation before
             the number of batches used for each channel
-            whether fraction of applicable batches used is above statistical_threshold
+            whether fraction of applicable batches used is above fraction_batches_used_threshold
             their p_r metric compared to the threshold
             the threshold used to make the recommendation
             the reference_percentile used to make the recommendation
@@ -1163,7 +1163,7 @@ class OutlierDetector(DetectorBase):
                     self.COMP_METRIC_KEY: average_ratios,
                     self.NUM_BATCHES_KEY: num_batches,
                     self.OUTLIER_KEY: outlier_calcs[self.OUTLIER_KEY],
-                    self.SUFFICIENT_BATCHES_KEY: outlier_calcs[self.SUFFICIENT_BATCHES_KEY],
+                    self.IS_SUFFICIENT_BATCHES_KEY: outlier_calcs[self.IS_SUFFICIENT_BATCHES_KEY],
                     self.MAX_VALS_KEY: max_vals
                 }
 
@@ -1183,7 +1183,7 @@ class OutlierDetector(DetectorBase):
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
                 the number of batches used for each channel
-                whether fraction of applicable batches used is above statistical_threshold
+                whether fraction of applicable batches used is above fraction_batches_used_threshold
                 their p_r metric compared to the threshold
                 the threshold used to make the recommendation
                 the reference_percentile used to make the recommendation
