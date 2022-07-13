@@ -4064,7 +4064,7 @@ Args:
          ``input.shape``.
     sizes (Tuple[int]): New shape of the unflattened dimension.
          One of its elements can be `-1` in which case the corresponding output
-         dimension is inferred. Otherwise, the product of ``sizes`` *must* 
+         dimension is inferred. Otherwise, the product of ``sizes`` *must*
          equal ``input.shape[dim]``.
 
 Returns:
