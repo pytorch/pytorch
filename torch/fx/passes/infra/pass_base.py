@@ -5,6 +5,8 @@ from torch.fx.graph_module import GraphModule
 from torch.fx._compatibility import compatibility
 
 
+__all__ = ['PassResult', 'PassBase']
+
 @compatibility(is_backward_compatible=False)
 class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
     """
