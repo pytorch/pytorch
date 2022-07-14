@@ -44,14 +44,12 @@ struct TorchOpBasicFields {
   uint64_t end_tid_{0};
 };
 
-
 struct TensorMetadata {
   void* ptr_;
   c10::ScalarType dtype_;
   uint32_t dim_;
   c10::Layout layout_;
 };
-
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;

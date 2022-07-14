@@ -279,8 +279,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .def_readonly("dtypes", &Inputs::dtypes_);
 
     py::class_<TensorMetadata>(m, "_TensorMetadata")
-        .def_property_readonly("layout", [](const TensorMetadata& metadata){
-          PyObject* layout_obj =  torch::autograd::utils::wrap(metadata.layout_);
+        .def_property_readonly("layout", [](const TensorMetadata& metadata) {
+          PyObject* layout_obj = torch::autograd::utils::wrap(metadata.layout_);
           return py::reinterpret_borrow<py::object>(layout_obj);
         });
 
