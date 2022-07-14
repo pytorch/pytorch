@@ -463,6 +463,7 @@ header_template_rule(
         "#define CAFFE2_USE_EIGEN_FOR_BLAS": "/* #undef CAFFE2_USE_EIGEN_FOR_BLAS */",
         "#define CAFFE2_USE_FBCODE": "/* #undef CAFFE2_USE_FBCODE */",
         "#define CAFFE2_USE_GOOGLE_GLOG": "/* #undef CAFFE2_USE_GOOGLE_GLOG */",
+        "#define CAFFE2_USE_ITT": "/* #undef CAFFE2_USE_ITT */",
         "#define CAFFE2_USE_LITE_PROTO": "/* #undef CAFFE2_USE_LITE_PROTO */",
         "#define CAFFE2_USE_MKL\n": "/* #undef CAFFE2_USE_MKL */\n",
         "#define CAFFE2_USE_NVTX": "/* #undef CAFFE2_USE_NVTX */",
