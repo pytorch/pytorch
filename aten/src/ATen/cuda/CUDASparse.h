@@ -11,7 +11,7 @@
 #endif
 
 // hipSparse Generic API
-#if defined(USE_ROCM) && ROCM_VERSION >= 50100
+#if defined(USE_ROCM) && ROCM_VERSION >= 50200
 #define AT_USE_HIPSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_HIPSPARSE_GENERIC_API() 0
