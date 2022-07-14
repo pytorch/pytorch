@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import unittest
 
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TEST_FAIRSEQ, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import TEST_FAIRSEQ, run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 if TEST_FAIRSEQ:
@@ -639,3 +639,6 @@ class TestTransformers(NNTestCase):
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
 instantiate_parametrized_tests(TestTransformers)
+
+if __name__ == '__main__':
+    run_tests()
