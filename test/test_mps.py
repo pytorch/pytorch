@@ -3300,6 +3300,20 @@ class TestNLLLoss(TestCase):
         helper(1, 1, 4, 4)
         helper(7, 5, 3, 2)
 
+    def test_upsample_nearest1d(self):
+        def helper(N, C, H, W):
+            inputCPU = torch.arange(C * H * W, device='cpu', dtype=torch.float,
+                                    requires_grad=True).reshape(C, H, W)
+            inputMPS = inputCPU.detach().clone().to('mps')
+
+            outputCPU = torch.nn.functional.interpolate(inputCPU, scale_factor=2.0, mode='nearest')
+            outputMPS = torch.nn.functional.interpolate(inputMPS, scale_factor=2.0, mode='nearest')
+
+            self.assertEqual(outputCPU, outputMPS)
+
+        helper(1, 1, 4, 4)
+        helper(7, 5, 3, 2)
+
     # Test concat forward
     def test_cat1(self):
         def helper(shape_x, shape_y, shape_z):
@@ -3328,6 +3342,22 @@ class TestNLLLoss(TestCase):
         r_cpu = m(input_cpu)
         r_mps = m(input_mps)
         self.assertEqual(r_cpu, r_mps.to("cpu"))
+
+    def test_circular_pad(self):
+        # https://github.com/pytorch/pytorch/issues/80856
+        k_cpu = torch.ones(3, 3, 9, 9)
+        k_mps = k_cpu.detach().clone().to("mps")
+
+        x_cpu = torch.rand(1, 3, 32, 32)
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        x_pad_cpu = F.pad(x_cpu, (2, 2, 2, 2), mode='circular')
+        x_pad_mps = F.pad(x_mps, (2, 2, 2, 2), mode='circular')
+
+        y_cpu = F.conv2d(x_pad_cpu, k_cpu)
+        y_mps = F.conv2d(x_pad_mps, k_mps)
+
+        self.assertEqual(y_cpu, y_mps.cpu())
 
     def test_pad(self):
         def helper(shape, padding, op):
