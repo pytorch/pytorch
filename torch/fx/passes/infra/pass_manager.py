@@ -11,6 +11,8 @@ from torch.fx.node import Argument, map_aggregate
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 
+__all__ = ['inplace_wrapper', 'pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
+
 @compatibility(is_backward_compatible=False)
 def inplace_wrapper(fn: Callable) -> Callable:
     """
@@ -91,8 +93,7 @@ def _validate_pass_schedule_constraint(
                 f" list."
             )
 
-@compatibility(is_backward_compatible=False)
-def topological_sort_passes(
+def _topological_sort_passes(
     passes: List[Callable], constraints: List[Callable]
 ) -> List[Callable]:
     """
@@ -254,7 +255,7 @@ class PassManager:
         then we will raise an error because if steps != 1 this means that we
         will re-run the passes, allowing for circular dependencies.
         """
-        self.passes = topological_sort_passes(self.passes, self.constraints)
+        self.passes = _topological_sort_passes(self.passes, self.constraints)
         self._validated = True
 
     def add_checks(self, check: Callable) -> None:
