@@ -281,8 +281,6 @@ class TestFSDPMixedPrecision(FSDPTest):
             )
         )
 
-        # for t in tensors:
-        #     print(f"tensor type {t.dtype} expected {expected_dtype}")
         for t in tensors:
             self.assertEqual(expected_dtype, t.dtype)
 
