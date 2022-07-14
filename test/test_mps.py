@@ -3399,15 +3399,33 @@ class TestNLLLoss(TestCase):
     # Test stack forward
     def test_stack(self):
         # All shapes must be same
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
+        def helper(shape, dtype=torch.float32):
 
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
+            x, cpu_x = None, None
+            y, cpu_y = None, None
+            z, cpu_z = None, None
 
-            cpu_z = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            z = cpu_z.detach().clone().to('mps')
+            if(dtype not in [torch.float32, torch.bool]):
+                cpu_x = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
+                x = cpu_x.detach().clone().to('mps')
+                cpu_y = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
+                y = cpu_y.detach().clone().to('mps')
+                cpu_z = torch.randint(50, shape, device='cpu', dtype=dtype, requires_grad=False)
+                z = cpu_z.detach().clone().to('mps')
+            elif (dtype == torch.bool):
+                cpu_x = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
+                x = cpu_x.detach().clone().to('mps')
+                cpu_y = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
+                y = cpu_y.detach().clone().to('mps')
+                cpu_z = torch.randint(2, shape, device='cpu', dtype=dtype, requires_grad=False)
+                z = cpu_z.detach().clone().to('mps')
+            else:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+                y = cpu_y.detach().clone().to('mps').requires_grad_()
+                cpu_z = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+                z = cpu_z.detach().clone().to('mps').requires_grad_()
 
             stack = torch.stack([x, y, z], dim=1)
             stack_cpu = torch.stack([cpu_x, cpu_y, cpu_z], dim=1)
@@ -3415,6 +3433,10 @@ class TestNLLLoss(TestCase):
             self.assertEqual(stack, stack_cpu)
 
         helper([2, 8, 4, 5])
+        helper([2, 8, 4, 5], dtype=torch.float16)
+        helper([2, 8, 4, 5], dtype=torch.int32)
+        helper([2, 8, 4, 5], dtype=torch.int64)
+        helper([2, 8, 4, 5], dtype=torch.bool)
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5])
 
