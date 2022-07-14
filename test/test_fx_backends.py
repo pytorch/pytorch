@@ -148,6 +148,8 @@ class TestFxNvFuserBackend(TestCase):
         inp = torch.randn(2, 3, 4, 5).to(dtype=dtype, device=device)
         m = Model().to(dtype=dtype, device=device)
 
+        # note that the traced module here contains only `call_module` node,
+        # which isn't fused by nvfuser backend. But `nvfuser.compile` should run without error
         traced = symbolic_trace(m)
 
         nvfuser = NvFuserBackend()
