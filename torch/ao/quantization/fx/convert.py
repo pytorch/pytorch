@@ -319,7 +319,7 @@ def convert_standalone_module(
     """
     # TODO: remove is_reference flag
     if is_reference:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference
+        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference_fx
     else:
         convert_fn = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
