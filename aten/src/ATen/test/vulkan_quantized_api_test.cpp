@@ -8,6 +8,7 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
+#include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 
 #include <c10/util/irange.h>
 
@@ -162,6 +163,38 @@ TEST_F(VulkanAPITest, support_vulkan) {
     showRtol(
         at::native::int_repr_quantized_cpu(in_cpu_quantized),
         at::native::int_repr_quantized_cpu(output));
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, quantize_per_tensor) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+
+  auto output_for_quantized_vulkan = vulkan_to_cpu(out_vulkan, out_cpu);
+
+  int rtol = 1;
+  const auto check = at::allclose(
+      at::native::int_repr_quantized_cpu(out_cpu),
+      at::native::int_repr_quantized_cpu(output_for_quantized_vulkan),
+      rtol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
   }
 
   ASSERT_TRUE(check);
