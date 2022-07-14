@@ -862,7 +862,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp0 = input_dp.fork(num_instances=1)
+        dp0 = input_dp.fork(num_instances=1, buffer_size=0)
         self.assertEqual(dp0, input_dp)
 
         # Functional Test: making sure all child DataPipe shares the same reference

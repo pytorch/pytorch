@@ -129,9 +129,15 @@ class _ForkerIterDataPipe(IterDataPipe):
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
                 try:
-                    self.buffer.append(next(self._datapipe_iterator))
+                    return_val = next(self._datapipe_iterator)
                     self.child_pointers[instance_id] += 1
-                    yield self.buffer[-1]
+                    self.buffer.append(return_val)
+                    if self.child_pointers[instance_id] - 1 == self.slowest_ptr:
+                        new_min = min(self.child_pointers)  # Can optimize by avoiding the call to min()
+                        if self.slowest_ptr < new_min:
+                            self.slowest_ptr = new_min
+                            self.buffer.popleft()
+                    yield return_val
                 except StopIteration:
                     self.end_ptr = self.leading_ptr
             else:  # Child pointer is slower than or equal to the leading_ptr
