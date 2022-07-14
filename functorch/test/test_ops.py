@@ -716,7 +716,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         xfail('linalg.solve_triangular'),
         xfail('nn.functional.huber_loss'),
-        xfail('nn.functional.poisson_nll_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
         xfail('cumprod'),
@@ -812,8 +811,6 @@ class TestOperators(TestCase):
         xfail('eig'),
         xfail('nansum'),
         xfail('nanmean'),
-        xfail('fmin'),
-        xfail('fmax'),
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
@@ -859,7 +856,6 @@ class TestOperators(TestCase):
         xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
-        xfail('nn.functional.poisson_nll_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
