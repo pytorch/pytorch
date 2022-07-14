@@ -115,8 +115,6 @@ class Adam(Optimizer):
 
         if fused:
             self._step_supports_amp_scaling = True
-            # TODO(crcrpar): Relax the condition by e.g. implementing a logic which accordingly
-            # groups tensors inside fused optimizer kernels.
             # TODO(crcrpar): [low prec params & their higher prec copy]
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
@@ -497,6 +495,7 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
 
 
+# TODO(crcrpar): Make this generic when there's more fused optimizers.
 @torch.no_grad()
 def _group_params_by_device_and_dtype(
     params: List[Tensor],
@@ -541,27 +540,27 @@ def _fused_adam(
     grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
     for (device, dtype) in grouped_tensors:
         (
-            d_params,
-            d_grads,
-            d_exp_avgs,
-            d_exp_avg_sqs,
-            d_max_exp_avg_sqs,
-            d_state_steps,
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
         ) = grouped_tensors[(device, dtype)]
         if inv_grad_scale is not None and found_inf is not None:
-            d_inv_grad_scale = inv_grad_scale.get(device)
-            d_found_inf = found_inf.get(device)
+            device_inv_grad_scale = inv_grad_scale.get(device)
+            device_found_inf = found_inf.get(device)
         else:
-            d_inv_grad_scale = None
-            d_found_inf = None
-        torch._foreach_add_(d_state_steps, 1)
+            device_inv_grad_scale = None
+            device_found_inf = None
+        torch._foreach_add_(device_state_steps, 1)
         torch._fused_adam_(
-            d_params,
-            d_grads,
-            d_exp_avgs,
-            d_exp_avg_sqs,
-            d_max_exp_avg_sqs,
-            d_state_steps,
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
             amsgrad=amsgrad,
             lr=lr,
             beta1=beta1,
@@ -570,10 +569,10 @@ def _fused_adam(
             eps=eps,
             maximize=maximize,
             capturable=capturable,
-            inv_grad_scale=d_inv_grad_scale,
-            found_inf=d_found_inf,
+            inv_grad_scale=device_inv_grad_scale,
+            found_inf=device_found_inf,
         )
         # NOTE(crcrpar): Is there a better way to handle a situation where `GradScaler` is used
         # and `inf` grads are found.
-        if found_inf is not None:
-            torch._foreach_sub_(d_state_steps, [d_found_inf] * len(d_state_steps))
+        if device_found_inf is not None:
+            torch._foreach_sub_(device_state_steps, [device_found_inf] * len(device_state_steps))

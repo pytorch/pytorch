@@ -47,8 +47,6 @@ __device__ bool init_args(
         return all_aligned;
 }
 
-// Initializes args and checks if all args are aligned
-// TODO(crcrpar): Merge this to `init_args` of `TensorListMetadata`
 template<int depth, typename T>
 __device__ bool init_args(
     T** args,
