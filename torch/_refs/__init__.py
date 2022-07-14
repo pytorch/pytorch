@@ -2255,12 +2255,12 @@ def instance_norm(
     if running_mean is not None:
         running_mean_square = repeated_running_mean.view([batch_size, num_channels])
         new_running_mean = running_mean_square.mean(dim=0, keepdim=False)
-        running_mean.copy_(new_running_mean)
+        copy_to(running_mean, new_running_mean)
 
     if running_var is not None:
         running_var_square = repeated_running_var.view([batch_size, num_channels])
         new_running_var = running_var_square.mean(dim=0, keepdim=False)
-        running_var.copy_(new_running_var)
+        copy_to(running_var, new_running_var)
     return output.view(input.shape)
 
 
@@ -2374,11 +2374,13 @@ def native_batch_norm(
         # update running_mean and running_var
         if running_mean is not None:
             squeeze_mean = _squeeze_multiple(save_mean, reduction_dims)
-            running_mean.copy_(_momentum_update(running_mean, squeeze_mean, momentum))
+            copy_to(
+                running_mean, _momentum_update(running_mean, squeeze_mean, momentum)
+            )
 
         if running_var is not None:
             squeeze_var = _squeeze_multiple(unbiased_var, reduction_dims)
-            running_var.copy_(_momentum_update(running_var, squeeze_var, momentum))
+            copy_to(running_var, _momentum_update(running_var, squeeze_var, momentum))
     else:
         assert running_mean is not None and running_var is not None
         mean = _unsqueeze_multiple(running_mean, reduction_dims)
