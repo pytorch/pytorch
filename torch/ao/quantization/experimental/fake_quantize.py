@@ -1,7 +1,6 @@
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.experimental.fake_quantize_helper import fake_quantize_helper
 
