@@ -1152,6 +1152,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with PoliteMode():
                 a.abs()
 
+    def test_disable_mode(self):
+        class FailEverythingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise RuntimeError("arf")
+
+        with FailEverythingMode() as m:
+            self.assertRaises(RuntimeError, lambda: torch.ones([2, 3]))
+            with enable_torch_dispatch_mode(None, replace=m):
+                torch.ones([2, 3])
+
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
             def __new__(cls, elem, mode):

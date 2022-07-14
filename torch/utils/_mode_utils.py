@@ -81,11 +81,12 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
         )
     # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
     # let you directly pass a Tensor subclass type to "mode-ify" it.
-    required_fn = "__" + mode_info.mode_name + "__"
-    if not hasattr(mode, required_fn):
-        raise ValueError(
-            f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
-        )
+    if mode is not None:
+        required_fn = "__" + mode_info.mode_name + "__"
+        if not hasattr(mode, required_fn):
+            raise ValueError(
+                f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
+            )
     mode_info.set_mode(mode)
     try:
         yield mode  # type: ignore[misc]
