@@ -201,7 +201,7 @@ class TestFxNvFuserBackend(TestCase):
     def test_aten_where(self, device, dtype):
 
         def fn(x):
-            where = torch.ops.aten.where(x < 0, 0.0, x)
+            where = torch.ops.aten.where(x < 0, -x, x)
             a = where + 1
             b = a + 1
             return b
