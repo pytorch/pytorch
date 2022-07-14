@@ -6,6 +6,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 
+import unittest
 import logging
 
 def are_aliased(x, y):
