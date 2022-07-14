@@ -1,11 +1,10 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
-namespace utils{
+namespace utils {
 
 void pack_buffer_to_vtensor(
     api::VulkanBuffer& buffer,
@@ -20,15 +19,15 @@ void pack_buffer_to_vtensor(
     api::utils::uvec3 extents;
     uint32_t block;
     api::utils::uvec4 offset;
-  } block {
-    extents,
-    4u * plane,
-    {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    },
+  } block{
+      extents,
+      4u * plane,
+      {
+          0u * plane,
+          1u * plane,
+          2u * plane,
+          3u * plane,
+      },
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -36,9 +35,9 @@ void pack_buffer_to_vtensor(
   context->submit_compute_job(
       // shader layout signature
       {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       // shader descriptor
       VK_KERNEL(nchw_to_image),
@@ -53,7 +52,7 @@ void pack_buffer_to_vtensor(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       buffer,
       // params buffer
@@ -66,7 +65,9 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
 }
 
 void pack_vtensor_to_staging(
-    vTensor& v_self, api::VulkanBuffer& staging, const VkFence fence_handle) {
+    vTensor& v_self,
+    api::VulkanBuffer& staging,
+    const VkFence fence_handle) {
   api::Context* const context = api::context();
 
   const api::utils::uvec3 extents = v_self.extents();
@@ -76,15 +77,15 @@ void pack_vtensor_to_staging(
     api::utils::uvec3 extents;
     uint32_t block;
     api::utils::uvec4 offset;
-  } block {
-    extents,
-    4u * plane,
-    {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    },
+  } block{
+      extents,
+      4u * plane,
+      {
+          0u * plane,
+          1u * plane,
+          2u * plane,
+          3u * plane,
+      },
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -93,9 +94,9 @@ void pack_vtensor_to_staging(
   context->submit_compute_job(
       // shader layout signature
       {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       // shader descriptor
       VK_KERNEL(image_to_nchw),
@@ -108,9 +109,7 @@ void pack_vtensor_to_staging(
       // fence handle
       fence_handle,
       // shader arguments
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       staging,
       // params buffer
       params.buffer());
