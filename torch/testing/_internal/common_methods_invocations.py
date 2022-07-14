@@ -13962,9 +13962,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_constant_pad_nd,
            supports_out=False,
            skips=(
-               # BoolType is not a subtype of ScalarType in JIT
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                            dtypes=(torch.bool,)),
+               # bool can't be passed to Scalar arguments in JIT tracer because
+               # BoolType is not a subtype of ScalarType.
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                   dtypes=(torch.bool,)),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCudaFuserOpInfo',
+                   'test_nvfuser_correctness', dtypes=(torch.bool,)),
            )),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
