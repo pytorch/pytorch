@@ -2679,13 +2679,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -4563,7 +4556,7 @@
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
 
-- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4572,7 +4565,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -5756,6 +5749,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5771,6 +5765,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -10488,6 +10483,7 @@
   dispatch:
     CPU: upsample_nearest1d_out_cpu
     CUDA: upsample_nearest1d_out_cuda
+    MPS: upsample_nearest1d_out_mps
 
 - func: _upsample_nearest_exact1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -11608,6 +11604,13 @@
   variants: function
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
+- func: linalg_vecdot(Tensor x, Tensor y, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_vecdot.out(Tensor x, Tensor y, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 - func: linalg_matrix_exp(Tensor self) -> Tensor
@@ -13067,3 +13070,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar
