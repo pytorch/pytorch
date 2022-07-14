@@ -367,6 +367,28 @@ additional_op_db.append(
         supports_forward_ad=True,
     ))
 
+def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
+    S = 3
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, 10))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, device=device) > 0, 10))
+    yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, 10))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn((), device=device) > 0, 10))
+    yield SampleInput(make_arg((S,)),
+                      args=(torch.randn(S, S, device=device) > 0, 10),
+                      broadcasts_input=True)
+
+additional_op_db.append(
+    OpInfo('masked_fill',
+           variant_test_name='functorch_Scalar_only',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+           sample_inputs_func=sample_inputs_masked_fill,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
+           supports_out=False)
+)
 
 
 def sample_inputs_new_zeros_with_same_feature_meta(op_info, device, dtype, requires_grad, **kwargs):

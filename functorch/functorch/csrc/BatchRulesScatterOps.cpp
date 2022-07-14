@@ -1016,6 +1016,40 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
   return std::make_tuple(at::stack(results), 0);
 }
 
+static std::tuple<Tensor,Tensor> binary_pointwise_align(
+    const Tensor & self,
+    optional<int64_t> self_bdim,
+    const Tensor & mask,
+    optional<int64_t> mask_bdim) {
+  // compute max logical rank
+  auto tensor_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto other_logical_rank = rankWithoutBatchDim(mask, mask_bdim);
+  auto max_logical_rank = std::max(tensor_logical_rank, other_logical_rank);
+
+  auto tensor_ = moveBatchDimToFront(self, self_bdim);
+  auto other_ = moveBatchDimToFront(mask, mask_bdim);
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  tensor_ = maybePadToLogicalRank(tensor_, self_bdim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, mask_bdim, max_logical_rank);
+
+  return std::make_tuple(tensor_, other_);
+}
+
+std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
+    const Tensor & self,
+    optional<int64_t> self_bdim,
+    const Tensor & mask,
+    optional<int64_t> mask_bdim,
+    const Scalar& source) {
+  auto tensors = binary_pointwise_align(self, self_bdim, mask, mask_bdim);
+  auto result = at::masked_fill(std::get<0>(tensors), std::get<1>(tensors), source);
+  return std::make_tuple(result, 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
@@ -1025,6 +1059,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
+  VMAP_SUPPORT2(masked_fill, Scalar, masked_fill_scalar_batch_rule);
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);

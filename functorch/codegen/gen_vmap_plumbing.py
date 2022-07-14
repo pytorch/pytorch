@@ -485,6 +485,7 @@ allowlist = {
     'positive',
     'rad2deg',
     'reciprocal',
+    'masked_fill.Scalar',
     'round',
     'round.decimals',
     'rsqrt',
