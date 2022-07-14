@@ -15,7 +15,8 @@ enum Conv2dMethod {
   Conv2dPointwise,
   Conv2dSlidingWindow,
   Conv2dQSlidingWindow,
-  Conv2dQPointwise
+  Conv2dQPointwise,
+  Conv2dQDepthwise
 };
 
 //  private:

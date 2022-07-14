@@ -48,68 +48,6 @@ Conv2dMethod determine_method(
   return Conv2dSlidingWindow;
 }
 
-vTensor pack_weights_dw(api::Context* const context, const Tensor& weight) {
-  /* Source */
-  const IntArrayRef src_filter = weight.sizes();
-  const float* const src_weight_ptr = weight.data_ptr<float>();
-
-  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
-  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
-  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
-  const int64_t src_block_sz =
-      src_kernel_sz * src_filter[Layout::Filter::input];
-  const int64_t num_stacks =
-      div_up(src_filter[Layout::Filter::output], INT64_C(4));
-
-  /* Destination */
-  const int64_t dst_kw_sz = src_kernel_sz;
-  const int64_t dst_kh_sz = num_stacks;
-  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
-
-  vTensor v_weight{
-      context,
-      {
-          4,
-          dst_kh_sz,
-          dst_kw_sz,
-      },
-      weight.options(),
-  };
-
-  api::StagingBuffer staging(context, v_weight.buffer_bytes());
-  {
-    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
-
-    float* dst_weight_ptr = mapping.template data<float>();
-
-    memset(dst_weight_ptr, 0, v_weight.nbytes());
-
-    for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
-      /* Source */
-      const float* const src_weight_oc_ptr =
-          src_weight_ptr + src_oc * src_block_sz;
-
-      /* Destination */
-      const int64_t dst_oh = src_oc / 4;
-      const int64_t dst_c = src_oc % 4;
-
-      float* const dst_weight_c_ptr =
-          dst_weight_ptr + dst_c * dst_kernel_sz + dst_oh * dst_kw_sz;
-
-      for (const auto src_ih :
-           c10::irange(src_filter[Layout::Filter::height])) {
-        memcpy(
-            dst_weight_c_ptr + src_ih * src_kw_sz,
-            src_weight_oc_ptr + src_ih * src_kw_sz,
-            sizeof(float) * src_kw_sz);
-      }
-    }
-  }
-  ops::utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
-
-  return v_weight;
-}
-
 vTensor weight_type(
     api::Context* const context,
     const Tensor& weight,
@@ -140,6 +78,60 @@ vTensor weight_type(
     };
     return v_weight;
   }
+}
+
+template <class T>
+vTensor pack_weights_dw(api::Context* const context, const Tensor& weight) {
+  /* Source */
+  const IntArrayRef src_filter = weight.sizes();
+  const T* const src_weight_ptr = weight.data_ptr<T>();
+
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz =
+      src_kernel_sz * src_filter[Layout::Filter::input];
+  const int64_t num_stacks =
+      div_up(src_filter[Layout::Filter::output], INT64_C(4));
+
+  /* Destination */
+  const int64_t dst_kw_sz = src_kernel_sz;
+  const int64_t dst_kh_sz = num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
+
+  vTensor v_weight = weight_type(context, weight, dst_kh_sz, dst_kw_sz);
+
+  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
+
+    T* dst_weight_ptr = mapping.template data<T>();
+
+    memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+    for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
+      /* Source */
+      const T* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+
+      /* Destination */
+      const int64_t dst_oh = src_oc / 4;
+      const int64_t dst_c = src_oc % 4;
+
+      T* const dst_weight_c_ptr =
+          dst_weight_ptr + dst_c * dst_kernel_sz + dst_oh * dst_kw_sz;
+
+      for (const auto src_ih :
+           c10::irange(src_filter[Layout::Filter::height])) {
+        memcpy(
+            dst_weight_c_ptr + src_ih * src_kw_sz,
+            src_weight_oc_ptr + src_ih * src_kw_sz,
+            sizeof(T) * src_kw_sz);
+      }
+    }
+  }
+  ops::utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
+
+  return v_weight;
 }
 
 template <class T>
@@ -214,12 +206,16 @@ vTensor pack_weights(const Tensor& weight_arg, const Conv2dMethod conv_method) {
 
   const Tensor weight = weight_arg.contiguous();
 
-  if (weight_arg.is_quantized()) {
-    return pack_weights_2d<c10::quint8>(context, weight);
+  if (conv_method == Conv2dDepthwise || conv_method == Conv2dQDepthwise) {
+    if (weight_arg.is_quantized()) {
+      return pack_weights_dw<c10::quint8>(context, weight);
+    } else {
+      return pack_weights_dw<float>(context, weight);
+    }
   }
 
-  if (conv_method == Conv2dDepthwise) {
-    return pack_weights_dw(context, weight);
+  if (weight_arg.is_quantized()) {
+    return pack_weights_2d<c10::quint8>(context, weight);
   }
 
   return pack_weights_2d<float>(context, weight);
@@ -432,6 +428,8 @@ VulkanOpContext conv2d_context_create(
   if (is_quantized) {
     if (is_pointwise(weight.sizes())) {
       method = Conv2dQPointwise;
+    } else if (is_depthwise(weight.sizes(), groups)) {
+      method = Conv2dQDepthwise;
     } else {
       method = Conv2dQSlidingWindow;
     }
@@ -856,6 +854,23 @@ Tensor conv2d_context_run_q(
   } else if (method_ == Conv2dQPointwise) {
     conv2d_sliding_window_q(
         VK_KERNEL(quantized_conv2d_pw_2x2),
+        v_output,
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        v_input.get_scale(),
+        v_input.get_zero_point());
+  } else if (method_ == Conv2dQDepthwise) {
+    conv2d_sliding_window_q(
+        VK_KERNEL(quantized_conv2d_dw),
         v_output,
         v_input,
         packed_v_weight,
