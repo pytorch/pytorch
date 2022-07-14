@@ -200,6 +200,48 @@ TEST_F(VulkanAPITest, quantize_per_tensor) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, quantize_dequantize) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+  // quantize tensors
+  const auto out_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  // dequantize tensors
+  const auto out_cpu_deq = at::dequantize(out_cpu);
+  const auto out_vulkan_deq = at::native::vulkan::ops::dequantize(out_vulkan);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu);
+
+  float rtol = 1;
+  float atol = 1;
+  const auto check =
+      at::allclose(in_cpu, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+
+  const auto check_two =
+      at::allclose(out_cpu_deq, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check_two) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check_two);
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */
