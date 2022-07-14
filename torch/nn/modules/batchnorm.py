@@ -134,6 +134,7 @@ class _BatchNorm(_NormBase):
         )
 
     def forward(self, input: Tensor) -> Tensor:
+        # disabling this since it is not symbolically traceable
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
