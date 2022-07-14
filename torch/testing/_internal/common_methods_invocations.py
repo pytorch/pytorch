@@ -6388,6 +6388,8 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
             shapes = ((2, 8, 9), (33,))
         elif self.name in ['fft.hfftn', 'fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
+            # Adjusting the limits because the test would be flaky due to over-saturation of float16
+            # See: https://github.com/pytorch/pytorch/pull/81416
             low = -1.0
             high = 1.0
         else:
