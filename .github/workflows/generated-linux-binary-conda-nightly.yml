@@ -38,7 +38,7 @@ concurrency:
 jobs:
   conda-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -57,7 +57,7 @@ jobs:
   conda-py3_7-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -95,7 +95,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -115,7 +115,7 @@ jobs:
   conda-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -155,7 +155,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -175,7 +175,7 @@ jobs:
   conda-py3_7-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -215,7 +215,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -235,7 +235,7 @@ jobs:
   conda-py3_7-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_6-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -275,7 +275,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -294,7 +294,7 @@ jobs:
   conda-py3_8-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -332,7 +332,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -352,7 +352,7 @@ jobs:
   conda-py3_8-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -392,7 +392,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -412,7 +412,7 @@ jobs:
   conda-py3_8-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -452,7 +452,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -472,7 +472,7 @@ jobs:
   conda-py3_8-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_6-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -512,7 +512,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -531,7 +531,7 @@ jobs:
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -569,7 +569,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -589,7 +589,7 @@ jobs:
   conda-py3_9-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -629,7 +629,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -649,7 +649,7 @@ jobs:
   conda-py3_9-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -689,7 +689,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -709,7 +709,7 @@ jobs:
   conda-py3_9-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_6-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -749,7 +749,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -768,7 +768,7 @@ jobs:
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -806,7 +806,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -826,7 +826,7 @@ jobs:
   conda-py3_10-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -866,7 +866,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -886,7 +886,7 @@ jobs:
   conda-py3_10-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -926,7 +926,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+    uses: ./.github/workflows/_linux-binary-build.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -946,7 +946,7 @@ jobs:
   conda-py3_10-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_6-build
-    uses: ./.github/workflows/_binary-test-linux.yml
+    uses: ./.github/workflows/_linux-binary-test.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
