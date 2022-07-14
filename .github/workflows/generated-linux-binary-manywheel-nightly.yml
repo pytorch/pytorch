@@ -38,7 +38,7 @@ concurrency:
 jobs:
   manywheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -57,7 +57,7 @@ jobs:
   manywheel-py3_7-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cpu-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -95,7 +95,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -115,7 +115,7 @@ jobs:
   manywheel-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -155,7 +155,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -175,7 +175,7 @@ jobs:
   manywheel-py3_7-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_3-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -215,7 +215,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -235,7 +235,7 @@ jobs:
   manywheel-py3_7-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_6-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -275,7 +275,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -414,7 +414,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -553,7 +553,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -572,7 +572,7 @@ jobs:
   manywheel-py3_8-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -610,7 +610,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -630,7 +630,7 @@ jobs:
   manywheel-py3_8-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda10_2-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -670,7 +670,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -690,7 +690,7 @@ jobs:
   manywheel-py3_8-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_3-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -730,7 +730,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -750,7 +750,7 @@ jobs:
   manywheel-py3_8-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_6-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -790,7 +790,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -929,7 +929,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1068,7 +1068,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1087,7 +1087,7 @@ jobs:
   manywheel-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1125,7 +1125,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1145,7 +1145,7 @@ jobs:
   manywheel-py3_9-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda10_2-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1185,7 +1185,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1205,7 +1205,7 @@ jobs:
   manywheel-py3_9-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_3-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1245,7 +1245,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1265,7 +1265,7 @@ jobs:
   manywheel-py3_9-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_6-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1305,7 +1305,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1444,7 +1444,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1583,7 +1583,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1602,7 +1602,7 @@ jobs:
   manywheel-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cpu-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1640,7 +1640,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1660,7 +1660,7 @@ jobs:
   manywheel-py3_10-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda10_2-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1700,7 +1700,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1720,7 +1720,7 @@ jobs:
   manywheel-py3_10-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_3-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1760,7 +1760,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1780,7 +1780,7 @@ jobs:
   manywheel-py3_10-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_6-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1820,7 +1820,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1959,7 +1959,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
