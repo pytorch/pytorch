@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch.ao.quantization.backend_config.observation_type import ObservationType
