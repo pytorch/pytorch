@@ -149,7 +149,7 @@ class TestPassManager(TestCase):
         # Not passing any constraints should keep the original order
         passes = [pass0, pass1, pass2, pass3, pass4, pass5]
         sorted = topological_sort_passes(passes, [])
-        self.assertEqual(sorted, (passes, False))
+        self.assertEqual(sorted, passes)
 
         # Graph that we are constructing:
         #     5 ---->  0  <---- 4
@@ -166,7 +166,7 @@ class TestPassManager(TestCase):
             this_before_that_pass_constraint(pass3, pass1),
         ]
         sorted = topological_sort_passes(passes, constraints)
-        self.assertEqual(sorted, ([pass4, pass5, pass0, pass2, pass3, pass1], False))
+        self.assertEqual(sorted, [pass4, pass5, pass0, pass2, pass3, pass1])
 
         # Circular dependency should result in the circular_dep flag being set
         passes = [pass0, pass1, pass2]
@@ -175,8 +175,10 @@ class TestPassManager(TestCase):
             this_before_that_pass_constraint(passes[1], passes[2]),
             this_before_that_pass_constraint(passes[2], passes[0]),
         ]
-        sorted = topological_sort_passes(passes, constraints)
-        self.assertEqual(sorted, ([pass0, pass1, pass2], True))
+        with self.assertRaises(RuntimeError) as e:
+            topological_sort_passes(passes, constraints)
+        expected_error_msg = f"Circular dependency detected within the following passes: {passes}"
+        self.assertEqual(e.exception.args[0], expected_error_msg)
 
     def test_validation_inputs(self):
         """

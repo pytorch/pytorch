@@ -1,12 +1,13 @@
 import inspect
 from queue import Queue
 from functools import wraps
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List
 import warnings
 
 import torch
 import torch.nn as nn
-import torch.fx as fx
+from torch.fx.graph_module import GraphModule
+from torch.fx.node import Argument, map_aggregate
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 
@@ -33,9 +34,10 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
+@compatibility(is_backward_compatible=False)
 def pass_result_wrapper(fn: Callable) -> Callable:
     """
-    Temporary wrapper for passes which currently do not return a PassResult.
+    Wrapper for passes which currently do not return a PassResult.
     This wrapper makes them return a PassResult containing the modified object
     and True for the "modified" flag.
 
@@ -92,7 +94,7 @@ def _validate_pass_schedule_constraint(
 @compatibility(is_backward_compatible=False)
 def topological_sort_passes(
     passes: List[Callable], constraints: List[Callable]
-) -> Tuple[List[Callable], bool]:
+) -> List[Callable]:
     """
     Args
         passes: Passes that we are ordering
@@ -103,7 +105,7 @@ def topological_sort_passes(
         existed
     """
     if len(constraints) == 0:
-        return passes, False
+        return passes
 
     # Contruct a graph mapping nodes to a list of their users
     graph: Dict[Callable, List[Callable]] = {p : [] for p in passes}
@@ -124,40 +126,6 @@ def topological_sort_passes(
 
     visited: Dict[Callable, bool] = {p : False for p in passes}
     sorted_passes: List[Callable] = []
-    circular_dependency = False
-
-    def break_cycles():
-        """
-        In the case where `candidates` is empty but there are still unvisited
-        nodes due to cycles, we will loop through the nodes that have not been
-        visited and add the last node with the min number of in-degree edges to
-        `candidates`.
-        """
-        if not candidates.empty():
-            return
-
-        nonlocal circular_dependency
-
-        min_degree = -1
-        min_degree_pass = None
-        for p in passes:
-            if visited[p]:
-                assert indegree_map[p] == 0
-                continue
-
-            if min_degree == -1:
-                min_degree = indegree_map[p]
-                min_degree_pass = p
-            elif min_degree > indegree_map[p]:
-                min_degree = indegree_map[p]
-                min_degree_pass = p
-
-        if min_degree_pass:
-            circular_dependency = True
-            candidates.put(min_degree_pass)
-            indegree_map[min_degree_pass] = 0
-
-    break_cycles()
 
     while not candidates.empty():
         p = candidates.get()
@@ -170,9 +138,13 @@ def topological_sort_passes(
                 if indegree_map[n] == 0:
                     candidates.put(n)
 
-        break_cycles()
+    # Check if there are unvisited nodes (aka cycles in the graph)
+    cycle_passes = list(filter(lambda p: indegree_map[p] != 0, indegree_map.keys()))
+    if len(cycle_passes) != 0:
+        error = f"Circular dependency detected within the following passes: {cycle_passes}"
+        raise RuntimeError(error)
 
-    return sorted_passes, circular_dependency
+    return sorted_passes
 
 @compatibility(is_backward_compatible=False)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
@@ -215,7 +187,7 @@ class PassManager:
 
     Args:
         passes (Optional[List[Callable]]): List of passes. A pass is a
-            callable which modifies an object and returns modified object
+            callable which modifies an object and returns a PassResult
         constraint (Optional[List[Callable]]): List of constraints. A
             constraint is a callable which takes two passes (A, B) and returns
             True if A depends on B and False otherwise. See implementation of
@@ -282,11 +254,8 @@ class PassManager:
         then we will raise an error because if steps != 1 this means that we
         will re-run the passes, allowing for circular dependencies.
         """
-        self.passes, circular_dep = topological_sort_passes(self.passes, self.constraints)
-        if circular_dep and self.steps == 1:
-            raise RuntimeError("Circular dependency detected within the constraints and steps was set to 1")
-        else:
-            self._validated = True
+        self.passes = topological_sort_passes(self.passes, self.constraints)
+        self._validated = True
 
     def add_checks(self, check: Callable) -> None:
         """
@@ -340,7 +309,7 @@ class PassManager:
                 module = res.graph_module
                 modified = modified or res.modified
 
-                if isinstance(module, fx.GraphModule):
+                if isinstance(module, GraphModule):
                     module.recompile()
 
                 # Check graph invariants
@@ -358,7 +327,7 @@ class PassManager:
 
         return PassResult(module, overall_modified)
 
-    def check_res_equal(self, pass_: Callable, res0: fx.node.Argument, res1: fx.node.Argument, **kwargs) -> None:
+    def check_res_equal(self, pass_: Callable, res0: Argument, res1: Argument, **kwargs) -> None:
         """
         Validates that inference results before and after the pass are `all_close`
 
@@ -368,16 +337,16 @@ class PassManager:
             res1: Inference result after pass was run on the module
             kwargs: Other kwargs that might be needed (ex. rtol, atol)
         """
-        def _collect_tensors(arg: fx.node.Argument) -> List[torch.Tensor]:
+        def _collect_tensors(arg: Argument) -> List[torch.Tensor]:
             """Collects all the tensors found in a nested container object"""
             res: List[torch.Tensor] = []
 
-            def collect(x: fx.node.Argument) -> fx.node.Argument:
+            def collect(x: Argument) -> Argument:
                 if isinstance(x, torch.Tensor):
                     res.append(x)
                 return x
 
-            fx.node.map_aggregate(arg, collect)
+            map_aggregate(arg, collect)
             return res
 
         tensor_res_0 = _collect_tensors(res0)
