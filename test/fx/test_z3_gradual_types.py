@@ -32,6 +32,41 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class HFOperations(unittest.TestCase):
 
+    def test_transpose(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([1, 2, 3, 4])):
+                transpose = x.transpose(0, 1)
+                return transpose
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        b = BasicBlock().forward(torch.rand(1, 2, 3, 4))
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        output = z3.Const(2, tensor_type)
+        self.assertEqual(s.check(), z3.sat)
+        self.assertEqual(s.model()[output].arg(0).arg(1), b.shape[0])
+        self.assertEqual(s.model()[output].arg(1).arg(1), b.shape[1])
+        self.assertEqual(s.model()[output].arg(2).arg(1), b.shape[2])
+        self.assertEqual(s.model()[output].arg(3).arg(1), b.shape[3])
+
+        # change the annotation to Dyn
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+
     def test_index_select(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -617,7 +652,6 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
         self.assertEqual(s.model()[d5], s.model()[d2])
         self.assertEqual(s.model()[d1], s.model()[d4])
-
 
     def test_size_getitem(self):
         class BasicBlock(torch.nn.Module):
