@@ -1,3 +1,5 @@
+import types
+import collections
 import copy
 import gc
 import inspect
@@ -733,6 +735,9 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
+        if isinstance(op_list, (types.GeneratorType, collections.Iterator)):
+            raise ValueError(f"op_list is of type {type(op_list)} which is exhaustive. "
+                            + "Non exhaustive iterable is supposed to be passed. E.g. list, tuple")
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
