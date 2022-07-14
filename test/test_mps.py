@@ -3300,6 +3300,20 @@ class TestNLLLoss(TestCase):
         helper(1, 1, 4, 4)
         helper(7, 5, 3, 2)
 
+    def test_upsample_nearest1d(self):
+        def helper(N, C, H, W):
+            inputCPU = torch.arange(C * H * W, device='cpu', dtype=torch.float,
+                                    requires_grad=True).reshape(C, H, W)
+            inputMPS = inputCPU.detach().clone().to('mps')
+
+            outputCPU = torch.nn.functional.interpolate(inputCPU, scale_factor=2.0, mode='nearest')
+            outputMPS = torch.nn.functional.interpolate(inputMPS, scale_factor=2.0, mode='nearest')
+
+            self.assertEqual(outputCPU, outputMPS)
+
+        helper(1, 1, 4, 4)
+        helper(7, 5, 3, 2)
+
     # Test concat forward
     def test_cat1(self):
         def helper(shape_x, shape_y, shape_z):
