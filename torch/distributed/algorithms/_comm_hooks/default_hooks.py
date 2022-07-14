@@ -1,3 +1,4 @@
+import functools
 import torch
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
@@ -10,10 +11,6 @@ class DefaultState(object):
 
     Args:
         process_group (ProcessGroup): The process group to be used for all-reduce.
-        world_size (int): The number of workers in a process group.
-            Determined based on a ``process_group``.
-        gradient_predivide_factor (float): A factor for gradients' pre-division.
-        gradient_postdivide_factor (float): A factor for gradients' post-division.
     """
 
     __slots__ = [
@@ -45,7 +42,9 @@ class DefaultState(object):
 class LowPrecisionState(DefaultState):
     r"""
     Stores state needed to perform gradient communication in a lower precision
-    within a communication hook. Builds on top of the :class:`DefaultState`
+    within a communication hook. Communication hook will cast gradients back
+    to the original parameter precision specified by ``parameter_type`` (default: torch.float32).
+    Builds on top of the :class:`DefaultState`.
 
     Args:
         parameter_type (torch.dtype): The precision of model's parameters.
@@ -59,7 +58,7 @@ class LowPrecisionState(DefaultState):
     def __init__(
         self,
         process_group,
-        parameter_type,
+        parameter_type=torch.float32,
     ):
         super().__init__(process_group)
         self.parameter_type = parameter_type
@@ -70,7 +69,6 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     Casts gradients back to full parameter precision so that
     further computation happens in full precision
     """
-
     orig_grad_data = grad.data
     grad.data = grad.data.to(state.parameter_type)
     # Don't let this memory get reused until after the transfer.
@@ -91,6 +89,11 @@ def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     if state.gradient_postdivide_factor > 1:
         grad.div_(state.gradient_postdivide_factor)
 
+def lower_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor):
+    grad.data = grad.data.to(prec)
+    allreduce_hook(state, grad)
+    _decompress(state, grad)
+
 def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     r"""
     This FSDP communication hook implements a simple gradient compression
@@ -103,10 +106,8 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
     """
-
-    grad.data = grad.data.to(torch.float16)
-    allreduce_hook(state, grad)
-    _decompress(state, grad)
+    fp16_hook = functools.partial(lower_precision_hook, torch.float16)
+    return fp16_hook(state, grad)
 
 def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     r"""
@@ -120,7 +121,5 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
     """
-
-    grad.data = grad.data.to(torch.bfloat16)
-    allreduce_hook(state, grad)
-    _decompress(state, grad)
+    bp16_hook = functools.partial(lower_precision_hook, torch.bfloat16)
+    return bp16_hook(state, grad)
