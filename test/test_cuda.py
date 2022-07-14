@@ -2311,7 +2311,7 @@ torch.cuda.synchronize()
         try_pickle = True
         self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3, optimizer_ctor=optimizer_ctor)
 
-    def test_grad_scaling_autocast_with_fused_adam(self):
+    def test_grad_scaling_autocast_with_fusedadam(self):
         self.test_grad_scaling_autocast(torch.optim._fused.Adam)
 
     def test_grad_scaling_clipping(self):
