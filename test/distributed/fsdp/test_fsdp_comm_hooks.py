@@ -315,8 +315,6 @@ class TestCommunicationHooks(FSDPTest):
         in_data = torch.rand(16, 8).cuda()
         fsdp_with_hook.train()
         fsdp_with_mp.train()
-        optim_mp.zero_grad()
-        optim_hook.zero_grad()
         loss_hook = fsdp_with_hook(in_data).sum()
         loss_mp = fsdp_with_mp(in_data).sum()
         loss_hook.backward()
@@ -328,8 +326,8 @@ class TestCommunicationHooks(FSDPTest):
 
         dist.barrier()
 
-        for hook_params, mp_params in zip(fsdp_with_hook.parameters(), fsdp_with_mp.parameters()):
-            self.assertEqual(hook_params.grad, mp_params.grad)
+        for hook_param, mp_param in zip(fsdp_with_hook.parameters(), fsdp_with_mp.parameters()):
+            self.assertEqual(hook_param.grad, mp_param.grad)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
@@ -344,7 +342,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None, parameter_type=torch.float32)
+        state = default_hooks.LowPrecisionState(process_group=None)
         hook = default_hooks.fp16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
@@ -362,7 +360,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None, parameter_type=torch.float32)
+        state = default_hooks.LowPrecisionState(process_group=None)
         hook = default_hooks.bf16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.bfloat16, has_wrapping)
