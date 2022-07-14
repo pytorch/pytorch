@@ -11825,33 +11825,46 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         [
             common_utils.subtest(
                 [
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8),
-                    torch.quantize_per_tensor(torch.zeros(1, 3), 0.26, 128, torch.quint8)
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(
+                        torch.zeros(1, 3), 0.26, 128, torch.quint8
+                    ),
                 ],
-                name="when_shape_is_different",
+                name="different_shape",
             ),
             common_utils.subtest(
                 [
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8),
-                    torch.quantize_per_tensor(torch.ones(2, 3), 42, 1, torch.quint8)
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 42, 1, torch.quint8),
                 ],
-                name="when_scale_is_different",
+                name="different_scale",
             ),
             common_utils.subtest(
                 [
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8),
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 63, torch.quint8)
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 63, torch.quint8),
                 ],
-                name="when_zero_point_is_different",
+                name="different_zero_point",
             ),
             common_utils.subtest(
                 [
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8),
-                    torch.quantize_per_tensor(torch.ones(2, 3), 0.1, 63, torch.quint8)
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 0.1, 63, torch.quint8),
                 ],
-                name="when_zero_point_and_scale_are_different",
+                name="different_zero_point_and_scale",
             ),
         ],
+    )
+    @unittest.skip(
+        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
     )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
@@ -11860,7 +11873,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x, y):
                 return torch.nn.quantized.QFunctional().cat((x, y), dim=0)
 
-        self.run_test(QuantizedConcatenationModel(), input_1, input_2)
+        self.run_test(QuantizedConcatenationModel(), (input_1, input_2))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     # torch.jit.frontend.FrontendError:
