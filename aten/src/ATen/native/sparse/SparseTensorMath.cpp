@@ -1,3 +1,5 @@
+#include <ATen/TensorIndexing.h>
+
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/SparseTensorMath.h>
 
@@ -64,6 +66,7 @@
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_native.h>
+#include <ATen/ops/index.h>
 #endif
 
 #include <algorithm>
@@ -705,7 +708,15 @@ Tensor mul_sparse(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
-  return at::mul_out(self, self, other);  // redispatch!
+  if (self.is_sparse()) {
+    return at::mul_out(self, self, other);  // redispatch!
+  }
+  else {
+    const auto res = at::mul(self, other);
+    self.zero_();
+    self.add_(res);
+    return self;
+  }
 }
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
@@ -744,23 +755,185 @@ Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other); // redispatch!
 }
 
-SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
-  if (src_.dim() == 0) {
-    return mul_out_sparse_zerodim(r, t_, src_);
-  } else if (t_.dim() == 0) {
-    return mul_out_sparse_zerodim(r, src_, t_);
+// A generic function to implement pointwise-like operations
+// with index intersection between dense and sparse COO tensors.
+// NOTE: op is always called as op(dense_values, sparse_values),
+// so it is up to the user to supply right implementations for non-commutative
+// operations.
+template <typename binary_func_t>
+Tensor& intersection_binary_op_sparse_dense_out(
+    const Tensor& d,
+    const SparseTensor& s_,
+    Tensor& res,
+    const char* const op_name,
+    const binary_func_t& op,
+    const bool coalesce = false) {
+  // compute broadcasted shape.
+  const auto res_shape = infer_size(d.sizes(), s_.sizes());
+
+  // Short-circuit if either s_ or d is empty.
+  if (!s_._nnz() || !s_.numel() || !d.numel()) {
+    auto common_dtype = promoteTypes(d.scalar_type(), s_.scalar_type());
+    TORCH_CHECK(canCast(common_dtype, res.scalar_type()),
+        op_name, "(): can't convert result type ", common_dtype, " to output ", res.scalar_type(), ".");
+    const auto sparse_dim = static_cast<int64_t>(res_shape.size());
+    const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
+    const auto values = at::empty({0}, d.options().dtype(common_dtype));
+    get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*shape=*/res_shape);
+    get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
+    get_sparse_impl(res)->set_nnz_and_narrow(0);
+    return res;
   }
 
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul operands have incompatible sizes");
+  const auto d_dim = d.dim();
+  const auto s_dim = s_.dim();
+
+  // Always coalesce when sparse broadcasts over dense,
+  // because new sparse dimensions are created and
+  // repeated indices have to be eliminated because of that.
+  const auto s = (coalesce || d_dim > s_dim) ? s_.coalesce() : s_;
+
+  const auto sparse_dim = s.sparse_dim();
+  const auto dense_dim = s.dense_dim();
+
+  const auto s_indices = s._indices();
+  const auto s_values = s._values();
+
+  const auto apply_op = [&](const Tensor& d_filtered) -> Tensor& {
+    const auto res_values = op(d_filtered, s_values);
+    get_sparse_impl(res)->raw_resize_(sparse_dim, dense_dim, res_shape);
+    get_sparse_impl(res)->set_indices_and_values_unsafe(s_indices, res_values);
+    get_sparse_impl(res)->set_nnz_and_narrow(s._nnz());
+    return res._coalesced_(s.is_coalesced());
+  };
+
+  // Easiest case: only dense dimensions intersect.
+  // This means only value tensors interact.
+  if (d_dim <= dense_dim) {
+    return apply_op(d);
+  }
+
+  // Now we have intersection between sparse and dense dims.
+  const auto sparse_dim_intersec = std::min(sparse_dim, d_dim - dense_dim);
+  const auto d_start_dim_intersec = std::max<int64_t>(0, d_dim - s_dim);
+  const auto s_start_dim_intersec = std::max<int64_t>(0, s_dim - d_dim);
+
+  // Index d with s_indices to find values which
+  // interact with s_values.
+  const auto d_filtered = [&]() -> Tensor {
+    using at::indexing::Slice;
+    using at::indexing::Ellipsis;
+    using at::indexing::TensorIndex;
+
+    std::vector<TensorIndex> intersec_indices;
+    intersec_indices.reserve(d_dim);
+
+    if (d_start_dim_intersec) {
+      intersec_indices.push_back(Ellipsis);
+    }
+    for (const auto i : c10::irange(sparse_dim_intersec)) {
+      const auto s_idx = s_start_dim_intersec + i;
+      intersec_indices.push_back(s_indices[s_idx]);
+    }
+    for (auto i = d_start_dim_intersec + sparse_dim_intersec; i < d_dim; ++i) {
+      intersec_indices.push_back(Slice());
+    }
+    // we need to expand d in the dimensions it is being indexed into
+    // to avoid out of bound indices
+    const auto d_expanded_shape = std::vector<int64_t>(
+        res_shape.end() - d_dim, res_shape.end());
+    return d.expand(d_expanded_shape).index(intersec_indices);
+  }();
+
+  // When dims match or sparse is "larger", the result nnz is the same,
+  // so only values get modified.
+  if (s_dim >= d_dim) {
+    return apply_op(d_filtered);
+  }
+
+  // Otherwise nnz gets larger, and both indices and values need an update.
+  const auto d_batch_shape = d.sizes().slice(0, d_start_dim_intersec);
+  const auto d_batch_len = d_batch_shape.size();
+  int64_t batch_count;
+  int64_t max_batch_dim;
+  std::tie(batch_count, max_batch_dim) = [&]() -> std::tuple<int64_t, int64_t> {
+    int64_t batch_count = 1;
+    int64_t max_batch_dim = 0;
+    for (const auto& b : d_batch_shape) {
+      batch_count *= b;
+      max_batch_dim = std::max(b, max_batch_dim);
+    }
+    return std::make_tuple(batch_count, max_batch_dim);
+  }();
+
+  const auto res_sparse_dim = static_cast<int64_t>(d_batch_shape.size()) + sparse_dim;
+  const auto res_dense_dim = dense_dim;
+  const auto res_nnz = batch_count * s._nnz();
+  auto res_values_shape = s_values.sizes().vec();
+  res_values_shape[0] = res_nnz;
+  const auto res_values = op(d_filtered, s_values).reshape(res_values_shape);
+  const auto res_indices = [&]() -> Tensor {
+    const auto index_buffer = at::arange(max_batch_dim, s_indices.options());
+    auto res_indices = at::empty({res_sparse_dim, res_nnz}, s_indices.options());
+    // fill in indices corresponding to the "batch" dimensions of d.
+    int64_t n_repeat_interleave = res_nnz;
+    int64_t n_repeat = 1;
+    for (const auto dim : c10::irange(d_batch_len)) {
+      const auto dim_size = d_batch_shape[dim];
+      n_repeat_interleave /= dim_size;
+      const auto dim_index = index_buffer.slice(-1, 0, dim_size);
+      const auto dim_index_expanded = at::repeat_interleave(dim_index, n_repeat_interleave).repeat(n_repeat);
+      res_indices[dim].copy_(dim_index_expanded);
+      n_repeat *= dim_size;
+    }
+    // fill in indices corresponding to s_indices.
+    n_repeat = res_nnz / s._nnz();
+    auto res_indices_sparse = res_indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
+    res_indices_sparse.copy_(s_indices.repeat({1, n_repeat}));
+
+    return res_indices;
+  }();
+
+  get_sparse_impl(res)->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
+  get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
+  get_sparse_impl(res)->set_nnz_and_narrow(res_nnz);
+  // By design of index expansion and that s is coalesced,
+  // the result is also coalesced.
+  return res._coalesced_(true);
+}
+
+Tensor _mul_dense_sparse(const Tensor& d, const Tensor& s) {
+  auto commonDtype = at::result_type(d, s);
+  auto result_options = s.options().dtype(commonDtype);
+  Tensor result = at::empty_like(s, result_options);
+  return at::native::_mul_dense_sparse_out(d, s, result);
+}
+
+Tensor& _mul_dense_sparse_out(const Tensor& d, const Tensor& s, Tensor& res) {
+  return intersection_binary_op_sparse_dense_out(d, s, res, "mul", [](const Tensor& a, const Tensor& b) -> Tensor {
+      return at::mul(a, b);
+  });
+}
+
+SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(src_.is_sparse(), "mul(sparse, dense) is not supported");
-  TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported");
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
-  if (src_._nnz() == 0 || t_._nnz() == 0) {
-    r.resize_as_(src_);
+  // case mul(sparse, dense)
+  if (!src_.is_sparse()) {
+    return at::native::_mul_dense_sparse_out(src_, t_, r);
+  }
+  // case mul(dense, sparse)
+  if (!t_.is_sparse()) {
+    return at::native::_mul_dense_sparse_out(t_, src_, r);
+  }
+
+  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
+      ", but ", t_.sizes(), " != ", src_.sizes());
+
+  if (!t_._nnz() || !src_._nnz()) {
+    r.resize_as_(t_);
     return r.zero_();
   }
 

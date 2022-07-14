@@ -3425,6 +3425,16 @@
     SparseCsrCPU, SparseCsrCUDA: mul_out_sparse_csr
     MkldnnCPU: mkldnn_mul_out
 
+- func: _mul_dense_sparse(Tensor dense, Tensor sparse) -> Tensor
+  device_check: NoCheck   # supposed to be called from within mul_out
+  dispatch:
+    SparseCPU, SparseCUDA: _mul_dense_sparse
+
+- func: _mul_dense_sparse.out(Tensor dense, Tensor sparse, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # supposed to be called from within mul_out
+  dispatch:
+    SparseCPU, SparseCUDA: _mul_dense_sparse_out
+
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
