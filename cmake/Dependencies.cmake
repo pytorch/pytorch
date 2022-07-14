@@ -1651,11 +1651,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(NOT MSVC)
-    if(CMAKE_VERSION VERSION_LESS "3.1")
-      set(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-    else()
-      set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
-    endif()
+    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
