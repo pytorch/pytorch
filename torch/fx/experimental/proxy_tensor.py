@@ -65,7 +65,8 @@ def proxy_call(func_overload, args, kwargs=None):
         kwargs = {}
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        with torch.overrides.enable_reentrant_dispatch():
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     if func_overload == aten._local_scalar_dense.default:
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
