@@ -103,7 +103,7 @@ T = TypeVar("T")
 #   - 'api' has conversions for how to translate JIT schema into
 #     the various C++ APIs that the codegen interacts with.  There
 #     are in fact THREE different C++ APIs: the public C++ API,
-#     the dispatcher API, and the legacy disaptcher API.  See each
+#     the dispatcher API, and the legacy dispatcher API.  See each
 #     of these respective files for more information
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
