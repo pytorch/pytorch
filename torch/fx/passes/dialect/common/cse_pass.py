@@ -1,8 +1,9 @@
-from torch.fx.passes.infra.pass_base import PassBase, PassResult
+from typing import Dict, Tuple, Any
+
 import torch
 import torch.fx as fx
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._pytree import tree_flatten
-from typing import Dict, Tuple, Any
 
 aten = torch.ops.aten
 
