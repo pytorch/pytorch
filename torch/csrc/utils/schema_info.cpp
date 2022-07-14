@@ -170,6 +170,36 @@ bool SchemaInfo::may_alias(
   }
 }
 
+bool SchemaInfo::may_contain_alias(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs,
+    bool bidirectional) {
+  bool basic_check = schema_.may_contain_alias(lhs, rhs) || may_alias(lhs, rhs);
+  if (basic_check) {
+    return true;
+  }
+  if (!alias_maps_current_) {
+    generateAliasMaps();
+  }
+  if (bidirectional) {
+    return mayContainAliasImpl(lhs, rhs) || mayContainAliasImpl(rhs, lhs);
+  } else {
+    return mayContainAliasImpl(lhs, rhs);
+  }
+}
+
+bool SchemaInfo::mayContainAliasImpl(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs) {
+  bool types_can_alias = schema_.canAliasTypeSetsAlias(
+      schema_.getAliasTypeSetContainedTypes(schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(lhs.type)[lhs.index].type())),
+      schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(rhs.type)[rhs.index].type()));
+  return types_can_alias && container_set_.count(lhs) &&
+      wildcard_set_.count(rhs);
+}
+
 std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   // This list of nondeterministic ops is copied from JIT ir.cpp.
   static const std::vector<std::string> nondeterministic_op_strings = {
@@ -214,12 +244,12 @@ void SchemaInfo::initSchemaInfo() {
           c10::SchemaArgType type) {
         seen.clear();
         for (size_t i = 0; i < arguments_list.size(); i++) {
-          if (arguments_list[i].alias_info()) {
-            if (arguments_list[i].alias_info()->isWildcardAfter()) {
+          const c10::Argument argument = arguments_list[i];
+          if (argument.alias_info()) {
+            if (argument.alias_info()->isWildcardAfter()) {
               wildcard_set_.insert({type, i});
             } else {
-              for (const auto& set :
-                   arguments_list[i].alias_info()->afterSets()) {
+              for (const auto& set : argument.alias_info()->afterSets()) {
                 TORCH_INTERNAL_ASSERT(
                     !seen.count(set),
                     set.toQualString(),
@@ -227,6 +257,12 @@ void SchemaInfo::initSchemaInfo() {
                 seen.insert(set);
               }
             }
+          }
+          c10::optional<c10::AliasTypeSet> contained_types =
+              schema_.getAliasTypeSetContainedTypes(
+                  schema_.mapTypeToAliasTypeSet(argument.type()));
+          if (contained_types && contained_types->size() > 0) {
+            container_set_.insert({type, i});
           }
         }
       };
@@ -259,6 +295,24 @@ void SchemaInfo::generateAliasMaps() {
           if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
+        }
+      }
+    }
+  }
+
+  // Fills wildcard_set with container created wildcards.
+  // ie if one argument is a container and it contains an element that aliases
+  // the other argument, then the second argument is added to the wildcard set.
+  for (size_t i = 0; i < schema_.arguments().size(); i++) {
+    for (size_t j = 0; j < schema_.arguments().size(); j++) {
+      // if they are already aliasing, there is no way one contains the other
+      if (!input_alias_map_[i].count(j) &&
+          value_map_.count(schema_.arguments()[i].name()) &&
+          value_map_.count(schema_.arguments()[j].name())) {
+        c10::IValue::HashAliasedIValues subValues;
+        value_map_[schema_.arguments()[i].name()].getSubValues(subValues);
+        if (subValues.count(value_map_[schema_.arguments()[j].name()])) {
+          wildcard_set_.insert({c10::SchemaArgType::input, j});
         }
       }
     }

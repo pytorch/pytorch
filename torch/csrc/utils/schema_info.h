@@ -39,6 +39,11 @@ struct TORCH_API SchemaInfo {
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs);
 
+  bool may_contain_alias(
+      const c10::SchemaArgument& lhs,
+      const c10::SchemaArgument& rhs,
+      bool bidirectional = true);
+
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
   void addArgumentValues(
@@ -52,10 +57,17 @@ struct TORCH_API SchemaInfo {
 
   void generateAliasMaps();
 
+  bool mayContainAliasImpl(
+      const c10::SchemaArgument& lhs,
+      const c10::SchemaArgument& rhs);
+
   static std::vector<c10::FunctionSchema> getNonDeterministicOps();
 
   // Set of all wildcard arguments
   std::unordered_set<c10::SchemaArgument> wildcard_set_;
+
+  // Set of all container arguments
+  std::unordered_set<c10::SchemaArgument> container_set_;
 
   // Map of argument IValues
   std::unordered_map<std::string, at::IValue> value_map_;
