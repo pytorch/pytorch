@@ -38,8 +38,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         seq_num_msg_index = err.find(seq_num_msg)
         seq_num_msg_len = len(seq_num_msg)
         self.assertTrue(seq_num_msg_index != -1, "Sequence number is missing.")
-        if seq_num_msg_index != -1:
-            self.assertTrue(err[seq_num_msg_index + seq_num_msg_len].isdigit(), "Sequence number is invalid.")
+        self.assertTrue(err[seq_num_msg_index + seq_num_msg_len].isdigit(), "Sequence number is invalid.")
 
         self.assertTrue(
             op_type in err, f"Got {err} but expected {op_type} to be in error."
