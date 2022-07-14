@@ -363,6 +363,12 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tens
                                      name:nil];
 }
 
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar) {
+    return [mpsGraph placeholderWithShape:@[@1]
+                                 dataType:getMPSScalarType(scalar.type())
+                                     name:nil];
+}
+
 // this is meant to suppress the availability warning on castTensor
 // we pass ScalarType instead of MPSDataType to handle MPSDataTypeBoolean's availability too
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType) {
