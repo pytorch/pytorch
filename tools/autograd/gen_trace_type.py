@@ -1,17 +1,13 @@
 import itertools
-from typing import List, Sequence, Union, Dict
+from typing import Dict, List, Sequence, Union
+
+from torchgen.api import cpp
 
 from torchgen.api.types import DispatcherSignature
-from torchgen.api import cpp
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
+from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
-from torchgen.model import (
-    Argument,
-    NativeFunction,
-    SchemaKind,
-    TensorOptionsArguments,
-)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and

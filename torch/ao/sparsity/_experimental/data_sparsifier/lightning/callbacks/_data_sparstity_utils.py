@@ -9,7 +9,7 @@ def _attach_model_to_data_sparsifier(module, data_sparsifier):
     Essentialy, loop over all the weight parameters in the module and
     attach it to the data sparsifier.
     Note::
-        The '.' in the layer names are replaced with some other character
+        The '.' in the layer names are replaced with '_' (refer to _get_valid_name() below)
         before attaching to the sparsifier. This is because, the data
         sparsifier uses a dummy model inside to store the weight parameters.
     """

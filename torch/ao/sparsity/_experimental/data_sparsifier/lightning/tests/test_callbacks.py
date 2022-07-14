@@ -37,7 +37,7 @@ def _make_lightning_module(iC: int, oC: List[int]):
     return DummyLightningModule(iC, oC)
 
 
-class _PostTrainingCallbackTestCase(TestCase):
+class TestPostTrainingCallback(TestCase):
     def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
         """Makes sure that each component of is working as expected while calling the
         post-training callback.
@@ -72,11 +72,6 @@ class _PostTrainingCallbackTestCase(TestCase):
             sparsified_data = callback.data_sparsifier.get_data(name=valid_name, return_original=False)
             assert torch.all(sparsified_data[sparsified_data != 0] == param[sparsified_data != 0])
 
-    def run_all_checks(self, pl_module, callback, sparsifier_args):
-        self._check_on_fit_end(pl_module, callback, sparsifier_args)
-
-
-class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
     @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
     def test_post_training_callback(self):
         sparsifier_args = {
@@ -87,7 +82,7 @@ class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
         callback = PostTrainingDataSparsity(DataNormSparsifier, sparsifier_args)
         pl_module = _make_lightning_module(100, [128, 256, 16])
 
-        self.run_all_checks(pl_module, callback, sparsifier_args)
+        self._check_on_fit_end(pl_module, callback, sparsifier_args)
 
 
 if __name__ == "__main__":
