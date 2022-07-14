@@ -30,7 +30,7 @@ functional_optim_map = {
 #     >>> import the new functional optimizer
 #     >>> from xyz import fn_optimizer
 #     >>> from torch.distributed.optim.utils import register_functional_optim
-#     >>>     register_functional_optim(key,fn_optimizer)
+#     >>> register_functional_optim(key, fn_optimizer)
 
 def register_functional_optim(key,optim):
     if key not in functional_optim_map:
