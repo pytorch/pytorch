@@ -279,6 +279,36 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(s.model()[output].arg(0).arg(1), b[0])
         self.assertEqual(s.model()[output].arg(1).arg(1), b[1])
 
+    def test_ne_int_long_type_as(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, Dyn]), y: TensorType([Dyn, Dyn])):
+                ne_int = torch.ne(x, y).int()
+                type_as = ne_int.type_as(y)
+                long = type_as.long()
+                return long
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # migrate one of the parameters to a fully static shape so we can compare
+
+        input = z3.Const(1, tensor_type)
+        output_long = z3.Const(8, tensor_type)
+        s.add(input == tensor_type.tensor2(D(1, 2), D(1, 4)))
+        self.assertEquals(s.check(), z3.sat)
+        actual_shape = BasicBlock().forward(torch.rand(2, 4), torch.rand(2, 4)).shape
+
+        self.assertEqual(s.model()[output_long].arg(0).arg(1), actual_shape[0])
+        self.assertEqual(s.model()[output_long].arg(1).arg(1), actual_shape[1])
+
+
     def test_ne(self):
         s1, s2 = z3.Ints('s1 s2')
         s11, s22 = z3.Ints('s11 s22')
