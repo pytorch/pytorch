@@ -50,8 +50,7 @@ class TestTransformers(NNTestCase):
 
     @parametrize("device", device_list)
     def test_transformerencoderlayer_src_mask(self, device):
-        if(device == "cuda"):
-            raise Exception("SPECIAL TEST EXCEPTION FOR TESTING PURPOSES")
+        raise Exception(f"SPECIAL {device} TEST EXCEPTION")
         batch_size = 2
         seqlen = 4
         d_model = 8
