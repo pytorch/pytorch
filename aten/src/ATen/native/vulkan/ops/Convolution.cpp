@@ -430,7 +430,11 @@ VulkanOpContext conv2d_context_create(
       determine_method(weight.sizes(), stride, padding, dilation, groups);
 
   if (is_quantized) {
-    method = Conv2dQSlidingWindow;
+    if (is_pointwise(weight.sizes())) {
+      method = Conv2dQPointwise;
+    } else {
+      method = Conv2dQSlidingWindow;
+    }
   }
   c10::impl::GenericList packed_context{c10::AnyType::get()};
   packed_context.reserve(10);
@@ -657,7 +661,7 @@ void conv2d_sliding_window_q(
   };
 
   uvec3 global_size = v_output.extents();
-  if (method_ == Conv2dPointwise) {
+  if (method_ == Conv2dQPointwise) {
     global_size = {
         safe_downcast<uint32_t>(
             div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
@@ -835,6 +839,23 @@ Tensor conv2d_context_run_q(
   if (method_ == Conv2dQSlidingWindow) {
     conv2d_sliding_window_q(
         VK_KERNEL(quantized_conv2d),
+        v_output,
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        v_input.get_scale(),
+        v_input.get_zero_point());
+  } else if (method_ == Conv2dQPointwise) {
+    conv2d_sliding_window_q(
+        VK_KERNEL(quantized_conv2d_pw_2x2),
         v_output,
         v_input,
         packed_v_weight,
