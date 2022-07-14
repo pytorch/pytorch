@@ -1348,7 +1348,6 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: data, fn_n1_def, 'x', 'y')
         _helper(lambda data: data, p_fn_n1, 'x', 'y')
 
-        _helper(lambda data: data, fn_n1_def, 'x', 'y')
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
 
         _helper(None, fn_n1_pos, 'x', error=ValueError)
