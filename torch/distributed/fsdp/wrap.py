@@ -317,11 +317,11 @@ class ParamExecOrderWrapPolicy:
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
 
-        tracing_config:
+        tracing_config (Optional[TracingConfig]):
             The configuration used to perform symbolic tracing at FSDP
             constructor to get the module and parameter execution order. The
-            type of ``tracing_config`` needs to be either None or
-            ``TracingConfig``. If set as None, then symbolic tracing is not
+            type of ``tracing_config`` needs to be either ``None`` or
+            ``TracingConfig``. If set as ``None``, then symbolic tracing is not
             enabled, and one forward as well as backward iteration are needed to
             get the parameter execution order.
 
