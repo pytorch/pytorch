@@ -1020,9 +1020,6 @@ class OutlierDetector(DetectorBase):
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
         return num_children == 0 and not is_activation_post_process(module)
-        # check to see if module is of a supported type
-        num_children = len(list(module.children()))
-        is_supported_type = num_children == 0 and not isinstance(module, ObserverBase)
 
     def _supports_report_gen(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for report generation
