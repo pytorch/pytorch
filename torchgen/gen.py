@@ -103,7 +103,7 @@ T = TypeVar("T")
 #   - 'api' has conversions for how to translate JIT schema into
 #     the various C++ APIs that the codegen interacts with.  There
 #     are in fact THREE different C++ APIs: the public C++ API,
-#     the dispatcher API, and the legacy disaptcher API.  See each
+#     the dispatcher API, and the legacy dispatcher API.  See each
 #     of these respective files for more information
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1392,6 +1392,41 @@ def get_native_function_declarations(
     return declarations
 
 
+# Return native function schema registration code for aten and other namespaces.
+def get_native_function_schema_registrations(
+    *,
+    native_functions: Sequence[NativeFunction],
+    schema_selector: SelectiveBuilder,
+) -> Tuple[List[str], str]:
+    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_function in native_functions:
+        ns_native_functions[native_function.namespace].append(native_function)
+    schema_registrations = ""
+    aten_schema_registrations = []
+    custom_namespace = None
+    for namespace, funcs in ns_native_functions.items():
+
+        schema_registrations_body = list(
+            mapMaybe(RegisterSchema(schema_selector), funcs)
+        )
+        # NB: we have to separate aten namespace registration from other namespaces,
+        # because in the template we hardcoded an operator for ATen already.
+        if namespace == "aten":
+            aten_schema_registrations = schema_registrations_body
+        else:
+            assert custom_namespace is None or namespace == custom_namespace, (
+                "Only one custom namespace (other than 'aten') is currently supported, "
+                f" but getting {namespace} and {custom_namespace}"
+            )
+            custom_namespace = namespace
+            tab = "\t"
+            schema_registrations += f"""
+TORCH_LIBRARY({custom_namespace}, m) {{
+  {tab.join(schema_registrations_body)}
+}};"""
+    return (aten_schema_registrations, schema_registrations)
+
+
 def gen_aggregated_headers(
     *,
     native_functions: Sequence[NativeFunction],
@@ -2090,32 +2125,12 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
 
-    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
-    for native_function in native_functions:
-        ns_native_functions[native_function.namespace].append(native_function)
-    schema_registrations = ""
-    aten_schema_registrations = []
-    custom_namespace = None
-    for namespace, funcs in ns_native_functions.items():
-
-        schema_registrations_body = list(
-            mapMaybe(RegisterSchema(schema_selector), funcs)
-        )
-        # NB: we have to separate aten namespace registration from other namespaces,
-        # because in the template we hardcoded an operator for ATen already.
-        if namespace == "aten":
-            aten_schema_registrations = schema_registrations_body
-        else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
-            custom_namespace = namespace
-            tab = "\t"
-            schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
-  {tab.join(schema_registrations_body)}
-}};"""
+    (
+        aten_schema_registrations,
+        schema_registrations,
+    ) = get_native_function_schema_registrations(
+        native_functions=native_functions, schema_selector=schema_selector
+    )
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
