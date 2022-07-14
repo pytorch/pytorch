@@ -148,7 +148,7 @@ size_t InlinePropagator::getMaxPosAll(TensorView* tv, bool check_siblings) {
 
 void InlinePropagator::setCAPos(TensorView* tv) {
   size_t pos = mapped_reference_pos_.at(tv);
-  if (selected_.count(tv) && !tv->isFusionInput()) {
+  if ((selected_.empty() || selected_.count(tv)) && !tv->isFusionInput()) {
     auto max_pos = getMaxPosAll(tv);
     if (mode_ == ComputeAtMode::Standard) {
       TORCH_INTERNAL_ASSERT(
@@ -171,10 +171,10 @@ void InlinePropagator::setCAPos(TensorView* tv) {
 }
 
 InlinePropagator::InlinePropagator(
-    std::unordered_set<TensorView*> selected,
     TensorView* reference,
     int64_t reference_pos,
-    ComputeAtMode mode)
+    ComputeAtMode mode,
+    std::unordered_set<TensorView*> selected)
     : max_pos_calc(mode),
       selected_(std::move(selected)),
       reference_(reference),
@@ -213,6 +213,8 @@ void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
       to_pos >= 0,
       "Unable to propagate CA position from consumer ",
       from,
+      " at ",
+      from_pos,
       " to producer ",
       to,
       " because this would require replay.");
@@ -240,6 +242,8 @@ void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
       to_pos >= 0,
       "Unable to propagate CA position from producer ",
       from,
+      " at ",
+      from_pos,
       " to consumer ",
       to,
       " because this would require replay.");

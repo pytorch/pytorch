@@ -185,7 +185,7 @@ void ComputeAt::runAt(
   InlinePropagatorSelector selector(selected);
 
   InlinePropagator inline_propagator(
-      selector.selected(), consumer, consumer_position, mode);
+      consumer, consumer_position, mode, selector.selected());
   MaxProducerPosUpdater updater;
 
   MaxRootDomainInfoSpanningTree path(consumer, consumer_position, &selector);
@@ -227,7 +227,7 @@ void ComputeAt::runWith(
   InlinePropagatorSelector selector(selected);
 
   InlinePropagator inline_propagator(
-      selector.selected(), producer, producer_position, mode);
+      producer, producer_position, mode, selector.selected());
   MaxProducerPosUpdater updater;
 
   MaxRootDomainInfoSpanningTree path(producer, producer_position, &selector);

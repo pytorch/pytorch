@@ -14,7 +14,8 @@ namespace cuda {
 // Simple selector that only propagates across tensor views in the provided
 // unordered_set. Will also propagate to all consumers of those tensors, and the
 // siblings of those tensors.
-class InlinePropagatorSelector : public MaxInfoSpanningTree::Selector {
+class TORCH_CUDA_CU_API InlinePropagatorSelector
+    : public MaxInfoSpanningTree::Selector {
   std::unordered_set<TensorView*> selected_;
 
  public:
@@ -29,7 +30,7 @@ class InlinePropagatorSelector : public MaxInfoSpanningTree::Selector {
   }
 };
 
-class MaxPosCalculator {
+class TORCH_CUDA_CU_API MaxPosCalculator {
   ComputeAtMode mode_ = ComputeAtMode::Standard;
 
   // Root domains in producer that's unmappable to any of its consumers
@@ -67,7 +68,10 @@ class MaxPosCalculator {
   MaxPosCalculator(ComputeAtMode mode);
 };
 
-class InlinePropagator : public MaxInfoSpanningTree::Propagator {
+// Propagate inline position to the `selected` tensors in the DAG. If `selected`
+// is not specified or empty, then propagate to the entire DAG.
+class TORCH_CUDA_CU_API InlinePropagator
+    : public MaxInfoSpanningTree::Propagator {
   // Checks producers and consumers to see what the maximum position in tv is
   // that can be shared across both directions.
   size_t getMaxPosAll(TensorView* tv, bool check_siblings = true);
@@ -94,10 +98,20 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
 
  public:
   InlinePropagator(
-      std::unordered_set<TensorView*> selected,
       TensorView* reference,
       int64_t reference_pos,
-      ComputeAtMode mode);
+      ComputeAtMode mode = ComputeAtMode::Standard,
+      std::unordered_set<TensorView*> selected = {});
+
+  InlinePropagator(
+      TensorView* reference,
+      int64_t reference_pos,
+      std::unordered_set<TensorView*> selected)
+      : InlinePropagator(
+            reference,
+            reference_pos,
+            ComputeAtMode::Standard,
+            selected) {}
 
   ~InlinePropagator() = default;
 
@@ -112,7 +126,8 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
 // the tensors, and it is not needed to compute the max producer position in a
 // specific order. But MaxInfoSpanningTree provides a very convenient API to
 // visit the tensors, so I just use it for cleaner code.
-class MaxProducerPosUpdater : public MaxInfoSpanningTree::Propagator {
+class TORCH_CUDA_CU_API MaxProducerPosUpdater
+    : public MaxInfoSpanningTree::Propagator {
   std::unordered_set<TensorView*> updated_;
   void handle(TensorView* tv);
 
