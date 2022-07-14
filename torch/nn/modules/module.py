@@ -1245,7 +1245,15 @@ class Module:
 
     __call__ : Callable[..., Any] = _call_impl
 
+    def __getstate__(self):
+        return {slot: getattr(self, slot) for slot in Module.__slots__}
+
     def __setstate__(self, state):
+        # TODO: support loading old checkpoints from before __slots__
+        for slot in Module.__slots__:
+            if slot in state:
+                super().__setattr__(slot, state[slot])
+
         """
         self.__dict__.update(state)
         # Support loading old checkpoints that don't have the following attrs:
@@ -1265,14 +1273,18 @@ class Module:
         pass
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
-        if name in self._parameters:
-            return self._parameters[name]  # type:ignore[return-value]
-        if name in self._buffers:
-            return self._buffers[name]  # type:ignore[return-value]
-        if name in self._modules:
-            return self._modules[name]  # type:ignore[return-value]
-        if name in self.__dict__:
-            return self.__dict__[name]  # type:ignore[return-value]
+        parameters = super().__getattribute__('_parameters')
+        if name in parameters:
+            return parameters[name]  # type:ignore[return-value]
+        buffers = super().__getattribute__('_buffers')
+        if name in buffers:
+            return buffers[name]  # type:ignore[return-value]
+        modules = super().__getattribute__('_modules')
+        if name in modules:
+            return modules[name]  # type:ignore[return-value]
+        __dict__ = super().__getattribute__('__dict__')
+        if name in __dict__:
+            return __dict__[name]  # type:ignore[return-value]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
