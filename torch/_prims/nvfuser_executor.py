@@ -56,7 +56,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         ):
             raise ValueError(
                 "All call_function nodes in the graph must support nvfuser. "
-                f"Node {node} does not support nvfuser"
+                f"Node {node} with target {node.target} does not support nvfuser"
             )
 
     fusion = Fusion()
