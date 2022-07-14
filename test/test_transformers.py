@@ -50,13 +50,19 @@ class TestTransformers(NNTestCase):
 
     @parametrize("device", device_list)
     def test_transformerencoderlayer_src_mask(self, device):
+        if(device == "cuda"):
+            raise Exception("SPECIAL TEST EXCEPTION FOR TESTING PURPOSES")
         batch_size = 2
         seqlen = 4
         d_model = 8
         nhead = 8
         dim_feedforward = 32
 
-        model = torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True).to(device)
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            batch_first=True).to(device)
         src = torch.rand(batch_size, seqlen, d_model).to(device)  # bs, seqlen, d_model
         src_mask = torch.zeros(seqlen, seqlen).to(torch.bool).to(device)
 
