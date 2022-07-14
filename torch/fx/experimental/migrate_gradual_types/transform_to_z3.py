@@ -107,6 +107,7 @@ try:
                 raise NotImplementedError('operation not yet implemented')
 
         else:
+            # print(constraint)
 
             raise NotImplementedError('Operation not yet implemented')
 
