@@ -1230,7 +1230,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs, sample.output_process_fn_grad)
+            composite_compliance.check_backward_formula(
+                op.get_op(), args, kwargs,
+                sample.output_process_fn_grad,
+                op.gradcheck_wrapper)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1248,7 +1251,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper)
 
 
 class TestMathBits(TestCase):
@@ -1532,12 +1536,14 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
         # CompositeImplicitAutograd
+        '_refs.allclose',
         '_refs.atleast_1d',
         '_refs.atleast_2d',
         '_refs.atleast_3d',
         '_refs.broadcast_to',
         '_refs.chunk',
         '_refs.column_stack',
+        '_refs.contiguous',
         '_refs.dsplit',
         '_refs.dstack',
         '_refs.fill',
@@ -1575,6 +1581,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
     }
 
     @parametrize("op", ref_ops_names)
