@@ -367,10 +367,11 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d_fp(
+  VulkanImage create_image3d(
       const VkExtent3D&,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
+      const caffe2::TypeMeta dtype,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
