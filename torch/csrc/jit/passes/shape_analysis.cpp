@@ -1391,8 +1391,8 @@ class ShapePropagator : public PropertyPropBase {
               node, /*num_reduced_dim=*/0, /*upcast_integer=*/false, opt_dtype);
         }};
 
-    static const auto factory_with_ndim = [](
-        Node* node, int dim, at::ScalarType default_dtype) -> type_vec_t {
+    static const auto factory_with_ndim =
+        [](Node* node, int dim, at::ScalarType default_dtype) -> type_vec_t {
       at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
@@ -1494,21 +1494,23 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
-            return factory_with_ndim(node, (int)maybe_size->size(), at::kDouble);
+            return factory_with_ndim(
+                node, (int)maybe_size->size(), at::kDouble);
           }
           return {};
         }};
 
-    static const register_formula_for randint{{
-        "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-        "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      },
-      [](Node* node) -> type_vec_t {
-        if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
-          return factory_with_ndim(node, (int)maybe_size->size(), at::kLong);
-        }
-        return {};
-      }};
+    static const register_formula_for randint{
+        {
+            "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+        },
+        [](Node* node) -> type_vec_t {
+          if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
+            return factory_with_ndim(node, (int)maybe_size->size(), at::kLong);
+          }
+          return {};
+        }};
 
     static const auto get_cast_scalar_type = [](Node* node) -> at::ScalarType {
       switch (node->kind()) {
