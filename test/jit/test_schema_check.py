@@ -5,9 +5,9 @@ import sys
 import torch
 from torch.utils._pytree import tree_map
 
-
+from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.schema_check_mode import SchemaCheckMode
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 from torch.testing._internal.jit_utils import JitTestCase
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -342,3 +342,41 @@ class TestSchemaCheck(JitTestCase):
         y = x.add(x, alpha=2)
         self.assertTrue(torch._C._is_alias_of(x, x))
         self.assertFalse(torch._C._is_alias_of(x, y))
+
+    # Tests that SchemaInfo Bindings work as expected
+    def test_schema_info_bind(self):
+        class SchemaInfoBindTestMode(TorchDispatchMode):
+            def __init__(self):
+                self.check = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                named_arg_list = normalize_function(
+                    func,
+                    args,
+                    kwargs,
+                    normalize_to_only_use_kwargs=True
+                ).kwargs
+                schema_info_value_test = torch._C._SchemaInfo(func._schema)
+                schema_info_values_test = torch._C._SchemaInfo(func._schema)
+                self.check.append(schema_info_value_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                self.check.append(schema_info_values_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                for i in named_arg_list:
+                    schema_info_value_test.add_argument_value(i, named_arg_list[i])
+                schema_info_values_test.add_argument_values(named_arg_list)
+                self.check.append(schema_info_value_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                self.check.append(schema_info_values_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+
+                return func(*args, **kwargs)
+        x = torch.rand((3, 3))
+        schemaInfoCheck = SchemaInfoBindTestMode()
+        with enable_torch_dispatch_mode(schemaInfoCheck):
+            x.add(x)
+        self.assertEqual([False, False, True, True], schemaInfoCheck.check)
