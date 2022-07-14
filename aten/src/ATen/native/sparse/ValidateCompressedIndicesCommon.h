@@ -157,7 +157,7 @@ _check_idx_sorted_distinct_vals_slices_with_cidx(
   }
 }
 
-static inline int64_t numel(IntArrayRef sizes) {
+static inline int64_t indexCount(IntArrayRef sizes) {
   int64_t res = 1;
   for (const auto& s : sizes) {
     res *= s;
@@ -200,12 +200,22 @@ void _validate_compressed_sparse_indices_kernel(
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
-  TORCH_CHECK(cidx.size(-1) == cdim + 1, "c{row|col}_indices have wrong shape: ",
-      "c{row|col}.shape[-1] = ", cidx.size(-1), " is not equal to ",
-      "cdim + 1 = ", cdim + 1);
-  TORCH_CHECK(idx.size(-1) == nnz, "{row|col}_indices have wrong shape: ",
-      "{row|col}.shape[-1] = ", idx.size(-1), " is not equal to ",
-      "nnz = ", nnz);
+  if (cdim_name == CDimName::CRow) {
+    TORCH_CHECK(cidx.size(-1) == cdim + 1, "crow_indices have wrong shape: ",
+        "crow_indices.shape[-1] = ", cidx.size(-1), " is not equal to ",
+        "nrows + 1 = ", cdim + 1);
+    TORCH_CHECK(idx.size(-1) == nnz, "col_indices have wrong shape: ",
+        "col_indices.shape[-1] = ", idx.size(-1), " is not equal to ",
+        "nnz = ", nnz);
+  }
+  else {
+    TORCH_CHECK(cidx.size(-1) == cdim + 1, "ccol_indices have wrong shape: ",
+        "ccol_indices.shape[-1] = ", cidx.size(-1), " is not equal to ",
+        "ncols + 1 = ", cdim + 1);
+    TORCH_CHECK(idx.size(-1) == nnz, "row_indices have wrong shape: ",
+        "row_indices.shape[-1] = ", idx.size(-1), " is not equal to ",
+        "nnz = ", nnz);
+  }
 
   using KernelLauncher = KernelLauncher<kernel_t, vec_kernel_t>;
 
@@ -240,7 +250,7 @@ void _validate_compressed_sparse_indices_kernel(
     const auto cidx_next = cidx.slice(-1, 1, cdim + 1);
 
     const auto batch_dims = cidx.sizes().slice(0, cidx.dim() - 1);
-    const auto batch_count = numel(batch_dims);
+    const auto batch_count = indexCount(batch_dims);
     const auto batch_idx = at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     auto iter = TensorIteratorConfig()

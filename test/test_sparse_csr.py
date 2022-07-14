@@ -754,6 +754,20 @@ class TestSparseCompressed(TestCase):
                    shape((2, 3)),
                    r'0 <= compressed_indices\[..., 1:\] - compressed_indices\[..., :\-1\] <= plain_dim` is not satisfied.')
 
+            yield ('invalid compressed_indices.diff(dim=-1)',
+                   tensor([0, 5, 4]),
+                   tensor([0, 1, 0, 2]),
+                   values([1, 2, 3, 4]),
+                   shape((2, 3)),
+                   r'0 <= compressed_indices\[..., 1:\] - compressed_indices\[..., :\-1\] <= plain_dim` is not satisfied.')
+
+            yield ('invalid min(plain_indices)',
+                   tensor([0, 2, 4]),
+                   tensor([0, -1, 0, 3]),
+                   values([1, 2, 3, 4]),
+                   shape((2, 3)),
+                   r'`0 <= plain_indices < plain_dim` is not satisfied.')
+
             yield ('invalid max(plain_indices)',
                    tensor([0, 2, 4]),
                    tensor([0, 1, 0, 3]),
