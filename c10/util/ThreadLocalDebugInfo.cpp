@@ -1,21 +1,19 @@
+#include <c10/util/Exception.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 namespace c10 {
 
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
+C10_DEFINE_TLS_static(ThreadLocalDebugInfo::lookup_cache_t, tls_lookup_cache);
 #define debug_info (tls_debug_info.get())
+#define lookup_cache (tls_lookup_cache.get())
 
 /* static */
 DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
-  ThreadLocalDebugInfo* cur = debug_info.get();
-  while (cur) {
-    if (cur->kind_ == kind) {
-      return cur->info_.get();
-    }
-    cur = cur->parent_info_.get();
-  }
-  return nullptr;
+  const auto index = static_cast<size_t>(kind);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(index < NUM_DEBUG_INFO_KINDS);
+  return lookup_cache[index];
 }
 
 /* static */
@@ -27,6 +25,7 @@ std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::current() {
 void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
     const std::shared_ptr<ThreadLocalDebugInfo>& info) {
   debug_info = info;
+  lookup_cache = ThreadLocalDebugInfo::_make_lookup_cache();
 }
 
 /* static */
@@ -38,6 +37,7 @@ void ThreadLocalDebugInfo::_push(
   debug_info->parent_info_ = prev_info;
   debug_info->kind_ = kind;
   debug_info->info_ = info;
+  lookup_cache[static_cast<size_t>(kind)] = info.get();
 }
 
 /* static */
@@ -48,6 +48,7 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
       (size_t)kind);
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
+  lookup_cache = ThreadLocalDebugInfo::_make_lookup_cache();
   return res->info_;
 }
 
@@ -58,6 +59,19 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
       "Expected debug info of type ",
       (size_t)kind);
   return debug_info->info_;
+}
+
+/* static */
+ThreadLocalDebugInfo::lookup_cache_t ThreadLocalDebugInfo::
+    _make_lookup_cache() {
+  ThreadLocalDebugInfo* cur = debug_info.get();
+
+  lookup_cache_t out;
+  while (cur) {
+    out[static_cast<size_t>(cur->kind_)] = cur->info_.get();
+    cur = cur->parent_info_.get();
+  }
+  return out;
 }
 
 DebugInfoGuard::DebugInfoGuard(

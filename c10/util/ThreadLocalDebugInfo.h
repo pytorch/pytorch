@@ -1,11 +1,13 @@
 #pragma once
 
-#include <c10/macros/Export.h>
-#include <c10/util/Exception.h>
-
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -18,7 +20,10 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
+  NUM_KINDS,
 };
+
+static constexpr auto NUM_DEBUG_INFO_KINDS = static_cast<size_t>(DebugInfoKind::NUM_KINDS);
 
 class C10_API DebugInfoBase {
  public:
@@ -52,12 +57,13 @@ class C10_API ThreadLocalDebugInfo {
   // given kind
   static std::shared_ptr<DebugInfoBase> _peek(DebugInfoKind kind);
 
+  using lookup_cache_t = std::array<DebugInfoBase*, NUM_DEBUG_INFO_KINDS>;
+  static lookup_cache_t _make_lookup_cache();
+
  private:
   std::shared_ptr<DebugInfoBase> info_;
   DebugInfoKind kind_;
   std::shared_ptr<ThreadLocalDebugInfo> parent_info_;
-
-  friend class DebugInfoGuard;
 };
 
 // DebugInfoGuard is used to set debug information,
