@@ -32,6 +32,107 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class HFOperations(unittest.TestCase):
 
+    def test_layer_norm(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.l = torch.nn.LayerNorm((1024,))
+
+            def forward(self, x: Dyn):
+                return self.l(x)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # make the output a size 1 tensor which should result
+        # in the migration of the input
+
+        b = BasicBlock().forward(torch.rand(1024))
+        input = z3.Const(1, tensor_type)
+        output = z3.Const(2, tensor_type)
+        s.add(output == tensor_type.tensor1(D(1, 1024)))
+        s.check()
+        self.assertEqual(s.model()[input], s.model()[output])
+        # input shape = output shape
+        self.assertEqual(b.shape[0], s.model()[input].arg(0).arg(1))
+
+        # change annotation to the wrong shape
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([10, 10])
+
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.unsat)
+
+        # fix the annotation
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([10, 1024])
+
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        s.check()
+        b = BasicBlock().forward(torch.rand(10, 1024)).shape
+        self.assertEqual(s.model()[output].arg(0).arg(1), b[0])
+        self.assertEqual(s.model()[output].arg(1).arg(1), b[1])
+
+    def test_ne(self):
+        s1, s2 = z3.Ints('s1 s2')
+        s11, s22 = z3.Ints('s11 s22')
+        d1, d2 = D(s11, s1), D(0, s2)
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn, y: Dyn):
+                return torch.ne(x, y)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # change the annotations
+        for n in graph.nodes:
+            if n.name == 'x':
+                n.type = TensorType([1, 2])
+            if n.name == 'y':
+                n.type = TensorType([2, Dyn])
+
+        # resulting type should be TensorType([2, 2])
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        # force the second dimension to be Dyn
+        # output should still be TensorType([2, 2])
+        input = z3.Const(2, tensor_type)
+        s.add(input == tensor_type.tensor2(d1, d2))
+        self.assertEqual(s.check(), z3.sat)
+        B = BasicBlock().forward(torch.rand(1, 2), torch.rand(2, 1))
+        output = z3.Const(3, tensor_type)
+        self.assertEqual(s.model()[output].arg(0).arg(1), B.shape[0])
+        self.assertEqual(s.model()[output].arg(1).arg(1), B.shape[0])
+
+
     def test_cumsum(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
