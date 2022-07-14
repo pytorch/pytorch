@@ -13985,7 +13985,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_constant_pad_nd,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # BoolType is not a subtype of ScalarType in JIT
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.bool,)),
+           )),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
@@ -19650,22 +19655,12 @@ op_db: List[OpInfo] = [
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        backward_dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
-        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
-        check_batched_grad=False,
         supports_forward_ad=True,
-        skips=(
-            # See https://github.com/pytorch/pytorch/issues/65466
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-            ),
-        ),
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "diagflat",
