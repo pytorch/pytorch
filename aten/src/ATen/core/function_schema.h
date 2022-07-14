@@ -10,7 +10,6 @@
 #include <ATen/core/operator_name.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <unordered_map>
-#include <stack>
 
 namespace c10 {
 
