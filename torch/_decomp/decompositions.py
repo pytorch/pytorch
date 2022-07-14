@@ -955,7 +955,6 @@ def native_layer_norm_backward(
     )
 
 
-@register_decomposition(aten.native_batch_norm)
 def native_batch_norm(
     input: Tensor,
     weight: Optional[Tensor],

@@ -2318,6 +2318,7 @@ def _momentum_update(a_hat: Tensor, a_update: Tensor, momentum: float):
     return (momentum * a_hat) + ((1 - momentum) * a_update)
 
 
+@register_decomposition(torch.ops.aten.native_batch_norm)
 def native_batch_norm(
     input: Tensor,
     weight: Optional[Tensor],
