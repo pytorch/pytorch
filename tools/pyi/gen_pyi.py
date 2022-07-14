@@ -433,6 +433,12 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_from_functional_tensor": [
+                "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
+            "_to_functional_tensor": [
+                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
