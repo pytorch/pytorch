@@ -1,0 +1,16 @@
+name: Set windows runner binary build vars
+
+description: Sets runner specific variables needed for windows binary builds
+
+runs:
+  using: composite
+  steps:
+    # NOTE: These environment variables are put here so that they can be applied on every job equally
+    #       They are also here because setting them at a workflow level doesn't give us access to the
+    #       runner.temp variable, which we need.
+    - name: Populate binary env
+      shell: bash
+      run: |
+        echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+        echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+        echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
