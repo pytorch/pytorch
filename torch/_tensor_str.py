@@ -415,6 +415,9 @@ def _str_intern(inp, *, tensor_contents=None):
                 return "\n".join(f"  {line}" for line in s.split("\n"))
             strs = ",\n".join(indented_str(str(t), indent + 1) for t in torch.ops.aten.unbind.int(self, 0))
             tensor_str = f"[\n{strs}\n]"
+    elif torch._is_functional_tensor(self):
+        prefix = "_to_functional_tensor("
+        tensor_str = repr(torch._from_functional_tensor(self))
     else:
         if self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))
