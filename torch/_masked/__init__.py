@@ -723,16 +723,7 @@ def _where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
     - all unspecified elements correspond to masked-out elements.
     """
     if mask.layout == torch.strided:
-        if fill_value.dtype == torch.bool:
-            # Workaround internal assert failure in
-            # test_nvfuser_correctness__masked_mean_cuda_bool: We
-            # don't have an op for aten::new_full but it isn't a
-            # special case.  Argument types: Tensor, int[], bool, int,
-            # int, Device, bool
-            fill = input.new_full([], int(fill_value.item())).to(dtype=torch.bool)
-        else:
-            fill = input.new_full([], fill_value.item())
-        return torch.where(mask, input, fill)
+        return torch.where(mask, input, fill_value)
     elif mask.layout == torch.sparse_coo:
         return _sparse_coo_where(mask, input, fill_value)
     elif mask.layout == torch.sparse_csr:
