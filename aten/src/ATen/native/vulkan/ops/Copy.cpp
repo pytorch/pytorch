@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 
@@ -16,12 +15,10 @@ void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
       // pipeline barrier
       pipeline_barrier,
       // images
-      src.image(
-          pipeline_barrier,
-          api::PipelineStage::Transfer),
+      src.image(pipeline_barrier, api::PipelineStage::TRANSFER),
       dst.image(
           pipeline_barrier,
-          api::PipelineStage::Transfer,
+          api::PipelineStage::TRANSFER,
           api::MemoryAccessType::WRITE),
       // copy details
       src.extents(),
@@ -41,9 +38,9 @@ void copy_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
     float* data_ptr = mapping.template data<float>();
 
     memcpy(
-      data_ptr,
-      src.contiguous().data_ptr<float>(),
-      std::min(src.nbytes(), src.nbytes()));
+        data_ptr,
+        src.contiguous().data_ptr<float>(),
+        std::min(src.nbytes(), src.nbytes()));
   }
   utils::pack_staging_to_vtensor(staging.buffer(), dst);
 }
@@ -55,11 +52,23 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
 
   api::VulkanFence fence = context->fences().get_fence();
 
-  utils::pack_vtensor_to_staging(
-      src, staging.buffer(), fence.get_submit_handle());
+  {
+    // Refer to comment in submit_compute_job. When syncing with the GPU, the
+    // context must not allow other threads to record dispatches into it between
+    // between calling vkQueueSubmit and flushing the context. Therefore,
+    // cmd_mutex_ must be manually managed by the calling thread.
+    std::unique_lock<std::mutex> context_lock(context->dispatch_lock());
 
-  fence.wait();
+    utils::pack_vtensor_to_staging(
+        src, staging.buffer(), fence.get_submit_handle());
 
+    fence.wait();
+
+    context->flush();
+    // cmd_mutex_ will be released when exiting this scope.
+  }
+
+  // Copy data from buffer back to CPU tensor.
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::READ);
     mapping.invalidate();
@@ -67,12 +76,9 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
     float* data_ptr = mapping.template data<float>();
 
     memcpy(
-        dst.data_ptr<float>(),
-        data_ptr,
-        std::min(src.nbytes(), dst.nbytes()));
+        dst.data_ptr<float>(), data_ptr, std::min(src.nbytes(), dst.nbytes()));
   }
 
-  context->flush();
   context->fences().return_fence(fence);
 }
 
@@ -103,12 +109,10 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     // Vulkan -> CPU
     if (self.device().is_cpu()) {
       copy_vulkan_to_cpu(v_src, self);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Unsupported!");
     }
-  }
-  else {
+  } else {
     TORCH_INTERNAL_ASSERT(
         false,
         "Invalid code path taken! Either the source or the destination tensor "
