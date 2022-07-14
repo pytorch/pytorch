@@ -40,6 +40,7 @@ class CSEPass(PassBase):
         result = p(traced_graph)
         print(result.graph_module)
         """
+        modified = False
         new_graph = fx.Graph()
         env: Dict[fx.node.Node, fx.node.Node] = {}  # map from node in the old graph to node in the new graph
         hash_env: Dict[Tuple[torch._ops.OpOverload, int], fx.node.Node] = {}  # map from hash to a node in the new graph
@@ -75,6 +76,7 @@ class CSEPass(PassBase):
                 # check if a node has a substitute and can be eliminated
                 hash_val_in_hash_env = hash_val in hash_env
                 if hash_val_in_hash_env and token_map[hash_val] == token:
+                    modified = True  # substition happens and the graph is modified
                     env[n] = hash_env[hash_val]
                     continue
 
@@ -85,4 +87,4 @@ class CSEPass(PassBase):
                     token_map[hash_val] = token
 
         csed_gm = fx.GraphModule(graph_module, new_graph)
-        return PassResult(csed_gm, False)
+        return PassResult(csed_gm, modified)
