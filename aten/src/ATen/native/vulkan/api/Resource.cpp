@@ -75,7 +75,7 @@ VulkanBuffer::VulkanBuffer(
 
   // TODO: enable creation with a custom pool
   VmaAllocationCreateInfo alloc_create_info{
-      VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT, // flags
+      memory_properties_.create_flags, // flags
       memory_properties_.memory_usage, // usage
       memory_properties_.required_mem_flags, // requiredFlags
       memory_properties_.preferred_mem_flags, // preferredFlags
@@ -320,7 +320,7 @@ VulkanImage::VulkanImage(
 
   // TODO: enable creation with a custom pool
   const VmaAllocationCreateInfo alloc_create_info{
-      VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT, // flags
+      memory_properties_.create_flags, // flags
       memory_properties_.memory_usage, // usage
       memory_properties_.required_mem_flags, // requiredFlags
       memory_properties_.preferred_mem_flags, // preferredFlags
@@ -492,6 +492,10 @@ MemoryAllocator::MemoryAllocator(
       physical_device_(physical_device),
       device_(device),
       allocator_{VK_NULL_HANDLE} {
+  VmaVulkanFunctions vk_functions{};
+  vk_functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+  vk_functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
   const VmaAllocatorCreateInfo allocator_create_info{
       0u, // flags
       physical_device_, // physicalDevice
@@ -499,12 +503,11 @@ MemoryAllocator::MemoryAllocator(
       0u, // preferredLargeHeapBlockSize
       nullptr, // pAllocationCallbacks
       nullptr, // pDeviceMemoryCallbacks
-      1u, // frameinUseCount
       nullptr, // pHeapSizeLimit
-      nullptr, // pVulkanFunctions
-      nullptr, // pRecordSettings
+      &vk_functions, // pVulkanFunctions
       instance, // instance
       VK_API_VERSION_1_0, // vulkanApiVersion
+      nullptr, // pTypeExternalMemoryHandleTypes
   };
 
   VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator_));
@@ -541,7 +544,8 @@ VulkanImage MemoryAllocator::create_image3d_fp(
   }
 
   const VulkanImage::MemoryProperties mem_props{
-      VMA_MEMORY_USAGE_GPU_ONLY,
+      DEFAULT_ALLOCATION_STRATEGY,
+      VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
       0u,
       0u,
       usage,
@@ -580,18 +584,28 @@ VulkanImage MemoryAllocator::create_image3d_fp(
 VulkanBuffer MemoryAllocator::create_storage_buffer(
     const VkDeviceSize size,
     const bool gpu_only) {
-  const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  const VkBufferUsageFlags buffer_usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+  VmaAllocationCreateFlags create_flags = DEFAULT_ALLOCATION_STRATEGY;
+  if (gpu_only) {
+    create_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+  }
 
   const VmaMemoryUsage vma_usage =
-      gpu_only ? VMA_MEMORY_USAGE_GPU_ONLY : VMA_MEMORY_USAGE_GPU_TO_CPU;
+      gpu_only ? VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE : VMA_MEMORY_USAGE_AUTO;
 
-  const VkMemoryPropertyFlags preferred_mem_props =
-      gpu_only ? 0u : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  const VkMemoryPropertyFlags required_mem_props =
+      gpu_only ? 0u : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+
+  const VkMemoryPropertyFlags preferred_mem_props = gpu_only
+      ? 0u
+      : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+          VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 
   const VulkanBuffer::MemoryProperties mem_props{
+      create_flags,
       vma_usage,
-      0u,
+      required_mem_props,
       preferred_mem_props,
       buffer_usage,
   };
@@ -601,7 +615,8 @@ VulkanBuffer MemoryAllocator::create_storage_buffer(
 
 VulkanBuffer MemoryAllocator::create_staging_buffer(const VkDeviceSize size) {
   const VulkanBuffer::MemoryProperties mem_props{
-      VMA_MEMORY_USAGE_CPU_COPY,
+      DEFAULT_ALLOCATION_STRATEGY,
+      VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
       0u,
       0u,
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
