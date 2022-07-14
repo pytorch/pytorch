@@ -511,8 +511,7 @@ def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor
         # apply mask to the dense part of the input values:
         _, w1 = intersection(mask_flat_indices, maskin_input_flat_indices)
         where_mask_values = mask.values()[w1]
-        where_input_values = torch.where(where_mask_values, where_input_values,
-                                         where_input_values.new_full([], fill_value.item()))
+        where_input_values = torch.where(where_mask_values, where_input_values, fill_value)
 
     # the set of flat indices of unspecified input and masked-in elements:
     maskin_zero_flat_indices = _apply(minus(maskin_flat_indices, maskin_input_flat_indices))
