@@ -13,6 +13,15 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(saved_dtype)
+
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -327,13 +336,17 @@ class TestTransformers(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # Fast path requires inference mode.
-        if training:
-            cm = contextlib.nullcontext()
-        else:
-            cm = torch.no_grad()
-        with cm:
-            _test(batch_first, training, enable_nested_tensor)
+        # TODO: remove set default dtype to double by making ref_output more precise. 
+        # Added because this test was copied from test_nn.py, which has default 
+        # dtype double. If default dtype is float, tests will say tensors not close because 
+        # ref output precision too low
+        with set_default_dtype(torch.double):
+            if training:
+                cm = contextlib.nullcontext()
+            else:
+                cm = torch.no_grad()  # transformer fast path requires no grad
+            with cm:
+                _test(batch_first, training, enable_nested_tensor)
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
