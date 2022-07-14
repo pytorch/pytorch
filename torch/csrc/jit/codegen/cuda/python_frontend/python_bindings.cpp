@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
@@ -874,54 +873,39 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_CAST_OP("to_dtype", castOp)
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
 
-/*
   nvf_ops.def_static(
       "var",
-      [](TensorView* input,
-         const std::vector<int>& dims,
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int>& axes,
          int64_t correction,
-         bool keepdim) -> TensorView* {
-        return torch::jit::fuser::cuda::variance(
-            input, dims, correction, keepdim);
+         bool keepdim) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output =
+          new nvfuser::Tensor(self.fusion_definition->recording_state.size());
+        self.fusion_definition->recording_state.emplace_back(output);
+        self.fusion_definition->recording.emplace_back(
+          new nvfuser::VarianceOpRecord(
+            {arg->index}, {output->index}, axes, correction, keepdim));
+        return output;
       },
       py::return_value_policy::reference);
 
-  // TODO: We don't have a way to realize a tensor if the operation creates
-  // the output of a fusion.
   nvf_ops.def_static(
       "broadcast_in_dim",
-      [](TensorView* input,
-         std::vector<int>& output_shape,
-         std::vector<int>& broadcast_dims) -> TensorView* {
-        const auto input_ndims = input->domain()->noReductions().size();
-        TORCH_CHECK(
-            output_shape.size() >= input_ndims,
-            "The new shape is expected to be greater-then-or-equal to the input",
-            output_shape.size(),
-            input_ndims);
-        TORCH_CHECK(
-            input_ndims == broadcast_dims.size(),
-            "The broadcast dimensions should match the input dimensions.",
-            input_ndims,
-            broadcast_dims.size());
-
-        std::vector<bool> is_broadcast_dim(output_shape.size(), true);
-        for (const auto idx : c10::irange(broadcast_dims.size())) {
-          if (idx > 0) {
-            TORCH_CHECK(
-                broadcast_dims[idx - 1] < broadcast_dims[idx],
-                "Broadcast dimension is not greater than the previous value.");
-          }
-          TORCH_CHECK(
-              broadcast_dims[idx] < static_cast<int>(output_shape.size()),
-              "Invalid broadcast_dims value.");
-          is_broadcast_dim.at(broadcast_dims[idx]) = false;
-        }
-
-        return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+      [](nvfuser::FusionDefinition::Operators& self,                           \
+         nvfuser::Tensor* arg,
+         std::vector<int64_t>& output_shape,
+         std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output =
+          new nvfuser::Tensor(self.fusion_definition->recording_state.size());
+        self.fusion_definition->recording_state.emplace_back(output);
+        self.fusion_definition->recording.emplace_back(
+          new nvfuser::BroadcastOpRecord(
+            {arg->index}, {output->index}, output_shape, broadcast_dims));
+        return output;
       },
       py::return_value_policy::reference);
-*/
+
 }
 
 } // namespace jit
