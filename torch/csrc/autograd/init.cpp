@@ -31,6 +31,18 @@
 #include <set>
 #include <unordered_set>
 
+namespace {
+
+struct DisableFuncTorch {
+  DisableFuncTorch()
+      : front_guard_(c10::DispatchKey::FuncTorchDynamicLayerFrontMode),
+        back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
+  c10::impl::ExcludeDispatchKeyGuard front_guard_;
+  c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+} // namespace
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
   using namespace torch::profiler::impl;
@@ -73,6 +85,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
+      .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
@@ -258,7 +271,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   {
     using torch::profiler::impl::Result;
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_);
+
+    py::class_<Inputs>(m, "_Inputs")
+        .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("dtypes", &Inputs::dtypes_);
+
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
@@ -419,6 +438,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
