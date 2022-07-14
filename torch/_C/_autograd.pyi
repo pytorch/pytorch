@@ -105,8 +105,13 @@ class _PyFrameState:
     file_name: str
     ...
 
+class _Inputs:
+    shapes: List[List[int]]
+    dtypes: List[str]
+
 class _ExtraFields_TorchOp:
     allow_tf32_cublas: bool
+    inputs: _Inputs
     ...
 
 class _ExtraFields_Backend:
