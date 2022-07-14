@@ -1,7 +1,7 @@
 import collections
 import contextlib
 import warnings
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, Tuple
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
@@ -573,7 +573,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
 
-def mem_get_info(device: Union[Device, int] = None) -> int:
+def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     r"""Returns the global free and total GPU memory occupied for a given
     device using cudaMemGetInfo.
 

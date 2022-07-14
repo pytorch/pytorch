@@ -781,8 +781,9 @@ class GitHubPR:
         repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
         gh_post_pr_comment(self.org, self.project, self.pr_num,
-                           'Successfully started land time checks.' +
-                           f' See progress here: https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}')
+                           '@pytorchbot successfully started a merge and created land time checks.' +
+                           f' See merge status [here]({os.getenv("GH_RUN_URL")}) ' +
+                           'and land check progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})')
         return commit
 
 
@@ -1087,10 +1088,10 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
-
-    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
-    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
-    gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+    if not args.land_checks:
+        msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+        msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
