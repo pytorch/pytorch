@@ -489,7 +489,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
           ||(input.size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L 
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
       && input.numel() < 2147483648 // some cuDNN kernels have 32-bit indexing limitations
       );
 
