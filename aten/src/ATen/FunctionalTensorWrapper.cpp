@@ -30,6 +30,17 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks;
+  // For better error handling,
+  // we also don't want our wrapper tensor to be able to dispatch directly
+  // to a backend kernel.
+  // Dispatching directly to e.g. a CPU kernel would always segfault,
+  // because wrapper tensors don't have any real data.
+  // (This should never happen because we should always hit a functionalization kernel,
+  // but can help make bugs less nasty).
+  // Here, we defensively remove any backend keys from the wrapper's keyset.
+  key_set_ = key_set_.remove_backend(value_.key_set().highestBackendKey());
+  // Python is also a "backend", so remove that.
+  key_set_ = key_set_ - c10::python_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)

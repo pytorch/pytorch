@@ -2,11 +2,9 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
-from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
+from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
-
-import logging
 
 def are_aliased(x, y):
     if x._base is None and y._base is None:
@@ -16,46 +14,6 @@ def are_aliased(x, y):
     if x._base is None and y._base is not None:
         return y._base is x
     return x._base is y._base
-
-# Just for testing: a logging tensor that also transforms out-of-place ops into inplace ops.
-# That way even if the outer wrapper is functionalized, the inner wrapper will also need functionalization.
-class InplaceLoggingTensor(LoggingTensorReentrant):
-    @staticmethod
-    def __new__(cls, e):
-        r = torch.Tensor._make_wrapper_subclass(cls, e.shape, dtype=e.dtype, requires_grad=False)
-        r.elem = e
-        return r
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    def __str__(self):
-        return f'InplaceLoggingTensor({self.elem})'
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            if isinstance(e, InplaceLoggingTensor):
-                return e.elem
-            else:
-                return e
-
-        def wrap(e):
-            if isinstance(e, torch.Tensor):
-                return InplaceLoggingTensor(e)
-            else:
-                return e
-        f = func
-        # this subclass converts all `add()` ops into `add_()` ops
-        if f is torch.ops.aten.add.Tensor:
-            f = torch.ops.aten.add_.Tensor
-
-        with cls.context():
-            rs = tree_map(wrap, f(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        # after running the (potentially transformed) op,
-        # log the original op that we saw.
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
-        return rs
-
 
 
 class TestFunctionalization(TestCase):
@@ -826,47 +784,6 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):
             x1_not_functional.add_(x2_functional)
-
-    # This tests the behavior of functionalization with multiple layers of wrapped tensor subclasses.
-    def test_multiple_levels_of_wrapping(self):
-        def f(x):
-            # call an inplace op and have it get logged twice (by the outer + inner wrapper)
-            x.add_(1)
-
-        # Test 1: both the inner and outer wrapper are "functionalized"
-        x_inner_and_outer_functional = torch._to_functional_tensor(
-            InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4)))))
-
-        with capture_logs() as logs:
-            f(x_inner_and_outer_functional)
-
-        # Since both wrappers were unctionalized, they both log "add"
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, 1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
-
-        # Test 2: only the inner wrapper is "functionalized"
-        x_only_inner_functional = InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4))))
-
-        with capture_logs() as logs:
-            f(x_only_inner_functional)
-
-        # Since only the inner wrapper is functionalized, then the inner (first) log is functionalized
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, 1)
-$3 = torch._ops.aten.add_.Tensor($2, 1)""")
-
-        # Test 3: only the inner wrapper is "functionalized"
-        x_only_outer_functional = torch._to_functional_tensor(InplaceLoggingTensor(LoggingTensor(torch.ones(4))))
-
-        with capture_logs() as logs:
-            f(x_only_outer_functional)
-
-        # Only the outer add_ is functionalized
-        # Since only the outer wrapper is functionalized, then the outer (second) log is functionalized
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add_.Tensor($0, 1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 if __name__ == '__main__':
     run_tests()
