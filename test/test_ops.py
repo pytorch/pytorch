@@ -1529,6 +1529,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.mse_loss',
         '_refs.masked_fill',
         '_refs.transpose',
+        '_refs.expand_as',
         '_refs.var',
         # these are not aten ops?
         '_refs.broadcast_shapes',
