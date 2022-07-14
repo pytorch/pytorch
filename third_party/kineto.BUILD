@@ -2,9 +2,9 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
     name = "kineto",
-    hdrs = glob(["libkineto/include/*.h",]),
+    hdrs = glob(["kineto/include/*.h",]),
     includes = [
-        "libkineto/include/",
+        "kineto/include/",
     ],
     visibility = ["//visibility:public"],
 )

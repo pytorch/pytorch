@@ -132,7 +132,7 @@ THIRD_PARTY_LIBS = {
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
     "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
-    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party/libkineto:libkineto_headers"],
+    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
