@@ -3,8 +3,8 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/ATen.h>
-#include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
+#include <ATen/native/vulkan/api/api.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
@@ -17,16 +17,13 @@ struct LastAccess {
   api::MemoryAccessFlags access;
 
   LastAccess()
-    : stage{api::PipelineStage::NO_STAGE},
-      access{api::MemoryAccessType::NONE} {
-  }
+      : stage{api::PipelineStage::NO_STAGE},
+        access{api::MemoryAccessType::NONE} {}
 
   LastAccess(
       api::PipelineStageFlags stage_flags,
       api::MemoryAccessFlags access_flags)
-    : stage{stage_flags},
-      access{access_flags} {
-  }
+      : stage{stage_flags}, access{access_flags} {}
 };
 
 class vTensorStorage final {
@@ -68,9 +65,9 @@ class vTensorStorage final {
  private:
   // Memory barrier insertion
   void transition(
-    api::PipelineBarrier&,
-    const api::PipelineStageFlags,
-    const api::MemoryAccessFlags);
+      api::PipelineBarrier&,
+      const api::PipelineStageFlags,
+      const api::MemoryAccessFlags);
 
   // Validation
   void verify() const;
@@ -96,14 +93,14 @@ class vTensor final {
   // at::TensorImpl::release_resources() to function as expected.  Now that this
   // class is made copyable though, a new door to a whole new class of bugs is
   // opened, in that there now is a chance of two [shallow] copies, have their
-  // StorageState objects go out of sync as a result of an operation being performed on
-  // one shallow copy that is not reflected in the other.  Technically, if the
-  // programmer is very careful, it is possible to avoid this trap and not pay
-  // the cost of indirection, but the resulting bugs of missing memory barriers
-  // will be so frustrating to hunt down for those unfamiliar with the internal
-  // mechanics of this class, that I decided to take the performance pentalty
-  // of this extra layer of indirection in favor of making this class easier
-  // to use.
+  // StorageState objects go out of sync as a result of an operation being
+  // performed on one shallow copy that is not reflected in the other.
+  // Technically, if the programmer is very careful, it is possible to avoid
+  // this trap and not pay the cost of indirection, but the resulting bugs of
+  // missing memory barriers will be so frustrating to hunt down for those
+  // unfamiliar with the internal mechanics of this class, that I decided to
+  // take the performance pentalty of this extra layer of indirection in favor
+  // of making this class easier to use.
   std::shared_ptr<vTensorStorage> view_;
 
  public:
@@ -111,9 +108,8 @@ class vTensor final {
    Texture Access
   */
 
-  api::VulkanImage& image(
-      api::PipelineBarrier&,
-      const api::PipelineStageFlags) const &;
+  api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
+      const&;
 
   api::VulkanImage& image(
       api::PipelineBarrier&,
@@ -141,14 +137,14 @@ class vTensor final {
   }
 
   inline size_t nbytes() const {
-    return c10::elementSize(c10::typeMetaToScalarType(options().dtype()))
-           * c10::multiply_integers(sizes());
+    return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
+        c10::multiply_integers(sizes());
   }
 
   inline VkDeviceSize buffer_bytes() {
-    return c10::elementSize(c10::typeMetaToScalarType(options().dtype()))
-           * view_->extents_.data[0u] * view_->extents_.data[1u]
-           * (4u * view_->extents_.data[2u]);
+    return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
+        view_->extents_.data[0u] * view_->extents_.data[1u] *
+        (4u * view_->extents_.data[2u]);
   }
 };
 
@@ -164,9 +160,7 @@ using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
 void verify(const TensorOptions& options);
 
 inline vTensor& convert(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(
-      tensor.is_vulkan(),
-      "Vulkan tensor expected!");
+  TORCH_INTERNAL_ASSERT(tensor.is_vulkan(), "Vulkan tensor expected!");
 
   vTensorImpl* const impl =
       static_cast<vTensorImpl*>(tensor.unsafeGetTensorImpl());
