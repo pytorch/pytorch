@@ -1546,21 +1546,6 @@ at::Tensor xlogy_Scalar_Other_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor logdet_generated_plumbing(const at::Tensor & self) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(self, cur_level)) {
-    return at::_ops::logdet::call(self);
-  }
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _log_softmax_backward_data_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & output, int64_t dim, at::ScalarType input_dtype) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -2965,6 +2950,24 @@ at::Tensor & masked_fill__Scalar_generated_plumbing(at::Tensor & self, const at:
   std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
   batch_rule(self_value, self_bdim, mask_value, mask_bdim, value);
   return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor masked_fill_Scalar_generated_plumbing(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(mask, cur_level)) {
+    return at::_ops::masked_fill_Scalar::call(self, mask, value);
+  }
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mask_value;
+  optional<int64_t> mask_bdim;
+  std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
+  auto results = batch_rule(self_value, self_bdim, mask_value, mask_bdim, value);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor view_generated_plumbing(const at::Tensor & self, at::IntArrayRef size) {
@@ -5382,6 +5385,21 @@ at::Tensor special_log1p_generated_plumbing(const at::Tensor & self) {
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
     return at::_ops::special_log1p::call(self);
+  }
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto results = batch_rule(self_value, self_bdim);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor logdet_generated_plumbing(const at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level)) {
+    return at::_ops::logdet::call(self);
   }
   Tensor self_value;
   optional<int64_t> self_bdim;
