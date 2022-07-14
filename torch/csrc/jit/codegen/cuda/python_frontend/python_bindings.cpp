@@ -147,57 +147,61 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("sizes"),
           py::arg("strides"),
           py::arg("dtype") = NvfDataType::Float,
-          py::return_value_policy::reference);
-      /*
+          py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](FusionDefinitionContextManager& self,
-             double val) -> torch::jit::fuser::cuda::Val* {
-            return IrBuilder::create<Double>(val);
+          [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar* {
+            nvfuser::Scalar* out = new nvfuser::Scalar(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::ConstantRecord<torch::jit::fuser::cuda::Double, double>({out->index}, val));
+            return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](FusionDefinitionContextManager& self,
-             std::complex<double> val) -> torch::jit::fuser::cuda::Val* {
-            return IrBuilder::create<ComplexDouble>(c10::complex<double>(val));
+          [](nvfuser::FusionDefinition& self,
+             c10::complex<double> val) -> nvfuser::Scalar* {
+            nvfuser::Scalar* out = new nvfuser::Scalar(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::ConstantRecord<torch::jit::fuser::cuda::ComplexDouble, c10::complex<double>>({out->index}, val));
+            return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](FusionDefinitionContextManager& self,
-             bool val) -> torch::jit::fuser::cuda::Val* {
-            return IrBuilder::create<Bool>(val);
+          [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar* {
+            nvfuser::Scalar* out = new nvfuser::Scalar(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::ConstantRecord<torch::jit::fuser::cuda::Bool, bool>({out->index}, val));
+            return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](FusionDefinitionContextManager& self,
-             int64_t val) -> torch::jit::fuser::cuda::Val* {
-            return IrBuilder::create<Int>(val);
+          [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar* {
+            nvfuser::Scalar* out = new nvfuser::Scalar(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::ConstantRecord<torch::jit::fuser::cuda::Int, int64_t>({out->index}, val));
+            return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_scalar",
-          [](FusionDefinitionContextManager& self,
-             torch::jit::fuser::cuda::DataType dtype =
-                 torch::jit::fuser::cuda::DataType::Double)
-              -> torch::jit::fuser::cuda::Val* {
-            if (dtype == torch::jit::fuser::cuda::DataType::Double) {
-              return IrBuilder::create<Double>();
-            } else if (
-                dtype == torch::jit::fuser::cuda::DataType::ComplexDouble) {
-              return IrBuilder::create<ComplexDouble>();
-            } else if (dtype == torch::jit::fuser::cuda::DataType::Bool) {
-              return IrBuilder::create<Bool>();
-            } else if (dtype == torch::jit::fuser::cuda::DataType::Int) {
-              return IrBuilder::create<Int>();
-            } else {
-              TORCH_CHECK(false, "Dtype is not supported:", dtype);
-            }
+          [](nvfuser::FusionDefinition& self,
+             NvfDataType dtype = torch::jit::fuser::cuda::DataType::Double)
+              -> nvfuser::Scalar* {
+            nvfuser::Scalar* out = new nvfuser::Scalar(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::ScalarRecord({out->index}, dtype));
+            return out;
           },
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Double,
-          py::return_value_policy::reference); */
+          py::return_value_policy::reference);
 
   py::class_<nvfuser::FusionDefinition::Operators> nvf_ops(fusion_def, "Operators");
   nvf_ops.def(py::init<nvfuser::FusionDefinition*>());

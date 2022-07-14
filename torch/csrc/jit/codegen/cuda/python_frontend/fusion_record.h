@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/complex.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
@@ -38,6 +39,47 @@ struct InputTensorRecord : RecordFunctor {
   std::vector<int64_t> symbolic_sizes;
   std::vector<bool> contiguous_info;
   NvfDataType dtype;
+};
+
+struct ScalarRecord : RecordFunctor {
+  ScalarRecord(std::vector<size_t> _outputs, NvfDataType dtype) :
+    RecordFunctor({}, std::move(_outputs)),
+    dtype_(dtype) {}
+  
+  void operator()(FusionDefinition &fd) final {
+    NvfVal* output = nullptr;
+    if (dtype_ == NvfDataType::Double) {
+      output = IrBuilder::create<torch::jit::fuser::cuda::Double>();
+    } else if (dtype_ == NvfDataType::ComplexDouble) {
+      output = IrBuilder::create<torch::jit::fuser::cuda::ComplexDouble>();
+    } else if (dtype_ == NvfDataType::Bool) {
+      output = IrBuilder::create<torch::jit::fuser::cuda::Bool>();
+    } else if (dtype_ == NvfDataType::Int) {
+      output = IrBuilder::create<torch::jit::fuser::cuda::Int>();
+    } else {
+      TORCH_CHECK(false, "Dtype is not supported:", dtype_);
+    }
+    fd.addInput(output);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+ 
+ private:
+  NvfDataType dtype_;
+};
+
+template<typename ExprType, typename ValueType>
+struct ConstantRecord : RecordFunctor {
+  ConstantRecord(std::vector<size_t> _outputs, ValueType val):
+    RecordFunctor({}, std::move(_outputs)),
+    value_(val) {}
+  
+  void operator()(FusionDefinition &fd) final {
+    NvfVal* output = IrBuilder::create<ExprType>(value_);
+    fd.fusion_state.at(outputs.at(0)) = output;
+  }
+   
+ private:
+  ValueType value_; 
 };
 
 template<class OutputType>
