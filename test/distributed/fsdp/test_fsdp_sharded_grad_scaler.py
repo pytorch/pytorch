@@ -3,23 +3,31 @@
 import functools
 import itertools
 import sys
-import torch
 import unittest
+from typing import Optional
 
+import torch
 from torch import distributed as dist
 from torch.cuda.amp.common import amp_definitely_not_available
+from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.distributed.fsdp import MixedPrecision, CPUOffload
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.testing._internal.common_fsdp import DummyProcessGroup, subtest_name, FSDPInitMode, NestedWrappedModule, FSDPTest
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    DummyProcessGroup,
+    FSDPInitMode,
+    FSDPTest,
+    NestedWrappedModule,
+    subtest_name,
+)
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -120,31 +128,37 @@ class TestShardGradScaler(TestCase):
 class TestShardedGradScalerParityWithDDP(FSDPTest):
     def _get_init_modes_for_test(self, cpu_offload):
         modes = [
-            FSDPInitMode.CUDA_AFTER,
-            FSDPInitMode.CUDA_BEFORE
+            CUDAInitMode.CUDA_AFTER,
+            CUDAInitMode.CUDA_BEFORE
         ]
-        # Note that FSDPInitMode.CUDA_NEVER works currently only with CPU
+        # Note that CUDAInitMode.CUDA_NEVER works currently only with CPU
         # offload as we explicitly bring the param back to CUDA device. In
         # general, it will not work since we try to all_gather p.data which is
         # on CPU but NCCL only supports GPU.
         if cpu_offload.offload_params:
-            modes.append(FSDPInitMode.CUDA_NEVER)
+            modes.append(CUDAInitMode.CUDA_NEVER)
 
         return modes
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    def test_scaler_enabled(self, cpu_offload, sharding_strategy, mixed_precision):
+    def test_fsdp_ddp_parity_with_grad_scaler(
+        self,
+        cpu_offload: CPUOffload,
+        sharding_strategy: Optional[ShardingStrategy],
+        mixed_precision: Optional[str],
+    ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         mp = MixedPrecision(
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
             buffer_dtype=torch.float16,
-        ) if mixed_precision else None
-        for fsdp_init_mode in init_modes:
-            self._test_identical_outputs(
+        ) if mixed_precision is not None else None
+        for cuda_init_mode in init_modes:
+            self._test_fsdp_parity(
                 NestedWrappedModule,
-                fsdp_init_mode=fsdp_init_mode,
+                FSDPInitMode.RECURSIVE,
+                cuda_init_mode=cuda_init_mode,
                 cpu_offload=cpu_offload,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mp,

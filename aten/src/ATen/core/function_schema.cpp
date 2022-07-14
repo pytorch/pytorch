@@ -1,6 +1,7 @@
 #include <ATen/core/function_schema.h>
 
 #include <iostream>
+#include <stack>
 
 namespace c10 {
 
@@ -55,7 +56,7 @@ c10::optional<std::vector<TypePtr>> FunctionSchema::getAliasTypeSetContainedType
     containedTypes.insert(current);
   }
 
-  return std::vector<TypePtr> (containedTypes.begin(), containedTypes.end());
+  return std::vector<TypePtr>(containedTypes.begin(), containedTypes.end());
 }
 
 c10::optional<std::vector<TypePtr>> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr& type) const {
