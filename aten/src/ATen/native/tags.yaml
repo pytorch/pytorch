@@ -19,5 +19,6 @@
 - tag: nondeterministic
   desc: |
           This tag indicates that the operator is nondeterministic meaning that if the
-          operator is run twice with the same arguments, the outputs will not necessarily be
-          identical.
+          operator is run twice with the same arguments, the outputs will intentionally
+          not necessarily be identical. Note that operators which happen to have bitwise
+          inequivalence across runs unintentially will not be specified by this tag.
