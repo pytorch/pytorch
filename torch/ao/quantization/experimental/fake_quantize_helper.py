@@ -4,8 +4,14 @@ from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequanti
 
 class fake_quantize_helper(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x: Tensor, alpha: Tensor, gamma: Tensor, quantization_levels: Tensor, level_indices: Tensor) -> Tensor:
+    def forward(ctx,  # type: ignore[override]
+                x: Tensor,
+                alpha: Tensor,
+                gamma: Tensor,
+                quantization_levels: Tensor,
+                level_indices: Tensor) -> Tensor:
         quantized_result, mask = quantize_APoT(x, alpha, gamma, quantization_levels, level_indices)
+
         result = dequantize_APoT(quantized_result)
 
         ctx.save_for_backward(mask)
@@ -13,6 +19,6 @@ class fake_quantize_helper(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(ctx, grad_output: Tensor) -> Tensor:
+    def backward(ctx, grad_output: Tensor) -> Tensor:  # type: ignore[override]
         mask = ctx.saved_tensors
         return grad_output * mask

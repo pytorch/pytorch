@@ -38,10 +38,14 @@ class APoTQuantizer():
         mask = mask.apply_(lambda x: (x <= self.alpha and x >= -self.alpha))
 
         # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.apply_(lambda x: float_to_apot(x,
-                                                                         self.quantization_levels,
-                                                                         self.level_indices,
-                                                                         self.alpha))
+        tensor2quantize = tensor2quantize.detach().apply_(lambda x: float_to_apot(x,
+                                                                                  self.quantization_levels,
+                                                                                  self.level_indices,
+                                                                                  self.alpha))
+
+        # convert to APoT int representation for dtype
+        mask = mask.int()
+        tensor2quantize = tensor2quantize.int()
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
