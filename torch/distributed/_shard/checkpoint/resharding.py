@@ -124,9 +124,6 @@ def _compute_sharded_tensor_md(
         for d in shard_md.shard_sizes:
             shard_size *= d
 
-        # not particularly great
-        storage_size = shard_size * _get_sharded_tensor_element_size(tensor)
-
         one_smd = ShardStorageMetadata(
             shard_metadata=shard_md,
             storage_key=shard_storage_key,
