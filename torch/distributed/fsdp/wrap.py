@@ -334,7 +334,7 @@ class ParamExecOrderWrapPolicy:
     users can set ``tracing_config = None`` to disable symbolic tracing.
     """
     init_policy: Callable = always_wrap_policy
-    tracing_config = None
+    tracing_config: Any = None
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
