@@ -1248,7 +1248,6 @@ class TestFunctionalIterDataPipe(TestCase):
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
-        _helper(lambda data: (data[0], data[1], 1 + data[1]), p_fn_n1, 1, 2)
         # The index of input column is out of range
         _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
