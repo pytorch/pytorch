@@ -38,6 +38,7 @@ ALLOW_LIST = [
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
     ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
+    ("aten::kl_div_backward", datetime.date(2022, 9, 1)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
