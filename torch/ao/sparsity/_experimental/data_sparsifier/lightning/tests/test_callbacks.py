@@ -44,6 +44,7 @@ def _make_lightning_module(iC: int, oC: List[int]):
     return DummyLightningModule(iC, oC)
 
 
+
 class StepSLScheduler(BaseDataScheduler):
     """The sparsity param of each data group is multiplied by gamma every step_size epochs.
     """
@@ -65,7 +66,7 @@ class StepSLScheduler(BaseDataScheduler):
         return {name: config[self.schedule_param] * self.gamma for name, config in data_groups.items()}
 
 
-class _PostTrainingCallbackTestCase(TestCase):
+class TestPostTrainingCallback(TestCase):
     def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
         """Makes sure that each component of is working as expected while calling the
         post-training callback.
@@ -100,11 +101,6 @@ class _PostTrainingCallbackTestCase(TestCase):
             sparsified_data = callback.data_sparsifier.get_data(name=valid_name, return_original=False)
             assert torch.all(sparsified_data[sparsified_data != 0] == param[sparsified_data != 0])
 
-    def run_all_checks(self, pl_module, callback, sparsifier_args):
-        self._check_on_fit_end(pl_module, callback, sparsifier_args)
-
-
-class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
     @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
     def test_post_training_callback(self):
         sparsifier_args = {
@@ -115,10 +111,10 @@ class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
         callback = PostTrainingDataSparsity(DataNormSparsifier, sparsifier_args)
         pl_module = _make_lightning_module(100, [128, 256, 16])
 
-        self.run_all_checks(pl_module, callback, sparsifier_args)
+        self._check_on_fit_end(pl_module, callback, sparsifier_args)
 
 
-class _TrainingAwareCallbackTestCase(TestCase):
+class TestTrainingAwareCallback(TestCase):
     """Class to test in-training version of lightning callback
     Simulates model training and makes sure that each hook is doing what is expected
     """
@@ -244,18 +240,6 @@ class _TrainingAwareCallbackTestCase(TestCase):
             valid_name = _get_valid_name(name)
             assert not is_parametrized(callback.data_sparsifier._continer, valid_name)
 
-    def run_all_checks(self, pl_module, callback, sparsifier_args, scheduler_args):
-        # simulate the training process and check all steps
-        self._check_on_train_start(pl_module, callback, sparsifier_args, scheduler_args)
-
-        num_epochs = 5
-        for _ in range(0, num_epochs):
-            self._check_on_train_epoch_start(pl_module, callback)
-            self._simulate_update_param_model(pl_module)
-            self._check_on_train_epoch_end(pl_module, callback)
-
-
-class TestTrainingAwareCallback(_TrainingAwareCallbackTestCase):
     @unittest.skipIf(not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning")
     def test_train_aware_callback(self):
         sparsifier_args = {
@@ -276,7 +260,15 @@ class TestTrainingAwareCallback(_TrainingAwareCallbackTestCase):
         )
 
         pl_module = _make_lightning_module(100, [128, 256, 16])
-        self.run_all_checks(pl_module, callback, sparsifier_args, scheduler_args)
+
+        # simulate the training process and check all steps
+        self._check_on_train_start(pl_module, callback, sparsifier_args, scheduler_args)
+
+        num_epochs = 5
+        for _ in range(0, num_epochs):
+            self._check_on_train_epoch_start(pl_module, callback)
+            self._simulate_update_param_model(pl_module)
+            self._check_on_train_epoch_end(pl_module, callback)
 
 
 if __name__ == "__main__":
