@@ -94,12 +94,6 @@ class ThreadLocal {
 
 #define C10_DEFINE_TLS_static(Type, Name) static ::c10::ThreadLocal<Type> Name
 
-#define C10_DECLARE_TLS_class_static(Class, Type, Name) \
-  static ::c10::ThreadLocal<Type> Name
-
-#define C10_DEFINE_TLS_class_static(Class, Type, Name) \
-  ::c10::ThreadLocal<Type> Class::Name
-
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 
 namespace c10 {
@@ -139,15 +133,6 @@ class ThreadLocal {
   static ::c10::ThreadLocal<Type> Name([]() { \
     static thread_local Type var;             \
     return &var;                              \
-  })
-
-#define C10_DECLARE_TLS_class_static(Class, Type, Name) \
-  static ::c10::ThreadLocal<Type> Name
-
-#define C10_DEFINE_TLS_class_static(Class, Type, Name) \
-  ::c10::ThreadLocal<Type> Class::Name([]() {          \
-    static thread_local Type var;                      \
-    return &var;                                       \
   })
 
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)

@@ -64,21 +64,6 @@ TEST(ThreadLocalTest, TestInnerScopeWithTwoVars) {
   EXPECT_EQ(*str, "");
 }
 
-struct Foo {
-  C10_DECLARE_TLS_class_static(Foo, std::string, str_);
-};
-
-C10_DEFINE_TLS_class_static(Foo, std::string, str_);
-
-TEST(ThreadLocalTest, TestClassScope) {
-  EXPECT_EQ(*Foo::str_, "");
-
-  *Foo::str_ = "abc";
-  EXPECT_EQ(*Foo::str_, "abc");
-  EXPECT_EQ(Foo::str_->length(), 3);
-  EXPECT_EQ(Foo::str_.get(), "abc");
-}
-
 C10_DEFINE_TLS_static(std::string, global_);
 C10_DEFINE_TLS_static(std::string, global2_);
 TEST(ThreadLocalTest, TestTwoGlobalScopeVars) {
