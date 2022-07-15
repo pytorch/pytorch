@@ -35,10 +35,23 @@ struct TORCH_API SchemaInfo {
 
   bool is_nondeterministic() const;
 
+  // Returns whether lhs and rhs may alias directly.
+  // This does not account for cases where lhs or rhs are a container that
+  // may contain elements that alias the other argument.
+  // Besides the checks already included in FunctionSchema::may_alias, this
+  // method also accounts special aliasing cases causes by aliasing argument
+  // values supplied from addArgumentValue.
   bool may_alias(
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs);
 
+  // Returns whether lhs and rhs may alias directly or whether lhs/rhs are a
+  // container that may contain elements that alias the other argument. Besides
+  // the checks already included in FunctionSchema::may_contain_alias, this
+  // method also accounts for special aliasing cases causes by aliasing argument
+  // values supplied from addArgumentValue. bidirectional = false only returns
+  // whether lhs may contain an alias of rhs while bidirectional = true returns
+  // both directions.
   bool may_contain_alias(
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs,
