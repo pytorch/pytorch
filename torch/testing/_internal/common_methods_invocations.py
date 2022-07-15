@@ -6354,6 +6354,27 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
                 yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
 
+def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
+    # Inherit sample inputs from nn.pad, but transform them to fit
+    # constant_pad_nd's interface
+    nn_samples = sample_inputs_nn_pad(op_info, device, dtype, *args,
+                                      mode='constant', **kwargs)
+
+    # NOTE: primTorch is more strict about the type of the fill value argument
+    # So we must cast it to the correct dtype
+    from torch._prims.utils import dtype_to_type
+    scalar_type = dtype_to_type(dtype)
+
+    def drop_mode_argument(input, pad, mode=None, value=None):
+        if value is None:
+            return SampleInput(input, args=(pad,))
+        else:
+            return SampleInput(input, args=(pad, scalar_type(value)))
+
+    for sample in nn_samples:
+        yield drop_mode_argument(sample.input, *sample.args, **sample.kwargs)
+
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -6394,11 +6415,14 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
         low = None
         high = None
-        if self.name in ['fft.hfft', 'fft.irfft']:
+        if self.name in ['fft.hfft', 'fft.irfft',
+                         '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
-        elif self.name in ['fft.hfft2', 'fft.irfft2']:
+        elif self.name in ['fft.hfft2', 'fft.irfft2',
+                           '_refs.fft.hfft2', '_refs.fft.irfft2']:
             shapes = ((2, 8, 9), (33,))
-        elif self.name in ['fft.hfftn', 'fft.irfftn']:
+        elif self.name in ['fft.hfftn', 'fft.irfftn',
+                           '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
             # Adjusting the limits because the test would be flaky due to over-saturation of float16
             # See: https://github.com/pytorch/pytorch/pull/81416
@@ -6481,6 +6505,10 @@ class SpectralFuncInfo(OpInfo):
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
                  **kwargs):
+
+        self._original_spectral_func_args = dict(locals()).copy()
+        self._original_spectral_func_args.update(kwargs)
+
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
@@ -11783,6 +11811,7 @@ op_db: List[OpInfo] = [
                    )),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.fft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11798,6 +11827,7 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.fft2',
                      aten_name='fft_fft2',
                      ref=np.fft.fft2,
+                     decomp_aten_name='_fft_c2c',
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      # rocFFT doesn't support Half/Complex Half Precision FFT
@@ -11813,6 +11843,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.fftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11829,6 +11860,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.hfft',
                      aten_name='fft_hfft',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.hfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11843,6 +11875,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.hfft2',
                      aten_name='fft_hfft2',
+                     decomp_aten_name='_fft_c2r',
                      ref=scipy.fft.hfft2 if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11862,6 +11895,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.hfftn',
                      aten_name='fft_hfftn',
+                     decomp_aten_name='_fft_c2r',
                      ref=scipy.fft.hfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11881,6 +11915,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
@@ -11895,6 +11930,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
                      aten_name='fft_rfft2',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and(torch.bool),
@@ -11910,6 +11946,7 @@ op_db: List[OpInfo] = [
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
@@ -11925,6 +11962,7 @@ op_db: List[OpInfo] = [
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -11938,6 +11976,7 @@ op_db: List[OpInfo] = [
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),),
     SpectralFuncInfo('fft.ifft2',
                      aten_name='fft_ifft2',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifft2,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -11956,6 +11995,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifftn,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -11974,6 +12014,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.ihfft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -11989,6 +12030,7 @@ op_db: List[OpInfo] = [
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
                      aten_name='fft_ihfft2',
+                     decomp_aten_name='_fft_r2c',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -12010,6 +12052,7 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warnings'))),
     SpectralFuncInfo('fft.ihfftn',
                      aten_name='fft_ihfftn',
+                     decomp_aten_name='_fft_r2c',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -12033,6 +12076,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -12047,6 +12091,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.irfft2',
                      aten_name='fft_irfft2',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -12066,6 +12111,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfftn,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -13940,6 +13986,22 @@ op_db: List[OpInfo] = [
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ],
            sample_inputs_func=sample_inputs_local_response_norm,),
+    OpInfo('constant_pad_nd',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=sample_inputs_constant_pad_nd,
+           supports_out=False,
+           skips=(
+               # bool can't be passed to Scalar arguments in JIT tracer because
+               # BoolType is not a subtype of ScalarType.
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestNNCOpInfo',
+                   'test_nnc_correctness', dtypes=(torch.bool,)),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCudaFuserOpInfo',
+                   'test_nvfuser_correctness', dtypes=(torch.bool,)),
+           )),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
@@ -18908,8 +18970,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -18952,8 +19012,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
@@ -18982,8 +19040,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -19001,8 +19057,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
@@ -19025,8 +19079,6 @@ op_db: List[OpInfo] = [
         supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amax),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: amax reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19055,8 +19107,6 @@ op_db: List[OpInfo] = [
         supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amin),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: amax reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19082,8 +19132,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # initial is not a keyword for argmax
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
@@ -19102,8 +19150,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # initial is not a keyword for argmin
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
@@ -19126,8 +19172,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked',
@@ -19162,8 +19206,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -19180,8 +19222,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19209,8 +19249,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19247,8 +19285,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19277,8 +19313,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19292,8 +19326,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19311,8 +19343,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19343,8 +19373,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -19363,8 +19391,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
@@ -20196,6 +20222,30 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
+
+class SpectralFuncPythonRefInfo(SpectralFuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
+            supports_nvfuser=True,
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
+        self.supports_nvfuser = supports_nvfuser
+        assert isinstance(self.torch_opinfo, SpectralFuncInfo)
+
+        inherited = self.torch_opinfo._original_spectral_func_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
 
 
 # Separate registry for experimental Python Reference OpInfos.
@@ -21074,6 +21124,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.constant_pad_nd",
+        torch_opinfo_name="constant_pad_nd",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.contiguous",
         torch_opinfo_name="contiguous",
         supports_nvfuser=False,
@@ -21404,6 +21459,109 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.allclose",
         torch_opinfo_name="allclose",
+        supports_nvfuser=False,
+    ),
+    #
+    # FFT OpInfos
+    #
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fft",
+        torch_opinfo_name="fft.fft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifft",
+        torch_opinfo_name="fft.ifft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfft",
+        torch_opinfo_name="fft.rfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfft",
+        torch_opinfo_name="fft.irfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfft",
+        torch_opinfo_name="fft.hfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfft",
+        torch_opinfo_name="fft.ihfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fftn",
+        torch_opinfo_name="fft.fftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifftn",
+        torch_opinfo_name="fft.ifftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfftn",
+        torch_opinfo_name="fft.rfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfftn",
+        torch_opinfo_name="fft.irfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfftn",
+        torch_opinfo_name="fft.hfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfftn",
+        torch_opinfo_name="fft.ihfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fft2",
+        torch_opinfo_name="fft.fft2",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifft2",
+        torch_opinfo_name="fft.ifft2",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfft2",
+        torch_opinfo_name="fft.rfft2",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfft2",
+        torch_opinfo_name="fft.irfft2",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfft2",
+        torch_opinfo_name="fft.hfft2",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfft2",
+        torch_opinfo_name="fft.ihfft2",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.fft.fftshift",
+        torch_opinfo_name="fft.fftshift",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.fft.ifftshift",
+        torch_opinfo_name="fft.ifftshift",
         supports_nvfuser=False,
     ),
 ]
