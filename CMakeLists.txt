@@ -782,6 +782,9 @@ if(USE_COREML_DELEGATE)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
+# # Lets try adding cutlass manually
+# string(APPEND CMAKE_CXX_FLAGS " -DUSE_CUTLASS")
+
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 

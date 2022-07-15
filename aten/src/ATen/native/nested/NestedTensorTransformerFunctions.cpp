@@ -6,6 +6,7 @@
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 namespace native {
@@ -260,5 +261,102 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   }
   return result;
 }
+std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
+  TORCH_CHECK(
+      qkv.is_nested(),
+      "QKV must be nested for flash cumulative_seq_len calculation.")
+  auto* nt_impl = get_nested_tensor_impl(qkv);
+  const auto& sizes = nt_impl->get_nested_size_tensor();
+  auto size_tensor_stride = sizes.stride(0);
+
+  const int64_t batch_size = qkv.size(0);
+  auto cumulative_seqlen = at::zeros({batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
+
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
+
+  int32_t sum = 0;
+  int64_t max_seqlen = -1;
+  cumulative_seqlen_ptr[0] = sum;
+  for (const auto i : c10::irange(batch_size)) {
+    // Calculate the cumulative sum of the sequence lengths
+    auto current_seq_len = sizes_ptr[i * size_tensor_stride];
+    sum += current_seq_len;
+    cumulative_seqlen_ptr[i + 1] = sum;
+
+    // Find the max element while we traverse
+    max_seqlen = std::max(max_seqlen, current_seq_len);
+  }
+  // Send to GPU, this is pretty light weight calc for normal batch size
+  // but maybe this needs to be on gpu
+  cumulative_seqlen = cumulative_seqlen.to(TensorOptions().device(at::kCUDA));
+  return std::tuple<Tensor, int64_t>{cumulative_seqlen, max_seqlen};
+}
+
+Tensor flash_dot_prod_cpu(
+    const Tensor& qkv,
+    const Tensor& cumulative_sequence_length,
+    const int64_t max_seqlen_batch,
+    double dropout_p,
+    bool causal){
+  TORCH_CHECK(false, "This should not be hit but needed to satiate the dispatcher")
+  return Tensor{};
+}
+
+Tensor flash_attention_helper(
+    const Tensor& qkv,
+    int64_t embed_dim,
+    int64_t num_heads,
+    double dropout_p,
+    bool causal) {
+  auto cumulative_and_max = cumulative_and_max_seq_len(qkv);
+  Tensor cumulative_tensor = std::get<0>(cumulative_and_max);
+  int64_t max_seq_len = std::get<1>(cumulative_and_max);
+
+  int64_t head_dim = embed_dim / (num_heads * 3);
+  int64_t Nnz = cumulative_tensor[-1].item<int64_t>();
+
+  // The output of flash attention is (Nnz, nheads, headdim) we need to create a nested size with the last dim = nheads*headdim
+  auto atten_size = get_nested_size_tensor(qkv);
+  auto div3 = atten_size.index({at::indexing::Slice(), -1 }).div(3);
+  atten_size.index({at::indexing::Slice(), -1 }) = div3;
+
+  auto qkv_buffer_reshaped =
+      get_buffer(qkv).view({Nnz, 3, num_heads, head_dim});
+
+  Tensor atten_buffer = at::_flash_scaled_dot_product_self_attention(
+      qkv_buffer_reshaped,
+      cumulative_tensor,
+      max_seq_len,
+      dropout_p,
+      causal);
+  return wrap_buffer(atten_buffer.view(-1), atten_size);
+}
+
+Tensor NestedTensor_scaled_dot_product_self_attention(
+    const Tensor& qkv,
+    int64_t num_heads,
+    double dropout_p,
+    bool causal) {
+  // We assume that the input has already been projected
+  TORCH_CHECK(qkv.is_nested(), "QKV tensor must be nested");
+  // qkv nested_size -> batch_size x ragged_seq_len x (3 * num_heads * head_dim)
+  const auto embed_dim = qkv.size(-1);
+  TORCH_CHECK(
+      embed_dim % (num_heads * 3) == 0,
+      "Expected embedding dim to be divisible by 3*num_heads");
+  if (true) {
+    //  Hot path for flash attention
+    return flash_attention_helper(qkv, embed_dim, num_heads, dropout_p, causal);
+  }
+
+  auto qkv_transposed = at::transpose(qkv, -1, 0);
+  auto q_dot_k_scaled = at::bmm(qkv, qkv_transposed).softmax(-1);
+  at::dropout_(q_dot_k_scaled, dropout_p, false);
+  auto atten = at::bmm(q_dot_k_scaled, qkv);
+  return atten;
+}
+
+
 } // namespace native
 } // namespace at
