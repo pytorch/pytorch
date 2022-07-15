@@ -20,7 +20,7 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     Args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
-            the file is opened by ``open()``. It defaults to ``r``, other options are 
+            the file is opened by ``open()``. It defaults to ``r``, other options are
             ``b`` for reading in binary mode and ``t`` for text mode.
         encoding: An optional string that specifies the encoding of the
             underlying file. It defaults to ``None`` to match the default encoding of ``open``.
