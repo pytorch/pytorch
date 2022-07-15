@@ -1158,7 +1158,8 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None, "when train=True, save_mean and save_invstd are required"
+        assert save_mean_cast is not None and save_invstd_cast is not None, \
+               "when train=True, save_mean and save_invstd are required"
 
         # reduciton_dims = [0] + list(range(2, input.dim()))
         # assert invstd is not None  # for typing
@@ -1211,7 +1212,7 @@ def native_batch_norm_backward(
         grad_input.to(input_dtype),
         _maybe_cast(grad_weight, input_dtype),
         _maybe_cast(grad_bias, input_dtype),
-)
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
