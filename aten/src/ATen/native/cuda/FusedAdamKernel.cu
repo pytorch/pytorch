@@ -26,7 +26,7 @@ C10_DEVICE __forceinline__ void adam_math(
     const double eps,
     const bool maximize,
     const bool amsgrad,
-    const float* inv_grad_scale_ptr,
+    const float* grad_scale_ptr,
     const float* found_inf_ptr
 ) {
 #pragma unroll
@@ -34,8 +34,8 @@ C10_DEVICE __forceinline__ void adam_math(
         // Load values.
         opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
         opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
-        if (inv_grad_scale_ptr) {
-            grad *= (*inv_grad_scale_ptr);
+        if (grad_scale_ptr) {
+            grad /= (static_cast<double>(*grad_scale_ptr));
         }
         const opmath_t grad_to_store = grad;
         if (maximize) {
@@ -95,7 +95,7 @@ C10_DEVICE __forceinline__ void adam_math(
 // in order to remove the device sync above. This means that fused optimizers have to have
 // their CUDA kernels (a) unscale gradients and (b) skip parameter updates accordingly.
 // To be functionally on par with `torch.optim` optimizers and `_multi_tensor` ones,
-// the kernel below writes out gradients only when `inv_grad_scale_ptr != nullptr.
+// the kernel below writes out gradients only when `grad_scale_ptr != nullptr.
 template <typename scalar_type, int depth=4>
 struct FusedAdamMathFunctor {
     static_assert(depth == 4 || depth == 5, "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
@@ -110,7 +110,7 @@ struct FusedAdamMathFunctor {
             const double eps,
             const bool maximize,
             const bool amsgrad,
-            const float* inv_grad_scale_ptr,
+            const float* grad_scale_ptr,
             const float* found_inf_ptr
   ) {
         int tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -134,10 +134,10 @@ struct FusedAdamMathFunctor {
                     load_store(r_args[i], args[i], 0, i_start);
                 }
                 adam_math<scalar_type, opmath_t, depth>(
-                    r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
+                    r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr);
 #pragma unroll
                 for (int i = 0; i < depth; i++) {
-                  if (i != kGradIdx || inv_grad_scale_ptr) {
+                  if (i != kGradIdx || grad_scale_ptr) {
                     load_store(args[i], r_args[i], i_start, 0);
                   }
                 }
@@ -146,10 +146,10 @@ struct FusedAdamMathFunctor {
             for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
               load_args<depth>(r_args, args, i_start, chunk_size, n);
               adam_math<scalar_type, opmath_t, depth>(
-                  r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
+                  r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr);
 #pragma unroll
               for (int i = 0; i < depth; i++) {
-                  if (i != kGradIdx || inv_grad_scale_ptr) {
+                  if (i != kGradIdx || grad_scale_ptr) {
                     store_args(args[i], r_args[i], i_start, chunk_size, n);
                   }
               }
@@ -174,7 +174,7 @@ void _fused_adam_kernel_cuda_(
     const bool amsgrad,
     const bool maximize,
     const bool capturable,
-    const c10::optional<at::Tensor>& inv_grad_scale,
+    const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf
 ) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
@@ -187,7 +187,7 @@ void _fused_adam_kernel_cuda_(
     }
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensor_lists[0][0].scalar_type(), "fused_adam_kernel_cuda",
         [&]() {
-            float* inv_grad_scale_ptr = inv_grad_scale.has_value() ? inv_grad_scale->data_ptr<float>() : nullptr;
+            float* grad_scale_ptr = grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
             float* found_inf_ptr = found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
             if (amsgrad) {
                 multi_tensor_apply_for_fused_optimizer<5>(
@@ -201,7 +201,7 @@ void _fused_adam_kernel_cuda_(
                     eps,
                     maximize,
                     amsgrad,
-                    inv_grad_scale_ptr,
+                    grad_scale_ptr,
                     found_inf_ptr
                 );
             } else {
@@ -216,7 +216,7 @@ void _fused_adam_kernel_cuda_(
                     eps,
                     maximize,
                     amsgrad,
-                    inv_grad_scale_ptr,
+                    grad_scale_ptr,
                     found_inf_ptr
                 );
             }
