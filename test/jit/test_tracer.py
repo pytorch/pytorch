@@ -2356,7 +2356,10 @@ class TestMixTracingScripting(JitTestCase):
 
         input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
         model = testA()
-        traced_model = torch.jit.trace(model, input_map)
+        example_input = list()
+        example_input.append(input_map)
+        example_input = tuple(example_input)
+        traced_model = torch.jit.trace(model, example_inputs=example_input)
         new_input_map = {"1" : [torch.rand(2, 2), torch.randn(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
         self.assertEqual(model(new_input_map), traced_model(new_input_map))
 
@@ -2417,7 +2420,10 @@ class TestMixTracingScripting(JitTestCase):
         checks_dict = torch.jit.script(ChecksDict())
         returns_dict = torch.jit.script(ReturnsDict())
         eager_module = TestModule(checks_dict, returns_dict)
-        traced_module = torch.jit.trace(eager_module, input1)
+        example_input = list()
+        example_input.append(input1)
+        example_input = tuple(example_input)
+        traced_module = torch.jit.trace(eager_module, example_inputs=example_input)
         self.assertEqual(traced_module(input1), eager_module(input1))
         self.assertEqual(traced_module(input2), eager_module(input2))
 
