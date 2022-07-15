@@ -6575,7 +6575,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 qconfig_mapping = get_default_qat_qconfig_mapping()
                 prepare = prepare_qat_fx
                 fq_count = 10
-
             # nothing to fuse so skipping the fuse step
             m_copy = copy.deepcopy(m)
             example_inputs = (torch.rand(3, 3, 3, 3),)
