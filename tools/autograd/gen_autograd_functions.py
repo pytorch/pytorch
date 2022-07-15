@@ -20,7 +20,6 @@ from torchgen.api.types import (
     boolT,
     doubleT,
     intArrayRefT,
-    symIntArrayRefT,
     ListCType,
     longT,
     MutRefCType,
@@ -28,6 +27,7 @@ from torchgen.api.types import (
     optionalIntArrayRefT,
     scalarT,
     stringT,
+    symIntArrayRefT,
     tensorListT,
     tensorT,
 )
