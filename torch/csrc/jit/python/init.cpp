@@ -1655,7 +1655,7 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self, size_t index) { return self.is_mutable(index); })
       .def(
           "is_mutable",
-          [](SchemaInfo& self, c10::string_view name) {
+          [](SchemaInfo& self, const std::string& name) {
             return self.is_mutable(name);
           })
       .def(
@@ -1675,8 +1675,15 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
+            // For normalization purposes there is an inconsistency within torch.fx that
+            // turns all arguments named "self" into "input". Thus this check ensures that
+            // those arguments are checked correctly.
             if (name == "input") {
-              self.addArgumentValue("self", toTypeInferredIValue(value));
+              try {
+                self.addArgumentValue("self", toTypeInferredIValue(value));
+              } catch (const c10::Error& e) {
+                self.addArgumentValue("input", toTypeInferredIValue(value));
+              }
             } else {
               self.addArgumentValue(name, toTypeInferredIValue(value));
             }
@@ -1689,8 +1696,16 @@ void initJITBindings(PyObject* module) {
           TORCH_INTERNAL_ASSERT(
               key.isString(),
               "Add argument value keys types should be strings.");
+                          // For normalization purposes there is an inconsistency within torch.fx that
+            // turns all arguments named "self" into "input". Thus this check ensures that
+            // those arguments are checked correctly.
+
           if (key.toStringRef() == "input") {
-            value_map["self"] = value;
+            try {
+              self.addArgumentValue("self", value);
+            } catch (const c10::Error& e) {
+              self.addArgumentValue("input", value);
+            }
           } else {
             value_map[key.toStringRef()] = value;
           }
@@ -1863,9 +1878,22 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
-  m.def("_is_alias_of", [](const at::Tensor& self, const at::Tensor& other) {
-    return self.is_alias_of(other);
+  m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
+    return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
   });
+  m.def(
+      "_contains_alias_of",
+      [](const py::object& self, const py::object& other) {
+        // the overlaps() functions errors out on certain IValue types.
+        // Thus, this function will return false when it errors out because
+        // only cases where tensors are contained are actually meaningful.
+        try {
+          return toTypeInferredIValue(self).overlaps(
+              toTypeInferredIValue(other));
+        } catch (const c10::Error& e) {
+          return false;
+        }
+      });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 
