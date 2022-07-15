@@ -228,8 +228,8 @@ def get_top_ops(torch_threshold, nn_fn_threshold, with_counts=False):
         'fft',  # is namespace
     })
 
-    torch_ops = [op for op in top_ops.top_torch]
-    nn_fn_ops = [op for op in top_ops.get_nn_functional_top_list()]
+    torch_ops = top_ops.top_torch
+    nn_fn_ops = top_ops.get_nn_functional_top_list()
     torch_ops = [op for op in torch_ops if op[0] not in denylist]
     nn_fn_ops = [op for op in nn_fn_ops if op[0] not in denylist]
 
@@ -801,7 +801,7 @@ class OperatorSet:
             elif n.startswith(torch_dot):
                 names_sanitized.append(n[len(torch_dot):])
             else:
-                assert False
+                raise AssertionError()
         return cls.from_names(names_sanitized)
 
     def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):
