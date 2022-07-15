@@ -156,6 +156,7 @@ def get_pt_compiler_flags():
     })
 
 _PT_COMPILER_FLAGS = [
+    "-fexceptions",
     "-frtti",
     "-Os",
     "-Wno-unknown-pragmas",
@@ -1099,6 +1100,7 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
         ] + ([] if IS_OSS else ["torch/fb/observers/MobileObserverUtil.cpp"]),
+        compiler_flags = ["-fexceptions"],
         header_namespace = "",
         exported_headers = subdir_glob(
             [
@@ -1833,6 +1835,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/static/passes.cpp",
             "torch/csrc/jit/runtime/static/te_wrapper.cpp",
         ],
+        compiler_flags = ["-fexceptions"],
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -2018,6 +2021,7 @@ def define_buck_targets(
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
+            "aten/src/ATen/core/function_schema.cpp",
             "aten/src/ATen/core/operator_name.cpp",
             "aten/src/ATen/core/register_symbols.cpp",
             "aten/src/ATen/core/tensor_type.cpp",
