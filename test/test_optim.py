@@ -41,7 +41,7 @@ class TestOptim(TestCase):
     exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
-                                sparse_only=False):
+                                sparse_only=False, maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
         params_t = torch.tensor([1.5, 1.5])
@@ -96,7 +96,10 @@ class TestOptim(TestCase):
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
                 self.assertEqual(params.data, params_c.data)
 
-        self.assertLessEqual(params.data.dist(solution), initial_dist)
+        if not maximize:
+            self.assertLessEqual(params.data.dist(solution), initial_dist)
+        else:
+            self.assertGreaterEqual(rosenbrock(params.data), rosenbrock(params_t))
 
     def _test_basic_cases_template(self, weight, bias, input, constructor,
                                    scheduler_constructors, constructor_accepts_maximize=True):
@@ -612,6 +615,12 @@ class TestOptim(TestCase):
             [],
             True
         )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2, maximize=True),
+            [],
+            True,
+            True
+        )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
@@ -831,20 +840,17 @@ class TestOptim(TestCase):
     def test_asgd(self):
         for optimizer in [optim.ASGD, optim_mt.ASGD]:
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
-                constructor_accepts_maximize=True
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
+                lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, t0=100, maximize=maximize),
-                constructor_accepts_maximize=True
+                    lr=1e-3, t0=100)
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
+                lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, weight_decay=1, maximize=maximize),
-                constructor_accepts_maximize=True
+                    lr=1e-2, weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
@@ -852,14 +858,12 @@ class TestOptim(TestCase):
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
-                constructor_accepts_maximize=True
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
+                lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, maximize=maximize),
-                constructor_accepts_maximize=True
+                    lr=1e-3)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
