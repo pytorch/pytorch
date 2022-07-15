@@ -28,7 +28,7 @@ for _ in range(5) :
 print(outputs[0])
 
 fusion2 = Fusion()
-"""
+
 input1 = torch.ones(1, 1, 4, device='cuda')
 input2 = torch.ones(2, 3, 4, device='cuda')
 
@@ -49,4 +49,3 @@ for _ in range(5) :
     outputs = fusion2.execute([input1, input2])
 
 print(outputs[0])
-"""
