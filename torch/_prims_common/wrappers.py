@@ -1,12 +1,12 @@
 import torch
-from torch._prims_utils import (
+from torch._prims_common import (
     Number,
     NumberType,
     TensorLike,
     TensorLikeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims_utils as utils
+import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
@@ -24,7 +24,7 @@ def _maybe_convert_to_dtype(
         if a.dtype != dtype:
             # NOTE: this is incorrect on the CPU
             # See https://github.com/pytorch/pytorch/issues/77553
-            return prims.convert_element_type(a, dtype)
+            return a.to(dtype=dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type(dtype)(a)
@@ -124,7 +124,7 @@ class elementwise_type_promotion_wrapper(object):
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
-        return prims.resize(out, shape)
+        return torch.resize(out, shape)
 
     if out.numel() != reduce(operator.mul, shape, 1):
         msg = (
@@ -137,7 +137,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
             )
         )
         warnings.warn(msg)
-        return prims.resize(out, shape)
+        return torch.resize(out, shape)
 
     return out
 
@@ -145,6 +145,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
 def _safe_copy_out(
     *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
 ):
+    from torch._prims import copy_to
     # Checks same device
     if copy_from.device != copy_to.device:
         msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
@@ -166,7 +167,7 @@ def _safe_copy_out(
             "but this can't be cast because it is not safe!",
         )
 
-    return prims.copy_to(copy_to, copy_from)
+    return copy_to(copy_to, copy_from)
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
