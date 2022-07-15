@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -16,9 +15,7 @@ Tensor mean(
     const IntArrayRef dim,
     const bool keepdim,
     const optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      input_arg.dim() == 4,
-      "Vulkan mean expects 4-dimensional input!");
+  TORCH_CHECK(input_arg.dim() == 4, "Vulkan mean expects 4-dimensional input!");
 
   static const std::unordered_set<int64_t> expected_dims_set({2, 3});
   std::unordered_set<int64_t> dims_set;
@@ -39,8 +36,8 @@ Tensor mean(
   const IntArrayRef v_input_sizes = v_input.sizes();
 
   c10::SmallVector<int64_t, 4u> output_sizes{
-    v_input_sizes[Layout::Activation4D::batch],
-    v_input_sizes[Layout::Activation4D::channels],
+      v_input_sizes[Layout::Activation4D::batch],
+      v_input_sizes[Layout::Activation4D::channels],
   };
 
   if (keepdim) {
@@ -49,22 +46,21 @@ Tensor mean(
   }
 
   vTensor v_output{
-    context,
-    output_sizes,
-    v_input.options(),
+      context,
+      output_sizes,
+      v_input.options(),
   };
 
   const struct Block final {
     uvec3 extents;
     int32_t range;
     uvec3 iextents;
-  } block {
-    v_output.extents(),
-    safe_downcast<int32_t>(
-        v_input_sizes[Layout::Activation4D::width] *
-        v_input_sizes[Layout::Activation4D::height]),
-    v_input.extents()
-  };
+  } block{
+      v_output.extents(),
+      safe_downcast<int32_t>(
+          v_input_sizes[Layout::Activation4D::width] *
+          v_input_sizes[Layout::Activation4D::height]),
+      v_input.extents()};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
@@ -72,9 +68,9 @@ Tensor mean(
   context->submit_compute_job(
       // shader layout signature
       {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       // shader descriptor
       keepdim ? VK_KERNEL(mean) : VK_KERNEL(mean2d),
@@ -89,11 +85,9 @@ Tensor mean(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
