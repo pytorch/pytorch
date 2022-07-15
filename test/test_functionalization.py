@@ -1,11 +1,12 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 
+import unittest
 import logging
 
 def are_aliased(x, y):
@@ -58,6 +59,7 @@ class InplaceLoggingTensor(LoggingTensorReentrant):
 
 
 
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
     # We can unify testing and use functionalize() here instead
     # if/when functorch moves into core.
