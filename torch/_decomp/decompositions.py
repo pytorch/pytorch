@@ -1160,10 +1160,6 @@ def native_batch_norm_backward(
     if train:
         assert save_mean_cast is not None and save_invstd_cast is not None, \
                "when train=True, save_mean and save_invstd are required"
-
-        # reduciton_dims = [0] + list(range(2, input.dim()))
-        # assert invstd is not None  # for typing
-        # mean, invstd = recompute_mean_var(input, invstd, reduciton_dims, keepdim=False)
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
@@ -1199,14 +1195,14 @@ def native_batch_norm_backward(
     if output_mask[1]:
         grad_weight = dot_p * invstd
     elif weight is not None:
-        grad_weight = torch.zeros_like(weight_cast)  # type: ignore[arg-type]  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros_like(weight_cast)  # type: ignore[arg-type]
     else:
-        grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros(())
 
     if output_mask[2]:
         grad_bias = grad_output_sum
     else:
-        grad_bias = torch.zeros_like(grad_output_sum)  # should be None but doesn't work with vjp
+        grad_bias = torch.zeros_like(grad_output_sum)
 
     return (
         grad_input.to(input_dtype),
