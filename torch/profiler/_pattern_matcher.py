@@ -245,6 +245,7 @@ class FP32MatMulPattern(Pattern):
 
     @property
     def skip(self):
+        # Anything less than sm_80 is not Ampere which doesn't support TF32
         has_tf32 = all(
             int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
         return has_tf32
