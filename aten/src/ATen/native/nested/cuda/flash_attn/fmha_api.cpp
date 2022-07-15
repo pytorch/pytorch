@@ -43,8 +43,7 @@
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
 
-namespace at {
-namespace native {
+namespace fmha{
 
 void set_params_fprop(FMHA_fprop_params &params,
                       // sizes
@@ -258,5 +257,4 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace fmha

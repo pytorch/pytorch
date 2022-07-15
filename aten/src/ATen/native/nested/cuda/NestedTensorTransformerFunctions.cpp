@@ -215,7 +215,7 @@ Tensor flash_scaled_dot_product_self_attention(
   auto v = qkv.index({at::indexing::Slice(), 2});
   auto softmax_scale = std::pow(qkv.size(-1), -0.5);
 
-  std::vector<Tensor> output = at::native::mha_fwd(
+  std::vector<Tensor> output = fmha::mha_fwd(
       q,
       k,
       v,

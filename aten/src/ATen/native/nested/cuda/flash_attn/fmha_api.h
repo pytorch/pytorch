@@ -4,8 +4,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
-namespace at {
-namespace native{
+namespace fmha {
 
 std::vector<at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
@@ -22,5 +21,4 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const bool return_softmax,
         c10::optional<at::Generator> gen_);
 
-} // namespace native
-} // namespace at
+} // namespace fmha
