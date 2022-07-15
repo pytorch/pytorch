@@ -338,7 +338,7 @@ def generate_tensor_like_torch_implementations():
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
+        "torch.overrides.get_testing_overrides for this function or if a "
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
@@ -649,7 +649,11 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                elif t == 'Dimname':
+                    func_args.append("")
+                elif t == 'DimnameList':
+                    func_args.append([""])
+                elif t.startswith('int'):
                     func_args.append(0)
                 elif t in {'Stream'}:
                     func_args.append(torch.Stream())

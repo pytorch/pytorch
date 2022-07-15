@@ -13,6 +13,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class LoopIndexing;
+
 //! Auxiliary class to represent information about halo of an axis
 class AxisHaloInfo {
  public:
@@ -63,6 +65,11 @@ class TORCH_CUDA_CU_API HaloInfo {
 
   //! Build mappings of extent information of a TensorDomain
   void build(TensorDomain* td);
+
+  //! Almost exact duplicate of build(TensorDomain* td), except that
+  //!  the traversal was done on loop indexing expressions.
+  std::unordered_map<IterDomain*, Val*> buildConcreteHaloExtentMap(
+      const LoopIndexing& loop_indexing);
 
   //! Set initial AxisHaloInfo of a root axis
   //!
