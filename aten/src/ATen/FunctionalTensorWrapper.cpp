@@ -42,7 +42,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  auto key_set = key_set_.remove(c10::DispatchKey::Dense);
+  keyset_ = key_set_.remove(c10::DispatchKey::Dense);
   // Python is also a "backend", so remove that (we don't want FunctionalTensorWrappers
   // to ever go directly into a `__torch_dispatch__`).
   key_set_ = key_set_ - c10::python_ks;
