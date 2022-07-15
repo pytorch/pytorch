@@ -528,8 +528,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
 
   // We currently don't support refresh_numel() and refresh_contiguous(). It's plausible that we could support it, but currently done to unblock.
-  if (impl->sizes_strides_policy_ <
-    static_cast<uint8_t>(SizesStridesPolicy::CustomSizes)) {
+  if (!has_symbolic_sizes_strides()) {
     impl->refresh_numel();
     impl->refresh_contiguous();
   }

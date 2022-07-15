@@ -36,7 +36,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
 def f(x, y):
-    breakpoint()
     val = torch.mul(x, y)
     out = torch.cat([val, val])
     if out.shape[0] * out.shape[1] > 20:
