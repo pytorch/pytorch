@@ -11294,6 +11294,7 @@ op_db: List[OpInfo] = [
                    check_batched_forward_grad=False,
                    supports_out=False),
     UnaryUfuncInfo('conj_physical',
+                   decomp_aten_name='_conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                     torch.half, torch.chalf),
@@ -18902,8 +18903,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -18946,8 +18945,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
@@ -18976,8 +18973,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -18995,8 +18990,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
@@ -19019,8 +19012,6 @@ op_db: List[OpInfo] = [
         supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amax),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: amax reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19049,8 +19040,6 @@ op_db: List[OpInfo] = [
         supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amin),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: amax reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19076,8 +19065,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # initial is not a keyword for argmax
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
@@ -19096,8 +19083,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # initial is not a keyword for argmin
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
@@ -19120,8 +19105,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked',
@@ -19156,8 +19139,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -19174,8 +19155,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19203,8 +19182,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19241,8 +19218,6 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -19271,8 +19246,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19286,8 +19259,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19305,8 +19276,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         ),
@@ -19337,8 +19306,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -19357,8 +19324,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
@@ -19598,22 +19563,12 @@ op_db: List[OpInfo] = [
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        backward_dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
-        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
-        check_batched_grad=False,
         supports_forward_ad=True,
-        skips=(
-            # See https://github.com/pytorch/pytorch/issues/65466
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-            ),
-        ),
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "diagflat",
@@ -20254,6 +20209,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
         torch_opinfo_name="ceil",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.conj_physical",
+        torch_opinfo_name="conj_physical",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.cos",
@@ -21088,6 +21048,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.conj",
+        torch_opinfo_name="conj",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
