@@ -188,7 +188,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
-    
+
     parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
       for (const auto f : c10::irange(b_begin, b_end)) {
         save_mean_a[f] = _mean_a[f];
