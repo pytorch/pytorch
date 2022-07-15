@@ -6413,11 +6413,14 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
-        if self.name in ['fft.hfft', 'fft.irfft']:
+        if self.name in ['fft.hfft', 'fft.irfft',
+                         '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
-        elif self.name in ['fft.hfft2', 'fft.irfft2']:
+        elif self.name in ['fft.hfft2', 'fft.irfft2',
+                           '_refs.fft.hfft2', '_refs.fft.irfft2']:
             shapes = ((2, 8, 9), (33,))
-        elif self.name in ['fft.hfftn', 'fft.irfftn']:
+        elif self.name in ['fft.hfftn', 'fft.irfftn',
+                           '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
         else:
             shapes = ((2, 8, 16), (32,))
@@ -6496,6 +6499,10 @@ class SpectralFuncInfo(OpInfo):
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
                  **kwargs):
+
+        self._original_spectral_func_args = dict(locals()).copy()
+        self._original_spectral_func_args.update(kwargs)
+
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
@@ -11798,6 +11805,7 @@ op_db: List[OpInfo] = [
                    )),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.fft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11813,6 +11821,7 @@ op_db: List[OpInfo] = [
     SpectralFuncInfo('fft.fft2',
                      aten_name='fft_fft2',
                      ref=np.fft.fft2,
+                     decomp_aten_name='_fft_c2c',
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
                      # rocFFT doesn't support Half/Complex Half Precision FFT
@@ -11828,6 +11837,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.fftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11844,6 +11854,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.hfft',
                      aten_name='fft_hfft',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.hfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11858,6 +11869,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.hfft2',
                      aten_name='fft_hfft2',
+                     decomp_aten_name='_fft_c2r',
                      ref=scipy.fft.hfft2 if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11877,6 +11889,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.hfftn',
                      aten_name='fft_hfftn',
+                     decomp_aten_name='_fft_c2r',
                      ref=scipy.fft.hfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -11896,6 +11909,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
@@ -11910,6 +11924,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
                      aten_name='fft_rfft2',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and(torch.bool),
@@ -11925,6 +11940,7 @@ op_db: List[OpInfo] = [
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.rfftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
@@ -11940,6 +11956,7 @@ op_db: List[OpInfo] = [
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -11953,6 +11970,7 @@ op_db: List[OpInfo] = [
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),),
     SpectralFuncInfo('fft.ifft2',
                      aten_name='fft_ifft2',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifft2,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -11971,6 +11989,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
+                     decomp_aten_name='_fft_c2c',
                      ref=np.fft.ifftn,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -11989,6 +12008,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
+                     decomp_aten_name='_fft_r2c',
                      ref=np.fft.ihfft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -12004,6 +12024,7 @@ op_db: List[OpInfo] = [
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
                      aten_name='fft_ihfft2',
+                     decomp_aten_name='_fft_r2c',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -12025,6 +12046,7 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warnings'))),
     SpectralFuncInfo('fft.ihfftn',
                      aten_name='fft_ihfftn',
+                     decomp_aten_name='_fft_r2c',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -12048,6 +12070,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfft,
                      ndimensional=SpectralFuncType.OneD,
                      supports_forward_ad=True,
@@ -12062,6 +12085,7 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.irfft2',
                      aten_name='fft_irfft2',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      supports_forward_ad=True,
@@ -12081,6 +12105,7 @@ op_db: List[OpInfo] = [
                      ),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
+                     decomp_aten_name='_fft_c2r',
                      ref=np.fft.irfftn,
                      ndimensional=SpectralFuncType.ND,
                      supports_forward_ad=True,
@@ -20192,6 +20217,30 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
 
+class SpectralFuncPythonRefInfo(SpectralFuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
+            supports_nvfuser=True,
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
+        self.supports_nvfuser = supports_nvfuser
+        assert isinstance(self.torch_opinfo, SpectralFuncInfo)
+
+        inherited = self.torch_opinfo._original_spectral_func_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
+
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
@@ -21404,6 +21453,39 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.allclose",
         torch_opinfo_name="allclose",
+        supports_nvfuser=False,
+    ),
+    #
+    # FFT OpInfos
+    #
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fft",
+        torch_opinfo_name="fft.fft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifft",
+        torch_opinfo_name="fft.ifft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfft",
+        torch_opinfo_name="fft.rfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfft",
+        torch_opinfo_name="fft.irfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfft",
+        torch_opinfo_name="fft.hfft",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfft",
+        torch_opinfo_name="fft.ihfft",
         supports_nvfuser=False,
     ),
 ]
