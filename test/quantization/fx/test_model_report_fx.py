@@ -826,8 +826,8 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             # one of the stats should be stationary, and the other non-stationary
             # as a result, dynamic should be recommended
             data_dist_info = [
-                dynam_vs_stat_dict[linear_fqn]["pre_observer_data_dist"],
-                dynam_vs_stat_dict[linear_fqn]["post_observer_data_dist"],
+                dynam_vs_stat_dict[linear_fqn]["pre_activation_data_dist"],
+                dynam_vs_stat_dict[linear_fqn]["post_activation_data_dist"],
             ]
 
             self.assertTrue("stationary" in data_dist_info)
