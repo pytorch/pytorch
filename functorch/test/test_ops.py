@@ -707,7 +707,7 @@ class TestOperators(TestCase):
         for sample in samples:
             arg_values = [sample.input] + list(sample.args)
             kwarg_values = sample.kwargs
-            args = tuple([*arg_values, *kwarg_values])
+            args = tuple(arg_values) + tuple(kwarg_values)
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
                 self.assertEqual(loop_out, batched_out)
@@ -791,7 +791,7 @@ class TestOperators(TestCase):
             for sample in samples:
                 arg_values = [sample.input] + list(sample.args)
                 kwarg_values = sample.kwargs
-                args = tuple([*arg_values, *kwarg_values])
+                args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
                         fn, args, {}, opinfo=op, compute_loop_out=False):

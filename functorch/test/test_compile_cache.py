@@ -209,7 +209,7 @@ class TestCompileCacheStaticArgs(TestCase):
         try:
             # Since b is not marked as static, it should raise exception
             aot_autograd_f(a, b)
-            assert False
+            raise AssertionError()
         except RuntimeError:
             pass
 
