@@ -59,6 +59,10 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
   using namespace mps;
 
   @autoreleasepool {
+    if (iter.numel() == 0) {
+      return true;
+    }
+
     const Tensor& inputTensor = iter.tensor(1);
     Tensor outputTensor = iter.tensor(0);
 
