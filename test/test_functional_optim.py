@@ -131,7 +131,7 @@ class TestFunctionalOptimParity(TestCase):
         register_functional_optim(fn_map_key, fn_optim)
         functional_optim_cls = functional_optim_map.get(fn_map_key, None)
         if not functional_optim_cls:
-            raise ValueError(f"Functional optimizer not implemented for {fn_map_key}")
+            raise ValueError(f"Functional optimizer not registered for {fn_map_key}")
 
     def test_functional_optim_registration(self):
         self._test_functional_optim_registration()
