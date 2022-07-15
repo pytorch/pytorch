@@ -84,6 +84,12 @@ try:
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
+_TORCH_FX_AVAIL = True
+if not hasattr(torch, "fx"):
+    _TORCH_FX_AVAIL = False
+if _TORCH_FX_AVAIL:
+    from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
+
 
 __all__ = [
     "FullyShardedDataParallel", "ShardingStrategy", "MixedPrecision",
@@ -649,7 +655,7 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
-                auto_wrap_policy=auto_wrap_policy.init_policy,
+                auto_wrap_policy=auto_wrap_policy,
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
                 ignored_modules=ignored_modules,
@@ -933,21 +939,74 @@ class FullyShardedDataParallel(nn.Module):
         self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
+        auto_wrap_policy = kwargs["auto_wrap_policy"]
+        module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            tracer = auto_wrap_policy.tracing_config.tracer
+            execution_info = _init_execution_info(module)
+
+            for m in module.modules():
+                assert not isinstance(
+                    m, FullyShardedDataParallel
+                ), "The input module of _patch_tracer should not contain FSDP modules"
+
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
+        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
         self._param_exec_order_policy: bool = True
-        # self._param_exec_order_prep_stage is set to True in the first forward and backward iteration,
-        # and set to False otherwise.
+        # self._param_exec_order_prep_stage is set to True before we get the execution order
         self._param_exec_order_prep_stage: bool = True
         # A list that stores the flatten parameters and its name based on the parameter execution order
         self._fsdp_params_exec_order: List[FlatParameter] = []
+        if _TORCH_FX_AVAIL and isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            for wrap in self.fsdp_modules(self):
+                module_to_fsdp[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
+            for m in execution_info.module_forward_order:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
+                        self._fsdp_params_exec_order.append(flat_param)
+            self._param_exec_order_prep_stage = False
+
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
                 # Assignment by reference, so each children FSDP wrap has access to
                 # the _fsdp_params_exec_order of the root module
                 m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                m._param_exec_order_policy = True
-                m._param_exec_order_prep_stage = True
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
 
     def _move_module_if_needed(self, module) -> None:
         """
