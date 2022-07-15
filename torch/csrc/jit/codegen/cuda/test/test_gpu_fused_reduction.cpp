@@ -117,6 +117,7 @@ void validateNoParallelBroadcastExist(kir::Kernel* kernel) {
 TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   const int nx = 999;
   const int tidx = 128;
+  const int bidx = 4;
 
   if (ceilDiv(nx, tidx) > deviceSMCount()) {
     GTEST_SKIP() << "Not enough SMs to run this test";
@@ -135,12 +136,19 @@ TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->split(0, tidx);
+  tv3->split(0, bidx);
+  tv3->split(0, 1); // unswitch
   TransformPropagator propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
-  tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDy);
+  tv3->axis(2)->parallelize(ParallelType::BIDx);
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
   scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+
+  // Just to make sure fused_reduction and work buffers are allocated
+  // uniquely
+  tv1->axis(1)->parallelize(ParallelType::Unswitch);
 
   GpuLower gpulw(&fusion);
   validateNoParallelBroadcastExist(gpulw.kernel());
