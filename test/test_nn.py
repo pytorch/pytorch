@@ -20671,6 +20671,13 @@ torch.cuda.synchronize()
 
     @dtypes(torch.double)
     @torch.no_grad()
+    def test_multihead_attn_fast_path_small_test(self, device, dtype):
+        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
+        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        mha(query, query, query)
+
+    @dtypes(torch.double)
+    @torch.no_grad()
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
         mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
         query = torch.rand(3, 2, 1, dtype=dtype, device=device)
