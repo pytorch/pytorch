@@ -13791,7 +13791,8 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-05, rtol=2e-05), }),
-                   'TestCompositeCompliance', 'test_forward_ad', device_type='cuda')],
+                   'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
+                   active_if=TEST_CUDNN)],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
