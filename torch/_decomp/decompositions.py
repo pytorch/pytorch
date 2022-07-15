@@ -1152,7 +1152,7 @@ def native_batch_norm_backward(
         running_mean_cast,
         running_var_cast,
         save_mean_cast,
-        save_invstd_cast
+        save_invstd_cast,
     ) = [
         x.to(computation_dtype) if x is not None else x
         for x in (
@@ -1162,7 +1162,7 @@ def native_batch_norm_backward(
             running_mean,
             running_var,
             save_mean,
-            save_invstd
+            save_invstd,
         )
     ]
     input_shape = input.shape
@@ -1174,7 +1174,9 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None, "when train=True, save_mean and save_invstd are required"  # noqa: E501
+        assert (
+               save_mean_cast is not None and save_invstd_cast is not None
+               ), "when train=True, save_mean and save_invstd are required"
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
@@ -1188,9 +1190,9 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = torch.reshape(mean, broadcast_mask)   # type: ignore[arg-type]
+    mean = torch.reshape(mean, broadcast_mask)  # type: ignore[arg-type]
     norm = 1.0 / num_features
-    grad_output_sum = torch.sum(grad_out_cast, reduction_axes)   # type: ignore[arg-type]
+    grad_output_sum = torch.sum(grad_out_cast, reduction_axes)  # type: ignore[arg-type]
     dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
 
     grad_mean = torch.reshape(grad_output_sum * norm, broadcast_mask)
