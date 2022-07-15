@@ -21488,6 +21488,36 @@ python_ref_db = [
         torch_opinfo_name="fft.ihfft",
         supports_nvfuser=False,
     ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fftn",
+        torch_opinfo_name="fft.fftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifftn",
+        torch_opinfo_name="fft.ifftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfftn",
+        torch_opinfo_name="fft.rfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfftn",
+        torch_opinfo_name="fft.irfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfftn",
+        torch_opinfo_name="fft.hfftn",
+        supports_nvfuser=False,
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfftn",
+        torch_opinfo_name="fft.ihfftn",
+        supports_nvfuser=False,
+    ),
 ]
 
 # Common operator groupings
