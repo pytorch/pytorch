@@ -205,36 +205,64 @@ class TransformerEncoder(Module):
         convert_to_nested = False
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
-        if isinstance(first_layer, torch.nn.TransformerEncoderLayer):
-            if (not first_layer.norm_first and not first_layer.training and
-                    first_layer.self_attn.batch_first and
-                    first_layer.self_attn._qkv_same_embed_dim and first_layer.activation_relu_or_gelu and
-                    first_layer.norm1.eps == first_layer.norm2.eps and
-                    src.dim() == 3 and self.enable_nested_tensor and
-                    src_key_padding_mask is not None and
-                    torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
-                if src_key_padding_mask is not None and not output.is_nested and mask is None:
-                    tensor_args = (
-                        src,
-                        first_layer.self_attn.in_proj_weight,
-                        first_layer.self_attn.in_proj_bias,
-                        first_layer.self_attn.out_proj.weight,
-                        first_layer.self_attn.out_proj.bias,
-                        first_layer.norm1.weight,
-                        first_layer.norm1.bias,
-                        first_layer.norm2.weight,
-                        first_layer.norm2.bias,
-                        first_layer.linear1.weight,
-                        first_layer.linear1.bias,
-                        first_layer.linear2.weight,
-                        first_layer.linear2.bias,
-                    )
-                    if not torch.overrides.has_torch_function(tensor_args):
-                        if not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]):
-                            if output.is_cuda or 'cpu' in str(output.device):
-                                convert_to_nested = True
-                                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
-                                src_key_padding_mask_for_layers = None
+        why_not_sparsity_fast_path = ''
+        str_first_layer = "self.layers[0]"
+        if not isinstance(first_layer, torch.nn.TransformerEncoderLayer):
+            why_not_sparsity_fast_path = f"{str_first_layer} was not TransformerEncoderLayer"
+        elif first_layer.norm_first :
+            why_not_sparsity_fast_path = f"{str_first_layer}.norm_first was True"
+        elif first_layer.training:
+            why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
+        elif not first_layer.self_attn.batch_first:
+            why_not_sparsity_fast_path = f" {str_first_layer}.self_attn.batch_first was not True"
+        elif not first_layer.self_attn._qkv_same_embed_dim:
+            why_not_sparsity_fast_path = f"{str_first_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif not first_layer.activation_relu_or_gelu:
+            why_not_sparsity_fast_path = f" {str_first_layer}.activation_relu_or_gelu was not True"
+        elif not (first_layer.norm1.eps == first_layer.norm2.eps) :
+            why_not_sparsity_fast_path = f"{str_first_layer}.norm1.eps was not equal to {str_first_layer}.norm2.eps"
+        elif not src.dim() == 3:
+            why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
+        elif not self.enable_nested_tensor:
+            why_not_sparsity_fast_path = "enable_nested_tensor was not True"
+        elif src_key_padding_mask is None:
+            why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        elif (not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+            why_not_sparsity_fast_path = "src and src_key_padding_mask was not left aligned"
+        elif output.is_nested:
+            why_not_sparsity_fast_path = "NestedTensor input is not supported"
+        elif mask is not None:
+            why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
+
+        if not why_not_sparsity_fast_path:
+            tensor_args = (
+                src,
+                first_layer.self_attn.in_proj_weight,
+                first_layer.self_attn.in_proj_bias,
+                first_layer.self_attn.out_proj.weight,
+                first_layer.self_attn.out_proj.bias,
+                first_layer.norm1.weight,
+                first_layer.norm1.bias,
+                first_layer.norm2.weight,
+                first_layer.norm2.bias,
+                first_layer.linear1.weight,
+                first_layer.linear1.bias,
+                first_layer.linear2.weight,
+                first_layer.linear2.bias,
+            )
+
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+            elif not (src.is_cuda or 'cpu' in str(src.device)):
+                why_not_sparsity_fast_path = "src is neither CUDA nor CPU"
+            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+                why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
+                                              "input/output projection weights or biases requires_grad")
+
+            if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
+                convert_to_nested = True
+                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
@@ -408,14 +436,27 @@ class TransformerEncoderLayer(Module):
         """
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+        why_not_sparsity_fast_path = ''
+        if not src.dim() == 3:
+            why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
+        elif self.norm_first:
+            why_not_sparsity_fast_path = "norm_first was True"
+        elif self.training:
+            why_not_sparsity_fast_path = "training is enabled"
+        elif not self.self_attn.batch_first :
+            why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+        elif not self.self_attn._qkv_same_embed_dim :
+            why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
+        elif not self.activation_relu_or_gelu:
+            why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
+        elif not (self.norm1.eps == self.norm2.eps):
+            why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
+        elif src_mask is not None:
+            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
+        elif src.is_nested and src_key_padding_mask is not None:
+            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
 
-        if (src.dim() == 3 and not self.norm_first and not self.training and
-            self.self_attn.batch_first and
-            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
-            self.norm1.eps == self.norm2.eps and
-            ((src_mask is None and src_key_padding_mask is None)
-             if src.is_nested
-             else (src_mask is None or src_key_padding_mask is None))):
+        if not why_not_sparsity_fast_path:
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
@@ -431,11 +472,18 @@ class TransformerEncoderLayer(Module):
                 self.linear2.weight,
                 self.linear2.bias,
             )
-            if (not torch.overrides.has_torch_function(tensor_args) and
-                    # We have to use a list comprehension here because TorchScript
-                    # doesn't support generator expressions.
-                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
-                    (not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]))):
+
+            # We have to use list comprehensions below because TorchScript does not support
+            # generator expressions.
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+            elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+                why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+                why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
+                                              "input/output projection weights or biases requires_grad")
+
+            if not why_not_sparsity_fast_path:
                 return torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
@@ -455,8 +503,9 @@ class TransformerEncoderLayer(Module):
                     self.linear1.bias,
                     self.linear2.weight,
                     self.linear2.bias,
-                    src_mask if src_mask is not None else src_key_padding_mask,
+                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
                 )
+
         x = src
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
