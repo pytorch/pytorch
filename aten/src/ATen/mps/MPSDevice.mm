@@ -12,26 +12,24 @@ static std::unique_ptr<MPSDevice> mps_device;
 static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
-  #if defined(__MAC_10_13) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_13
-  #else
-  #error "Metal is not available on the current platform."
-  #endif
-
-  // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffer and function constants)
+  // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
   MTLLanguageVersion languageVersion;
-  if (@available(macOS 13.0, *)) {
-    languageVersion = MTLLanguageVersion3_0;
-  } else if (@available(macOS 12.0, *)) {
-    languageVersion = MTLLanguageVersion2_4;
-  } else if (@available(macOS 11.0, *)) {
-    languageVersion = MTLLanguageVersion2_3;
-  } else if (@available(macOS 10.15, *)) {
-    languageVersion = MTLLanguageVersion2_2;
-  } else if (@available(macOS 10.14, *)) {
-    languageVersion = MTLLanguageVersion2_1;
-  } else if (@available(macOS 10.13, *)) {
+
+#if defined(__MAC_13_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_13_0
+  languageVersion = MTLLanguageVersion3_0;
+#elif defined(__MAC_12_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_12_0
+  languageVersion = MTLLanguageVersion2_4;
+#elif defined(__MAC_11_0) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_11_0
+  languageVersion = MTLLanguageVersion2_3;
+#elif defined(__MAC_10_15) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_15
+  languageVersion = MTLLanguageVersion2_2;
+#elif defined(__MAC_10_14) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_14
+  languageVersion = MTLLanguageVersion2_1;
+#elif defined(__MAC_10_13) && __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_13
     languageVersion = MTLLanguageVersion2_0;
-  }
+#elif
+  #error "Metal is not available on the current platform."
+#endif
 
   TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
   return languageVersion;
