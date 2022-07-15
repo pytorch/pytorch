@@ -28,6 +28,7 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
+from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1112,19 +1113,21 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+def find_node_with_name(nodes, name):
+    for node in nodes:
+        if node.name() == name:
+            return node
+        result = find_node_with_name(node.children, name)
+        if result is not None:
+            return result
+
+class TestTorchTidyProfiler(TestCase):
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
 
-        def find_ones(nodes):
-            for n in nodes:
-                if n.name() == "aten::ones":
-                    return n
-                result = find_ones(n.children)
-                if result:
-                    return result
-
-        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::ones")
         self.assertIsNotNone(node)
 
         self.assertIsInstance(
@@ -1140,6 +1143,25 @@ class TestProfiler(TestCase):
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
+
+    def test_tensor_sizes(self):
+        x = torch.ones(10, 10)
+        y = torch.ones(1, 10)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + y
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        # The alpha scalar has a [] size
+        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
+        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
 
 
 @dataclass(frozen=True)
@@ -1441,6 +1463,62 @@ class TestExperimentalUtils(TestCase):
             expected_output, """\
 <built-in function _cuda_synchronize>
 aten::copy_""")
+
+    def test_profiler_name_pattern(self):
+        x = torch.ones((4096, 4096))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        matched_events = NamePattern(prof, "aten::mm").matched_events()
+        output = "\n".join([f"{event.name()}" for event in matched_events])
+        self.assertExpectedInline(output, """\
+aten::mm
+aten::mm
+aten::mm
+aten::mm
+aten::mm""")
+
+    def test_profiler_pattern_match_helper(self):
+        x = torch.ones((100, 100))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        event_tree = prof.profiler.kineto_results.experimental_event_tree()
+        pattern = Pattern(prof)
+        self.assertEqual([], pattern.siblings_of(event_tree[0])[0])
+        self.assertEqual(event_tree[1:], pattern.siblings_of(event_tree[0])[1])
+        child_nodes = event_tree[0].children
+        self.assertEqual([], pattern.siblings_of(child_nodes[0])[0])
+        self.assertEqual(child_nodes[1:], pattern.siblings_of(child_nodes[0])[1])
+        self.assertEqual(event_tree[0],
+                         pattern.root_of(event_tree[0].children[0].children[0]))
+        self.assertEqual(None, pattern.next_of(event_tree[-1]))
+        self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
+        self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern(self):
+        cases = (
+            (0, lambda: torch.ones((100, 100), device="cuda")),
+            (1, lambda: torch.ones((100, 100)).to("cuda")),
+            (1, lambda: torch.zeros((100, 100)).to("cuda")),
+            (1, lambda: torch.empty((100, 100)).fill_(5).to("cuda")),
+            (1, lambda: torch.ones((100, 100)).cuda()),
+            (1, lambda: torch.zeros((100, 100)).cuda()),
+            (1, lambda: torch.empty((100, 100)).fill_(5).cuda()),
+            (1, lambda: torch.rand((100, 100)).cuda()),
+            (1, lambda: torch.randn((100, 100)).cuda()),
+            (1, lambda: torch.full((100, 100), 10).cuda()),
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ExtraCUDACopyPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
 
 
 if __name__ == '__main__':
