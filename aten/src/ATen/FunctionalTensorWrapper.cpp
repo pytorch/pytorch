@@ -38,8 +38,13 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // (This should never happen because we should always hit a functionalization kernel,
   // but can help make bugs less nasty).
   // Here, we defensively remove any backend keys from the wrapper's keyset.
-  key_set_ = key_set_.remove_backend(value_.key_set().highestBackendKey());
-  // Python is also a "backend", so remove that.
+  // We don't want to remove actual backend bits though (say we're redispatching to autograd;
+  // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
+  // Instead, it's sufficient to remove the `Dense` dispatch key,
+  // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
+  auto key_set = key_set_.remove(c10::DispatchKey::Dense);
+  // Python is also a "backend", so remove that (we don't want FunctionalTensorWrappers
+  // to ever go directly into a `__torch_dispatch__`).
   key_set_ = key_set_ - c10::python_ks;
 }
 
