@@ -26,9 +26,9 @@ def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
     return a.new_empty(tuple(shape))
 
 
-@register_meta([aten.expand.SymInt])
-def expand_symint_meta(a, size, implicit=False):
-    return a.new_empty(size)
+# @register_meta([aten.expand.SymInt])
+# def expand_symint_meta(a, size, implicit=False):
+#     return a.new_empty(size)
 
 
 from torch._subclasses import FakeTensor
