@@ -8,8 +8,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/native/nested/flash_attn/fmha_api.h>
-
 namespace at {
 namespace native {
 namespace {
@@ -293,35 +291,6 @@ std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   // but maybe this needs to be on gpu
   cumulative_seqlen = cumulative_seqlen.to(TensorOptions().device(at::kCUDA));
   return std::tuple<Tensor, int64_t>{cumulative_seqlen, max_seqlen};
-}
-
-Tensor flash_scaled_dot_product_self_attention(
-    const Tensor& qkv,
-    const Tensor& cumulative_sequence_length,
-    const int64_t max_seqlen_batch,
-    double dropout_p,
-    bool causal) {
-  auto q = qkv.index({at::indexing::Slice(), 0});
-  auto k = qkv.index({at::indexing::Slice(), 1});
-  auto v = qkv.index({at::indexing::Slice(), 2});
-  auto softmax_scale = std::pow(qkv.size(-1), -0.5);
-
-  std::vector<Tensor> output = at::native::mha_fwd(
-      q,
-      k,
-      v,
-      cumulative_sequence_length,
-      cumulative_sequence_length,
-      max_seqlen_batch,
-      max_seqlen_batch,
-      dropout_p,
-      softmax_scale,
-      false,
-      causal,
-      false,
-      c10::nullopt);
-
-  return output[0];
 }
 
 Tensor flash_attention_helper(

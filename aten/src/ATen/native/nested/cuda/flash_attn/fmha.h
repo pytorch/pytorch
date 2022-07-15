@@ -32,7 +32,7 @@
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
-#include <ATen/native/nested/flash_attn/fmha_utils.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_utils.h>
 
 
 constexpr int TOTAL_DIM = 0;

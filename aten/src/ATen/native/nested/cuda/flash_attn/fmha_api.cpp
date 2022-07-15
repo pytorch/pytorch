@@ -34,9 +34,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/nested/flash_attn/fmha_utils.h>
-#include <ATen/native/nested/flash_attn/fmha.h>
-#include <ATen/native/nested/flash_attn/fmha_api.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_utils.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_api.h>
 
 #include <c10/util/Exception.h>
 

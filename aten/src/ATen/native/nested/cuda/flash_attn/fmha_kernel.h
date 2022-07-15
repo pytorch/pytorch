@@ -27,15 +27,15 @@
 
 #pragma once
 
-#include <ATen/native/nested/flash_attn/philox.cuh>
+#include <ATen/native/nested/cuda/flash_attn/philox.cuh>
 
-#include <ATen/native/nested/flash_attn/fmha_utils.h>
-#include <ATen/native/nested/flash_attn/fmha.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_utils.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha.h>
 
-#include <ATen/native/nested/flash_attn/smem_tile.h>
-#include <ATen/native/nested/flash_attn/gmem_tile.h>
-#include <ATen/native/nested/flash_attn/mask.h>
-#include <ATen/native/nested/flash_attn/softmax.h>
+#include <ATen/native/nested/cuda/flash_attn/smem_tile.h>
+#include <ATen/native/nested/cuda/flash_attn/gmem_tile.h>
+#include <ATen/native/nested/cuda/flash_attn/mask.h>
+#include <ATen/native/nested/cuda/flash_attn/softmax.h>
 
 namespace fmha {
 

@@ -25,8 +25,8 @@
  *
  ******************************************************************************/
 
-#include <ATen/native/nested/flash_attn/fmha.h>
-#include <ATen/native/nested/flash_attn/fmha_fprop_kernel_1xN.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_fprop_kernel_1xN.h>
 
 #include <ATen/cuda/CUDAContext.h>
 // #include <ATen/cuda/detail/KernelUtils.h>

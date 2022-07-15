@@ -112,7 +112,7 @@ file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
-file(GLOB native_nested_cpp "native/nested/*.cpp" "native/nested/flash_attn/*.cpp")
+file(GLOB native_nested_cpp "native/nested/*.cpp")
 file(GLOB native_transformers_cpp "native/transformers/*.cpp")
 
 file(GLOB native_h "native/*.h")
@@ -130,8 +130,8 @@ file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu" "native/nested/flash_attn/*.cu")
-file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp" "native/nested/flash_attn/*.cpp")
+file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu" "native/nested/cuda/flash_attn/*.cu")
+file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp" "native/nested/cuda/flash_attn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
@@ -416,10 +416,8 @@ endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
   # add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass" ${CMAKE_BINARY_DIR}/cutlass)
-  list(APPEND ATen_THIRD_PARTY_INCLUDE ${TORCH_ROOT}/third_party/cutlass/include)
+  # list(APPEND ATen_THIRD_PARTY_INCLUDE ${TORCH_ROOT}/third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
-  message("!!!!!!!!!!!!!!!!!THIRD PARTY INCLUDES BRO: ${ATen_THIRD_PARTY_INCLUDE}!!!!!!!!!!!!!!!!!")
-  message("!!!!!!!!!!!!!!!!!ATEN_CUDDA ATen_CUDA_INCLUDE : ${ATen_CUDA_INCLUDE}}!!!!!!!!!!!!!!!!!")
 
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS

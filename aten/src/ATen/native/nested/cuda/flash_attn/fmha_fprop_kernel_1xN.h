@@ -28,10 +28,10 @@
 
 #pragma once
 
-#include <ATen/native/nested/flash_attn/fmha_kernel.h>
-#include <ATen/native/nested/flash_attn/kernel_traits.h>
-#include <ATen/native/nested/flash_attn/gemm.h>
-#include <ATen/native/nested/flash_attn/utils.h>
+#include <ATen/native/nested/cuda/flash_attn/fmha_kernel.h>
+#include <ATen/native/nested/cuda/flash_attn/kernel_traits.h>
+#include <ATen/native/nested/cuda/flash_attn/gemm.h>
+#include <ATen/native/nested/cuda/flash_attn/utils.h>
 
 
 // #include <fmha_kernel.h>

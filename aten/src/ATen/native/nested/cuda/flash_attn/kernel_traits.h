@@ -29,9 +29,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include <ATen/native/nested/flash_attn/gemm.h>
-#include <ATen/native/nested/flash_attn/gmem_tile.h>
-#include <ATen/native/nested/flash_attn/smem_tile.h>
+#include <ATen/native/nested/cuda/flash_attn/gemm.h>
+#include <ATen/native/nested/cuda/flash_attn/gmem_tile.h>
+#include <ATen/native/nested/cuda/flash_attn/smem_tile.h>
 
 template<int S, int D, int STEP, int WARPS_M, int WARPS_N, uint32_t FLAGS = 0x08u>
 struct FMHA_kernel_traits {

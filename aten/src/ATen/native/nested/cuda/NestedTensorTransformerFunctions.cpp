@@ -9,6 +9,7 @@
 #include <ATen/ops/_nested_from_padded.h>
 #endif
 
+#include <ATen/native/nested/cuda/flash_attn/fmha_api.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 
@@ -202,5 +203,35 @@ Tensor NestedTensor_to_padded_tensor_cuda(
   }
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
 }
+
+Tensor flash_scaled_dot_product_self_attention(
+    const Tensor& qkv,
+    const Tensor& cumulative_sequence_length,
+    const int64_t max_seqlen_batch,
+    double dropout_p,
+    bool causal) {
+  auto q = qkv.index({at::indexing::Slice(), 0});
+  auto k = qkv.index({at::indexing::Slice(), 1});
+  auto v = qkv.index({at::indexing::Slice(), 2});
+  auto softmax_scale = std::pow(qkv.size(-1), -0.5);
+
+  std::vector<Tensor> output = at::native::mha_fwd(
+      q,
+      k,
+      v,
+      cumulative_sequence_length,
+      cumulative_sequence_length,
+      max_seqlen_batch,
+      max_seqlen_batch,
+      dropout_p,
+      softmax_scale,
+      false,
+      causal,
+      false,
+      c10::nullopt);
+
+  return output[0];
+}
+
 } // namespace native
 } // namespace at

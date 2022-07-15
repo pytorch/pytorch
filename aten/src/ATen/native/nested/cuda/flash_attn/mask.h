@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include <ATen/native/nested/flash_attn/gemm.h>
+#include <ATen/native/nested/cuda/flash_attn/gemm.h>
 namespace fmha {
 
 

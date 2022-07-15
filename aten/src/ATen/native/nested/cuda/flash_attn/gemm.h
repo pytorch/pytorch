@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include <ATen/native/nested/flash_attn/utils.h>
+#include <ATen/native/nested/cuda/flash_attn/utils.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/warp/default_mma_tensor_op.h>
 #include <cutlass/layout/layout.h>
