@@ -411,7 +411,7 @@ def gather_leaf_tensors(args, kwargs):
 # while debugging.
 def check_backward_formula(op: Callable, args, kwargs,
                            output_process_fn_grad=None,
-                           gradcheck_wrapper=None):
+                           gradcheck_wrapper=None, assert_equal_fn=None):
     CCT = generate_cct()
 
     def compute_expected_grads(args, kwargs):
@@ -479,7 +479,7 @@ def check_backward_formula(op: Callable, args, kwargs,
             def unwrap(e):
                 return e.elem if isinstance(e, CCT) else e
 
-            torch.testing.assert_close(tuple(map(unwrap, actual)), expected, equal_nan=True)
+            assert_equal_fn(tuple(map(unwrap, actual)), expected, equal_nan=True)
 
 # Checks if the forward AD formula is composite compliant by testing
 # all possible permutations of {primals, tangents} being
@@ -488,7 +488,7 @@ def check_backward_formula(op: Callable, args, kwargs,
 # NB: it is important that op is accepted as a Callable and not an OpInfo,
 # this means we can apply check_forward_ad_formula to things that aren't OpInfos
 # while debugging.
-def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None):
+def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None, assert_equal_fn=None):
     CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
 
     def maybe_tangent(t):
@@ -564,5 +564,5 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None)
                 actual = tree_map(fwAD.unpack_dual, actual)
                 actual_primals = tree_map(lambda x: unwrap(x.primal), actual)
                 actual_tangents = tree_map(lambda x: unwrap(x.tangent), actual)
-                torch.testing.assert_close(actual_primals, expected_primals, equal_nan=True)
-                torch.testing.assert_close(actual_tangents, expected_tangents, equal_nan=True)
+                assert_equal_fn(actual_primals, expected_primals, equal_nan=True)
+                assert_equal_fn(actual_tangents, expected_tangents, equal_nan=True)
