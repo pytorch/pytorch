@@ -44,7 +44,6 @@ class HFOperations(unittest.TestCase):
 
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
         b = BasicBlock().forward(torch.rand(1, 2, 3), torch.rand(1, 3, 2))
-        print(b.shape)
         transformed = transform_all_constraints(symbolic_traced, counter=0)
 
         s = z3.Solver()
