@@ -2512,8 +2512,6 @@ def main() -> None:
         if isinstance(g, NativeFunctionsViewGroup)
     ]
 
-    template_dir = os.path.join(options.source_path, "templates")
-
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
     # will eventually be ingested by cmake, which does not respect Windows style
     # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -2534,18 +2532,6 @@ def main() -> None:
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-
-    extra_cuda_headers = """\
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/cuda/CUDADevice.h>
-#include <ATen/cuda/CUDAContext.h>"""
-    if options.rocm:
-        extra_cuda_headers = """\
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
-#include <ATen/hip/ATenHIPGeneral.h>
-#include <ATen/hip/HIPDevice.h>
-#include <ATen/hip/HIPContext.h>"""
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
