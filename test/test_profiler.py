@@ -28,7 +28,9 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern, ForLoopIndexingPattern
+from torch.profiler._pattern_matcher import (Pattern, NamePattern,
+                                             ExtraCUDACopyPattern,
+                                             ForLoopIndexingPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
