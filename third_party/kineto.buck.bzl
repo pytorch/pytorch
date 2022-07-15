@@ -172,10 +172,10 @@ def define_kineto():
     cxx_library(
         name = "libkineto_headers",
         exported_headers = native.glob([
-            "kineto/include/*.h",
+            "kineto/libkineto/include/*.h",
         ]),
         public_include_directories = [
-            "kineto/include",
+            "kineto/libkineto/include",
         ],
         visibility = ["PUBLIC"],
     )
