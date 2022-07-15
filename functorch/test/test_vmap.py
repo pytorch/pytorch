@@ -3242,7 +3242,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('allclose'),
         xfail('argwhere'),
         xfail('linalg.cross'),
-        xfail('searchsorted'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
