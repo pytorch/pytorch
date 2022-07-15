@@ -85,6 +85,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
+      .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
@@ -270,6 +271,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   {
     using torch::profiler::impl::Result;
+    py::enum_<EventType>(m, "_EventType")
+        .value("TorchOp", EventType::TorchOp)
+        .value("Backend", EventType::Backend)
+        .value("Allocation", EventType::Allocation)
+        .value("PyCall", EventType::PyCall)
+        .value("PyCCall", EventType::PyCCall);
     py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
         .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
         .def_readonly(
