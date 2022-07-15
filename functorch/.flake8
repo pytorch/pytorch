@@ -12,3 +12,9 @@ ignore =
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!
     C400,C401,C402,C403,C404,C405,C407,C411,C413,C414,C415
+exclude =
+    ./.git,
+    ./benchmarks,
+    ./docs,
+    ./examples,
+    ./notebooks
