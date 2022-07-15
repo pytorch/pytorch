@@ -94,6 +94,62 @@ CommonIndexKey::CommonIndexKey(
       loops.size());
 }
 
+CommonIndexKey::CommonIndexKey(
+    IterDomain* consumer_indexed_id,
+    TensorDomain* consumer_td,
+    const std::vector<IterDomain*>& loop_domains,
+    const std::unordered_map<IterDomain*, Val*>& loop_index_map,
+    const std::vector<kir::ForLoop*>& loops) {
+  auto gpu_lower = GpuLower::current();
+
+  concrete_indexed_id_ = gpu_lower->caMap()->getConcreteMappedID(
+      consumer_indexed_id, IdMappingMode::EXACT);
+
+  const auto consumer_leaf_ids =
+      getUsedLeafIds(consumer_indexed_id, consumer_td);
+
+  // Convert to Parallel concrete IDs to find matching loops.
+  std::unordered_set<IterDomain*> concrete_leaf_ids;
+  for (auto& id : consumer_leaf_ids) {
+    concrete_leaf_ids.insert(
+        gpu_lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP));
+  }
+
+  // Find used loops and their index vals
+  for (const auto i : c10::irange(loops.size())) {
+    auto loop = loops.at(i);
+    auto loop_id = gpu_lower->caMap()->getConcreteMappedID(
+        loop->iter_domain(), IdMappingMode::LOOP);
+    auto it = concrete_leaf_ids.find(loop_id);
+    if (it != concrete_leaf_ids.end()) {
+      // This leaf reference id is used for indexing the consumer id
+      used_loops_.push_back(loop);
+      auto index_it =
+          loop_index_map.find(gpu_lower->caMap()->getConcreteMappedID(
+              loop_domains.at(i), IdMappingMode::EXACT));
+      TORCH_INTERNAL_ASSERT(
+          index_it != loop_index_map.end(),
+          "Index not found for leaf ID, ",
+          loop_domains.at(i)->toString());
+      loop_index_vals_.push_back(index_it->second);
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      !used_loops_.empty(),
+      "No loop used for indexing found. ",
+      consumer_indexed_id->toString());
+
+  TORCH_INTERNAL_ASSERT(
+      consumer_leaf_ids.size() == used_loops_.size(),
+      "consumer_leaf_ids.size() = ",
+      consumer_leaf_ids.size(),
+      ", used_loops_.size() == ",
+      used_loops_.size(),
+      ", loops.size() == ",
+      loops.size());
+}
+
 bool CommonIndexKey::operator==(const CommonIndexKey& other) const {
   auto gpu_lower = GpuLower::current();
 
@@ -179,7 +235,30 @@ std::pair<Val*, bool> CommonIndexMap::insert(
 
   const CommonIndexKey key(
       indexed_consumer_id, consumer_td, ref_td, ref_index_map, loops);
+  return tryInsertNewIndex(key, index);
+}
 
+std::pair<Val*, bool> CommonIndexMap::insert(
+    IterDomain* indexed_consumer_id,
+    TensorDomain* consumer_td,
+    const std::vector<IterDomain*>& loop_domains,
+    const std::unordered_map<IterDomain*, Val*>& loop_index_map,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* index) {
+  if (index->definition() == nullptr) {
+    // Only expression is eligible to hoist
+    return {index, false};
+  }
+
+  const CommonIndexKey key(
+      indexed_consumer_id, consumer_td, loop_domains, loop_index_map, loops);
+
+  return tryInsertNewIndex(key, index);
+}
+
+std::pair<Val*, bool> CommonIndexMap::tryInsertNewIndex(
+    CommonIndexKey key,
+    Val* index) {
   Val* hoisted_index = nullptr;
   bool new_index_inserted = false;
 
@@ -195,7 +274,6 @@ std::pair<Val*, bool> CommonIndexMap::insert(
     new_index_inserted = true;
     use_counts_[key] = 1;
   }
-
   return {hoisted_index, new_index_inserted};
 }
 

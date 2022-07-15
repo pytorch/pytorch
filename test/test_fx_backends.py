@@ -132,6 +132,38 @@ class TestFxNvFuserBackend(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(torch.float32)
+    def test_nvfuser_call_module_backend(self, device, dtype):
+
+        class Model(torch.nn.Module):
+
+            def __init__(self):
+                super(Model, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, inp):
+                o = self.bn(inp)
+                o = self.relu(o)
+                return o
+
+        inp = torch.randn(2, 3, 4, 5).to(dtype=dtype, device=device)
+        m = Model().to(dtype=dtype, device=device)
+
+        # note that the traced module here contains only `call_module` node,
+        # which isn't fused by nvfuser backend. But `nvfuser.compile` should run without error
+        traced = symbolic_trace(m)
+
+        nvfuser = NvFuserBackend()
+        compiled_module = nvfuser.compile(traced)
+
+        eager_result = m(inp)
+        nvfuser_result = compiled_module(inp)
+
+        torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
+
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
     def test_nvfuser_backend(self, device, dtype):
         m = HF_T5_Partial()
         m.to(device)
