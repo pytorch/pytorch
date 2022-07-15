@@ -1,12 +1,12 @@
 from collections import deque
-from enum import Enum
 import re
 from typing import Dict, List, Set
 
 from torch.profiler import profile
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_Backend, _ExtraFields_Allocation,
-                                _ExtraFields_PyCCall, _ExtraFields_PyCall)
+                                _ExtraFields_PyCCall, _ExtraFields_PyCall,
+                                _EventType)
 
 
 class Pattern:
@@ -18,7 +18,6 @@ class Pattern:
     '''
 
     def __init__(self, prof: profile):
-        self.skip = False
         self.prof = prof
         self.description = "Please specify a description for pattern"
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
@@ -28,9 +27,25 @@ class Pattern:
         for event in self.event_tree:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 
+    @property
+    def skip(self):
+        return False
+
     def report(self, event: _ProfilerEvent):
         msg = f"{event.name()}\n{self.description}\n{source_code_location(event)}"
         return msg
+
+    def eventTreeTraversal(self):
+        '''
+        Standard DFS traversal of the event tree.
+        Override this method to customize the traversal order.
+        '''
+        stack = deque(self.event_tree)
+        while stack:
+            curr_event = stack.pop()
+            yield curr_event
+            for child_event in curr_event.children:
+                stack.append(child_event)
 
     def match(self, event: _ProfilerEvent):
         '''
@@ -43,7 +58,7 @@ class Pattern:
         if self.skip:
             return []
         matched_events = []
-        for event in eventTreeBFS(self.event_tree):
+        for event in self.eventTreeTraversal():
             if self.match(event):
                 matched_events.append(event)
         return matched_events
@@ -103,12 +118,14 @@ class ExtraCUDACopyPattern(Pattern):
 
     def __init__(self, prof: profile):
         super().__init__(prof)
-        if not prof.with_stack:
-            self.skip = True
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
         self.init_ops = {
             "aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"
         }
+
+    @property
+    def skip(self):
+        return self.prof.with_stack is False
 
     def match(self, event):
         # TODO: We should also check tensor identities
@@ -147,10 +164,22 @@ class ForLoopIndexingPattern(Pattern):
     We start at node aten::select, and we check if we can find this alternating patterns.
     We also keep a dictionary to avoid duplicate match in the for loop.
     '''
+
     def __init__(self, prof: profile):
         super().__init__(prof)
         self.description = "For loop indexing detected. Vectorization recommended."
         self.visited: Set[int] = set()
+
+    def eventTreeTraversal(self):
+        '''
+        We need to use BFS traversal order to avoid duplicate match.
+        '''
+        stack = deque(self.event_tree)
+        while stack:
+            curr_event = stack.popleft()
+            yield curr_event
+            for child_event in curr_event.children:
+                stack.append(child_event)
 
     def match(self, event: _ProfilerEvent):
         if event.name() != "aten::select":
@@ -169,19 +198,10 @@ class ForLoopIndexingPattern(Pattern):
         return repeat_count >= 10
 
 
-def eventTreeBFS(event_tree):
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.popleft()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
-
-
 def source_code_location(event: _ProfilerEvent):
     while event:
-        if event_type(event) == EventType.PyCall or event_type(
-                event) == EventType.PyCCall:
+        if event_type(event) == _EventType.PyCall or event_type(
+                event) == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
@@ -191,8 +211,12 @@ def source_code_location(event: _ProfilerEvent):
 
 
 def report_all_anti_patterns(prof):
-    anti_patterns = [ExtraCUDACopyPattern(prof), ForLoopIndexingPattern(prof)]
+    anti_patterns = [
+        ExtraCUDACopyPattern(prof),
+        ForLoopIndexingPattern(prof)
+    ]
     reported = set()
+    print(f"{'-'*40}TorchTidy Report{'-'*40}")
     for anti_pattern in anti_patterns:
         for event in anti_pattern.matched_events():
             report_msg = anti_pattern.report(event)
@@ -201,24 +225,16 @@ def report_all_anti_patterns(prof):
                 reported.add(report_msg)
 
 
-class EventType(Enum):
-    TorchOp = 1
-    Backend = 2
-    Allocation = 3
-    PyCall = 4
-    PyCCall = 5
-
-
 def event_type(event: _ProfilerEvent):
     if isinstance(event.extra_fields, _ExtraFields_TorchOp):
-        return EventType.TorchOp
+        return _EventType.TorchOp
     elif isinstance(event.extra_fields, _ExtraFields_Backend):
-        return EventType.Backend
+        return _EventType.Backend
     elif isinstance(event.extra_fields, _ExtraFields_Allocation):
-        return EventType.Allocation
+        return _EventType.Allocation
     elif isinstance(event.extra_fields, _ExtraFields_PyCall):
-        return EventType.PyCall
+        return _EventType.PyCall
     elif isinstance(event.extra_fields, _ExtraFields_PyCCall):
-        return EventType.PyCCall
+        return _EventType.PyCCall
     else:
         raise Exception("Unknown event type")
