@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Rprop', 'rprop']
 
 class Rprop(Optimizer):
     r"""Implements the resilient backpropagation algorithm.

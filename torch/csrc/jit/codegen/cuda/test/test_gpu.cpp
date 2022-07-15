@@ -4088,6 +4088,14 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::isposinf, UnaryOpType::IsPosInf, "isposinf"},
   };
 
+  // The following ops only supports complex
+  std::vector<OpTuple> ops_complex_only{
+      // real is supported via UnaryOpType::Set for non-complex types, and
+      // UnaryOpType::Real requires input to be complex
+      OpTuple{at::real, UnaryOpType::Real, "real"},
+      OpTuple{at::imag, UnaryOpType::Imag, "imag"},
+  };
+
   // Complex support for the following op is not working in nvFuser yet
   std::vector<OpTuple> ops_skip_complex{
       // TODO: abs is actually supported in nvFuser, but it has bug!!!
@@ -4119,6 +4127,9 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
           ops_without_complex.end());
       ops_to_test.insert(
           ops_to_test.end(), ops_skip_complex.begin(), ops_skip_complex.end());
+    } else {
+      ops_to_test.insert(
+          ops_to_test.end(), ops_complex_only.begin(), ops_complex_only.end());
     }
     std::for_each(ops.begin(), ops.end(), [&](OpTuple& op) {
       test_op(
@@ -24163,7 +24174,7 @@ TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
       __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
+TEST_F(NVFuserTest, FusionTransformPropagatorSelector_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 

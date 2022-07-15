@@ -190,6 +190,9 @@ TORCH_CUDA_CU_API TensorView* neg(TensorView*);
 // randlike
 TORCH_CUDA_CU_API Val* randlike(Val*);
 TORCH_CUDA_CU_API TensorView* randlike(TensorView*);
+// real
+TORCH_CUDA_CU_API Val* real(Val*);
+TORCH_CUDA_CU_API TensorView* real(TensorView*);
 // reciprocal
 TORCH_CUDA_CU_API Val* reciprocal(Val*);
 TORCH_CUDA_CU_API TensorView* reciprocal(TensorView*);
@@ -229,6 +232,9 @@ TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
 // bitwise_not
 TORCH_CUDA_CU_API Val* bitwise_not(Val*);
 TORCH_CUDA_CU_API TensorView* bitwise_not(TensorView*);
+// imag
+TORCH_CUDA_CU_API Val* imag(Val*);
+TORCH_CUDA_CU_API TensorView* imag(TensorView*);
 // isfinite
 TORCH_CUDA_CU_API Val* isfinite(Val*);
 TORCH_CUDA_CU_API TensorView* isfinite(TensorView*);

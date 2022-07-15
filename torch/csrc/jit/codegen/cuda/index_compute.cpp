@@ -267,49 +267,6 @@ Val* getProducerIndexWithGather(
     size_t producer_root_axis,
     const TensorView* producer_tv,
     const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& concrete_to_ref_map,
-    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
-  auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
-
-  // Just return the producer index as is if this is not a gather
-  if (gather_op == nullptr) {
-    return producer_index;
-  }
-
-  // Consumer axis that corresponds to the producer axis
-  int consumer_axis = -1;
-  for (const auto i : c10::irange(producer_root_axis + 1)) {
-    if (producer_tv->getMaybeRFactorDomain()[i]->isReduction() ||
-        producer_tv->getMaybeRFactorDomain()[i]->isStride()) {
-      continue;
-    }
-    ++consumer_axis;
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      consumer_axis >= 0 &&
-          consumer_axis < (int)gather_op->windowShape().size(),
-      "Invalid consumer axis",
-      consumer_axis,
-      ", producer_axis: ",
-      producer_root_axis);
-
-  auto offset = getProducerOffsetWithGather(
-      consumer_axis, consumer_tv, ref_index_map, true, concrete_to_ref_map);
-  return SimplifyingIrBuilder::addExpr(producer_index, offset);
-}
-
-//! Offset a producer index of a gather expression
-//!
-//! Given an index of a producer root axis, build a new index
-//! expression that accesses a window position that the current loop
-//! structure refers to. Use getGatherProducerOffset to create an
-//! offset Val.
-Val* getProducerIndexWithGather(
-    Val* producer_index,
-    size_t producer_root_axis,
-    const TensorView* producer_tv,
-    const TensorView* consumer_tv,
     const std::unordered_map<IterDomain*, Val*>& concrete_index_map) {
   auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
 

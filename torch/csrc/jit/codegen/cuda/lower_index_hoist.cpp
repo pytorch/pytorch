@@ -235,7 +235,6 @@ std::pair<Val*, bool> CommonIndexMap::insert(
 
   const CommonIndexKey key(
       indexed_consumer_id, consumer_td, ref_td, ref_index_map, loops);
-
   return tryInsertNewIndex(key, index);
 }
 

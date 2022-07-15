@@ -17,7 +17,8 @@ from functools import reduce, partial, wraps
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
-     make_fullrank_matrices_with_distinct_singular_values)
+     make_fullrank_matrices_with_distinct_singular_values,
+     freeze_rng_state)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -533,14 +534,14 @@ class TestLinalg(TestCase):
 
         # dtypes should be safely castable
         out = torch.empty(*A.shape, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.cholesky(A, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
@@ -696,19 +697,6 @@ class TestLinalg(TestCase):
         self.assertEqual(info, expected_info)
         with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The factorization could not be completed'):
             torch.linalg.cholesky_ex(A, check_errors=True)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_cholesky_ex_out_info_error(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        # dtype for info must be torch.int32
-        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
-        L = torch.empty(A.shape, dtype=dtype, device=device)
-        info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
-            torch.linalg.cholesky_ex(A, out=(L, info))
 
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
         def check(m, a, b, beta, alpha):
@@ -6202,6 +6190,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test([3, 4], [3, 3, 3])
         run_test([3, 4], [3, 3, 3, 3])
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64)
+    def test_linalg_matrix_exp_no_warnings(self, device, dtype):
+        # this tests https://github.com/pytorch/pytorch/issues/80948
+        with freeze_rng_state():
+            torch.manual_seed(42)
+            tens = 0.5 * torch.randn(10, 3, 3, dtype=dtype, device=device)
+            tens = (0.5 * (tens.transpose(-1, -2) + tens))
+            with warnings.catch_warnings(record=True) as w:
+                tens.imag = torch.matrix_exp(tens.imag)
+                self.assertFalse(len(w))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -6532,9 +6533,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.slogdet(a)
 
-        # slogdet requires the input to be of float, double, cfloat or cdouble types
         a = torch.randn(2, 2, device=device, dtype=torch.bfloat16)
-        with self.assertRaisesRegex(RuntimeError, r'of float, double, cfloat or cdouble types'):
+        with self.assertRaisesRegex(RuntimeError, r'Low precision dtypes not supported'):
             torch.linalg.slogdet(a)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -6548,16 +6548,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
-        # dtypes should be safely castable
-        sign_out = torch.empty_like(a).to(torch.int)
-        logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got sign with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
-
-        sign_out = torch.empty(0, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "but got logabsdet with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         # device should match
         if torch.cuda.is_available():

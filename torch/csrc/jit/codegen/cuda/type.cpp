@@ -376,6 +376,8 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
+    case UnaryOpType::Real:
+    case UnaryOpType::Imag:
       return false;
     default:
       return true;
@@ -470,6 +472,10 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "isposinf";
     case UnaryOpType::IsReal:
       return "isreal";
+    case UnaryOpType::Real:
+      return "std::real";
+    case UnaryOpType::Imag:
+      return "std::imag";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
