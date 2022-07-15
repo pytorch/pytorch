@@ -1112,6 +1112,12 @@ class MultiheadAttention(Module):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
+                if query.is_nested:
+                    query_projected = torch.nn.functional.linear(query, self.in_proj_weight, self.in_proj_bias)
+                    attn_output = torch._scaled_dot_product_self_attention(query_projected, self.num_heads)
+                    attn_output = torch.nn.functional.linear(attn_output, self.out_proj.weight, self.out_proj.bias)
+                    assert not need_weights
+                    return attn_output, None
                 return torch._native_multi_head_attention(
                     query,
                     key,
