@@ -1,4 +1,4 @@
-name: binary-test-linux
+name: windows-binary-build
 
 on:
   workflow_call:
@@ -35,10 +35,6 @@ on:
         required: true
         type: string
         description: GPU Arch type
-      DOCKER_IMAGE:
-        required: true
-        type: string
-        description: Docker image to use
       LIBTORCH_CONFIG:
         required: false
         type: string
@@ -55,10 +51,6 @@ on:
         required: false
         type: string
         description: Desired python version
-      runs_on:
-        required: true
-        type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
     secrets:
       github-token:
         required: true
@@ -66,7 +58,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -77,7 +69,6 @@ jobs:
       DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
-      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
@@ -89,9 +80,8 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.github-token }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
@@ -105,7 +95,6 @@ jobs:
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
             echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
-            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
             echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
             echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
             echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
@@ -118,35 +107,39 @@ jobs:
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
-            echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
           } >> "${GITHUB_ENV} }}"
 
-        # Setup the environment
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
-        with:
-          github-secret: ${{ secrets.github-token }}
-      - name: Clean workspace
+      - name: Display EC2 information
         shell: bash
         run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
+          set -euo pipefail
+          function get_ec2_metadata() {
+            # Pulled from instance metadata endpoint for EC2
+            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+            category=$1
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          }
+          echo "ami-id: $(get_ec2_metadata ami-id)"
+          echo "instance-id: $(get_ec2_metadata instance-id)"
+          echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
         with:
-          name: ${{ inputs.build_name }}
-          path: "${{ runner.temp }}/artifacts/"
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+      # Since it's just a defensive command, the workflow should continue even the command fails
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
-
-      - name: Checkout PyTorch to pytorch dir
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -157,8 +150,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-
-      - name: Checkout pytorch/builder to builder dir
+      - name: Checkout pytorch/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
@@ -171,42 +163,38 @@ jobs:
           git clean -fxd
         working-directory: builder
 
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - name: Setup runner specific env variables
+        uses: ./pytorch/.github/actions/set-windows-runner-binary-build-vars
 
-      - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
-        with:
-          docker-image: ${{ inputs.DOCKER_IMAGE }}
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
 
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Build PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
 
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
+      - name: Upload artifact to s3
+        uses: seemethere/upload-artifact-s3@v5
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
+        with:
+          name: ${{ inputs.build_name }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+
+      - name: Wait until all sessions have drained
+        shell: powershell
+        working-directory: pytorch
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_to_drain.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+        working-directory: pytorch
         if: always()
         run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+          .github\scripts\kill_active_ssh_sessions.ps1

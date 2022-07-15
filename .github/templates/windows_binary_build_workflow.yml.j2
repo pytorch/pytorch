@@ -56,59 +56,28 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
-    timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config, True) }}
-    steps:
-      !{{ common.setup_ec2_windows() }}
-      !{{ set_runner_specific_vars() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: !{{ common.upload_artifact_s3_action }}
-        if: always()
-        with:
-          name: !{{ config["build_name"] }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+    uses: ./.github/workflows/_binary-build-windows.yml
+    with:!{{ upload.binary_env_as_input(config, True) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] == "cuda" %}
-    runs-on: windows.8xlarge.nvidia.gpu
-{%- else %}
-    runs-on: windows.4xlarge
-{%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config, True) }}
-    steps:
-      !{{ common.setup_ec2_windows() }}
-      !{{ set_runner_specific_vars() }}
-      - uses: !{{ common.download_artifact_s3_action }}
-        name: Download Build Artifacts
-        with:
-          name: !{{ config["build_name"] }}
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+    uses: ./.github/workflows/_binary-test-windows.yml
+    with:!{{ upload.binary_env_as_input(config, True) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+      {%- if config["gpu_arch_type"] == "cuda" %}
+      runs_on: windows.8xlarge.nvidia.gpu
+      {%- else %}
+      runs_on: windows.4xlarge
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
   {%- endif %}

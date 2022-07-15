@@ -6,8 +6,8 @@
 
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PYTORCH_ROOT: ./pytorch
+      BUILDER_ROOT: ./builder
 {%- else %}
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
