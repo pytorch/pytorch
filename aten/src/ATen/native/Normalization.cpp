@@ -188,19 +188,19 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
-    auto momentum_ = static_cast<param_t>(momentum);
+    
     parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
       for (const auto f : c10::irange(b_begin, b_end)) {
         save_mean_a[f] = _mean_a[f];
         save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
         if (running_mean.defined()) {
-          running_mean_a[f] = momentum_ * _mean_a[f] + (1 - momentum_) * running_mean_a[f];
+          running_mean_a[f] = static_cast<param_t>(momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f]);
         }
         if (running_var.defined()) {
           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
           running_var_a[f] =
-              momentum_ * unbiased_var + (1 - momentum_) * running_var_a[f];
+              static_cast<param_t>(momentum * unbiased_var + (1 - momentum) * running_var_a[f]);
         }
       }
     });
