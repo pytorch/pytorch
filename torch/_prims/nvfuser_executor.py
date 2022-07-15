@@ -78,11 +78,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
-                fd.add_input(x)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
-                fd.add_input(x)
                 return x
             else:
                 return arg

@@ -219,7 +219,7 @@ def _assert_nvfuser_op_exists(fname: str):
     try:
         from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
 
-        assert getattr(fd.Ops, fname)
+        assert getattr(fd.ops, fname)
     except ImportError:
         # Not all PyTorch builds have nvfuser
         pass
@@ -232,7 +232,7 @@ for fname in _nvfuser_unary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.{fname}(a)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a)  # type: ignore[attr-defined]
 """
     )
 
@@ -262,7 +262,7 @@ for fname in _nvfuser_binary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b)  # type: ignore[attr-defined]
 """
     )
 
@@ -277,7 +277,7 @@ for fname in _nvfuser_ternary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType, c: TensorLikeType):
-    return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b, c)  # type: ignore[attr-defined]
 """
     )
 
@@ -873,7 +873,7 @@ tanh = _make_elementwise_unary_prim(
 
 
 def _trunc_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.trunc(a)  # type: ignore[attr-defined]
+    return fd.ops.trunc(a)  # type: ignore[attr-defined]
 
 
 trunc = _make_elementwise_unary_prim(
@@ -1107,7 +1107,7 @@ pow = _make_elementwise_binary_prim(
 
 
 def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+    return fd.ops.remainder(a, b)  # type: ignore[attr-defined]
 
 
 remainder = _make_elementwise_binary_prim(
@@ -1259,7 +1259,7 @@ def _broadcast_in_dim_nvfuser(
     shape: ShapeType,
     broadcast_dimensions: ShapeType,
 ):
-    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
+    return fd.ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
 
 
 _broadcast_in_dim_doc = """
@@ -1977,7 +1977,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
+    return fd.ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
 
 
 _convert_element_type_doc = """
@@ -2271,7 +2271,7 @@ def _sum_nvfuser(
 ):
     keep_dims = False
     output_dtype = torch._C._nvfuser.DataType.Null
-    return fd.Ops.sum(a, dims, keep_dims, output_dtype)
+    return fd.ops.sum(a, dims, keep_dims, output_dtype)
 
 
 sum = _make_reduction_prim(
@@ -2312,7 +2312,7 @@ def _var_nvfuser(
     correction: int,
 ):
     keep_dims = False
-    return fd.Ops.var(a, dims, correction, keep_dims)
+    return fd.ops.var(a, dims, correction, keep_dims)
 
 
 def _amax_nvfuser(
@@ -2321,7 +2321,7 @@ def _amax_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.max(a, dims, keep_dims)
+    return fd.ops.max(a, dims, keep_dims)
 
 
 def _amin_nvfuser(
@@ -2330,7 +2330,7 @@ def _amin_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.min(a, dims, keep_dims)
+    return fd.ops.min(a, dims, keep_dims)
 
 
 var = _make_var_reduction_prim(
