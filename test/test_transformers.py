@@ -336,9 +336,9 @@ class TestTransformers(NNTestCase):
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # TODO: remove set default dtype to double by making ref_output more precise. 
-        # Added because this test was copied from test_nn.py, which has default 
-        # dtype double. If default dtype is float, tests will say tensors not close because 
+        # TODO: remove set default dtype to double by making ref_output more precise.
+        # Added because this test was copied from test_nn.py, which has default
+        # dtype double. If default dtype is float, tests will say tensors not close because
         # ref output precision too low
         with set_default_dtype(torch.double):
             if training:
