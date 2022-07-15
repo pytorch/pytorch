@@ -1154,7 +1154,7 @@ def native_batch_norm_backward(
     assert input_rank >= 2, "rank of the input must be at least 2"
 
     axis = 1
-    num_features = prod(input_shape) / input_shape[axis]
+    num_features = prod(list(input_shape)) / input_shape[axis]
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
@@ -1168,7 +1168,7 @@ def native_batch_norm_backward(
         mean = running_mean_cast
         invstd = torch.rsqrt(running_var_cast + eps)
 
-    broadcast_mask = [1] * input_rank
+    broadcast_mask: List[int] = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
 
     reduction_axes: List[int] = []
@@ -1176,16 +1176,16 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = torch.reshape(mean, broadcast_mask)
+    mean = torch.reshape(mean, broadcast_mask)   # type: ignore[arg-type]
     norm = 1.0 / num_features
-    grad_output_sum = torch.sum(grad_out_cast, reduction_axes)
+    grad_output_sum = torch.sum(grad_out_cast, reduction_axes)   # type: ignore[arg-type]
     dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
 
     grad_mean = torch.reshape(grad_output_sum * norm, broadcast_mask)
-    proj_scale = torch.reshape(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)
+    proj_scale = torch.reshape(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
 
     if weight_cast is None:
-        grad_scale = torch.reshape(invstd, broadcast_mask) * 1.0
+        grad_scale = torch.reshape(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
     else:
         grad_scale = torch.reshape(invstd * weight_cast, broadcast_mask)
 
@@ -1198,7 +1198,7 @@ def native_batch_norm_backward(
     if output_mask[1]:
         grad_weight = dot_p * invstd
     elif weight is not None:
-        grad_weight = torch.zeros_like(weight_cast)  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros_like(weight_cast)  # type: ignore[arg-type]  # should be None but doesn't work with vjp
     else:
         grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
 
@@ -1208,8 +1208,8 @@ def native_batch_norm_backward(
         grad_bias = torch.zeros_like(grad_output_sum)  # should be None but doesn't work with vjp
 
     return (
-        _maybe_cast(grad_input, input_dtype), 
-        _maybe_cast(grad_weight, input_dtype), 
+        grad_input.to(input_dtype),
+        _maybe_cast(grad_weight, input_dtype),
         _maybe_cast(grad_bias, input_dtype),
 )
 
