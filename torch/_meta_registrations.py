@@ -7,8 +7,6 @@ from torch._prims_common import (
     elementwise_dtypes,
 )
 from torch._prims_common.wrappers import out_wrapper
-from torch.utils._pytree import tree_map
-from torch._decomp_tables import meta_funcs
 
 from typing import List, Optional
 
