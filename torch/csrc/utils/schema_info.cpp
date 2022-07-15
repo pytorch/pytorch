@@ -133,11 +133,14 @@ bool SchemaInfo::may_alias(
   if (basic_check) {
     return true;
   }
-  bool types_can_alias = schema_.canAliasTypeSetsAlias(
+  c10::optional<c10::AliasTypeSet> lhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(lhs.type)[lhs.index].type()),
+          schema_.getCorrectList(lhs.type)[lhs.index].type());
+  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(rhs.type)[rhs.index].type()));
+          schema_.getCorrectList(rhs.type)[rhs.index].type());
+  bool types_can_alias =
+      schema_.canAliasTypeSetsAlias(lhsAliasTypeSet, rhsAliasTypeSet);
   if (!types_can_alias) {
     return false;
   }
@@ -191,11 +194,14 @@ bool SchemaInfo::may_contain_alias(
 bool SchemaInfo::mayContainAliasImpl(
     const c10::SchemaArgument& lhs,
     const c10::SchemaArgument& rhs) {
-  bool types_can_alias = schema_.canAliasTypeSetsAlias(
+  c10::optional<c10::AliasTypeSet> lhsContainedAliasTypeSet =
       schema_.getAliasTypeSetContainedTypes(schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(lhs.type)[lhs.index].type())),
+          schema_.getCorrectList(lhs.type)[lhs.index].type()));
+  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(rhs.type)[rhs.index].type()));
+          schema_.getCorrectList(rhs.type)[rhs.index].type());
+  bool types_can_alias =
+      schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
   return types_can_alias && container_set_.count(lhs) &&
       wildcard_set_.count(rhs);
 }
@@ -244,11 +250,17 @@ void SchemaInfo::initSchemaInfo() {
           c10::SchemaArgType type) {
         seen.clear();
         for (size_t i = 0; i < arguments_list.size(); i++) {
-          const c10::Argument argument = arguments_list[i];
+          const c10::Argument& argument = arguments_list[i];
           if (argument.alias_info()) {
             if (argument.alias_info()->isWildcardAfter()) {
               wildcard_set_.insert({type, i});
             } else {
+              // This check is to ensure that the FunctionSchema will accurately
+              // be represented when calling may_alias and may_contain_alias
+              // As of now, there are no schemas in native_functions.yaml
+              // that either have two inputs that share the same alias or two
+              // outputs that share the same alias, so this class optimizes
+              // alias checking from O(n^2) time to O(n) or less time.
               for (const auto& set : argument.alias_info()->afterSets()) {
                 TORCH_INTERNAL_ASSERT(
                     !seen.count(set),
@@ -301,8 +313,10 @@ void SchemaInfo::generateAliasMaps() {
   }
 
   // Fills wildcard_set with container created wildcards.
-  // ie if one argument is a container and it contains an element that aliases
-  // the other argument, then the second argument is added to the wildcard set.
+  // For instance, given the schema:
+  // test(Tensor a, Tensor(*) b, Tensor[] c) -> Tensor
+  // where value(a) is contained in value(c), then a will be added to the
+  // wildcard set where it can now alias b.
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = 0; j < schema_.arguments().size(); j++) {
       // if they are already aliasing, there is no way one contains the other

@@ -414,8 +414,9 @@ Tensor internal_new_from_data(
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   // lift has no autograd implementation, so we need to make sure we don't try
   // to dispatch to it.
+  // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
-  return tensor.lift();
+  return at::lift_fresh(tensor);
 }
 
 Tensor new_from_data_copy(
