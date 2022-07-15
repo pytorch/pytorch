@@ -19,14 +19,15 @@ TEST_SRC_ROOT="$PWD/test/mobile/lightweight_dispatch"
 pushd "$CUSTOM_TEST_ARTIFACT_BUILD_DIR"
 
 # prepare test
-python "$TEST_SRC_ROOT/tests_setup.py" setup
+OP_LIST="lightweight_dispatch_ops.yaml"
+export SELECTED_OP_LIST=$TEST_SRC_ROOT/$OP_LIST
+python "$TEST_SRC_ROOT/tests_setup.py" setup "$SELECTED_OP_LIST"
 
 export USE_DISTRIBUTED=0
 export USE_LIGHTWEIGHT_DISPATCH=1
 export STATIC_DISPATCH_BACKEND="CPU"
 export BUILD_LITE_INTERPRETER=1
-OP_LIST="lightweight_dispatch_ops.yaml"
-export SELECTED_OP_LIST=$TEST_SRC_ROOT/$OP_LIST
+
 export USE_FBGEMM=0
 python "${BUILD_LIBTORCH_PY}"
 ret=$?

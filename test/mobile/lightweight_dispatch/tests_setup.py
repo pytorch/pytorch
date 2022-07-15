@@ -118,7 +118,7 @@ class ModelWithMultipleOps(torch.nn.Module):
 
 if __name__ == "__main__":
     command = sys.argv[1]
-    ops_yaml = "./lightweight_dispatch_ops.yaml"
+    ops_yaml = sys.argv[2]
     backup = ops_yaml + ".bak"
     if command == "setup":
         tests = [
