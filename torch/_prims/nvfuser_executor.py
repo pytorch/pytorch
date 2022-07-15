@@ -108,7 +108,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     nv_template_args = to_nvfuser_template_args(flat_args)
     fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
+    # Inputs to fusion.execute correspond to the same template/symbolic inputs
     concrete_fusion_inputs = tuple(
         arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
     )
