@@ -1675,9 +1675,9 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
-            // For normalization purposes there is an inconsistency within torch.fx that
-            // turns all arguments named "self" into "input". Thus this check ensures that
-            // those arguments are checked correctly.
+            // For normalization purposes there is an inconsistency within
+            // torch.fx that turns all arguments named "self" into "input". Thus
+            // this check ensures that those arguments are checked correctly.
             if (name == "input") {
               try {
                 self.addArgumentValue("self", toTypeInferredIValue(value));
@@ -1696,9 +1696,10 @@ void initJITBindings(PyObject* module) {
           TORCH_INTERNAL_ASSERT(
               key.isString(),
               "Add argument value keys types should be strings.");
-                          // For normalization purposes there is an inconsistency within torch.fx that
-            // turns all arguments named "self" into "input". Thus this check ensures that
-            // those arguments are checked correctly.
+          // For normalization purposes there is an inconsistency within
+          // torch.fx that
+          // turns all arguments named "self" into "input". Thus this check
+          // ensures that those arguments are checked correctly.
 
           if (key.toStringRef() == "input") {
             try {
