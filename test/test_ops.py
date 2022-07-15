@@ -1497,7 +1497,7 @@ class TestTags(TestCase):
 
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
@@ -1536,6 +1536,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
         # CompositeImplicitAutograd
+        '_refs.allclose',
         '_refs.atleast_1d',
         '_refs.atleast_2d',
         '_refs.atleast_3d',
@@ -1580,6 +1581,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
     }
 
     @parametrize("op", ref_ops_names)

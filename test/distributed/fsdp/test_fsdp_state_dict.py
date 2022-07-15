@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import itertools
 import sys
 from contextlib import suppress
 from copy import deepcopy
@@ -8,40 +9,52 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
-from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch import distributed as dist
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    StateDictType,
-    FullStateDictConfig,
-    LocalStateDictConfig,
-    CPUOffload,
-    MixedPrecision,
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
+from torch.distributed.fsdp import CPUOffload, FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    LocalStateDictConfig,
+    MixedPrecision,
+    StateDictType,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FullyShardedDataParallel,
+)
 from torch.distributed.fsdp.shard_utils import _gather_state_dict
-from torch.distributed.fsdp.wrap import enable_wrap, wrap, transformer_auto_wrap_policy
-from torch.nn import Linear, Module
+from torch.distributed.fsdp.wrap import (
+    enable_wrap,
+    transformer_auto_wrap_policy,
+    wrap,
+)
+from torch.nn import (
+    Linear,
+    Module,
+    TransformerDecoderLayer,
+    TransformerEncoderLayer,
+)
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
     FSDPTest,
-    get_full_params,
-    _get_state_dict,
     SkipModel,
-    _zero_model,
     TransformerWithSharedParams,
-    _validate,
+    _assert_module_states,
+    _get_state_dict,
+    _zero_model,
+    get_full_params,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -155,7 +168,12 @@ class TestFSDPStateDict(FSDPTest):
             self._get_simple_nested_model(*fsdp_args, wrap=wrap, **fsdp_kwargs),
         )
 
-    def _get_state_dict_mgr(self, model, state_dict_type, state_dict_rank0_and_offload):
+    def _get_state_dict_mgr(
+        self,
+        model: nn.Module,
+        state_dict_type: str,
+        state_dict_rank0_and_offload: bool,
+    ):
         _state_dict_type = STATE_DICT_MAPPING[state_dict_type]
         if state_dict_type == "state_dict":
             config = FullStateDictConfig(
@@ -189,6 +207,9 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("checkpoint_wrap", ["first", "second", "both"])
     def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
+        """Tests saving the state dict, zeroing a target model's parameters, and
+        loading the state dict, where the source and target models may have a
+        checkpoint wrapper."""
         for model_call in [
             partial(self._get_simple_model),
             partial(self._get_simple_nested_model)
@@ -206,51 +227,62 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_rank0_offload_save_load_flow(self):
-        # Test taking checkpoint on rank 0 only, and reload
-        # without redundant CPU memories.
-        model = TransformerWithSharedParams(group=dist.distributed_c10d._get_default_group())
-        my_auto_wrap_policy = partial(
+        """Tests saving a model checkpoint only on rank 0 and loading it only
+        on rank 0 with ``sync_module_states=True`` to emulate the workflow to
+        avoid redundant CPU memory usage."""
+        auto_wrap_policy = partial(
             transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
         )
-        model = FSDP(model, auto_wrap_policy=my_auto_wrap_policy)
-        ctx = self._get_state_dict_mgr(
-            model, "state_dict", True
+        fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            fsdp_kwargs,
         )
-        with ctx:
-            state_dict = deepcopy(_get_state_dict(model))
-
-        # All ranks initialize non-FSDP model
-        grp = dist.distributed_c10d._get_default_group()
-        model_new = TransformerWithSharedParams(group=grp)
-        for p in model_new.parameters():
-            with torch.no_grad():
-                p.zero_()
-        # Only rank 0 loads the checkpoint
+        # Force model parameters and buffers to be nonzero
+        with FSDP.summon_full_params(fsdp_model):
+            for tensor in itertools.chain(fsdp_model.parameters(), fsdp_model.buffers()):
+                if torch.count_nonzero(tensor) == 0:
+                    with torch.no_grad():
+                        tensor.add_(torch.tensor(1, dtype=tensor.dtype, device=tensor.device))
+        with self._get_state_dict_mgr(fsdp_model, "state_dict", True):
+            state_dict = deepcopy(_get_state_dict(fsdp_model))
+        # Initialize a non-wrapped model on all ranks
+        new_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+        )
+        _zero_model(new_model, zero_buffers=True)
+        # Only load the checkpoint on rank 0
         if self.rank == 0:
-            model_new.load_state_dict(state_dict)
-
-        # TransformerWithSharedParams has a buffer of zeros, so can't pass in
-        # self.assertNotEqual since the buffers would be equal. So just checking that
-        # there is some difference in the model across ranks before state_dict is
-        # broadcasted.
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
-            _validate(model_new, process_group=grp, assert_fn=self.assertEqual)
-        # FSDP with sync_module_states=True broadcasts the checkpointed states.
-        model_new = FSDP(
-            model_new,
-            device_id=torch.cuda.current_device(),
-            auto_wrap_policy=my_auto_wrap_policy,
-            sync_module_states=True
+            new_model.load_state_dict(state_dict)
+        _assert_module_states(
+            new_model,
+            process_group=self.process_group,
+            assert_fn=self.assertNotEqual,
         )
-        # After wrapping with FSDP models are equal across ranks, and have loaded the checkpoint
-        with FSDP.summon_full_params(model_new):
-            _validate(model_new, process_group=grp, assert_fn=self.assertEqual)
-
-        with FullyShardedDataParallel.summon_full_params(model):
-            with FullyShardedDataParallel.summon_full_params(model_new):
-                params = list(model.parameters())
-                params_new = list(model_new.parameters())
+        # Broadcast the module states from rank 0 with `sync_module_states=True`
+        new_fsdp_model = FSDP(
+            new_model,
+            device_id=torch.cuda.current_device(),
+            auto_wrap_policy=auto_wrap_policy,
+            sync_module_states=True,
+        )
+        # Check FSDP models are equal across ranks
+        with FSDP.summon_full_params(new_fsdp_model):
+            _assert_module_states(
+                new_fsdp_model,
+                process_group=self.process_group,
+                assert_fn=self.assertEqual,
+            )
+        # Check FSDP models correctly loaded the checkpoint
+        with FullyShardedDataParallel.summon_full_params(fsdp_model):
+            with FullyShardedDataParallel.summon_full_params(new_fsdp_model):
+                params = list(fsdp_model.parameters())
+                params_new = list(new_fsdp_model.parameters())
                 self.assertEqual(params, params_new)
 
     @skip_if_lt_x_gpu(2)
