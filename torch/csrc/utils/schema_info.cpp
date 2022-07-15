@@ -207,37 +207,55 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
 }
 
 void SchemaInfo::initSchemaInfo() {
-  std::unordered_set<at::Symbol> seen;
-  auto init_schema_arguments =
-      [this, &seen](
+  std::unordered_set<at::Symbol> duplicates;
+  auto init_schema_arguments = [this, &duplicates](
+                                   const std::vector<c10::Argument>&
+                                       arguments_list,
+                                   c10::SchemaArgType type) {
+    std::unordered_set<at::Symbol> seen;
+    for (size_t i = 0; i < arguments_list.size(); i++) {
+      if (arguments_list[i].alias_info()) {
+        if (arguments_list[i].alias_info()->isWildcardAfter()) {
+          wildcard_set_.insert({type, i});
+        } else {
+          // This check is to ensure that the FunctionSchema will accurately
+          // be represented when calling may_alias and may_contain_alias
+          for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+            if (seen.count(set)) {
+              TORCH_WARN(
+                  set.toQualString(),
+                  " appears twice in same argument list which will make aliasing checks more conservative.");
+              duplicates.insert(set);
+            } else {
+              seen.insert(set);
+            }
+          }
+        }
+      }
+    }
+  };
+  // This function enforces more conservative results when the TORCH_WARN is
+  // triggered from above.
+  auto ensure_conservativity =
+      [this, &duplicates](
           const std::vector<c10::Argument>& arguments_list,
           c10::SchemaArgType type) {
-        seen.clear();
         for (size_t i = 0; i < arguments_list.size(); i++) {
           if (arguments_list[i].alias_info()) {
-            if (arguments_list[i].alias_info()->isWildcardAfter()) {
-              wildcard_set_.insert({type, i});
-            } else {
-              // This check is to ensure that the FunctionSchema will accurately
-              // be represented when calling may_alias and may_contain_alias
-              // As of now, there are no schemas in native_functions.yaml
-              // that either have two inputs that share the same alias or two
-              // outputs that share the same alias, so this class optimizes
-              // alias checking from O(n^2) time to O(n) or less time.
-              for (const auto& set :
-                   arguments_list[i].alias_info()->afterSets()) {
-                TORCH_INTERNAL_ASSERT(
-                    !seen.count(set),
-                    set.toQualString(),
-                    " invalidly appears twice in same argument list");
-                seen.insert(set);
+            for (const auto& set :
+                 arguments_list[i].alias_info()->afterSets()) {
+              if (duplicates.count(set)) {
+                wildcard_set_.insert({type, i});
               }
             }
           }
         }
       };
+
   init_schema_arguments(schema_.arguments(), c10::SchemaArgType::input);
   init_schema_arguments(schema_.returns(), c10::SchemaArgType::output);
+  ensure_conservativity(schema_.arguments(), c10::SchemaArgType::input);
+  ensure_conservativity(schema_.returns(), c10::SchemaArgType::output);
 }
 
 void SchemaInfo::generateAliasMaps() {
@@ -261,8 +279,7 @@ void SchemaInfo::generateAliasMaps() {
           input_alias_map_[j].insert(i);
           if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
             wildcard_set_.insert({c10::SchemaArgType::input, j});
-          }
-          if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
+          } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
         }
