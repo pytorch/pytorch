@@ -6591,7 +6591,7 @@ Tensor take_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& indices) {
-  Tensor grad_self = self.new_zeros(self.sizes());
+  Tensor grad_self = at::zeros_like(self);
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `self` is not
   // then we use the out-of-place variant of `put`.
