@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, List, Tuple
+from typing import Any, Dict, Set, List, Tuple, OrderedDict
 
 class ModelReportVisualization:
     r"""
@@ -27,11 +27,9 @@ class ModelReportVisualization:
         other information as long as the information is structured in the following general format:
 
         Report Structure
-        - detector name
-        |
         -- module_fqn [module with attached detectors]
             |
-            -- detector specific keys [not every detector extracts same information]
+            -- feature keys [not every detector extracts same information]
                                     [same collected info has same keys, unless can be specific to detector]
 
 
@@ -51,7 +49,7 @@ class ModelReportVisualization:
 
     """
 
-    def __init__(self, generated_reports: Dict[str, Any]):
+    def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
         Initializes the ModelReportVisualization instance with the necessary reports.
 
