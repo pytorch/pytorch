@@ -5,9 +5,14 @@
 namespace c10 {
 
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
+#define debug_info (tls_debug_info.get())
+
+#if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 C10_DEFINE_TLS_static(ThreadLocalDebugInfo::lookup_cache_t, tls_lookup_cache);
 #define debug_info (tls_debug_info.get())
-#define lookup_cache (tls_lookup_cache.get())
+#else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+static thread_local ThreadLocalDebugInfo::lookup_cache_t lookup_cache;
+#endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 
 /* static */
 DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
