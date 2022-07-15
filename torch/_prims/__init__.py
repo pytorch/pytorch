@@ -234,7 +234,7 @@ def _assert_nvfuser_op_exists(fname: str):
     try:
         from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
 
-        assert getattr(fd.ops, fname)
+        assert getattr(fd.Operators, fname)
     except ImportError:
         # Not all PyTorch builds have nvfuser
         pass
@@ -2019,7 +2019,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
+    return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
 _convert_element_type_doc = """

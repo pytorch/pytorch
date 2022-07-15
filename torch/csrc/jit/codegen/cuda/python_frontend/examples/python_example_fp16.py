@@ -18,7 +18,7 @@ with FusionDefinition(fusion) as fd :
     t5 = fd.ops.relu(t4)
     t6 = fd.ops.sum(t5, [-1], False, DataType.Float)
 
-    t7 = fd.ops.to_dtype(t6, DataType.Half)
+    t7 = fd.ops.cast(t6, DataType.Half)
     fd.add_output(t7)
 
 fusion.print_ir()

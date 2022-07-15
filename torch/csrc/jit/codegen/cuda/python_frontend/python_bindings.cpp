@@ -939,6 +939,10 @@ void initNvFuserPythonBindings(PyObject* module) {
                 dtype));                                              \
         return output;                                                \
       },                                                              \
+      py::arg("arg"),                                                 \
+      py::arg("axes"),                                                \
+      py::arg("keep_dim"),                                            \
+      py::arg("dtype") = torch::jit::fuser::cuda::DataType::Null,     \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)
@@ -984,7 +988,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       },                                                                      \
       py::return_value_policy::reference);
 
-  NVFUSER_PYTHON_BINDING_CAST_OP("to_dtype", castOp)
+  NVFUSER_PYTHON_BINDING_CAST_OP("cast", castOp)
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
 
   nvf_ops.def(

@@ -9,8 +9,8 @@ with FusionDefinition(fusion) as fd :
     t0 = fd.define_tensor(2, DataType.Double)
     t1 = fd.define_tensor(2, DataType.Double)
 
-    t0h = fd.ops.to_dtype(t0, DataType.Half)
-    t1h = fd.ops.to_dtype(t1, DataType.Half)
+    t0h = fd.ops.cast(t0, DataType.Half)
+    t1h = fd.ops.cast(t1, DataType.Half)
     t2 = fd.ops.add(t0h, t1h)
     t3 = fd.ops.relu(t2)
 
