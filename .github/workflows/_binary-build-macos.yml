@@ -1,0 +1,205 @@
+name: binary-build-macos
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+        description: The build's name
+      build_environment:
+        required: true
+        type: string
+        description: The build environment
+      timeout_minutes:
+        required: true
+        type: number
+        description: Number of mintues to timeout after
+      runs_on:
+        required: true
+        type: string
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
+      PYTORCH_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/pytorch repository
+      BUILDER_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/builder repository
+      PACKAGE_TYPE:
+        required: true
+        type: string
+        description: Package type
+      DESIRED_CUDA:
+        required: true
+        type: string
+        description: Desired Cuda version
+      GPU_ARCH_VERSION:
+        required: false
+        type: string
+        description: GPU Arch version
+      GPU_ARCH_TYPE:
+        required: true
+        type: string
+        description: GPU Arch type
+      DOCKER_IMAGE:
+        required: true
+        type: string
+        description: Docker image to use
+      LIBTORCH_CONFIG:
+        required: false
+        type: string
+        description: Desired libtorch config (for libtorch builds only)
+      LIBTORCH_VARIANT:
+        required: false
+        type: string
+        description: Desired libtorch variant (for libtorch builds only)
+      DESIRED_DEVTOOLSET:
+        required: false
+        type: string
+        description: Desired dev toolset
+      DESIRED_PYTHON:
+        required: false
+        type: string
+        description: Desired python version
+    secrets:
+      github-token:
+        required: true
+        description: Github Token
+      AWS_ACCESS_KEY_ID:
+        required: true
+        description: AWS Access Key Id
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+        description: AWS Secret Access Key
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    env:
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      SKIP_ALL_TESTS: 1
+      CROSS_COMPILE_ARM64: 1
+      LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
+      LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      # Needed for conda builds
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      ANACONDA_USER: pytorch
+      AWS_DEFAULT_REGION: us-east-1
+      BINARY_ENV_FILE: /tmp/env
+      BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
+      GITHUB_TOKEN: ${{ secrets.github-token }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Make the env permanent during this workflow (but not the secrets)
+        shell: bash
+        run: |
+          {
+            echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
+            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
+            echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
+
+            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
+            echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
+            echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
+            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
+            echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
+            echo "CROSS_COMPILE_ARM64=${{ env.CROSS_COMPILE_ARM64 }}"
+            echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
+            echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
+            echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
+            echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
+
+            echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
+            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
+            echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
+            echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
+            echo "SHA1=${{ env.SHA1 }}"
+          } >> "${GITHUB_ENV} }}"
+      - name: List the env
+        shell: bash
+        run: env
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          # shellcheck disable=SC2129
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+      - name: Install conda and dependencies
+        run: |
+          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
+          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+          chmod +x "${RUNNER_TEMP}/conda.sh"
+          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
+          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+          sudo chmod +x /usr/local/bin/sccache
+          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+      - name: Populate binary env
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Build PyTorch binary
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
+      - uses: actions/upload-artifact@v2
+        if: always()
+        with:
+          name: ${{ inputs.build_name }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
