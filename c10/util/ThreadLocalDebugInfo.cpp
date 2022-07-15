@@ -7,9 +7,17 @@ namespace c10 {
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
 #define debug_info (tls_debug_info.get())
 
+// Thread local values are default initialized. However we must manually zero
+// the lookup cache storage when using `c10::ThreadLocal`.
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
-C10_DEFINE_TLS_static(ThreadLocalDebugInfo::lookup_cache_t, tls_lookup_cache);
-#define debug_info (tls_debug_info.get())
+
+struct Cache {
+  Cache() { storage.fill(nullptr); }
+  ThreadLocalDebugInfo::lookup_cache_t storage_;
+};
+static ::c10::ThreadLocal<Cache> tls_lookup_cache
+#define lookup_cache (tls_lookup_cache->storage_)
+
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 static thread_local ThreadLocalDebugInfo::lookup_cache_t lookup_cache;
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
@@ -72,8 +80,12 @@ ThreadLocalDebugInfo::lookup_cache_t ThreadLocalDebugInfo::
   ThreadLocalDebugInfo* cur = debug_info.get();
 
   lookup_cache_t out;
+  out.fill(nullptr);
   while (cur) {
-    out[static_cast<size_t>(cur->kind_)] = cur->info_.get();
+    const auto index = static_cast<size_t>(cur->kind_);
+    if (out[index] == nullptr) {
+      out[index] = cur->info_.get();
+    }
     cur = cur->parent_info_.get();
   }
   return out;
