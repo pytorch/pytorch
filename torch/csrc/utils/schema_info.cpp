@@ -33,25 +33,6 @@ void SchemaInfo::addArgumentValues(
   }
 }
 
-bool SchemaInfo::has_side_effects() const {
-  static const std::vector<std::string> side_effects_ops = {
-      "aten::warn",
-      "aten::save",
-      "aten::manual_seed",
-      "aten::wait",
-      "cuda::set_stream",
-      "cuda::_set_device",
-      "cuda::_current_device",
-      "cuda::synchronize",
-  };
-  return std::any_of(
-      side_effects_ops.begin(),
-      side_effects_ops.end(),
-      [this](const std::string& side_effect_op) {
-        return side_effect_op == schema_.name();
-      });
-}
-
 bool SchemaInfo::is_mutable() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     if (is_mutable(i)) {
@@ -243,43 +224,62 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
 }
 
 void SchemaInfo::initSchemaInfo() {
-  std::unordered_set<at::Symbol> seen;
-  auto init_schema_arguments =
-      [this, &seen](
+  std::unordered_set<at::Symbol> duplicates;
+  auto init_schema_arguments = [this, &duplicates](
+                                   const std::vector<c10::Argument>&
+                                       arguments_list,
+                                   c10::SchemaArgType type) {
+    std::unordered_set<at::Symbol> seen;
+    for (size_t i = 0; i < arguments_list.size(); i++) {
+      const c10::Argument& argument = arguments_list[i];
+      if (argument.alias_info()) {
+        if (argument.alias_info()->isWildcardAfter()) {
+          wildcard_set_.insert({type, i});
+        } else {
+          // This check is to ensure that the FunctionSchema will accurately
+          // be represented when calling may_alias and may_contain_alias
+          for (const auto& set : argument.alias_info()->afterSets()) {
+            if (seen.count(set)) {
+              TORCH_WARN(
+                  set.toQualString(),
+                  " appears twice in same argument list which will make aliasing checks more conservative.");
+              duplicates.insert(set);
+            } else {
+              seen.insert(set);
+            }
+          }
+        }
+      }
+      c10::optional<c10::AliasTypeSet> contained_types =
+          schema_.getAliasTypeSetContainedTypes(
+              schema_.mapTypeToAliasTypeSet(argument.type()));
+      if (contained_types && contained_types->size() > 0) {
+        container_set_.insert({type, i});
+      }
+    }
+  };
+  // This function enforces more conservative results when the TORCH_WARN is
+  // triggered from above.
+  auto ensure_conservativity =
+      [this, &duplicates](
           const std::vector<c10::Argument>& arguments_list,
           c10::SchemaArgType type) {
-        seen.clear();
         for (size_t i = 0; i < arguments_list.size(); i++) {
-          const c10::Argument& argument = arguments_list[i];
-          if (argument.alias_info()) {
-            if (argument.alias_info()->isWildcardAfter()) {
-              wildcard_set_.insert({type, i});
-            } else {
-              // This check is to ensure that the FunctionSchema will accurately
-              // be represented when calling may_alias and may_contain_alias
-              // As of now, there are no schemas in native_functions.yaml
-              // that either have two inputs that share the same alias or two
-              // outputs that share the same alias, so this class optimizes
-              // alias checking from O(n^2) time to O(n) or less time.
-              for (const auto& set : argument.alias_info()->afterSets()) {
-                TORCH_INTERNAL_ASSERT(
-                    !seen.count(set),
-                    set.toQualString(),
-                    " invalidly appears twice in same argument list");
-                seen.insert(set);
+          if (arguments_list[i].alias_info()) {
+            for (const auto& set :
+                 arguments_list[i].alias_info()->afterSets()) {
+              if (duplicates.count(set)) {
+                wildcard_set_.insert({type, i});
               }
             }
           }
-          c10::optional<c10::AliasTypeSet> contained_types =
-              schema_.getAliasTypeSetContainedTypes(
-                  schema_.mapTypeToAliasTypeSet(argument.type()));
-          if (contained_types && contained_types->size() > 0) {
-            container_set_.insert({type, i});
-          }
         }
       };
+
   init_schema_arguments(schema_.arguments(), c10::SchemaArgType::input);
   init_schema_arguments(schema_.returns(), c10::SchemaArgType::output);
+  ensure_conservativity(schema_.arguments(), c10::SchemaArgType::input);
+  ensure_conservativity(schema_.returns(), c10::SchemaArgType::output);
 }
 
 void SchemaInfo::generateAliasMaps() {
@@ -303,8 +303,7 @@ void SchemaInfo::generateAliasMaps() {
           input_alias_map_[j].insert(i);
           if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
             wildcard_set_.insert({c10::SchemaArgType::input, j});
-          }
-          if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
+          } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
         }
