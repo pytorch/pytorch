@@ -155,6 +155,14 @@ class vTensor final {
     return view_->is_quantized_;
   }
 
+  inline double get_scale() const {
+    return view_->q_scale;
+  }
+
+  inline int64_t get_zero_point() const {
+    return view_->q_zero_point;
+  }
+
   inline size_t nbytes() const {
     return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
         c10::multiply_integers(sizes());
