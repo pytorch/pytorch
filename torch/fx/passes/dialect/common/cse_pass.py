@@ -28,7 +28,7 @@ class CSEPass(PassBase):
 
         Example usage:
 
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
         def f(a):
             b = a * a
             c = a * a
