@@ -1004,6 +1004,8 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
+        from torch.optim import adam
+
         num_tensors = 5
         for amsgrad in (False, True):
             params, grads, exp_avgs, exp_avg_sqs = [[torch.randn(4, device="cuda") for _ in range(num_tensors)] for _ in range(4)]
@@ -1014,7 +1016,7 @@ class TestOptim(TestCase):
             found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
                 torch.ones((1,), dtype=torch.float32, device="cuda"))
 
-            optim.adam.adam(
+            adam.adam(
                 params,
                 grads,
                 exp_avgs,
@@ -1031,7 +1033,6 @@ class TestOptim(TestCase):
                 weight_decay=.0,
                 eps=1e-8,
                 maximize=False,
-                capturable=False,
                 grad_scale=grad_scale,
                 found_inf=found_inf,
             )
