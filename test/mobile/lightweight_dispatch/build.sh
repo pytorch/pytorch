@@ -45,7 +45,7 @@ if ! build/bin/test_codegen_unboxing; then
 fi
 
 # shutdown test
-python "$TEST_SRC_ROOT/tests_setup.py" shutdown
+python "$TEST_SRC_ROOT/tests_setup.py" shutdown "$SELECTED_OP_LIST"
 
 popd
 
