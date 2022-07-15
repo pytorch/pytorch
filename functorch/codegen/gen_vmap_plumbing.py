@@ -566,6 +566,7 @@ allowlist = {
     'slice.Tensor',
     'transpose.int',
     'diag_embed',
+    'searchsorted.Tensor',
 }
 
 
