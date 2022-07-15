@@ -94,6 +94,28 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
+             size_t ndims,
+             NvfDataType dtype =
+                 NvfDataType::Float) -> nvfuser::Tensor* {
+            std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);;
+            std::vector<bool> contig_info(ndims, false);
+            
+            nvfuser::Tensor* out = new nvfuser::Tensor(self.recording_state.size());
+            self.recording_state.emplace_back(out);
+            self.recording.emplace_back(
+                new nvfuser::InputTensorRecord({out->index},
+                                               std::move(maybe_symbolic_sizes),
+                                               std::move(contig_info),
+                                               dtype));
+
+            return out;
+          },
+          py::arg("ndims"),
+          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
+          py::return_value_policy::reference)
+      .def(
+          "define_tensor",
+          [](nvfuser::FusionDefinition& self,
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
              NvfDataType dtype =

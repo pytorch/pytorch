@@ -9,11 +9,8 @@ with FusionDefinition(fusion1) as fd :
     t0 = fd.define_tensor(1)
     t1 = fd.define_tensor(3)
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t0_b = fd.Ops.broadcast_in_dim(t0, [2, 3, 4], [1])
-    t2 = fd.Ops.add(t0_b, t1)
+    t0_b = fd.ops.broadcast_in_dim(t0, [2, 3, 4], [1])
+    t2 = fd.ops.add(t0_b, t1)
 
     fd.add_output(t2)
 
