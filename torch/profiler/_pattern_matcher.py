@@ -243,7 +243,8 @@ def source_code_location(event: _ProfilerEvent):
 def report_all_anti_patterns(prof):
     anti_patterns = [
         ExtraCUDACopyPattern(prof),
-        ForLoopIndexingPattern(prof)
+        ForLoopIndexingPattern(prof),
+        FP32MatMulPattern(prof)
     ]
     reported = set()
     print(f"{'-'*40}TorchTidy Report{'-'*40}")
