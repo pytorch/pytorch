@@ -37,12 +37,12 @@ struct Scalar : State {
 class FusionDefinition {
  public:
   FusionDefinition(FusionOwner* fusion_owner)
-    : fusion_owner_(fusion_owner),
-      prev_fusion_(nullptr),
-      recording(),
-      recording_state(),
-      fusion_state(),
-      ops(this) {}
+      : fusion_owner_(fusion_owner),
+        prev_fusion_(nullptr),
+        recording(),
+        recording_state(),
+        fusion_state(),
+        ops(this) {}
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -84,7 +84,7 @@ class FusionDefinition {
   std::vector<std::unique_ptr<RecordFunctor>> recording;
   std::vector<std::unique_ptr<State>> recording_state;
   std::vector<NvfVal*> fusion_state;
-  
+
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
 
@@ -94,4 +94,4 @@ class FusionDefinition {
   Operators ops;
 };
 
-} // nvfuser namespace
+} // namespace nvfuser

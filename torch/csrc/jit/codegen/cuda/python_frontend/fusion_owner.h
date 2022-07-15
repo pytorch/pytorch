@@ -33,4 +33,4 @@ class FusionOwner {
   FusionExecutorCache executor_cache_;
 };
 
-} // nvfuser namespace
+} // namespace nvfuser
