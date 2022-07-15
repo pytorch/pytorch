@@ -103,16 +103,17 @@ class ModelWithStringOptional(torch.nn.Module):
 
 
 @save_model
-class ModelWithMultipleOps(torch.nn.Sequential):
+class ModelWithMultipleOps(torch.nn.Module):
     def __init__(self):
-        super().__init__(
+        super().__init__()
+        self.ops = torch.nn.Sequential(
             torch.nn.ReLU(),
             torch.nn.Flatten(),
         )
 
     def forward(self, x):
         x[1] = -2
-        return super().forward(x)
+        return self.ops(x)
 
 
 if __name__ == "__main__":
