@@ -1,13 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from torch.optim import SGD, Adam, AdamW
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.distributed.optim.utils import functional_optim_map, register_functional_optim
-from typing import List, Optional, Tuple
-from torch import Tensor
 
 class MyModule(torch.nn.Module):
     def __init__(self):
