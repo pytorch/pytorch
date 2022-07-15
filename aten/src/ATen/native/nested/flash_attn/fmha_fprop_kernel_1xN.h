@@ -34,7 +34,7 @@
 #include <ATen/native/nested/flash_attn/utils.h>
 
 
-// #include "fmha_kernel.h"
+// #include <fmha_kernel.h>
 // #include <fmha/kernel_traits.h>
 // #include <fmha/gemm.h>
 // #include <fmha/utils.h>
@@ -656,4 +656,3 @@ inline __device__ void device_1xN_loop(const Params &params) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 } // namespace fmha
-

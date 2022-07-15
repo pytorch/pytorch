@@ -40,8 +40,8 @@
 // #include <c10/cuda/CUDAStream.h>
 
 
-// #include "fmha.h"
-// #include "fmha_fprop_kernel_1xN.h"
+// #include <fmha.h>
+// #include <fmha_fprop_kernel_1xN.h>
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Return_softmax>
 __global__ void fmha_fprop_fp16_sm80_loop_kernel(FMHA_fprop_params params) {
