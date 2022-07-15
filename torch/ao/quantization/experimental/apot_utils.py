@@ -27,7 +27,7 @@ def float_to_apot(x, levels, indices, alpha):
             min_delta = cur_delta
             best_idx = idx
 
-    return best_idx
+    return int(best_idx)
 
 r"""Converts floating point input into
     reduced precision floating point value
