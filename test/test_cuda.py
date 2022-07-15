@@ -3389,13 +3389,13 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
-    @unittest.skipIf(
-        tuple(int(a) for a in torch.version.cuda.split(".")[:2]) < (11, 4),
-        "CUDA<11.4 has a CUDA graphs bug in libcuda.so. See https://github.com/pytorch/pytorch/pull/61063"
-    )
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @unittest.skipIf(
+        torch.version.cuda is None or tuple(int(a) for a in torch.version.cuda.split(".")[:2]) < (11, 4),
+        "CUDA<11.4 has a CUDA graphs bug in libcuda.so. See https://github.com/pytorch/pytorch/pull/61063"
+    )
     def test_graph_concurrent_replay(self):
         torch.cuda.empty_cache()
 
