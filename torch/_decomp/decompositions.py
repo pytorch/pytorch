@@ -1145,9 +1145,25 @@ def native_batch_norm_backward(
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_dtype = input.dtype
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out_cast, input_cast, weight_cast, running_mean_cast, running_var_cast, save_mean_cast, save_invstd_cast = [
+    (
+        grad_out_cast,
+        input_cast,
+        weight_cast,
+        running_mean_cast,
+        running_var_cast,
+        save_mean_cast,
+        save_invstd_cast
+    ) = [
         x.to(computation_dtype) if x is not None else x
-        for x in (grad_out, input, weight, running_mean, running_var, save_mean, save_invstd)
+        for x in (
+            grad_out,
+            input,
+            weight,
+            running_mean,
+            running_var,
+            save_mean,
+            save_invstd
+        )
     ]
     input_shape = input.shape
     input_rank = input.dim()
@@ -1158,8 +1174,7 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None, \
-               "when train=True, save_mean and save_invstd are required"
+        assert save_mean_cast is not None and save_invstd_cast is not None, "when train=True, save_mean and save_invstd are required"  # noqa: E501
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
