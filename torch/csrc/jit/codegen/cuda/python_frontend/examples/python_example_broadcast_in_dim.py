@@ -28,7 +28,7 @@ for _ in range(5) :
 print(outputs[0])
 
 fusion2 = Fusion()
-
+"""
 input1 = torch.ones(1, 1, 4, device='cuda')
 input2 = torch.ones(2, 3, 4, device='cuda')
 
@@ -36,12 +36,8 @@ with FusionDefinition(fusion2) as fd :
     t0 = fd.define_tensor(sizes=input1.size(), strides=input1.stride())
     t1 = fd.define_tensor(sizes=input2.size(), strides=input2.stride())
 
-    fd.add_input(t0)
-    fd.add_input(t1)
-
-    t0_b = fd.Ops.broadcast_in_dim(t0, [2, 3, 4], [0, 1, 2])
-    print("Broadcast TensorView", t0_b)
-    t2 = fd.Ops.add(t0_b, t1)
+    t0_b = fd.ops.broadcast_in_dim(t0, [2, 3, 4], [0, 1, 2])
+    t2 = fd.ops.add(t0_b, t1)
 
     fd.add_output(t2)
 
@@ -53,3 +49,4 @@ for _ in range(5) :
     outputs = fusion2.execute([input1, input2])
 
 print(outputs[0])
+"""

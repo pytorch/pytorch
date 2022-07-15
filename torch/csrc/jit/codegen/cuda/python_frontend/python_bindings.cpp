@@ -899,7 +899,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_CAST_OP("to_dtype", castOp)
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
 
-  nvf_ops.def_static(
+  nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor* arg,
@@ -916,7 +916,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  nvf_ops.def_static(
+  nvf_ops.def(
       "broadcast_in_dim",
       [](nvfuser::FusionDefinition::Operators& self,                           \
          nvfuser::Tensor* arg,
