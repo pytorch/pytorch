@@ -15,9 +15,9 @@ constexpr uint8_t kExpAvgIdx = 2;
 constexpr uint8_t kExpAvgSqIdx = 3;
 constexpr uint8_t kMaxExpAvgSqIdx = 4;
 
-template <typename scalar_type, typename opmath_t, int Depth=4>
+template <typename scalar_type, typename opmath_t, int depth=4>
 C10_DEVICE __forceinline__ void adam_math(
-    scalar_type r_args[Depth][kILP],
+    scalar_type r_args[depth][kILP],
     const float* step_count,
     const double lr,
     const double beta1,
@@ -37,6 +37,7 @@ C10_DEVICE __forceinline__ void adam_math(
         if (inv_grad_scale_ptr) {
             grad *= (*inv_grad_scale_ptr);
         }
+        const opmath_t grad_to_store = grad;
         if (maximize) {
             grad = -grad;
         }
@@ -76,7 +77,7 @@ C10_DEVICE __forceinline__ void adam_math(
 
         // Store results.
         r_args[kParamIdx][ii] = param;
-        r_args[kGradIdx][ii] = grad;
+        r_args[kGradIdx][ii] = grad_to_store;
         r_args[kExpAvgIdx][ii] = exp_avg;
         r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
         if (amsgrad) {
@@ -85,13 +86,23 @@ C10_DEVICE __forceinline__ void adam_math(
     }
 }
 
-template <typename scalar_type, int Depth=4>
+// [note: Conditional Gradient Store when `optimizer.step` is called by GradScaler]
+// When a user is training their model(s) with an FP16 AMP recipe,
+// parameter updates are done via `grad_scaler.step(optimizer)` instead of `optimizer.step()`.
+// For most optimizers, GradScaler unscales gradients on behalf of those optimizers.
+// Also, before `.step`, it makes sure that all the gradients involved are finite, which incurs a device sync.
+// On the other hand, fused optimizers set their member variable of `_step_supports_amp_scaling` to `True`
+// in order to remove the device sync above. This means that fused optimizers have to have
+// their CUDA kernels (a) unscale gradients and (b) skip parameter updates accordingly.
+// To be functionally on par with `torch.optim` optimizers and `_multi_tensor` ones,
+// the kernel below writes out gradients only when `inv_grad_scale_ptr != nullptr.
+template <typename scalar_type, int depth=4>
 struct FusedAdamMathFunctor {
-    static_assert(Depth == 4 || Depth == 5, "");
+    static_assert(depth == 4 || depth == 5, "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
     using opmath_t = at::opmath_type<scalar_type>;
     C10_DEVICE __forceinline__ void operator()(
             int chunk_size,
-            FusedOptimizerTensorListMetadata<Depth>& tl,
+            FusedOptimizerTensorListMetadata<depth>& tl,
             const double lr,
             const double beta1,
             const double beta2,
@@ -111,34 +122,36 @@ struct FusedAdamMathFunctor {
         }
         float *step_count = reinterpret_cast<float*>(tl.state_steps_addresses[tensor_loc]);
 
-        scalar_type* args[Depth];
-        const bool all_aligned{init_args<Depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
+        scalar_type* args[depth];
+        const bool all_aligned{init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
         n -= chunk_idx * chunk_size;
-        scalar_type r_args[Depth][kILP];
+        scalar_type r_args[depth][kILP];
 
         if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
             for (int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
-                // Store values into register.
 #pragma unroll
-                for (int i = 0; i < Depth; i++) {
+                for (int i = 0; i < depth; i++) {
                     load_store(r_args[i], args[i], 0, i_start);
                 }
-                // Execute math.
-                adam_math<scalar_type, opmath_t, Depth>(
+                adam_math<scalar_type, opmath_t, depth>(
                     r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
 #pragma unroll
-                for (int i = 0; i < Depth; i++) {
-                    store_args(args[i], r_args[i], i_start, chunk_size, n);
+                for (int i = 0; i < depth; i++) {
+                  if (i != kGradIdx || inv_grad_scale_ptr) {
+                    load_store(args[i], r_args[i], i_start, 0);
+                  }
                 }
             }
         } else {
             for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
-              load_args<Depth>(r_args, args, i_start, chunk_size, n);
-              adam_math<scalar_type, opmath_t, Depth>(
+              load_args<depth>(r_args, args, i_start, chunk_size, n);
+              adam_math<scalar_type, opmath_t, depth>(
                   r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, inv_grad_scale_ptr, found_inf_ptr);
 #pragma unroll
-              for (int i = 0; i < Depth; i++) {
-                  store_args(args[i], r_args[i], i_start, chunk_size, n);
+              for (int i = 0; i < depth; i++) {
+                  if (i != kGradIdx || inv_grad_scale_ptr) {
+                    store_args(args[i], r_args[i], i_start, chunk_size, n);
+                  }
               }
             }
         }
@@ -146,7 +159,6 @@ struct FusedAdamMathFunctor {
 };
 } // namespace
 
-// TODO(crcrpar): Support complex dtypes
 void _fused_adam_kernel_cuda_(
     at::TensorList params,
     at::TensorList grads,

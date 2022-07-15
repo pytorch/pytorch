@@ -572,7 +572,5 @@ def _fused_adam(
             inv_grad_scale=device_inv_grad_scale,
             found_inf=device_found_inf,
         )
-        # NOTE(crcrpar): Is there a better way to handle a situation where `GradScaler` is used
-        # and `inf` grads are found.
         if device_found_inf is not None:
             torch._foreach_sub_(device_state_steps, [device_found_inf] * len(device_state_steps))
