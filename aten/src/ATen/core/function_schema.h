@@ -214,7 +214,7 @@ enum struct TORCH_API SchemaArgType { input, output };
 struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
-  bool operator ==(const SchemaArgument& rhs) const {
+  bool operator==(const SchemaArgument& rhs) const {
     return type == rhs.type && index == rhs.index;
   }
 };
