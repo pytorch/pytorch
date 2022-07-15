@@ -58,54 +58,26 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    {%- if config["package_type"] == "libtorch" %}
-    runs-on: macos-10.15
-    {%- else %}
-    runs-on: macos-12
-    {%- endif %}
-{%- if config["package_type"] == "libtorch" %}
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
-{%- else %}
-    timeout-minutes: !{{ common.timeout_minutes }}
-{%- endif %}
-    !{{ upload.binary_env(config, true) }}
+    uses: ./.github/workflows/_binary-build-macos.yml
+    with:!{{ upload.binary_env_as_input(config, True) }}
+      build_name: !{{ config["build_name"] }}
+      build_environment: !{{ build_environment }}
+      {%- if config["package_type"] == "libtorch" %}
+      # libtorch builds take a long time on github hosted runners
+      timeout-minutes: 720
+      {%- else %}
+      timeout_minutes: !{{ common.timeout_minutes }}
+      {%- endif %}
+      {%- if config["package_type"] == "libtorch" %}
+      runs_on: macos-10.15
+      {%- else %}
+      runs_on: macos-12
+      {%- endif %}
       # For sccache access (only on non-forked PRs)
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
-    steps:
-      !{{ set_runner_specific_vars() }}
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-      - name: Populate binary env
-        run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        run: |
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
-        if: always()
-        with:
-          name: !{{ config["build_name"] }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+
   !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
 {%- endfor %}
