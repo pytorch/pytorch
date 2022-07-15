@@ -544,7 +544,7 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
 def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
 
     op_code = None
-    if n.target == operator.add or torch.add:
+    if n.target == operator.add or n.target == torch.add:
         op_code = op_add
     elif n.target == operator.mul:
         op_code = op_mul
