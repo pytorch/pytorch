@@ -1556,19 +1556,14 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_fp32_matmul_pattern(self):
-        has_tf32 = 1
-        for arch in torch.cuda.get_arch_list():
-            arch_no = int(arch[3:])
-            # For anything lower than sm_80, there is no TF32
-            if arch_no < 80:
-                has_tf32 = 0
-                break
         x = torch.ones((100, 100), device="cuda")
         with profile(with_stack=True) as prof:
             x = x @ x
         pattern = FP32MatMulPattern(prof)
+        has_tf32 = 0 if pattern.skip else 1
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
 

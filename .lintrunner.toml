@@ -43,6 +43,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/native/vulkan/**/*.h',
+    'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -51,6 +53,7 @@ include_patterns = [
     'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
@@ -305,6 +308,7 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
@@ -332,6 +336,7 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
@@ -360,6 +365,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -661,8 +667,12 @@ init_command = [
 code = 'UFMT'
 # This is a big bang change to reformat every python files in the repo,
 # so it's arguably safer to gradually reformat them in subsequent PR.
-# After that, we can use **/*.py to apply the formatter to everything
-include_patterns = ['tools/linter/**/*.py']
+# After that, we can use **/*.py to apply the formatter to all entries
+# currently enforced by BLACK linter
+include_patterns = [
+    'test/onnx/**/*.py',
+    'tools/**/*.py',
+]
 command = [
     'python3',
     'tools/linter/adapters/ufmt_linter.py',
