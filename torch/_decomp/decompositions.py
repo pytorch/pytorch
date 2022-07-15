@@ -1130,7 +1130,7 @@ def cudnn_batch_norm(
     )
 
 
-@register_decomposition(aten.native_batch_norm_backward)  # @register_decomposition_for_jvp after in core
+@register_decomposition(aten.native_batch_norm_backward)
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -1143,24 +1143,30 @@ def native_batch_norm_backward(
     eps: float,
     output_mask: List[bool],
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    input_dtype = input.dtype
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    grad_out_cast, input_cast, weight_cast, running_mean_cast, running_var_cast, save_mean_cast, save_invstd_cast = [
+        x.to(computation_dtype) if x is not None else x
+        for x in (grad_out, input, weight, running_mean, running_var, save_mean, save_invstd)
+    ]
     input_shape = input.shape
     input_rank = input.dim()
     assert input_rank >= 2, "rank of the input must be at least 2"
 
     axis = 1
     num_features = prod(input_shape) / input_shape[axis]
-    mean = save_mean
-    invstd = save_invstd
+    mean = save_mean_cast
+    invstd = save_invstd_cast
     if train:
-        assert save_mean is not None and save_invstd is not None, "when train=True, save_mean and save_invstd are required"
+        assert save_mean_cast is not None and save_invstd_cast is not None, "when train=True, save_mean and save_invstd are required"
 
         # reduciton_dims = [0] + list(range(2, input.dim()))
         # assert invstd is not None  # for typing
         # mean, invstd = recompute_mean_var(input, invstd, reduciton_dims, keepdim=False)
     else:
-        assert running_mean is not None and running_var is not None
-        mean = running_mean
-        invstd = torch.rsqrt(running_var + eps)
+        assert running_mean_cast is not None and running_var_cast is not None
+        mean = running_mean_cast
+        invstd = torch.rsqrt(running_var_cast + eps)
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
@@ -1172,27 +1178,27 @@ def native_batch_norm_backward(
 
     mean = torch.reshape(mean, broadcast_mask)
     norm = 1.0 / num_features
-    grad_output_sum = torch.sum(grad_out, reduction_axes)
-    dot_p = torch.sum(grad_out * (input - mean), reduction_axes)
+    grad_output_sum = torch.sum(grad_out_cast, reduction_axes)
+    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
 
     grad_mean = torch.reshape(grad_output_sum * norm, broadcast_mask)
     proj_scale = torch.reshape(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)
 
-    if weight is None:
+    if weight_cast is None:
         grad_scale = torch.reshape(invstd, broadcast_mask) * 1.0
     else:
-        grad_scale = torch.reshape(invstd * weight, broadcast_mask)
+        grad_scale = torch.reshape(invstd * weight_cast, broadcast_mask)
 
     if train:
-        proj = (input - mean) * proj_scale
-        grad_input = ((grad_out - proj) - grad_mean) * grad_scale
+        proj = (input_cast - mean) * proj_scale
+        grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
-        grad_input = grad_out * grad_scale
+        grad_input = grad_out_cast * grad_scale
 
     if output_mask[1]:
         grad_weight = dot_p * invstd
     elif weight is not None:
-        grad_weight = torch.zeros_like(weight)  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros_like(weight_cast)  # should be None but doesn't work with vjp
     else:
         grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
 
@@ -1201,7 +1207,11 @@ def native_batch_norm_backward(
     else:
         grad_bias = torch.zeros_like(grad_output_sum)  # should be None but doesn't work with vjp
 
-    return (grad_input, grad_weight, grad_bias)
+    return (
+        _maybe_cast(grad_input, input_dtype), 
+        _maybe_cast(grad_weight, input_dtype), 
+        _maybe_cast(grad_bias, input_dtype),
+)
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
@@ -1216,7 +1226,7 @@ def cudnn_batch_norm_backward(
     epsilon: float,
     reserveSpace: Tensor,
 ):
-    return aten.native_batch_norm_backward(
+    return native_batch_norm_backward(
         grad_output,
         input,
         weight,
