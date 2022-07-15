@@ -21548,6 +21548,16 @@ python_ref_db = [
         torch_opinfo_name="fft.ihfft2",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.fft.fftshift",
+        torch_opinfo_name="fft.fftshift",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.fft.ifftshift",
+        torch_opinfo_name="fft.ifftshift",
+        supports_nvfuser=False,
+    ),
 ]
 
 # Common operator groupings
