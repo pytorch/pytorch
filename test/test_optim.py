@@ -1000,6 +1000,7 @@ class TestOptim(TestCase):
             # all params have no grad
             opt.step()
 
+    # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
     def test_functional_fused_adam_with_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
@@ -1008,11 +1009,11 @@ class TestOptim(TestCase):
 
         num_tensors = 5
         for amsgrad in (False, True):
-            params, grads, exp_avgs, exp_avg_sqs = [[torch.randn(4, device="cuda") for _ in range(num_tensors)] for _ in range(4)]
-            max_exp_avg_sqs = [torch.randn(4, device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
             grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
-                torch.full((1,), 2, dtype=torch.float32, device="cuda"))
+                torch.ones((1,), dtype=torch.float32, device="cuda"))
             found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
                 torch.ones((1,), dtype=torch.float32, device="cuda"))
 
