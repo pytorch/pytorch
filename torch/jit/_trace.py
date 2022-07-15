@@ -338,7 +338,7 @@ def _check_trace(
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, (torch.Tensor, dict)):
+            if isinstance(inputs, (torch.Tensor)):
                 inputs = (inputs,)
         else:
             check_mod = torch.jit.trace(
@@ -440,11 +440,10 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                if len(inputs) > 0:
-                    if isinstance(inputs[0], dict):
-                        outs = wrap_retval(mod(**inputs[0]))
-                    else:
-                        outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                if isinstance(inputs, dict):
+                    outs = wrap_retval(mod(**inputs))
+                else:
+                    outs = wrap_retval(mod(*_clone_inputs(inputs)))
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
