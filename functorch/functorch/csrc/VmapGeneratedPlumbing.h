@@ -4070,6 +4070,29 @@ at::Tensor alias_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor searchsorted_Tensor_generated_plumbing(const at::Tensor & sorted_sequence, const at::Tensor & self, bool out_int32, bool right, c10::optional<c10::string_view> side, const c10::optional<at::Tensor> & sorter) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(sorted_sequence, cur_level) && !isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(sorter, cur_level)) {
+    return at::_ops::searchsorted_Tensor::call(sorted_sequence, self, out_int32, right, side, sorter);
+  }
+  Tensor sorted_sequence_value;
+  optional<int64_t> sorted_sequence_bdim;
+  std::tie(sorted_sequence_value, sorted_sequence_bdim) = unwrapTensorAtLevel(sorted_sequence, cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  optional<Tensor> sorter_value;
+  optional<int64_t> sorter_bdim;
+  if (sorter) {
+      std::tie(sorter_value, sorter_bdim) = unwrapTensorAtLevel(sorter.value(), cur_level);
+  }
+  auto results = batch_rule(sorted_sequence_value, sorted_sequence_bdim, self_value, self_bdim, out_int32, right, side, sorter_value, sorter_bdim);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor mse_loss_generated_plumbing(const at::Tensor & self, const at::Tensor & target, int64_t reduction) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
