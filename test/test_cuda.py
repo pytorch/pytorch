@@ -2282,7 +2282,7 @@ torch.cuda.synchronize()
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
-    def test_grad_scaling_autocast(self, optimizer_ctor=torch.optim.SGD):
+    def test_grad_scaling_autocast(self, optimizer_ctor=torch.optim.SGD, atol=1e-3):
         try_pickle = False
 
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2306,13 +2306,13 @@ torch.cuda.synchronize()
             return scaler
 
         # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3, optimizer_ctor=optimizer_ctor)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
         # this will be picked up by try_pickle within run():
         try_pickle = True
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3, optimizer_ctor=optimizer_ctor)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
 
-    def test_grad_scaling_autocast_with_fusedadam(self):
-        self.test_grad_scaling_autocast(torch.optim._fused.Adam)
+    def test_grad_scaling_autocast_fusedadam(self):
+        self.test_grad_scaling_autocast(torch.optim._fused.Adam, 5e-5)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3914,13 +3914,11 @@ torch.cuda.synchronize()
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
-    # TODO(crcrpar): Merge this into test_graph_adam_adamw.
-    # TODO(crcrpar): Better check `step` when `found_inf = 1`.
     @unittest.skipIf(
         (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
         "CUDA >= 11.0 required for graphs",
     )
-    def test_graph_fusedadam_gradscaler(self):
+    def test_graph_scaling_fusedadam(self):
         cases = [
             (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for amsgrad in (False, True)
