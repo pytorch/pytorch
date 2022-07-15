@@ -130,8 +130,8 @@ file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
-file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
+# file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu" "native/nested/cuda/flash_attn/*.cu")
+# file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp" "native/nested/cuda/flash_attn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
@@ -155,6 +155,15 @@ file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
 file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
+
+# Add flash attention sources if condition
+if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.6 AND NOT USE_ROCM AND LINUX)
+  file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu" "native/nested/cuda/flash_attn/*.cu")
+  file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp" "native/nested/cuda/flash_attn/*.cpp")
+else()
+  file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
+  file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
+endif()
 
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
@@ -415,6 +424,11 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
+  # add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass" ${CMAKE_BINARY_DIR}/cutlass)
+  # list(APPEND ATen_THIRD_PARTY_INCLUDE ${TORCH_ROOT}/third_party/cutlass/include)
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.6)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
+  endif()
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}

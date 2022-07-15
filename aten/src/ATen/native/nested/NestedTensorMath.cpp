@@ -102,10 +102,6 @@ at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
       std::move(buffer), std::move(nested_size_tensor));
 }
 
-inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
 // The starting positions of the underlying tensors in contiguous buffer memory
 // i.e. the buffer memory offsets to get the underlying tensors
 inline std::vector<int64_t> NestedTensor_get_offsets(const NestedTensorImpl* self_ptr) {
