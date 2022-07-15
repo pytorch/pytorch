@@ -1451,7 +1451,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
       // Empty output
       if(result.numel() == 0)
         return;
-      
+
       auto beta_f = beta.to<float>();
 
       struct CachedGraph : public MPSCachedGraph
@@ -1530,7 +1530,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
         // Create dictionary of inputs and outputs
         NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
           selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-          cacheGraph->betaTensor : getMPSGraphTensorFromScalar(stream, beta_f, MPSDataTypeFloat32)
+          cacheGraph->betaTensor_ : getMPSGraphTensorFromScalar(stream, beta_f, MPSDataTypeFloat32)
         };
         NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
           outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
