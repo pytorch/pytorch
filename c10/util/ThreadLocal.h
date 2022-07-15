@@ -1,7 +1,5 @@
 #pragma once
 
-#include <type_traits>
-
 #include <c10/macros/Macros.h>
 
 /**
@@ -96,6 +94,12 @@ class ThreadLocal {
 
 #define C10_DEFINE_TLS_static(Type, Name) static ::c10::ThreadLocal<Type> Name
 
+#define C10_DECLARE_TLS_class_static(Class, Type, Name) \
+  static ::c10::ThreadLocal<Type> Name
+
+#define C10_DEFINE_TLS_class_static(Class, Type, Name) \
+  ::c10::ThreadLocal<Type> Class::Name
+
 #else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 
 namespace c10 {
@@ -104,19 +108,17 @@ namespace c10 {
  * @brief Default thread_local implementation for non-Android cases.
  * To be used with composite types that provide default ctor.
  */
-template <typename Type, typename Accessor>
+template <typename Type>
 class ThreadLocal {
-  static_assert(
-      std::is_same<Type*, decltype(Accessor()())>::value,
-      "Accessor's operator() must return a pointer to the underlying thread local.");
-
  public:
-  ThreadLocal() = default;
+  using Accessor = Type* (*)();
+  explicit ThreadLocal(Accessor accessor) : accessor_(accessor) {}
+
   ThreadLocal(const ThreadLocal&) = delete;
   ThreadLocal& operator=(const ThreadLocal&) = delete;
 
   Type& get() {
-    return *Accessor()();
+    return *accessor_();
   }
 
   Type& operator*() {
@@ -126,19 +128,26 @@ class ThreadLocal {
   Type* operator->() {
     return &get();
   }
+
+ private:
+  Accessor accessor_;
 };
 
 } // namespace c10
 
-#define C10_DEFINE_TLS_static(Type, Name) \
-  namespace {                             \
-  struct Name##_Accessor {                \
-    auto operator()() const {             \
-      static thread_local Type var;       \
-      return &var;                        \
-    }                                     \
-  };                                      \
-  }                                       \
-  static ::c10::ThreadLocal<Type, Name##_Accessor> Name
+#define C10_DEFINE_TLS_static(Type, Name)     \
+  static ::c10::ThreadLocal<Type> Name([]() { \
+    static thread_local Type var;             \
+    return &var;                              \
+  })
+
+#define C10_DECLARE_TLS_class_static(Class, Type, Name) \
+  static ::c10::ThreadLocal<Type> Name
+
+#define C10_DEFINE_TLS_class_static(Class, Type, Name) \
+  ::c10::ThreadLocal<Type> Class::Name([]() {          \
+    static thread_local Type var;                      \
+    return &var;                                       \
+  })
 
 #endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
