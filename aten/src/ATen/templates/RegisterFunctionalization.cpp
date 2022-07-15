@@ -23,6 +23,19 @@ $ops_headers
 namespace at {
 namespace functionalization {
 
+// This keyset is used by functionalization when it calls into meta kernels
+// to accurately propagate stride metadata.
+// Exclude any modes: the purpose of calling into meta kernels is only as an implementation
+// detail to perform shape inference, and we don't want any modal keys to run.
+// Specifically, we want to prevent functionalization and Python modes from running.
+constexpr auto exclude_keys_for_meta_dispatch =
+    c10::functorch_transforms_ks |
+    c10::DispatchKeySet({
+        c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+        c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+        c10::DispatchKey::Python
+    });
+
 
 inline Tensor to_meta(const Tensor& t) {
     return at::native::empty_strided_meta(t.sizes(), t.strides(),

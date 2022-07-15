@@ -9,7 +9,7 @@ created on that device. The selected device can be changed with a
 :any:`torch.cuda.device` context manager.
 
 However, once a tensor is allocated, you can do operations on it irrespective
-of the selected device, and the results will be always placed in on the same
+of the selected device, and the results will be always placed on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the exception of
