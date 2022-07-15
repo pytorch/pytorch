@@ -318,7 +318,8 @@ def input_shapes(event: _ProfilerEvent):
 def report_all_anti_patterns(prof):
     anti_patterns = [
         ExtraCUDACopyPattern(prof),
-        ForLoopIndexingPattern(prof)
+        ForLoopIndexingPattern(prof),
+        FP32MatMulPattern(prof)
     ]
     reported = set()
     summaries = []
