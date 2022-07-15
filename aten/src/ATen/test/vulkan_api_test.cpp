@@ -2860,7 +2860,7 @@ TEST_F(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
+TEST_F(VulkanAPITest, DISABLED_cat_dim1_mult4ch_nonmult4ch_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
