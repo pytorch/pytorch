@@ -28,14 +28,9 @@ class APoTQuantizer():
         tensor2quantize: fp Tensor
     Returns:
         result: APoT Tensor representation of tensor2quantize
-        mask: mask Tensor with boolean values representing if values were clipped
     """
     def quantize(self, tensor2quantize: Tensor):
         result = torch.tensor([])
-
-        # calculate mask tensor
-        mask = torch.clone(tensor2quantize)
-        mask = mask.apply_(lambda x: (x <= self.alpha and x >= -self.alpha))
 
         # map float_to_apot over tensor2quantize elements
         tensor2quantize = tensor2quantize.detach().apply_(lambda x: float_to_apot(x,
@@ -44,14 +39,13 @@ class APoTQuantizer():
                                                                                   self.alpha))
 
         # convert to APoT int representation for dtype
-        mask = mask.int()
         tensor2quantize = tensor2quantize.int()
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
         result = TensorAPoT(self, tensor2quantize)
 
-        return result, mask
+        return result
 
     r""" Dequantizes integer Tensor to floating point (fp) representation
     based on the calculated quantization levels from a specified APoT non-uniform observer.
@@ -81,12 +75,11 @@ r""" Global method to create quantizer and call quantizer quantize_APoT
         level indices: Tensor with integer quantization level indices
     Returns:
         result: ApoT Tensor representation of tensor2quantize
-        mask: mask Tensor with boolean values representing if values were clipped
 """
 def quantize_APoT(tensor2quantize: Tensor, alpha: Tensor, gamma: Tensor, quantization_levels: Tensor, level_indices: Tensor):
     quantizer = APoTQuantizer(alpha=alpha, gamma=gamma, quantization_levels=quantization_levels, level_indices=level_indices)
-    result, mask = quantizer.quantize(tensor2quantize)
-    return result, mask
+    result = quantizer.quantize(tensor2quantize)
+    return result
 
 r""" Global method to create quantizer and call quantizer dequantize_APoT
     Args:
