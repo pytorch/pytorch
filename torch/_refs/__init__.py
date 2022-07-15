@@ -1,8 +1,8 @@
 import torch
 
 import torch._prims as prims
-import torch._prims_utils as utils
-from torch._prims_utils import (
+import torch._prims_common as utils
+from torch._prims_common import (
     check,
     DimsType,
     ShapeType,
@@ -20,7 +20,7 @@ from torch._prims_utils import (
     is_weakly_lesser_type,
     dtype_to_type,
 )
-from torch._prims_utils.wrappers import (
+from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     out_wrapper,
     _maybe_convert_to_dtype,

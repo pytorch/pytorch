@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor, _TypedStorage
 
-import torch._prims_utils as utils
-from torch._prims_utils import (
+import torch._prims_common as utils
+from torch._prims_common import (
     check,
     TensorLike,
     TensorLikeType,
