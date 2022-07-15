@@ -2026,9 +2026,8 @@ void ONNXShapeTypeInference(
         }
       }
     }
-  } else {
-    UpdateReliable(n);
   }
+  UpdateReliable(n);
 
   // For the node type that does not have ComputeConstant logic, it may have
   // reliable shape but its shape is not in ConstantValueMap. So we need this
