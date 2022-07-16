@@ -759,7 +759,7 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.view(numel, grad_output.size(-1))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
     indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
@@ -1100,7 +1100,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.alias], disable_meta=True)
+@register_decomposition(
+    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
+)
 def nop_decomposition(x):
     return x
 
