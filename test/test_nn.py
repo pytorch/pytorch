@@ -1606,8 +1606,7 @@ class TestNN(NNTestCase):
         l3 = nn.Linear(3, 4)
         l4 = nn.Linear(4, 5)
         n1 = nn.Sequential(l1, l2, l3, l4)
-        n2 = nn.Sequential(l1, l2, l3)
-        self.assertEqual(n2, n1.pop())
+        self.assertEqual(l4, n1.pop(3))
 
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
