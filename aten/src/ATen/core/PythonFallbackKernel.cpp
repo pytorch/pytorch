@@ -13,12 +13,23 @@ namespace {
 // To achieve this, we ensure that the tls is empty by default and emptied again both when
 // we call into user torch_dispatch or returning back to python after this call.
 
-thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
+thread_local c10::optional<at::impl::DispatchContextSnapshot>
+    dispatch_ctx_on_entry;
 
-c10::impl::LocalDispatchKeySet safe_get_tls_on_entry() {
-  TORCH_CHECK(tls_on_entry.has_value(), "Accessing torch dispatch state outside of '__torch_dispatch__' "
-              "is not allowed.");
-  return tls_on_entry.value();
+constexpr char* bad_local_access_error =
+    "Accessing torch dispatch state outside of '__torch_dispatch__' is not allowed.";
+
+at::impl::DispatchContextSnapshot safe_get_dispatch_ctx_on_entry() {
+  TORCH_CHECK(dispatch_ctx_on_entry.has_value(), bad_local_access_error);
+  return dispatch_ctx_on_entry.value();
+}
+
+c10::impl::LocalDispatchKeySet safe_get_key_set_on_entry() {
+  return safe_get_dispatch_ctx_on_entry().key_set_;
+}
+
+std::shared_ptr<c10::SafePyObject> safe_get_dispatch_mode_on_entry() {
+  return safe_get_dispatch_ctx_on_entry().dispatch_mode_;
 }
 
 // All the keys below the Python key
@@ -27,31 +38,13 @@ constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::Dis
    c10::DispatchKeySet(c10::DispatchKey::Python));
 
 
-// This guard assumes that tls_on_entry has a value.
-struct StashTLSOnEntryGuard {
-public:
-  StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
-    tls_on_entry = c10::nullopt;
-  }
-
-  ~StashTLSOnEntryGuard() {
-    TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
-    tls_on_entry = saved_;
-  }
-
-private:
-  c10::impl::LocalDispatchKeySet saved_;
-};
-
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-  // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
-  // StashTLSOnEntryGuard stash_guard;
+  TORCH_INTERNAL_ASSERT(dispatch_ctx_on_entry.has_value());
   c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
 
-
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-  const auto& maybe_torch_dispatch_mode_state = at::impl::TorchDispatchModeTLS::get_state();
+  const auto& maybe_torch_dispatch_mode_state =
+      at::impl::TorchDispatchModeTLS::get_state();
   if (maybe_torch_dispatch_mode_state) {
     maybe_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
     return;
@@ -102,27 +95,32 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySe
 namespace at {
 namespace impl {
 
-RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
-  tls_on_entry = c10::nullopt;
+RestorePythonTLSSnapshot::RestorePythonTLSSnapshot()
+    : saved_(safe_get_dispatch_ctx_on_entry()),
+      key_guard_(safe_get_key_set_on_entry()),
+      mode_guard_(safe_get_dispatch_mode_on_entry()) {
+  dispatch_ctx_on_entry = c10::nullopt;
 }
 
 RestorePythonTLSSnapshot::~RestorePythonTLSSnapshot() {
-  TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
-  tls_on_entry = saved_;
+  TORCH_INTERNAL_ASSERT(!dispatch_ctx_on_entry.has_value());
+  dispatch_ctx_on_entry = saved_;
 }
 
 MaybeSetTLSOnEntryGuard::MaybeSetTLSOnEntryGuard() {
-  if (tls_on_entry.has_value()) {
+  if (dispatch_ctx_on_entry.has_value()) {
     value_set_ = false;
   } else {
     value_set_ = true;
-    tls_on_entry = c10::impl::tls_local_dispatch_key_set();
+    dispatch_ctx_on_entry = {
+        c10::impl::tls_local_dispatch_key_set(),
+        at::impl::TorchDispatchModeTLS::get_state()};
   }
 }
 MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
   if (value_set_) {
-    TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-    tls_on_entry = c10::nullopt;
+    TORCH_INTERNAL_ASSERT(dispatch_ctx_on_entry.has_value());
+    dispatch_ctx_on_entry = c10::nullopt;
   }
 }
 

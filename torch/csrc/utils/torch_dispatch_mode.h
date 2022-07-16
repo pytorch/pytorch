@@ -7,9 +7,10 @@ namespace torch_dispatch_mode {
 
 struct StashTorchDispatchModeGuard {
  public:
-  StashTorchDispatchModeGuard() {
+  StashTorchDispatchModeGuard(
+      std::shared_ptr<at::SafePyObject> new_state = nullptr) {
     saved_ = at::impl::TorchDispatchModeTLS::get_state();
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    at::impl::TorchDispatchModeTLS::set_state(std::move(new_state));
   }
 
   ~StashTorchDispatchModeGuard() {
