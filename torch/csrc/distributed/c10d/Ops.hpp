@@ -72,12 +72,14 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> recv(
     int64_t srcRank,
     int64_t tag);
 
-#if defined(USE_NCCL)
+// note [Why declaring w/o NCCL guards]
+// As `c10d/Ops.cpp` is included in `torch_cpu`,
+// certain NCCL related macros such as `USE_NCCL`
+// and `USE_C10D_NCCL` are not available in this header.
 TORCH_API c10::intrusive_ptr<ProcessGroup::Work>
 nccl_premulsum_allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors, const AllreduceOptions& opts);
-#endif
 
 } // namespace ops
 } // namespace c10d

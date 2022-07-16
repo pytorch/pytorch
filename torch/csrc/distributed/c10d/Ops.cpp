@@ -35,7 +35,6 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
 // NCCL specific PREMUL_SUM Reductions
 // NCCL 2.11.1-1 introduced "User Defined Reduction Operators":
 //   https://docs.nvidia.com/deeplearning/nccl/archives/nccl_21212/user-guide/docs/api/ops.html
-#if defined(USE_NCCL)
 c10::intrusive_ptr<ProcessGroup::Work>
 nccl_premulsum_allreduce_with_scaling_tensors_(
     at::TensorList tensors,
@@ -66,7 +65,6 @@ nccl_premulsum_allreduce_with_scaling_scalar_(
           c10d::makeNCCLPreMulSum(double_factor),
           std::chrono::milliseconds(timeout)});
 }
-#endif
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -212,7 +210,6 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
-#if defined(USE_NCCL)
   m.def(
       "nccl_premulsum_allreduce_with_scaling_tensors_",
       dispatch(
@@ -223,7 +220,6 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           nccl_premulsum_allreduce_with_scaling_scalar_));
-#endif
 }
 } // namespace
 
@@ -429,7 +425,6 @@ c10::intrusive_ptr<ProcessGroup::Work> recv(
   return op.call(tensors, process_group, srcRank, tag);
 }
 
-#if defined(USE_NCCL)
 c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
@@ -477,7 +472,6 @@ c10::intrusive_ptr<ProcessGroup::Work> nccl_premulsum_allreduce(
         opts.timeout.count());
   }
 }
-#endif
 
 } // namespace ops
 } // namespace c10d

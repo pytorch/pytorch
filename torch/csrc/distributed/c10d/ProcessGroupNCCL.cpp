@@ -1,3 +1,4 @@
+#include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/UCCForNCCL.hpp>
 #include <sstream>
@@ -118,8 +119,8 @@ ncclRedOpRAII getNcclReduceOp(
       }
 #endif
     }
-#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
     if (reduceOp == ReduceOp::PREMUL_SUM) {
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
       switch (dataType) {
         case ncclHalf:
           return unpackPreMulSum<at::Half, ncclHalf>(
@@ -136,8 +137,10 @@ ncclRedOpRAII getNcclReduceOp(
           ncclRedOp_t unused;
           return unused;
       }
-    }
+#else
+      TORCH_CHECK(false, "PreMulSum requires NCCL>=2.11.1");
 #endif
+    }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
