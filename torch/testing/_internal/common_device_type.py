@@ -1,4 +1,3 @@
-import types
 import collections
 import copy
 import gc
@@ -735,7 +734,7 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        if isinstance(op_list, (types.GeneratorType, collections.Iterator)):
+        if isinstance(op_list, collections.abc.Iterator):
             raise ValueError('Prefer non exhaustive iterables like list for op_list')
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes

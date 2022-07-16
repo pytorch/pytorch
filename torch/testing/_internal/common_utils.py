@@ -300,7 +300,7 @@ class parametrize(_TestParametrizer):
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
         self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
-        if isinstance(arg_values, (types.GeneratorType, collections.Iterator)):
+        if isinstance(arg_values, collections.abc.Iterator):
             raise ValueError('Prefer non exhaustive iterables like list for arg_values')
         self.arg_values = arg_values
         self.name_fn = name_fn
