@@ -14,6 +14,12 @@ namespace c10 {
 /// to some sort of "default" stream.
 using StreamId = int64_t;
 
+struct C10_API StreamData3 {
+  int64_t stream_id;
+  int64_t device_index;
+  int64_t device_type;
+};
+
 // NB: I decided not to call the above StreamIndex to avoid confusion with
 // DeviceIndex.  This way, you access device index with index(), and stream id
 // with id()
@@ -151,6 +157,14 @@ class C10_API Stream final {
     return bits;
   }
 
+  struct StreamData3 pack3() const {
+    StreamData3 data;
+    data.stream_id = static_cast<int64_t>(id());
+    data.device_index = static_cast<int64_t>(device_index());
+    data.device_type = static_cast<int64_t>(device_type());
+    return data;
+  }
+
   static Stream unpack(uint64_t bits) {
     // Re-extend the sign of stream_id
     uint64_t mask = (1ull << 47);
@@ -164,6 +178,17 @@ class C10_API Stream final {
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.
     return Stream(UNSAFE, Device(device_type, device_index), stream_id);
+  }
+
+  static Stream unpack3(
+      int64_t stream_id,
+      int64_t device_index,
+      int64_t device_type) {
+    const auto _stream_id = static_cast<StreamId>(stream_id);
+    const auto _device_index = static_cast<DeviceIndex>(device_index);
+    const auto _device_type = static_cast<DeviceType>(device_type);
+    TORCH_CHECK(isValidDeviceType(_device_type));
+    return Stream(UNSAFE, Device(_device_type, _device_index), _stream_id);
   }
 
   // I decided NOT to provide setters on this class, because really,

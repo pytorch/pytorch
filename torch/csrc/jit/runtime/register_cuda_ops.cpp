@@ -130,11 +130,13 @@ RegisterOperators const reg({
           // to be converted to c10::cuda::CUDAStream. Since the latter cannot
           // be returned from a class registered via TorchBind, this can only be
           // achieved by packing the c10::cuda::CUDAStream instance contained
-          // inside the jit::CUDAStream object to a uint64_t representation, and
+          // inside the jit::CUDAStream object to a struct representation, and
           // unpacking it inside this operator. The unpacked stream is then used
           // to set the current CUDA stream.
-          auto packed = s->pack();
-          auto unpacked = c10::cuda::CUDAStream::unpack(packed);
+          auto unpacked = c10::cuda::CUDAStream::unpack3(
+              s->id(),
+              stream_device_idx,
+              static_cast<int64_t>(c10::DeviceType::CUDA));
           c10::cuda::setCurrentCUDAStream(unpacked);
         },
         aliasAnalysisFromSchema()),

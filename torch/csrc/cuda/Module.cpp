@@ -151,8 +151,20 @@ PyObject* THCPModule_getCurrentStream_wrap(
   THPUtils_assert(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
-  return PyLong_FromUnsignedLongLong(
-      at::cuda::getCurrentCUDAStream(device).pack());
+  auto stream = at::cuda::getCurrentCUDAStream(device);
+  PyObject* output_tuple = PyTuple_New(3);
+  PyTuple_SetItem(
+      output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
+  PyTuple_SetItem(
+      output_tuple,
+      1,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+  PyTuple_SetItem(
+      output_tuple,
+      2,
+      THPUtils_packInt64(static_cast<int64_t>(c10::DeviceType::CUDA)));
+  return output_tuple;
+
   END_HANDLE_TH_ERRORS
 }
 
@@ -174,19 +186,42 @@ PyObject* THCPModule_getDefaultStream_wrap(
   THPUtils_assert(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
-  return PyLong_FromUnsignedLongLong(
-      at::cuda::getDefaultCUDAStream(device).pack());
+  auto stream = at::cuda::getDefaultCUDAStream(device);
+  PyObject* output_tuple = PyTuple_New(3);
+  PyTuple_SetItem(
+      output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
+  PyTuple_SetItem(
+      output_tuple,
+      1,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+  PyTuple_SetItem(
+      output_tuple,
+      2,
+      THPUtils_packInt64(static_cast<int64_t>(c10::DeviceType::CUDA)));
+  return output_tuple;
+
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_setStream_wrap(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyLong_Check(obj), "invalid stream");
-  uint64_t bits = PyLong_AsUnsignedLongLong(obj);
-  if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
-    throw python_error();
+  // THPUtils_assert(PyLong_Check(obj), "invalid stream");
+  // uint64_t bits = PyLong_AsUnsignedLongLong(obj);
+  // if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
+  //  throw python_error();
+  //}
+  // auto stream = at::cuda::CUDAStream::unpack(bits);
+  int64_t stream_id = 0;
+  int64_t device_index = 0;
+  int64_t device_type = static_cast<int64_t>(DeviceType::CUDA);
+
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+  static char* kwlist[] = {"_stream_id", "_device_index", nullptr};
+  if (!PyArg_ParseTuple(obj, "|ii", &stream_id, &device_index)) {
   }
-  auto stream = at::cuda::CUDAStream::unpack(bits);
+  auto stream =
+      at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type);
+
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
