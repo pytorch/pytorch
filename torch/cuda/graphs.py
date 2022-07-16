@@ -364,7 +364,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                         static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
                 assert isinstance(static_outputs, tuple)
-                return tuple(o.detach() for o in static_outputs)
+                out_forward = tuple(o.detach() for o in static_outputs)
+                torch.clear_autocast_cache()
+                return out_forward
 
             @staticmethod
             @torch.autograd.function.once_differentiable
