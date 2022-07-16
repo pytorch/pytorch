@@ -17,7 +17,6 @@ static PyObject* THPStream_pynew(
   int64_t device_index = 0;
   int64_t device_type = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  TORCH_WARN("THPStream pynew called");
   static char* kwlist[] = {
       "_stream_id", "_device_index", "_device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
