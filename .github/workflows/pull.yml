@@ -54,22 +54,6 @@ jobs:
       build-environment: linux-focal-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  # TODO: remove after full migration off Xenial
-  linux-xenial-py3_7-gcc7-build:
-    name: linux-xenial-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
-
-  # TODO: remove after full migration off Xenial
-  linux-xenial-py3_7-clang7-asan-build:
-    name: linux-xenial-py3.7-clang7-asan
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-clang7-asan
-      docker-image-name: pytorch-linux-xenial-py3-clang7-asan
-
   linux-focal-py3_7-clang7-asan-build:
     name: linux-focal-py3.7-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
