@@ -1,7 +1,7 @@
 import torch
 
 try:
-    import sympy
+    import sympy # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
