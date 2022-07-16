@@ -152,7 +152,10 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten.clone": None,
             # Failing with where(): incompatible function arguments: \
             # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
+            # failing with BERT_pytorch_forward_0, which has aten.where.ScalarSelf in the decomps
             # "torch.ops.aten.where": None,
+            # However, aten.where.self overload is fully supported
+            "torch.ops.aten.where.self": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
             # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like

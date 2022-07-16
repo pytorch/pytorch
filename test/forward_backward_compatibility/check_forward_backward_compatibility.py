@@ -9,6 +9,19 @@ import torch
 from torch._C import parse_schema
 
 
+# How to run this test locally:
+# 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
+#   one with your local changes (venv_yours).
+# In venv_nightly:
+# 2. First ensure that Pytorch is uninstalled, but all prereqs are installed
+# 3. Install torch nightly build with
+#    `pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html`
+# 4. Generate original schemas with
+#    `python test/forward_backward_compatibility/dump_all_function_schemas.py --filename nightly_schemas.txt`
+# Now in venv_yours:
+# 5. Run this test with
+#    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
+
 # The date specifies how long the allowlist exclusion should apply to.
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
@@ -38,6 +51,7 @@ ALLOW_LIST = [
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
     ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
+    ("aten::kl_div_backward", datetime.date(2022, 9, 1)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -102,8 +116,6 @@ ALLOW_LIST = [
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
-    (r"__getstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 15)),
-    (r"__setstate__\(__torch__.torch.classes.sparse.LinearPackedParamsBase", datetime.date(2022, 7, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
