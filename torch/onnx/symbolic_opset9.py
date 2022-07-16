@@ -340,10 +340,12 @@ def _reshape_from_tensor(g, input, shape):
     return reshape(g, input, shape)
 
 
+@symbolic_helper.quantized_args(True)
 def reshape(g, self, shape):
     return symbolic_helper._reshape_helper(g, self, shape)
 
 
+@symbolic_helper.quantized_args(True)
 def reshape_as(g, self, other):
     shape = g.op("Shape", other)
     return reshape(g, self, shape)
@@ -774,6 +776,7 @@ def numpy_T(g, input):
     return g.op("Transpose", input, perm_i=perm)
 
 
+@symbolic_helper.quantized_args(True)
 def expand(g, self, size, implicit):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
@@ -807,6 +810,7 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i", "b", "v")
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and GLOBALS.export_training:
@@ -824,6 +828,8 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
+@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
@@ -900,6 +906,7 @@ def permute(g, self, dims):
     return g.op("Transpose", self, perm_i=dims)
 
 
+@symbolic_helper.quantized_args(True)
 def view(g, self, size):
     return reshape(g, self, size)
 
@@ -985,6 +992,7 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
 def select(g, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
@@ -1180,6 +1188,7 @@ def threshold(g, self, threshold, value):
     return g.op("Relu", self)
 
 
+@symbolic_helper.quantized_args(True)
 def leaky_relu(g, input, negative_slope, inplace=False):
     negative_slope = symbolic_helper._get_const(negative_slope, "t", "negative_slope")
     # See Note [Export inplace]
@@ -1720,6 +1729,7 @@ def __not_(g, self):
     return g.op("Not", self)
 
 
+@symbolic_helper.quantized_args(True, True)
 def eq(g, self, other):
     if isinstance(self.type(), _C.DeviceObjType) and isinstance(
         other.type(), _C.DeviceObjType
@@ -1730,11 +1740,13 @@ def eq(g, self, other):
     return g.op("Equal", self, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def ne(g, self, other):
     return eq(g, self, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -1751,6 +1763,7 @@ def gt_impl(g, input, other):
     return g.op("Greater", input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 def lt(g, input, other):
     return lt_impl(g, input, other)
 
@@ -1767,11 +1780,13 @@ def lt_impl(g, input, other):
     return g.op("Less", input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def ge(g, input, other):
     return lt_impl(g, input, other)
 
 
+@symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 def le(g, input, other):
     return gt_impl(g, input, other)
@@ -2165,6 +2180,7 @@ def batch_norm(
         return res
 
 
+@symbolic_helper.quantized_args(True, False, True, True)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -2199,6 +2215,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     return layer_norm
 
 
+@symbolic_helper.quantized_args(True, True, True, True, True)
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def instance_norm(
     g,
@@ -2322,6 +2339,8 @@ def unfold(g, input, dimension, size, step):
         return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
+@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "t", "t", "t")
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
@@ -2334,6 +2353,8 @@ def elu(g, input, alpha, scale, input_scale):
     return g.op("Elu", input, alpha_f=symbolic_helper._scalar(alpha))
 
 
+@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): check scale
 def selu(g, input):
     return g.op("Selu", input)
 
@@ -2571,6 +2592,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
+@symbolic_helper.quantized_args(
+    True, True
+)  # TODO(justinchuby): Support maybe quantized args
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input)
     if dim_or_y is None and keepdim is None:
@@ -2587,10 +2611,12 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+@symbolic_helper.quantized_args(True, True)
 def maximum(g, input, other):
     return max(g, input, dim_or_y=other)
 
 
+@symbolic_helper.quantized_args(True)
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -2607,20 +2633,24 @@ def min(g, self, dim_or_y=None, keepdim=None):
         return min, indices
 
 
+@symbolic_helper.quantized_args(True, True)
 def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 def amax(g, self, dim, keepdim):
     return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 def amin(g, self, dim, keepdim):
     return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i")
 def aminmax(g, self, dim, keepdim):
     reduce_kwargs = {"keepdims_i": keepdim}
@@ -3036,6 +3066,8 @@ def slice(g, self, *args):
         raise NotImplementedError("Unknown aten::slice signature")
 
 
+@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     return op_with_optional_float_cast(
@@ -3043,6 +3075,8 @@ def hardtanh(g, self, min_val, max_val):
     )
 
 
+@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v")
 def hardswish(g, self):
     hs = hardsigmoid(g, self)
@@ -3163,6 +3197,7 @@ def unsqueeze(g, self, dim):
     return symbolic_helper._unsqueeze_helper(g, self, axes_i=[dim])
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     if out is not None:
@@ -3186,6 +3221,7 @@ def numel(g, self):
     return g.op("ReduceProd", shape, keepdims_i=0)
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
@@ -4822,6 +4858,7 @@ def gelu(g, self: torch._C.Value, approximate: str = "none"):
         )
 
 
+@symbolic_helper.quantized_args(True, False, True, True)
 @symbolic_helper.parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -4974,6 +5011,7 @@ def kl_div(g, input, target, reduction, log_target):
         )
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "is", "i")
 def as_strided(g, self, sizes, strides, offset=None):
     sizes = symbolic_helper._maybe_get_const(sizes, "is")
@@ -5037,6 +5075,7 @@ def __range_length(g, lo, hi, step):
     return g.op("Cast", div, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
 
 
+@symbolic_helper.quantized_args(True, True, True)
 def linear(g, input, weight, bias):
     rank = symbolic_helper._get_tensor_rank(input)
     weight = t(g, weight)
