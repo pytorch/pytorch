@@ -1380,8 +1380,6 @@ if(USE_UCC)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(WARNING "UCC is currently only supported under Linux.")
     caffe2_update_option(USE_UCC OFF)
-  else()
-    include(${CMAKE_CURRENT_LIST_DIR}/External/ucc.cmake)
   endif()
 endif()
 
