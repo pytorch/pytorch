@@ -33,7 +33,9 @@ def handle_symbolic_op(func, args, kwargs):
 
 class PySymInt(object):
     """
-    PySymInt objects are the primary "symbolic shape" objects that flow through our program. They're what sit under FakeTensor, and contains our primary implementation of symbolic shapes.
+    PySymInt objects are the primary "symbolic shape" objects that flow through
+    our program. They're what sit under FakeTensor, and contains our primary
+    implementation of symbolic shapes.
     """
     def __init__(self, expr, shape_env):
         self.expr = expr
