@@ -6,6 +6,31 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
+aten = torch.ops.aten
+
+def create_contiguous(shape):
+    strides = [1]
+    for dim in reversed(shape[:-1]):
+        strides.append(dim * strides[-1])
+    return list(reversed(strides))
+
+
+def is_symbolic_op(func):
+    return func in [aten.sym_size.default, aten.size.default, aten.dim.default, aten.is_contiguous.default, aten.stride]
+
+
+def handle_symbolic_op(func, args, kwargs):
+    if func == torch.ops.aten.sym_size.default:
+        return None
+    if func == torch.ops.aten.size.default:
+        return args[0].shape
+    if func == torch.ops.aten.dim.default:
+        return len(args[0].shape)
+    if func == torch.ops.aten.is_contiguous.default:
+        return True
+    if func == torch.ops.aten.stride:
+        return create_contiguous(args[0].shape)
+
 class PySymInt(object):
     """
     PySymInt objects are the primary "symbolic shape" objects that flow through our program. They're what sit under FakeTensor, and contains our primary implementation of symbolic shapes.

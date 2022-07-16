@@ -16,6 +16,7 @@ import contextlib
 from dataclasses import dataclass
 from torch._decomp import decomposition_table
 from torch._meta_registrations import meta_table
+import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
 
 aten = torch.ops.aten
@@ -310,6 +311,9 @@ class FakeTensor(torch.Tensor):
     def new_empty(self, shape, dtype=None):
         return torch.empty(shape, dtype=dtype)
 
+    def stride(self):
+        return symbolic_shapes.create_contiguous(self.shape)
+
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
         # so in order to use the same pattern as normal invocation of
@@ -339,6 +343,9 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        if symbolic_shapes.is_symbolic_op(func):
+            return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use
@@ -347,8 +354,6 @@ class FakeTensor(torch.Tensor):
         if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
             return NotImplemented
 
-        if func == torch.ops.aten.stride:
-            return None
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
@@ -460,22 +465,16 @@ class FakeTensorMode(TorchDispatchMode):
                 return r
 
         with no_dispatch():
-            if func == torch.ops.aten.sym_size.default:
-                return None
-            if func == torch.ops.aten.size.default:
-                return args[0].shape
-            if func == torch.ops.aten.dim.default:
-                return len(args[0].shape)
-            if func == torch.ops.aten.is_contiguous.default:
-                return True
-            if func == torch.ops.aten.stride:
-                return None
+            if symbolic_shapes.is_symbolic_op(func):
+                return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+
 
         constructors = [torch.ops.aten.empty.SymInt]
         if 'prims' not in func.overloadpacket._qualified_op_name and func not in constructors:
             raise RuntimeError(f"Couldn't find meta function/decomposition, {func}")
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
+
         if "prims::" in func._schema.name:
             with no_dispatch():
                 return func(*args, **kwargs)

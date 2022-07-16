@@ -18,6 +18,7 @@ from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._meta_registrations import register_meta
 
 import contextlib
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
@@ -1318,6 +1319,7 @@ as_strided = _make_prim(
     doc=_as_strided_doc,
 )
 
+from torch.fx.experimental.symbolic_shapes import create_contiguous
 
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
@@ -1349,21 +1351,21 @@ def _broadcast_in_dim_meta(
     for idx, new_idx in enumerate(broadcast_dimensions):
         assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
 
-    new_strides = []
-    original_idx = 0
-    for idx in range(len(shape)):
-        if idx in broadcast_dimensions:
-            # Assigns a stride of zero to dimensions
-            # which were actually broadcast
-            if a.shape[original_idx] != shape[idx]:
-                new_strides.append(0)
-            else:
-                new_strides.append(a.stride()[original_idx])
-            original_idx = original_idx + 1
-        else:
-            new_strides.append(0)
+    # new_strides = []
+    # original_idx = 0
+    # for idx in range(len(shape)):
+    #     if idx in broadcast_dimensions:
+    #         # Assigns a stride of zero to dimensions
+    #         # which were actually broadcast
+    #         if a.shape[original_idx] != shape[idx]:
+    #             new_strides.append(0)
+    #         else:
+    #             new_strides.append(a.stride()[original_idx])
+    #         original_idx = original_idx + 1
+    #     else:
+    #         new_strides.append(0)
 
-    return TensorMeta(a, shape=shape, strides=new_strides)
+    return TensorMeta(a, shape=shape, strides=create_contiguous(shape))
 
 
 def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):

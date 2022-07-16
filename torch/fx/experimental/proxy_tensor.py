@@ -19,6 +19,7 @@ from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatc
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
+import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
@@ -230,7 +231,6 @@ def proxy_call(func_overload, args, kwargs=None):
     return wrap_output(inner_res, proxy_res, constant=constant)
 
 
-
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
@@ -247,7 +247,7 @@ class ProxyTensor(torch.Tensor):
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        r = torch.Tensor._make_wrapper_subclass(cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=elem.stride(), storage_offset=elem.storage_offset())
+        r = torch.Tensor._make_wrapper_subclass(cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=symbolic_shapes.create_contiguous(elem.shape), storage_offset=elem.storage_offset())
         return r
 
     def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
@@ -357,8 +357,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
-        if func_overload == torch.ops.aten.stride:
-            return None
+        if symbolic_shapes.is_symbolic_op(func_overload):
+            return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
+
         func = func_overload.overloadpacket
         # We don't want to convert torch.tensor constants into tracing objects.
         if func_overload == aten.lift.default:
