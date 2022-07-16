@@ -15,12 +15,16 @@ from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+# In order to use reentrant dispatch, we need to re-set the torch dispatch mode.
+# This stores the mode to be used inside proxy_call
+PROXY_DISPATCH_MODE = None
 
 
 @contextmanager
@@ -32,6 +36,17 @@ def decompose(decomposition_table):
         yield CURRENT_DECOMPOSITION_TABLE
     finally:
         CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
+
+@contextmanager
+def proxy_dispatch_mode_ctx(mode):
+    global PROXY_DISPATCH_MODE
+    old_mode = PROXY_DISPATCH_MODE
+    PROXY_DISPATCH_MODE = mode
+    try:
+        yield PROXY_DISPATCH_MODE
+    finally:
+        PROXY_DISPATCH_MODE = mode
+
 
 # Checks whether we try to convert the tensor into a scalar
 IS_STRICT = True
@@ -65,7 +80,9 @@ def proxy_call(func_overload, args, kwargs=None):
         kwargs = {}
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        with torch.overrides.enable_reentrant_dispatch():
+        global PROXY_DISPATCH_MODE
+        proxy_mode = enable_torch_dispatch_mode(PROXY_DISPATCH_MODE) if PROXY_DISPATCH_MODE else nullcontext()
+        with proxy_mode, torch.overrides.enable_reentrant_dispatch():
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     if func_overload == aten._local_scalar_dense.default:
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
@@ -282,7 +299,8 @@ def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=
         if use_fake:  # type: ignore[attr-defined]
             args = pytree.tree_map(wrap_fake, args)
 
-        with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
+        with decompose(decomposition_table), fake_tensor_mode, proxy_mode, \
+                proxy_dispatch_mode_ctx(proxy_mode):  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
         return t
 

@@ -198,7 +198,7 @@ class TestProxyTensor(TestCase):
         def f(x):
             return torch.ops.aten.norm.Scalar(x, 2.0)
 
-        def norm_decomp(x, p = 2.0):
+        def norm_decomp(x, p=2.0):
             if p != 2.0:
                 raise RuntimeError("can't handle with p != 2")
             return torch.sqrt(torch.sum(torch.square(x)))
@@ -208,7 +208,6 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f, decomposition_table=decomp)(torch.rand(3))
 
         for n in traced.graph.nodes:
-            print(n)
             self.assertTrue("square" not in str(n.target))
             self.assertTrue("norm" not in str(n.target))
 
