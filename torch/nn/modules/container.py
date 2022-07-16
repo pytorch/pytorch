@@ -135,6 +135,11 @@ class Sequential(Module):
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
 
+    def pop(self):
+        module = self._get_item_by_idx(self._modules.keys(), -1)
+        delattr(self, module)
+        return self
+
     @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
@@ -267,6 +272,11 @@ class ModuleList(Module):
         """
         self.add_module(str(len(self)), module)
         return self
+
+    def pop(self, key: str) -> 'ModuleList':
+        v = self[key]
+        del self[key]
+        return v
 
     def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
