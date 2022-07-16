@@ -335,13 +335,14 @@ def raise_composite_compliance_error(err, additional_info=''):
 
 # If some composite operation does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
-def check_all_permutations(op, args, kwargs):
+def check_all_permutations(op, args, kwargs, assert_equal_fn):
     CCT = generate_cct()
+    expected = op(*args, **kwargs)
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
         try:
-            op(*new_args, **new_kwargs)
+            actual = op(*new_args, **new_kwargs)
         # NOTE: [What errors are Composite Compiance trying to catch?]
         #
         # There's two things we want to catch:
@@ -362,6 +363,11 @@ def check_all_permutations(op, args, kwargs):
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
+        def unwrap(e):
+            return e.elem if isinstance(e, CCT) else e
+
+        assert_equal_fn(tree_map(unwrap, actual), expected)
+
 # Checks via the usage of torch dispatch mode certain anti-patterns that
 # are not composite compliant.
 #
@@ -374,20 +380,27 @@ def check_all_permutations(op, args, kwargs):
 # CompositeCompliantTensor wrappers. If an operator that is
 # Composite does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
-def check_with_mode(op, args, kwargs):
+def check_with_mode(op, args, kwargs, assert_equal_fn):
     CCT = generate_cct()
 
     def wrap(e):
         return CCT(e) if isinstance(e, torch.Tensor) else e
 
+    expected = op(*args, **kwargs)
+
     args = tree_map(wrap, args)
     kwargs = tree_map(wrap, kwargs)
     try:
         with enable_torch_dispatch_mode(CCT):
-            op(*args, **kwargs)
+            actual = op(*args, **kwargs)
     # see NOTE: [What errors are Composite Compiance trying to catch?]
     except RuntimeError as err:
         raise_composite_compliance_error(err)
+
+    def unwrap(e):
+        return e.elem if isinstance(e, CCT) else e
+
+    assert_equal_fn(tree_map(unwrap, actual), expected)
 
 def gather_leaf_tensors(args, kwargs):
     leaf_tensors = []
