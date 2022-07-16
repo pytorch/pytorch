@@ -421,7 +421,7 @@ a bug if you need this)""")
         if use_fake:  # type: ignore[attr-defined]
             args = pytree.tree_map(wrap_fake, args)
 
-        with (
+        with (  # type: ignore[attr-defined]
                 decompose(decomposition_table),
                 fake_tensor_mode,
                 proxy_mode,
