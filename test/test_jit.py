@@ -7444,7 +7444,7 @@ a")
                         continue
                     # Skip unsigned tensor initializaton for signed values on 3.10
                     if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
-                      continue
+                        continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
                     exec(code, globals(), scope)
