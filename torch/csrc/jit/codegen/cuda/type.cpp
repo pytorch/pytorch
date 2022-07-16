@@ -692,6 +692,28 @@ static const char* parallel_type2string(ParallelType t) {
   }
 }
 
+std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except) {
+  std::unordered_set<ParallelType> result = {
+      ParallelType::BIDz,
+      ParallelType::BIDy,
+      ParallelType::BIDx,
+      ParallelType::TIDz,
+      ParallelType::TIDy,
+      ParallelType::TIDx,
+      ParallelType::Vectorize,
+      ParallelType::MisalignedVectorize,
+      ParallelType::Unroll,
+      ParallelType::Unswitch,
+      ParallelType::Mma,
+      ParallelType::Group,
+      ParallelType::Serial};
+  for (auto t : except) {
+    result.erase(t);
+  }
+  return result;
+}
+
 static const char* memory_type2string(MemoryType t) {
   switch (t) {
     case MemoryType::Local:

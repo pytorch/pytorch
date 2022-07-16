@@ -251,7 +251,7 @@ void multiReductionInliner(
   }
 
   // Propagate parallelization
-  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
+  scheduler_utils::parallelizeAllLike(reference_tv);
 
   // Find iter domains that are mapped to a trivial reduction, these should
   // never be inlined.

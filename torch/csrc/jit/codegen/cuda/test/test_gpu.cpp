@@ -13849,7 +13849,7 @@ TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
 
   TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   tv0_cache->axis(2)->parallelize(ParallelType::Vectorize);
   tv1_cache->axis(2)->parallelize(ParallelType::Vectorize);
@@ -17152,7 +17152,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination3_CUDA) {
 
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv4);
 
   GpuLower gpulw(&fusion);
 
@@ -17203,7 +17203,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination4_CUDA) {
 
   tv1->axis(0)->parallelize(ParallelType::TIDy);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv1);
 
   GpuLower gpulw(&fusion);
 
@@ -17252,7 +17252,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination5_CUDA) {
   auto rtvs2 = tvs2.rFactor({1});
 
   rtvs2.avg->axis(0)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(rtvs2.avg, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(rtvs2.avg);
 
   GpuLower gpulw(&fusion);
 
@@ -20392,7 +20392,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering1_CUDA) {
 
   tv3->axis(-2)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   tv1->doubleBuffer();
 
@@ -20430,7 +20430,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering2_CUDA) {
 
   tv3->axis(-2)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   tv1->doubleBuffer();
 
@@ -20479,7 +20479,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering3_CUDA) {
   tv2->doubleBuffer();
 
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
@@ -20520,7 +20520,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering4_CUDA) {
 
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(1)->parallelize(ParallelType::Unswitch);
-  scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv3);
 
   tv2->doubleBuffer();
 
@@ -20562,7 +20562,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering5_CUDA) {
 
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(1)->parallelize(ParallelType::Unswitch);
-  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv2);
 
   tv1->doubleBuffer();
 
@@ -20684,7 +20684,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering8_CUDA) {
   tv1->computeAt(tv4, 1);
 
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv4);
 
   tv2->doubleBuffer();
   tv3->doubleBuffer();
@@ -20728,7 +20728,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering9_CUDA) {
   tv3->computeAt(out, -1);
 
   out->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   tv2->doubleBuffer();
   tv3->doubleBuffer();
@@ -20806,7 +20806,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
   tv5->axis(-3)->parallelize(ParallelType::TIDy);
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   tv0_cache_local->doubleBuffer();
   tv1_cache_local->doubleBuffer();
@@ -21170,7 +21170,7 @@ TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
 
   auto rfactor = ir_utils::rfactorHelper(tv3, {1, 4});
 
-  scheduler_utils::parallelizeAllLike(rfactor, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(rfactor);
 
   for (auto tv : ir_utils::allTvs(&fusion)) {
     if (tv != tv1 || tv != tv3) {
@@ -23202,7 +23202,7 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   TransformPropagatorWithCheck propagator(reduction_tv);
   MaxRootDomainInfoSpanningTree(reduction_tv).traverse(&propagator);
   auto rfactor_tv = ir_utils::rfactorHelper(reduction_tv, {4});
-  scheduler_utils::parallelizeAllLike(rfactor_tv, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(rfactor_tv);
 
   tv0->computeAt(tv_avg, 2);
   tv0->computeAt(cached_input, -2);

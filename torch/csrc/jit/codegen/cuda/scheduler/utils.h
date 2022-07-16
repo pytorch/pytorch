@@ -49,9 +49,32 @@ size_t mergeNonReduction(
     TensorView* tv,
     const std::unordered_set<IterDomain*>& dont_merge = {});
 
+// Propagate the parallelization from the selected dimensions of the reference
+// tensor to their corresponding dimensions in all selected tensors in the DAG.
+// Position `pos` means selecting all the dimensions [0, 1, ..., pos - 1]. pos =
+// -1 means selecting all dimensions. `selected_tvs` are selected tensors in the
+// DAG. Empty `selected_tvs` means selecting all tensors in the fusion of
+// `reference_tv`. `selected_parallel_types` are the selected parallel types.
+// Empty `selected_parallel_types` means selecting all parallel types.
 TORCH_CUDA_CU_API void parallelizeAllLike(
     TensorView* reference_tv,
-    const std::vector<TensorView*>& all_tvs);
+    int64_t pos = -1,
+    std::vector<TensorView*> selected_tvs = {},
+    const std::unordered_set<ParallelType>& selected_parallel_types = {},
+    bool propagate_padding = true);
+
+TORCH_CUDA_CU_API inline void parallelizeAllLike(
+    TensorView* reference_tv,
+    std::vector<TensorView*> selected_tvs,
+    const std::unordered_set<ParallelType>& selected_parallel_types = {},
+    bool propagate_padding = true) {
+  parallelizeAllLike(
+      reference_tv,
+      -1,
+      std::move(selected_tvs),
+      selected_parallel_types,
+      propagate_padding);
+}
 
 TORCH_CUDA_CU_API void computeAtInputs(
     TensorView* consumer,

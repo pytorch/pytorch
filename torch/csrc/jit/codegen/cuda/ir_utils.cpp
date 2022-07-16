@@ -652,6 +652,19 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries<TensorView>(all_tvs);
 }
 
+std::vector<TensorView*> allTvsExcept(
+    Fusion* fusion,
+    const std::unordered_set<TensorView*>& except) {
+  auto all_tvs = allTvs(fusion);
+  std::vector<TensorView*> result;
+  for (auto tv : all_tvs) {
+    if (except.count(tv) == 0) {
+      result.emplace_back(tv);
+    }
+  }
+  return result;
+}
+
 std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
 

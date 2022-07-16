@@ -188,30 +188,53 @@ size_t mergeNonReduction(
 
 void parallelizeAllLike(
     TensorView* reference_tv,
-    const std::vector<TensorView*>& all_tvs) {
+    int64_t pos,
+    std::vector<TensorView*> selected_tvs,
+    const std::unordered_set<ParallelType>& selected_parallel_types,
+    bool propagate_padding) {
   FusionGuard fg(reference_tv->fusion());
+
+  if (pos < 0) {
+    pos += reference_tv->nDims() + 1;
+  }
+  TORCH_CHECK(
+      pos >= 0 && pos <= reference_tv->nDims(),
+      "parallelizeAllLike called on an position outside valid range.");
+
+  std::unordered_map<IterDomain*, IterDomain*> concrete_to_reference_map;
 
   auto ca_map = ComputeAtMap(FusionGuard::getCurFusion());
 
-  for (auto id : reference_tv->domain()->domain()) {
-    ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
-        ->parallelize(id->getParallelType());
-    if (id->hasPaddingToMultipleOfWarp()) {
-      ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
-          ->padToMultipleOfWarp(id->getMaybeSizeAfterPadding());
-    }
+  const auto& reference_dom = reference_tv->domain()->domain();
+  for (auto it = reference_dom.begin(); it != reference_dom.begin() + pos;
+       it++) {
+    auto ca_id = ca_map.getConcreteMappedID(*it, IdMappingMode::PERMISSIVE);
+    concrete_to_reference_map[ca_id] = *it;
   }
 
-  for (auto tv : all_tvs) {
+  if (selected_tvs.empty()) {
+    selected_tvs = ir_utils::allTvs(reference_tv->fusion());
+  }
+  for (auto tv : selected_tvs) {
     if (tv->isFusionInput()) {
       continue;
     }
     for (const auto i : c10::irange(tv->domain()->domain().size())) {
       auto ca_id =
           ca_map.getConcreteMappedID(tv->axis(i), IdMappingMode::PERMISSIVE);
-      tv->axis(i)->parallelize(ca_id->getParallelType());
-      if (ca_id->hasPaddingToMultipleOfWarp()) {
-        tv->axis(i)->padToMultipleOfWarp(ca_id->getMaybeSizeAfterPadding());
+      if (concrete_to_reference_map.count(ca_id) > 0) {
+        auto reference_id = concrete_to_reference_map.at(ca_id);
+        auto reference_parallel_type = reference_id->getParallelType();
+        if (selected_parallel_types.empty() ||
+            selected_parallel_types.count(reference_parallel_type)) {
+          tv->axis(i)->parallelize(reference_parallel_type);
+        }
+        if (propagate_padding) {
+          if (reference_id->hasPaddingToMultipleOfWarp()) {
+            tv->axis(i)->padToMultipleOfWarp(
+                reference_id->getMaybeSizeAfterPadding());
+          }
+        }
       }
     }
   }

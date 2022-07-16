@@ -2175,7 +2175,7 @@ TEST_F(NVFuserTest, FusionHdiff_CUDA) {
   out->axis(3)->parallelize(ParallelType::TIDy);
   out->axis(4)->parallelize(ParallelType::TIDx);
   // Apply the same parallelization to all other tensors
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   // Store intermediate stencil results on smem so that they can be
   // accessed by threads
@@ -2733,7 +2733,7 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2793,7 +2793,7 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2894,7 +2894,7 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -3817,7 +3817,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3873,7 +3873,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3934,7 +3934,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv3->computeAt(tv_avg, -1);
 
   tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv_avg, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv_avg);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -4122,7 +4122,7 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -5080,7 +5080,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   max_tensor->axis(4)->parallelize(ParallelType::TIDy);
   max_tensor->axis(5)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(max_tensor, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(max_tensor);
 
   inp_cache->setMemoryType(MemoryType::Shared);
 
@@ -5332,7 +5332,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(0)->parallelize(ParallelType::BIDx);
 
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   tv0_cache->doubleBuffer();
 
@@ -5380,7 +5380,7 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   tv5->axis(1)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({1024 * 32}, options);

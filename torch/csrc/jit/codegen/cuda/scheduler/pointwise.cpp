@@ -676,6 +676,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   }
 
   int64_t unswitch_pos;
+  IterDomain* vectorize_id = nullptr;
   if (params.break_point) {
     // 2D parallelization scheme
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
@@ -692,9 +693,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(1)->parallelize(ParallelType::Unswitch);
       reference_tv->axis(3)->parallelize(ParallelType::TIDx);
 
-      // Aggressively mark with vectorized and cleanup later. That way we
-      // don't have to manually specify parallelization outside the reference.
-      reference_tv->axis(4)->parallelize(ParallelType::Vectorize);
+      vectorize_id = reference_tv->axis(4);
 
       // [outer, Unswitch | i-remainder, TIDx, Vectorization]
       // To make consistent with unrolling:
@@ -797,7 +796,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
       // Aggressively mark with vectorized and cleanup later. That way we
       // don't have to manually specify parallelization outside the reference.
-      reference_tv->axis(3)->parallelize(ParallelType::Vectorize);
+      vectorize_id = reference_tv->axis(3);
 
       //[BIDx, TIDx, Unswitch, Vectorization]
       // To make consistent with unrolling:
@@ -822,37 +821,32 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   TransformPropagator propagator(reference_tv);
   MaxRootDomainInfoSpanningTree spanning_tree(reference_tv);
   spanning_tree.traverse(&propagator);
-  scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
+  scheduler_utils::parallelizeAllLike(reference_tv);
 
   if (params.vectorize) {
     // Grab all tensor views that should be vectorized
-    auto vectorized_tvs =
+    auto inputs_outputs =
         scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
-    // Going to move inputs to consumers of inputs, need a copy as we'll modify
-    // the original.
-    {
-      auto vectorized_tvs_copy = vectorized_tvs;
-      for (auto inp : vectorized_tvs_copy) {
-        if (!inp->isFusionInput()) {
-          continue;
-        }
-        vectorized_tvs.erase(
-            std::find(vectorized_tvs.begin(), vectorized_tvs.end(), inp));
-        auto consumer_tvs = ir_utils::consumerTvsOf(inp);
-        vectorized_tvs.insert(
-            vectorized_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
+    std::vector<TensorView*> vectorized_tvs;
+    bool should_vectorize_reference_tv = false;
+    for (auto tv : inputs_outputs) {
+      if (!tv->isFusionInput()) {
+        vectorized_tvs.emplace_back(tv);
+        continue;
       }
+      if (tv == reference_tv) {
+        should_vectorize_reference_tv = true;
+      }
+      // move inputs to consumers of inputs
+      auto consumer_tvs = ir_utils::consumerTvsOf(tv);
+      vectorized_tvs.insert(
+          vectorized_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
     }
-    // Clear vectorize on tensors that shouldn't have it
-    for (auto tv : all_tvs) {
-      if (std::find(vectorized_tvs.begin(), vectorized_tvs.end(), tv) ==
-          vectorized_tvs.end()) {
-        for (auto id : tv->domain()->domain()) {
-          if (id->getParallelType() == ParallelType::Vectorize) {
-            id->parallelize(ParallelType::Serial);
-          }
-        }
-      }
+    vectorize_id->parallelize(ParallelType::Vectorize);
+    scheduler_utils::parallelizeAllLike(
+        reference_tv, vectorized_tvs, {ParallelType::Vectorize});
+    if (!should_vectorize_reference_tv) {
+      vectorize_id->parallelize(ParallelType::Serial);
     }
   }
 

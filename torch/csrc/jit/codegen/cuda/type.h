@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -260,6 +261,9 @@ enum class ParallelType {
   Group,
   Serial
 };
+
+TORCH_CUDA_CU_API std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except);
 
 static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::BIDx,
