@@ -308,6 +308,7 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
@@ -335,6 +336,7 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
@@ -363,6 +365,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -667,6 +670,7 @@ code = 'UFMT'
 # After that, we can use **/*.py to apply the formatter to all entries
 # currently enforced by BLACK linter
 include_patterns = [
+    'test/onnx/**/*.py',
     'tools/**/*.py',
 ]
 command = [
