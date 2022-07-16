@@ -243,12 +243,12 @@ jobs:
       cuda-version: "11.6"
       sync-tag: win-cuda-build
 
-  linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
+  linux-focal-cuda11_6-py3_7-gcc7-bazel-test:
+    name: linux-focal-cuda11.6-py3.7-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda11.6-py3.7-gcc7-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda11.6-cudnn8-py3.7-gcc7
 
   linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
     name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
