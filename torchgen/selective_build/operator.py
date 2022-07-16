@@ -1,5 +1,5 @@
-from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
 
 # This class holds information about a single operator used to determine
 # the outcome of a selective/custom PyTorch build that doesn't include

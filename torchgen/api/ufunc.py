@@ -1,29 +1,28 @@
+from dataclasses import dataclass
+from typing import List, Optional
+
+import torchgen.api.types as api_types
+
+from torchgen.api import cpp, structured
+from torchgen.api.types import (
+    ArgName,
+    BaseCppType,
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    CType,
+    NamedCType,
+    scalarT,
+)
 from torchgen.model import (
     Argument,
     BaseTy,
     BaseType,
+    DispatchKey,
     FunctionSchema,
     NativeFunctionsGroup,
     Type,
-    DispatchKey,
 )
-
-import torchgen.api.types as api_types
-from torchgen.api.types import (
-    ArgName,
-    BaseCType,
-    Binding,
-    ConstRefCType,
-    NamedCType,
-    scalarT,
-    CType,
-    BaseCppType,
-)
-
-from torchgen.api import cpp, structured
-
-from dataclasses import dataclass
-from typing import List, Optional
 
 
 def schema_kernel_name(func: FunctionSchema, dispatch_key: DispatchKey) -> str:

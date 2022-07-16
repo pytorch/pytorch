@@ -3,29 +3,26 @@ import functools
 import hashlib
 import os
 import re
-import textwrap
 import sys
+import textwrap
 from argparse import Namespace
-from dataclasses import (
-    fields,
-    is_dataclass,
-)
+from dataclasses import fields, is_dataclass
+from enum import Enum
 from typing import (
-    Tuple,
-    List,
+    Any,
+    Callable,
+    Dict,
     Iterable,
     Iterator,
-    Callable,
-    Sequence,
-    TypeVar,
-    Optional,
-    Dict,
-    Any,
-    Union,
-    Set,
+    List,
     NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
 )
-from enum import Enum
 
 from torchgen.code_template import CodeTemplate
 

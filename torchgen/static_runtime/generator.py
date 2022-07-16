@@ -1,24 +1,25 @@
+import json
+import logging
+
+import math
+from typing import List, Optional, Sequence, Tuple, Union
+
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
 from torchgen.model import (
     Argument,
     BackendIndex,
     BaseTy,
+    BaseType,
     FunctionSchema,
+    NativeFunctionsGroup,
+    NativeFunctionsViewGroup,
     OptionalType,
     SelfArgument,
-    BaseType,
-    NativeFunctionsGroup,
     TensorOptionsArguments,
     Type,
-    NativeFunctionsViewGroup,
 )
 from torchgen.static_runtime import config
-
-import math
-import logging
-import json
-from typing import List, Optional, Sequence, Tuple, Union
 
 logger: logger = logging.getLogger()
 

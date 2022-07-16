@@ -1,35 +1,36 @@
-from abc import ABC
 import itertools
+from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union, Tuple
-from torchgen.context import method_with_native_function
-from torchgen.model import (
-    FunctionSchema,
-    Argument,
-    BackendIndex,
-    NativeFunction,
-    NativeFunctionsGroup,
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import torchgen.api.dispatcher as dispatcher
+from torchgen.api.lazy import (
+    getValueT,
+    isValueType,
+    LazyArgument,
+    LazyIrProperties,
+    LazyIrSchema,
+    tensorListValueT,
 )
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
+    deviceT,
     DispatcherSignature,
+    kernel_signature,
     OptionalCType,
     VectorCType,
-    kernel_signature,
-    deviceT,
 )
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.translate import translate
-from torchgen.api.lazy import (
-    LazyIrProperties,
-    LazyIrSchema,
-    LazyArgument,
-    getValueT,
-    isValueType,
-    tensorListValueT,
-)
+from torchgen.context import method_with_native_function
 from torchgen.dest.lazy_ts_lowering import ts_lowering_body
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    FunctionSchema,
+    NativeFunction,
+    NativeFunctionsGroup,
+)
 
 
 def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:

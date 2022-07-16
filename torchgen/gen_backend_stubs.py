@@ -1,14 +1,18 @@
-import pathlib
 import argparse
 import os
-import yaml
+import pathlib
 import re
-from collections import namedtuple, Counter, defaultdict
-from typing import List, Dict, Union, Sequence, Optional
-from torchgen.gen import (
-    get_grouped_native_functions,
-    parse_native_yaml,
-)
+from collections import Counter, defaultdict, namedtuple
+from typing import Dict, List, Optional, Sequence, Union
+
+import yaml
+
+import torchgen.api.dispatcher as dispatcher
+import torchgen.dest as dest
+from torchgen.api.types import DispatcherSignature
+from torchgen.code_template import CodeTemplate
+from torchgen.context import native_function_manager
+from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -19,18 +23,13 @@ from torchgen.model import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
-    Target,
     concatMap,
     context,
-    YamlLoader,
     FileManager,
     NamespaceHelper,
+    Target,
+    YamlLoader,
 )
-from torchgen.context import native_function_manager
-from torchgen.code_template import CodeTemplate
-import torchgen.dest as dest
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.types import DispatcherSignature
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
