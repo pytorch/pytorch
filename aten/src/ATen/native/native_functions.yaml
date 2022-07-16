@@ -2487,6 +2487,13 @@
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
 
+- func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _validate_compressed_sparse_indices_cpu
+    CUDA: _validate_compressed_sparse_indices_cuda
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
 
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
@@ -2679,13 +2686,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -6333,12 +6333,30 @@
     MPS: set_mps_
   autogen: set, set.out
 
+# Not making it CompositeImplicitAutograd because lift
+# should be a primitive w.r.t. functorch
+
+# TODO: this should have a view annotation
+# TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
   variants: method
   dispatch:
-    # Not making it CompositeImplicitAutograd because lift
-    # should be a primitive w.r.t. functorch
     CompositeExplicitAutograd: lift
+
+# lift_fresh is called with an argument that is guaranteed to be
+# fresh (i.e., newly allocated).  This is ONLY called from a
+# torch.tensor call; if you FX trace a lift_fresh, you are obligated
+# to convert this into a lift_fresh_copy (because FX will violate the
+# freshness invariant when tracing).
+- func: lift_fresh(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh
+
+# Like lift, but it clones the input.
+- func: lift_fresh_copy(Tensor self) -> Tensor
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh_copy
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
@@ -6439,6 +6457,7 @@
   dispatch:
     CPU: index_add_cpu_out
     CUDA: index_add_cuda_out
+    MPS: index_add_mps_out
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: index_add.out
@@ -10490,6 +10509,7 @@
   dispatch:
     CPU: upsample_nearest1d_out_cpu
     CUDA: upsample_nearest1d_out_cuda
+    MPS: upsample_nearest1d_out_mps
 
 - func: _upsample_nearest_exact1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -11610,6 +11630,13 @@
   variants: function
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
+- func: linalg_vecdot(Tensor x, Tensor y, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_vecdot.out(Tensor x, Tensor y, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 - func: linalg_matrix_exp(Tensor self) -> Tensor
@@ -13069,3 +13096,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar
