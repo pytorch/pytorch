@@ -84,8 +84,8 @@ if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
-ucx_commit=v1.13.x
-ucc_commit=a7bda274b10f8adf5bb729f01da064f4e735fb23
+UCX_COMMIT=v1.13.x
+UCC_COMMIT=a7bda274b10f8adf5bb729f01da064f4e735fb23
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
