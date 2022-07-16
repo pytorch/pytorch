@@ -421,8 +421,7 @@ a bug if you need this)""")
         if use_fake:  # type: ignore[attr-defined]
             args = pytree.tree_map(wrap_fake, args)
 
-        with decompose(decomposition_table), fake_tensor_mode, proxy_mode, \
-                proxy_dispatch_mode_ctx(proxy_mode):  # type: ignore[attr-defined]
+        with decompose(decomposition_table), fake_tensor_mode, proxy_mode, proxy_dispatch_mode_ctx(proxy_mode):  # type: ignore[attr-defined] # noqa: 950
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
         return t
 
