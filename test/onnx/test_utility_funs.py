@@ -5,6 +5,10 @@ import io
 import unittest
 
 import onnx
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
@@ -12,15 +16,10 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from verify import verify
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 from torch.onnx import (
     OperatorExportTypes,
-    TrainingMode,
     register_custom_op_symbolic,
+    TrainingMode,
     unregister_custom_op_symbolic,
     utils,
 )
@@ -32,6 +31,7 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
+from verify import verify
 
 
 class _BaseTestCase(common_utils.TestCase):

@@ -2768,7 +2768,8 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()
+            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             dtype = symbolic_helper.scalar_type_to_onnx.index(
                 symbolic_helper.cast_pytorch_to_onnx[dtype]
             )

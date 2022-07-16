@@ -59,7 +59,6 @@ full_codegen:
   - gt.Tensor
   - hardsigmoid
   - index_select
-  - kl_div_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
