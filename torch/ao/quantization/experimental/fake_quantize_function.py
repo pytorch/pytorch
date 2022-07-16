@@ -13,8 +13,7 @@ class fake_quantize_function(torch.autograd.Function):
         quantized_result = quantize_APoT(x, alpha, gamma, quantization_levels, level_indices)
 
         # calculate mask tensor
-        mask = torch.clone(x)
-        mask = mask.apply_(lambda x: (x <= alpha and x >= -alpha))
+        mask = x.detach().apply_(lambda x: (x <= alpha and x >= -alpha))
 
         result = dequantize_APoT(quantized_result)
 
