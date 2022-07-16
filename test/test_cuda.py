@@ -2312,7 +2312,7 @@ torch.cuda.synchronize()
         self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
 
     def test_grad_scaling_autocast_fusedadam(self):
-        self.test_grad_scaling_autocast(torch.optim._fused.Adam, 5e-5)
+        self.test_grad_scaling_autocast(torch.optim._fused.Adam, 5e-3)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3933,13 +3933,14 @@ torch.cuda.synchronize()
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
 
+                # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
                 grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
                 with torch.no_grad():
                     grads_control = [[g.clone() for g in gs] for gs in grads]
                     grads_graphed = [[g.clone() for g in gs] for gs in grads]
 
                 # Gradient Scaler
-                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=1.0)
+                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
                 with torch.no_grad():
                     scaler_for_control._lazy_init_scale_growth_tracker(torch.device("cuda"))
 
