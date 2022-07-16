@@ -789,13 +789,13 @@ PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-// CRTP base class to implement the python bindings for a Tensor property in PyTorch
-// A class that implements a property is expected to have:
+// CRTP base class to implement the python bindings for a Tensor property in
+// PyTorch A class that implements a property is expected to have:
 // - static constexpr const char* name;
 //   - This variable should hold the Python name of the property
 // - static Tensor fn(const Tensor&);
 //   - This function calls the relevant ATen on the tensor
-template<typename T>
+template <typename T>
 struct GetterBase {
   static PyObject* getter(THPVariable* self, void* /*unused*/) {
     HANDLE_TH_ERRORS
@@ -809,42 +809,58 @@ struct GetterBase {
 
 struct PropertyT : GetterBase<PropertyT> {
   static constexpr const char* name = "T";
-  static Tensor fn(const Tensor& t) { return t.numpy_T(); }
+  static Tensor fn(const Tensor& t) {
+    return t.numpy_T();
+  }
 };
 
 struct PropertyH : GetterBase<PropertyH> {
   static constexpr const char* name = "H";
-  static Tensor fn(const Tensor& t) { return t.matrix_H(); }
+  static Tensor fn(const Tensor& t) {
+    return t.matrix_H();
+  }
 };
 
 struct PropertymT : GetterBase<PropertymT> {
   static constexpr const char* name = "mT";
-  static Tensor fn(const Tensor& t) { return t.mT(); }
+  static Tensor fn(const Tensor& t) {
+    return t.mT();
+  }
 };
 
 struct PropertymH : GetterBase<PropertymH> {
   static constexpr const char* name = "mH";
-  static Tensor fn(const Tensor& t) { return t.mH(); }
+  static Tensor fn(const Tensor& t) {
+    return t.mH();
+  }
 };
 
 struct PropertyData : GetterBase<PropertyData> {
   static constexpr const char* name = "data";
-  static Tensor fn(const Tensor& t) { return t.variable_data(); }
+  static Tensor fn(const Tensor& t) {
+    return t.variable_data();
+  }
 };
 
 struct PropertyGrad : GetterBase<PropertyGrad> {
   static constexpr const char* name = "grad";
-  static Tensor fn(const Tensor& t) { return t.grad(); }
+  static Tensor fn(const Tensor& t) {
+    return t.grad();
+  }
 };
 
 struct PropertyReal : GetterBase<PropertyReal> {
   static constexpr const char* name = "real";
-  static Tensor fn(const Tensor& t) { return at::real(t); }
+  static Tensor fn(const Tensor& t) {
+    return at::real(t);
+  }
 };
 
 struct PropertyImag : GetterBase<PropertyImag> {
   static constexpr const char* name = "imag";
-  static Tensor fn(const Tensor& t) { return at::imag(t); }
+  static Tensor fn(const Tensor& t) {
+    return at::imag(t);
+  }
 };
 
 PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
