@@ -135,7 +135,7 @@ class Sequential(Module):
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
 
-    def pop(self, key: str) -> Module:
+    def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
         del self[key]
         return v
@@ -273,7 +273,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def pop(self, key: str) -> Module:
+    def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
         del self[key]
         return v
