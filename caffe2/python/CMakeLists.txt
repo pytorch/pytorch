@@ -7,7 +7,7 @@ set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state_int8.cc"
 )
 
-if(CAFFE2_USE_MKLDNN)
+if(USE_MKLDNN)
   set(Caffe2_CPU_PYTHON_SRCS
       ${Caffe2_CPU_PYTHON_SRCS}
       "/pybind_state_ideep.cc"
