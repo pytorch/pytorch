@@ -147,6 +147,7 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
   if (path_.empty()) {
     compute_spanning_tree();
   }
+  propagator->setUp();
   for (const auto& next_hop : path_) {
     switch (next_hop.type) {
       case NextHopType::SIBLING:
@@ -160,6 +161,7 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
         break;
     }
   }
+  propagator->tearDown();
 }
 
 MaxRootDomainInfoSpanningTree::RootDomainInfo::operator bool() const {

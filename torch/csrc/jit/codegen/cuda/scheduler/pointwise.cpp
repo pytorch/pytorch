@@ -871,10 +871,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   InlinePropagator inline_inner_most(
       reference_tv, -1, ComputeAtMode::BestEffort, inner_most_tensors);
   spanning_tree.traverse(&inline_inner_most);
-
-  // Fix max producer position
-  MaxProducerPosUpdater updater;
-  spanning_tree.traverse(&updater);
 }
 
 } // namespace cuda

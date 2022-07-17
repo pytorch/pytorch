@@ -46,6 +46,8 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
 
   // This is the interface to implement the actual propagation
   struct Propagator {
+    virtual void setUp() {}
+    virtual void tearDown() {}
     virtual void propagateC2P(TensorView* from, TensorView* to) = 0;
     virtual void propagateP2C(TensorView* from, TensorView* to) = 0;
     virtual void propagateSibling(TensorView* from, TensorView* to) = 0;

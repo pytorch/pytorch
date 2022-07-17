@@ -91,10 +91,10 @@ class TORCH_CUDA_CU_API InlinePropagator
 
   const MaxPosCalculator max_pos_calc;
   std::unordered_set<TensorView*> selected_;
+  std::unordered_set<TensorView*> needs_update_max_producer_;
   TensorView* reference_;
   size_t reference_pos_;
   ComputeAtMode mode_ = ComputeAtMode::Standard;
-  bool is_first_ = true;
 
  public:
   InlinePropagator(
@@ -117,24 +117,11 @@ class TORCH_CUDA_CU_API InlinePropagator
 
   // Actually propagate the transformations for the inlining pass. Uses the
   // functions above to figure out what position to do the propagation at.
+  virtual void setUp() override;
   virtual void propagateC2P(TensorView* from, TensorView* to) override;
   virtual void propagateP2C(TensorView* from, TensorView* to) override;
   virtual void propagateSibling(TensorView* from, TensorView* to) override;
-};
-
-// This is actually not a propagation, it only sets the max producer position of
-// the tensors, and it is not needed to compute the max producer position in a
-// specific order. But MaxInfoSpanningTree provides a very convenient API to
-// visit the tensors, so I just use it for cleaner code.
-class TORCH_CUDA_CU_API MaxProducerPosUpdater
-    : public MaxInfoSpanningTree::Propagator {
-  std::unordered_set<TensorView*> updated_;
-  void handle(TensorView* tv);
-
- public:
-  virtual void propagateC2P(TensorView* from, TensorView* to) override;
-  virtual void propagateP2C(TensorView* from, TensorView* to) override;
-  virtual void propagateSibling(TensorView* from, TensorView* to) override;
+  virtual void tearDown() override;
 };
 
 } // namespace cuda

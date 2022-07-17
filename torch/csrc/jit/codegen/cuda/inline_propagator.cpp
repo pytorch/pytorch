@@ -166,7 +166,13 @@ void InlinePropagator::setCAPos(TensorView* tv) {
     while (pos > 0 && tv->axis(pos - 1)->isBroadcast()) {
       pos--;
     }
-    tv->setComputeAt(pos);
+    auto current_ca_pos = tv->getComputeAtPosition();
+    if (pos > current_ca_pos) {
+      tv->setComputeAt(pos);
+      for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
+        needs_update_max_producer_.insert(consumer_tv);
+      }
+    }
   }
 }
 
@@ -194,82 +200,9 @@ InlinePropagator::InlinePropagator(
   reference_pos_ = reference_pos;
 }
 
-void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
-  }
-  // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
-  auto to_pos =
-      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from consumer ",
-      from,
-      " at ",
-      from_pos,
-      " to producer ",
-      to,
-      " because this would require replay.");
-  mapped_reference_pos_[to] = to_pos;
-  // Step 2: set CA position of `to`
-  setCAPos(to);
-}
-
-void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
-  }
-  // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
-  auto to_pos =
-      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from producer ",
-      from,
-      " at ",
-      from_pos,
-      " to consumer ",
-      to,
-      " because this would require replay.");
-  mapped_reference_pos_[to] = to_pos;
-  // Step 2: set CA position of `to`
-  setCAPos(to);
-}
-
-void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
-  }
-  // Step 1: find mapped_reference_pos_[to]
-  auto from_pos = mapped_reference_pos_.at(from);
-  TORCH_CHECK(
-      TransformReplay::fullSelfMatching(to, from),
-      "Unable to propagate CA position from ",
-      from,
-      " to sibling ",
-      to,
-      " because this would require replay.");
-  mapped_reference_pos_[to] = from_pos;
-  // Step 2: set CA position of `to`
-  setCAPos(to);
+void InlinePropagator::setUp() {
+  mapped_reference_pos_[reference_] = reference_pos_;
+  setCAPos(reference_);
 }
 
 namespace {
@@ -328,38 +261,78 @@ unsigned int getConsumerPosAlignedToProducerCA(
 
 } // namespace
 
-// Try to find the aligned position on consumer's domain corresponding to the
-// compute at position of producer domain.
-void MaxProducerPosUpdater::handle(TensorView* consumer) {
-  unsigned int consumer_pos = 0;
-  for (auto producer : ir_utils::producerTvsOf(consumer)) {
-    consumer_pos = std::max(
-        consumer_pos, getConsumerPosAlignedToProducerCA(consumer, producer));
-  }
-  consumer->setMaxProducer(consumer_pos);
-}
-
-void MaxProducerPosUpdater::propagateC2P(TensorView* from, TensorView* to) {
-  if (updated_.empty()) {
-    // handle the reference tensor
-    updated_.insert(nullptr);
-    propagateC2P(nullptr, from);
-  }
-  for (auto consumer_tv : ir_utils::consumerTvsOf(to)) {
-    if (updated_.count(consumer_tv) > 0) {
-      continue;
+void InlinePropagator::tearDown() {
+  for (auto consumer : needs_update_max_producer_) {
+    unsigned int consumer_pos = 0;
+    for (auto producer : ir_utils::producerTvsOf(consumer)) {
+      consumer_pos = std::max(
+          consumer_pos, getConsumerPosAlignedToProducerCA(consumer, producer));
     }
-    handle(consumer_tv);
-    updated_.insert(consumer_tv);
+    consumer->setMaxProducer(consumer_pos);
   }
 }
 
-void MaxProducerPosUpdater::propagateP2C(TensorView* from, TensorView* to) {
-  propagateC2P(from, to);
+void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
+  // Step 1: find mapped_reference_pos_[to]
+  int from_pos;
+  if (mode_ != ComputeAtMode::MostInlined) {
+    from_pos = mapped_reference_pos_.at(from);
+  } else {
+    from_pos = from->nDims();
+  }
+  auto to_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
+  TORCH_CHECK(
+      to_pos >= 0,
+      "Unable to propagate CA position from consumer ",
+      from,
+      " at ",
+      from_pos,
+      " to producer ",
+      to,
+      " because this would require replay.");
+  mapped_reference_pos_[to] = to_pos;
+  // Step 2: set CA position of `to`
+  setCAPos(to);
 }
 
-void MaxProducerPosUpdater::propagateSibling(TensorView* from, TensorView* to) {
-  propagateC2P(from, to);
+void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
+  // Step 1: find mapped_reference_pos_[to]
+  int from_pos;
+  if (mode_ != ComputeAtMode::MostInlined) {
+    from_pos = mapped_reference_pos_.at(from);
+  } else {
+    from_pos = from->nDims();
+  }
+  auto to_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
+  TORCH_CHECK(
+      to_pos >= 0,
+      "Unable to propagate CA position from producer ",
+      from,
+      " at ",
+      from_pos,
+      " to consumer ",
+      to,
+      " because this would require replay.");
+  mapped_reference_pos_[to] = to_pos;
+  // Step 2: set CA position of `to`
+  setCAPos(to);
+}
+
+void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
+  // Step 1: find mapped_reference_pos_[to]
+  auto from_pos = mapped_reference_pos_.at(from);
+  TORCH_CHECK(
+      TransformReplay::fullSelfMatching(to, from),
+      "Unable to propagate CA position from ",
+      from,
+      " to sibling ",
+      to,
+      " because this would require replay.");
+  mapped_reference_pos_[to] = from_pos;
+  // Step 2: set CA position of `to`
+  setCAPos(to);
 }
 
 } // namespace cuda
