@@ -20,7 +20,6 @@
 #ifdef USE_KINETO
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
-class GenericTraceActivity;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
 } // namespace libkineto
@@ -52,36 +51,31 @@ const DeviceAndResource kineto_ids();
 #ifdef USE_KINETO
 using trace_t = libkineto::CpuTraceBuffer;
 using interface_trace_t = libkineto::ActivityTraceInterface;
-using activity_t = libkineto::GenericTraceActivity;
 #else
 struct DummyTraceBuffer {};
 struct DummyTraceInterface {};
 
 using trace_t = DummyTraceBuffer;
 using interface_trace_t = DummyTraceBuffer;
-struct activity_t;
 #endif // USE_KINETO
 
-void addMetadata(
-    activity_t* activity,
-    const std::string& key,
-    const std::string& value);
+using annotation_t = std::vector<std::pair<std::string, std::string>>;
 
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
   TraceWrapper(const int64_t start_time, const std::string& name);
   TraceWrapper(TraceWrapper&&) = default;
   TraceWrapper(const TraceWrapper&) = delete;
-  ~TraceWrapper();
 
   // The caller is expected to hold a mutex when calling `addCPUActivity`.
-  activity_t* addCPUActivity(
+  void addCPUActivity(
       const std::string& name,
       const libkineto::ActivityType type,
       const DeviceAndResource device_and_resource,
       const uint64_t correlation_id,
       const int64_t start_time,
-      const int64_t end_time);
+      const int64_t end_time,
+      const annotation_t& annotations);
 
   void transferCpuTrace(int64_t end_time);
 
