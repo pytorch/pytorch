@@ -273,7 +273,7 @@ def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
     # OrderedDict.  See Note [Don't serialize hooks]
     param._backward_hooks = backward_hooks
 
-    # Restore 
+    # Restore state on Parameter like python attr.
     param = torch._utils._set_obj_state(param, state)
     return param
 
