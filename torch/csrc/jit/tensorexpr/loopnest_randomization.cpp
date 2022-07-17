@@ -657,8 +657,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
             for (const auto& producer : producers) {
               for (const auto& consumer : consumers) {
                 auto parent_loop = LoopNest::getParentLoop(consumer);
-                auto pc_pair = std::make_pair(producer, parent_loop);
-                producer_consumer_pairs.push_back(pc_pair);
+                producer_consumer_pairs.emplace_back(producer, parent_loop);
               }
             }
           }

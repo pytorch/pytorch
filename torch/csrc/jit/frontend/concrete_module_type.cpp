@@ -369,7 +369,7 @@ ConcreteModuleType::getModulesPy() const {
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_));
+    ret.emplace_back(info.name_, info.meta_);
   }
   return ret;
 }

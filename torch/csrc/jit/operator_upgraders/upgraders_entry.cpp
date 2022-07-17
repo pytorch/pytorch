@@ -134,7 +134,7 @@ generate_upgraders_graph() {
   std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
   for (const auto& entry : kUpgradersEntryMap) {
     auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
-    populate_content.insert(std::make_pair(entry.first, upgrader_graph));
+    populate_content.emplace(entry.first, upgrader_graph);
   }
   return populate_content;
 }

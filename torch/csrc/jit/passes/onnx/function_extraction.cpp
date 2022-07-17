@@ -646,8 +646,8 @@ void FunctionExtractor::ConvertScopeToFunction(
   // 3. Create function node for each call, and replace subgraph nodes in parent
   // functions.
 
-  func_ctxs_.insert(std::make_pair(
-      scope_key, new FunctionContext(scope_key, scope_list, scope_ctxs)));
+  func_ctxs_.emplace(
+      scope_key, new FunctionContext(scope_key, scope_list, scope_ctxs));
   auto& func_ctx = *func_ctxs_[scope_key];
 
   const std::string module_class_name(
@@ -836,7 +836,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
   auto find_or_create_scope_ctx = [](scope_ctx_map& scope_ctxs,
                                      const ScopePtr& scope) {
     if (scope_ctxs.find(scope) == scope_ctxs.end()) {
-      scope_ctxs.insert(std::make_pair(scope, new ScopeContext()));
+      scope_ctxs.emplace(scope, new ScopeContext());
     }
     return scope_ctxs[scope];
   };
@@ -879,7 +879,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
 
       for (auto& it : subblock_scope_ctxs) {
         if (scope_ctxs.find(it.first) == scope_ctxs.end()) {
-          scope_ctxs.insert(std::make_pair(it.first, it.second));
+          scope_ctxs.emplace(it.first, it.second);
         } else {
           for (auto* s_n : it.second->nlist_) {
             scope_ctxs[it.first]->nlist_.emplace_back(s_n);

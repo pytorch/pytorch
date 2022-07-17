@@ -108,9 +108,9 @@ void serialize(
     param_group_archive.read("options", param_group_options_archive);
     DerivedOptimizerParamOptions param_group_options(0);
     param_group_options.serialize(param_group_options_archive);
-    param_groups.emplace_back(std::make_pair(
+    param_groups.emplace_back(
         params,
-        std::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
+        std::make_unique<DerivedOptimizerParamOptions>(param_group_options));
   }
 }
 } // namespace detail

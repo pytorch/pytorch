@@ -45,7 +45,7 @@ void UpgradersMap::test_only_set_content(
   for (const auto& entry : content) {
     auto graph = std::make_shared<Graph>();
     torch::jit::parseIR(entry.second, graph.get());
-    content_.insert(std::make_pair(entry.first, graph));
+    content_.emplace(entry.first, graph);
   }
 }
 void UpgradersMap::test_only_remove_content(

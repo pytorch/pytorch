@@ -377,7 +377,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
   auto work =
       c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
-  queue_.push_back(std::make_tuple(std::move(entry), work));
+  queue_.emplace_back(std::move(entry), work);
   lock.unlock();
   queueProduceCV_.notify_one();
   return work;

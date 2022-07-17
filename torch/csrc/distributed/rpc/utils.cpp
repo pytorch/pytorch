@@ -298,7 +298,7 @@ parseWireSections(const void* data, size_t data_size) {
       break;
     }
     size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
-    headerEnts.emplace_back(std::make_pair(name, sz));
+    headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
   if (!ok) {

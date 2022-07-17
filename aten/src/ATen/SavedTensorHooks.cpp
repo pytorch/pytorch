@@ -23,7 +23,7 @@ void SavedTensorDefaultHooks::push_hooks(PyObject* pack_hook, PyObject* unpack_h
   // Reference counting is handled by the caller of `push_hooks`
   TORCH_INTERNAL_ASSERT(is_enabled);
   TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
-  stack.push(std::make_pair(pack_hook, unpack_hook));
+  stack.emplace(pack_hook, unpack_hook);
 }
 
 void SavedTensorDefaultHooks::pop_hooks() {

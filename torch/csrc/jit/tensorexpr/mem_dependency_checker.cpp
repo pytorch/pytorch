@@ -1143,7 +1143,7 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   intermediates_[var] = info;
 
   auto& history = currentScope_->openWrites_[var];
-  history.emplace_back(std::make_pair(info->bounds(), info));
+  history.emplace_back(info->bounds(), info);
   currentScope_->accesses_.push_back(info);
 
   lastStmt_ = last;
@@ -1235,7 +1235,7 @@ void MemDependencyChecker::updateWriteHistory(
   }
 
   if (insert && isWrite) {
-    writeHistory.emplace_back(std::make_pair(info->bounds(), info));
+    writeHistory.emplace_back(info->bounds(), info);
   }
 }
 
