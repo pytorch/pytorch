@@ -706,9 +706,27 @@ class {module_name}(torch.nn.Module):
     def __copy__(self):
         return GraphModule(self, self.graph)
 
+    def __nested_code(self) -> str:
+        """
+        Return the Python code generated for current GraphModule and its children GraphModules
+        """
+        module_code = self.code
+        module_code = module_code.lstrip('\n')
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, GraphModule):
+                submodule_code_list.append(submodule.__nested_code())
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        return module_code + submodule_code
+
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        return '\n'.join([orig_str, self.__nested_code()])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()
