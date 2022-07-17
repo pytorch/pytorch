@@ -119,6 +119,7 @@ jobs:
         ]}
 
   ios-12-5-1-x86-64:
+    if: false
     name: ios-12-5-1-x86-64
     uses: ./.github/workflows/_ios-build-test.yml
     with:
