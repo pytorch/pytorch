@@ -302,6 +302,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
 
         per_callable_static_outputs.append(outputs)
 
+    # Clear AMP autocast cache after the forward graph is captured
+    torch.clear_autocast_cache()
+
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
@@ -343,7 +346,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
-    # Clear AMP autocast cache after the graphs are captured
+    # Clear AMP autocast cache after both forward and backward graphs are captured
     torch.clear_autocast_cache()
 
     def make_graphed_autograd_function(fwd_graph,
