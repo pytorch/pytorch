@@ -245,7 +245,7 @@ struct EventFieldsVisitor {
     std::string name_;
   };
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
   std::reference_wrapper<KinetoEvent> kineto_event_;
   std::reference_wrapper<const post_process_t> post_process_;
   std::vector<PythonMetadata> py_metadata_;

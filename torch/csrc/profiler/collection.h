@@ -222,7 +222,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
   template <EventType E>
