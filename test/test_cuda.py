@@ -3833,49 +3833,49 @@ torch.cuda.synchronize()
 
         loss_fn_control = torch.nn.functional.mse_loss
 
-        for cache_enabled in (False, True,):
-            model_graphed = models[0]
-            model_control = models[1]
 
-            model_graphed.load_state_dict(model_control.state_dict())
+        model_graphed = models[0]
+        model_control = models[1]
 
-            opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
-            opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
+        model_graphed.load_state_dict(model_control.state_dict())
 
-            with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
-                model_graphed, loss_fn_graphed = \
-                    torch.cuda.make_graphed_callables((model_graphed, loss_fn_control),
-                                                      ((x,), (y_pred, y)))
+        opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
+        opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
 
-            real_inputs = [torch.rand_like(x) for _ in range(10)]
-            real_targets = [torch.rand_like(y) for _ in range(10)]
+        with torch.cuda.amp.autocast(cache_enabled=True):
+            model_graphed, loss_fn_graphed = \
+                torch.cuda.make_graphed_callables((model_graphed, loss_fn_control),
+                                                  ((x,), (y_pred, y)))
 
-            with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
-                for m, opt, loss_fn in zip((model_graphed, model_control),
-                                           (opt_graphed, opt_control),
-                                           (loss_fn_graphed, loss_fn_control)):
-                    # Resets RNC states before iterations for graphed and ungraphed models,
-                    # so dropout math should be bitwise identical for both.
-                    torch.manual_seed(5)
-                    torch.cuda.manual_seed(5)
-                    for data, target in zip(real_inputs, real_targets):
-                        opt.zero_grad(set_to_none=True)
-                        y_pred = m(data)
-                        loss = loss_fn(y_pred, target)
-                        loss.backward()
-                        opt.step()
+        real_inputs = [torch.rand_like(x) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
 
-                for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
-                    self.assertEqual(pg, pc)
+        with torch.cuda.amp.autocast(cache_enabled=True):
+            for m, opt, loss_fn in zip((model_graphed, model_control),
+                                       (opt_graphed, opt_control),
+                                       (loss_fn_graphed, loss_fn_control)):
+                # Resets RNC states before iterations for graphed and ungraphed models,
+                # so dropout math should be bitwise identical for both.
+                torch.manual_seed(5)
+                torch.cuda.manual_seed(5)
+                for data, target in zip(real_inputs, real_targets):
+                    opt.zero_grad(set_to_none=True)
+                    y_pred = m(data)
+                    loss = loss_fn(y_pred, target)
+                    loss.backward()
+                    opt.step()
 
-                # We graphed the models in training mode. Eval should still run ungraphed.
-                model_graphed.eval()
-                model_control.eval()
-                self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+            for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
+                self.assertEqual(pg, pc)
 
-            del model_graphed
-            del opt_graphed
-            del loss_fn_graphed
+            # We graphed the models in training mode. Eval should still run ungraphed.
+            model_graphed.eval()
+            model_control.eval()
+            self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+
+        del model_graphed
+        del opt_graphed
+        del loss_fn_graphed
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
