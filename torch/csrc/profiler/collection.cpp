@@ -447,12 +447,12 @@ class TraceActivityKey {
     auto activity =
         static_cast<const libkineto::ITraceActivity*>(kineto_activity);
     state_ = std::make_tuple(
-        kineto_activity->deviceId(),
-        kineto_activity->resourceId(),
-        kineto_activity->timestamp(),
-        kineto_activity->duration(),
-        kineto_activity->correlationId(),
-        kineto_activity->type());
+        activity->deviceId(),
+        activity->resourceId(),
+        activity->timestamp(),
+        activity->duration(),
+        activity->correlationId(),
+        activity->type());
 #endif
   }
 
