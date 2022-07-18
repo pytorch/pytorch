@@ -1,6 +1,6 @@
 import argparse
-from os.path import dirname, abspath
 import sys
+from os.path import abspath, dirname
 
 # By appending pytorch_root to sys.path, this module can import other torch
 # modules even when run as a standalone script. i.e., it's okay either you

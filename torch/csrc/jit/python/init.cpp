@@ -213,6 +213,16 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
     return dispatch_common_(__FUNCTION__, other);
   }
 
+  virtual std::shared_ptr<SymbolicIntNode> le(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual std::shared_ptr<SymbolicIntNode> ge(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -1258,6 +1268,20 @@ void initJITBindings(PyObject* module) {
             return a->lt(snb);
           })
       .def(
+          "__le__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->le(snb);
+          })
+      .def(
+          "__ge__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->ge(snb);
+          })
+      .def(
           "__bool__",
           [](std::shared_ptr<c10::SymbolicIntNode> a) { return a->bool_(); })
       .def(
@@ -1339,6 +1363,10 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
+          // Writting an empty file is a noop
+          if (size == 0) {
+            return size;
+          }
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));

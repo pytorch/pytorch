@@ -74,6 +74,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -117,6 +118,13 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       -Wno-writable-strings)
 endif()
 
+if(USE_ITT)
+  list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/itt.cpp
+  )
+  list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
+endif()
+
 if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
@@ -140,6 +148,10 @@ if(USE_ROCM)
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
+endif()
+
+if(USE_EXPERIMENTAL_CUDNN_V8_API)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
 endif()
 
 if(USE_CUDNN OR USE_ROCM)
@@ -247,6 +259,9 @@ if(USE_DISTRIBUTED)
     if(USE_NCCL)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     endif()
+    if(USE_UCC)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_ucc)
+    endif()
     # Same for MPI.
     if(USE_MPI)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
@@ -279,6 +294,9 @@ if(USE_DEPLOY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(USE_GLOO AND USE_C10D_GLOO)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
+    endif()
+    if(USE_UCC AND USE_C10D_UCC)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_UCC)
     endif()
     if(USE_NCCL AND USE_C10D_NCCL)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)

@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -58,9 +57,9 @@ Tensor _lerp_scalar(
   const vTensor& v_end = convert(end);
 
   vTensor v_output{
-    context,
-    v_start.sizes(),
-    v_start.options(),
+      context,
+      v_start.sizes(),
+      v_start.options(),
   };
 
   const float weight = weight_arg.to<float>();
@@ -104,14 +103,10 @@ Tensor _lerp_scalar(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_start.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
-      v_end.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_start.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_end.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -171,11 +166,9 @@ Tensor& _lerp_scalar_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
-      v_end.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_end.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -197,13 +190,14 @@ Tensor _lerp_tensor(
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
   const vTensor& v_end = convert(end);
 
-  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  const Tensor weight =
+      weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
   const vTensor& v_weight = convert(weight_arg);
 
   vTensor v_output{
-    context,
-    v_start.sizes(),
-    v_start.options(),
+      context,
+      v_start.sizes(),
+      v_start.options(),
   };
 
   const struct Block final {
@@ -251,17 +245,11 @@ Tensor _lerp_tensor(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_start.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
-      v_end.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
-      v_weight.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_start.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_end.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -286,7 +274,8 @@ Tensor& _lerp_tensor_(
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
   const vTensor& v_end = convert(end_arg);
 
-  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  const Tensor weight =
+      weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
   const vTensor& v_weight = convert(weight_arg);
 
   const struct Block final {
@@ -329,14 +318,10 @@ Tensor& _lerp_tensor_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
-      v_end.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
-      v_weight.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_end.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -344,25 +329,27 @@ Tensor& _lerp_tensor_(
 }
 
 Tensor lerp_scalar(
-    const Tensor& start, const Tensor& end, const Scalar& weight) {
+    const Tensor& start,
+    const Tensor& end,
+    const Scalar& weight) {
   return _lerp_scalar(start, end, weight);
 }
 
-Tensor& lerp_scalar_(
-    Tensor& self, const Tensor& end, const Scalar& weight) {
+Tensor& lerp_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
   return _lerp_scalar_(self, end, weight);
 }
 
 Tensor lerp_tensor(
-    const Tensor& start, const Tensor& end, const Tensor& weight) {
+    const Tensor& start,
+    const Tensor& end,
+    const Tensor& weight) {
   if (weight.sizes().size() == 0) {
     return _lerp_scalar(start, end, weight.item<float>());
   }
   return _lerp_tensor(start, end, weight);
 }
 
-Tensor& lerp_tensor_(
-    Tensor& self, const Tensor& end, const Tensor& weight) {
+Tensor& lerp_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
   if (weight.sizes().size() == 0) {
     return _lerp_scalar_(self, end, weight.item<float>());
   }
