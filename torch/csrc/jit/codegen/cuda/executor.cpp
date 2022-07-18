@@ -762,8 +762,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       if (outputs.empty()) {
         FUSER_PERF_SCOPE("ExecutorRunFusion::OutputAlloc");
         for (const auto i : c10::irange(executor_entry->output_sizes.size())) {
-          allocated_outputs.push_back(at::native::empty_cuda(
+          allocated_outputs.push_back(at::native::empty_strided_cuda(
               executor_entry->output_sizes[i],
+              executor_entry->output_strides[i],
               executor_entry->output_types[i],
               c10::nullopt,
               options_.device,
@@ -934,6 +935,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       executor_entry->io_alias_indices = alias_indices;
       for (const auto& output : allocated_outputs) {
         executor_entry->output_sizes.push_back(output.sizes().vec());
+        executor_entry->output_strides.push_back(output.strides().vec());
         executor_entry->output_types.push_back(output.scalar_type());
       }
 
