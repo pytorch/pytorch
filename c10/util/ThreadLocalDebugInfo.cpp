@@ -1,5 +1,6 @@
-#include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+
+#include <c10/util/ThreadLocal.h>
 
 namespace c10 {
 

@@ -1,5 +1,4 @@
-#include <c10/macros/Macros.h>
-#include <c10/util/Flags.h>
+#include <c10/util/Flags.h> // IWYU pragma: associated
 
 #include <cstdlib>
 #include <iostream>

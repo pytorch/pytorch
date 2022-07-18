@@ -1,7 +1,7 @@
 #pragma once
 
+// IWYU pragma: begin_exports
 #include <c10/util/BFloat16.h>
-#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
 #include <c10/util/qint32.h>
@@ -9,9 +9,12 @@
 #include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
+// IWYU pragma: end_exports
 
-#include <complex>
-#include <cstdint>
+#include <c10/util/Exception.h>
+
+#include <complex> // IWYU pragma: export
+#include <cstdint> // IWYU pragma: export
 #include <ostream>
 
 namespace c10 {

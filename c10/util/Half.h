@@ -9,6 +9,9 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
+
+// include-what-you-use want to put this include in the wrong place
+// IWYU pragma: no_include "c10/util/Half-inl.h"
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
@@ -542,4 +545,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
-#include <c10/util/Half-inl.h> // IWYU pragma: keep
+#include <c10/util/Half-inl.h> // IWYU pragma: export

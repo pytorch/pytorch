@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cmath>
+#include <cmath> // IWYU pragma: export
 
 // Android NDK platform < 21 with libstdc++ has spotty C++11 support.
 // Various hacks in this header allow the rest of the codebase to use

@@ -1,5 +1,6 @@
-#include <c10/util/Backtrace.h>
 #include <c10/util/signal_handler.h>
+
+#include <c10/util/Backtrace.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 

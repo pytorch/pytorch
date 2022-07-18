@@ -7,6 +7,10 @@
 #include <limits>
 #include <sstream>
 
+// include-what-you-use want to put these includes in the wrong place
+// IWYU pragma: no_include "c10/util/Logging.h"
+// IWYU pragma: no_include "c10/util/logging_is_not_google_glog.h"
+// IWYU pragma: no_include "c10/util/logging_is_google_glog.h"
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -23,9 +27,9 @@
 
 // Below are different implementations for glog and non-glog cases.
 #ifdef C10_USE_GLOG
-#include <c10/util/logging_is_google_glog.h>
+#include <c10/util/logging_is_google_glog.h> // IWYU pragma: export
 #else // !C10_USE_GLOG
-#include <c10/util/logging_is_not_google_glog.h>
+#include <c10/util/logging_is_not_google_glog.h> // IWYU pragma: export
 #endif // C10_USE_GLOG
 
 C10_DECLARE_int(caffe2_log_level);

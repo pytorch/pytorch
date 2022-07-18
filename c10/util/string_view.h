@@ -10,14 +10,14 @@
 #include <string>
 
 #if __cpp_lib_string_view
-#include <string_view>
+#include <string_view> // IWYU pragma: export
 #define C10_HAS_STD_STRING_VIEW() 1
 #define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
 #elif defined(__has_include)
 #if __has_include(<experimental/string_view>)
 // libc++ 7.0 has experimental/string_view but it's just a #error
 #if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION < 7000)
-#include <experimental/string_view>
+#include <experimental/string_view> // IWYU pragma: export
 #endif
 #if __cpp_lib_experimental_string_view
 #define C10_HAS_STD_STRING_VIEW() 0

@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_CMAKE_MACROS_H_
 #define C10_MACROS_CMAKE_MACROS_H_
+// IWYU pragma: private, include "c10/macros/Macros.h"
 
 // Automatically generated header file for the C10 library.
 // Do not include this file directly. Instead, include c10/macros/Macros.h.

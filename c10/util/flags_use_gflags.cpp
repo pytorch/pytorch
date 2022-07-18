@@ -1,10 +1,10 @@
-#include <c10/util/Flags.h>
+#include <c10/util/Flags.h> // IWYU pragma: keep
 
-#include <string>
+#ifdef C10_USE_GFLAGS
 
 #include <c10/macros/Macros.h>
 
-#ifdef C10_USE_GFLAGS
+#include <string>
 
 namespace c10 {
 

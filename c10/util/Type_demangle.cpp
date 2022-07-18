@@ -1,4 +1,4 @@
-#include <c10/util/Type.h>
+#include <c10/util/Type.h> // IWYU pragma: associated
 
 #include <cstdlib>
 #include <functional>

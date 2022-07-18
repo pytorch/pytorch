@@ -31,8 +31,9 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <c10/util/Logging.h>
 #include <c10/util/int128.h>
+
+#include <c10/util/Logging.h>
 #include <iomanip>
 #include <ostream> // NOLINT(readability/streams)
 #include <sstream>

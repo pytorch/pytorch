@@ -1,4 +1,4 @@
-#include <c10/util/Type.h>
+#include <c10/util/Type.h> // IWYU pragma: keep
 
 #if HAS_DEMANGLE == 0
 namespace c10 {

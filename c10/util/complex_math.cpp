@@ -1,7 +1,6 @@
-#include <c10/util/complex.h>
-#include <c10/util/math_compat.h>
+#include <c10/util/complex.h> // IWYU pragma: associated
 
-#include <cmath>
+#include <c10/util/math_compat.h> // IWYU pragma: keep
 
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

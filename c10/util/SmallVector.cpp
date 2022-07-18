@@ -15,6 +15,7 @@
 // deleted LLVM_ENABLE_EXCEPTIONS
 
 #include <c10/util/SmallVector.h>
+
 #include <cstdint>
 #include <stdexcept>
 using namespace c10;

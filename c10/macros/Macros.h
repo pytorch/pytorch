@@ -19,10 +19,10 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include <c10/macros/cmake_macros.h>
+#include <c10/macros/cmake_macros.h> // IWYU pragma: export
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
-#include <c10/macros/Export.h>
+#include <c10/macros/Export.h> // IWYU pragma: export
 
 #if defined(__clang__)
 #define __ubsan_ignore_float_divide_by_zero__ \
