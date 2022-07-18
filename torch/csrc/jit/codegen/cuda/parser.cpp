@@ -742,6 +742,13 @@ class IrParser {
                   aten_to_data_type(*tensor_type->scalarType()), out)
                   ->as<TensorView>();
       }
+
+      if (out->isFusionOutput()) {
+        // TODO: This is wasted memory bandwidth, we need to copy since we can't
+        // output a tensor twice.
+        out = set(out);
+      }
+
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
@@ -3202,6 +3209,79 @@ class IrParser {
             },
             nullptr);
       }
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_as_copy(Tensor self, Tensor other) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getPWFormatValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+            auto other = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto output = expand_as(self, other);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                expand_sizes.has_value(), "The size parameter is required.");
+
+            std::vector<CgValue> expand_sizes_vec;
+            for (const int64_t& size : expand_sizes.value()) {
+              expand_sizes_vec.push_back(IrBuilder::create<Int>(size));
+            }
+
+            // TODO: we should be able to support dynamic expand values
+            auto output = expand(self, expand_sizes_vec);
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            // expand_sizes needs to be constant
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            if (!expand_sizes.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
     }
   }
 
