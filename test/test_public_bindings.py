@@ -247,7 +247,8 @@ class TestPublicBindings(TestCase):
             "view_copy",
             "generated",
             "dynamic_output_shape",
-            "nondeterministic",
+            "nondeterministic_bitwise",
+            "nondeterministic_seeded",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
