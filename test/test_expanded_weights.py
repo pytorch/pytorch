@@ -165,6 +165,7 @@ class TestExpandedWeightFunctional(TestCase):
         # check equality
         self.assertEqual(len(per_sample_grad), len(expanded_weight_grad))
         if loss_reduction == "mean":
+            # don't check equality of `input.grad`s since these vanilla tensors won't be scaled
             expanded_weight_grad = expanded_weight_grad[1:]
             per_sample_grad = per_sample_grad[1:]
         for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
