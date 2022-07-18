@@ -470,7 +470,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    torch._C._cuda_setStream(stream._stream_id, stream._device_index)
+    torch._C._cuda_setStream(stream.stream_id, stream.device_index)
 
 def _parse_visible_devices() -> Set[int]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
