@@ -1,28 +1,20 @@
 # Intro
 The data sparsifier inherits from the ```BaseSparsifier``` class.
 The current base sparsifier accepts a model and sparsifies its layers by introducing parametrization.
-<br> 
-The data sparsifier attempts to sparsify data tensors in general. The data tensors can also be weight tensors of the model. The base sparsifier can be generalized into data sparsifier in the case when weight tensors of the model layers are passed instead of the layer.
-
 <br>
+The data sparsifier attempts to sparsify data tensors in general. The data tensors can also be weight tensors of the model. The base sparsifier can be generalized into data sparsifier in the case when weight tensors of the model layers are passed instead of the layer.
 
 # Implementation Details
 The base sparsifier introduces sparsity in the model by introducing layer parametrizations which means that the mask is owned by the model and not the sparsifier class.
-<br>
+
 The data sparsifier does not receive a model or a layer to sparsify. Hence, the mask needs to be owned by the data sparsifier. This is acheived by introducing a private container model that registers the data as a parametrized buffer.
 
-<br>
-
 The BaseDataSparsifier handles all the housekeeping while allowing the user to just implement the ```update_mask``` logic in their implementation.
-
-<br>
 
 # Supported data
 1. torch tensors (torch.Tensor)
 2. parameters (nn.Parameter)
 3. embedding and embedding bags (nn.Embeddings / nn.EmbeddingBag)
-
-<br>
 
 # Code snippets
 ```BaseDataSparsifier```: base class with abstract method ```update_mask``` that computes the new mask for all the data.
@@ -43,8 +35,6 @@ data_sparsifier.step()
 data_sparsifier.squash_mask()
 ```
 
-<br>
-
 # Write your own data sparsifier.
 The custom data sparsifier should be inherited from the BaseDataSparsifier class and the ```update_mask()``` should be implemented. For example, the following data sparsifier just creates a mask to zero out the first row of the data.
 ```
@@ -54,11 +44,9 @@ class ImplementedDataSparsifier(BaseDataSparsifier):
         mask[0] = 0
 ```
 
-Note 
+Note::
 1. It is the responsibility of the ```BaseDataSparsifier``` to call the ```self.update_mask``` when appropriate.
 2. The mask should be modified in place. Some valid inplace operations are
     1. Change a portion of a mask: ```mask[:10] = torch.zeros(10)```
     2. Use an inplace operator: ```mask *= another_mask```
     3. Change the underlying data: ```mask.data = torch.zeros_like(mask)```
-
-
