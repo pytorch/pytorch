@@ -207,11 +207,14 @@ class TestSparseCompressed(TestCase):
             # replaced with a N-list where N==len(densesize) and the
             # shape corresponds to densesize.
 
+            max_val = torch.iinfo(dtype).max if dtype in [torch.int16, torch.int8, torch.uint8] else None
+
             def list_add(lst, value):
                 # recursively add a value to lst items
                 if isinstance(lst, list):
                     return [list_add(item, value) for item in lst]
-                return lst + value
+                rc = lst + value
+                return rc if max_val is None else (rc % max_val)
 
             def stretch_values(value, bdim, values_item_shape):
                 # replace a value with a new value that extends the
