@@ -183,6 +183,12 @@ __all__ = [
     # Randomness Prims
     #
     "uniform",
+    #
+    # FFT prims
+    #
+    "fft_r2c",
+    "fft_c2c",
+    "fft_c2r",
 ]
 
 #
@@ -2491,7 +2497,7 @@ def _full_like_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    strides = strides = utils.compute_elementwise_output_strides(a)
+    strides = utils.compute_elementwise_output_strides(a)
     if a.numel() == 0:
         strides = a.stride()
 
@@ -2668,4 +2674,127 @@ uniform = _make_prim(
     meta=_uniform_meta,
     impl_aten=_uniform_aten,
     doc=_uniform_doc,
+)
+
+
+def _fft_r2c_meta(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    onesided: bool,
+) -> TensorLikeType:
+    dim = utils.canonicalize_dims(input.ndim, dim)
+    utils.validate_no_repeating_dims(dim)
+
+    shape = list(input.shape)
+    if onesided:
+        last_dim = dim[-1]
+        shape[last_dim] = shape[last_dim] // 2 + 1
+
+    dtype = utils.corresponding_complex_dtype(input.dtype)
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
+
+
+def _fft_r2c_aten(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    onesided: bool,
+) -> TensorLikeType:
+    normalization = 0  # No normalization
+    return torch._fft_r2c(input, dim, normalization, onesided)
+
+
+_fft_r2c_doc = """
+    Performs a real to complex Fast Fourier Transform
+"""
+
+
+fft_r2c = _make_prim(
+    schema="fft_r2c(Tensor self, *, int[] dim, bool onesided) -> Tensor",
+    meta=_fft_r2c_meta,
+    impl_aten=_fft_r2c_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_fft_r2c_doc,
+)
+
+
+def _fft_c2c_meta(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    forward: bool,
+) -> TensorLikeType:
+    dim = utils.canonicalize_dims(input.ndim, dim)
+    utils.validate_no_repeating_dims(dim)
+
+    shape = input.shape
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(
+        shape=shape, strides=strides, dtype=input.dtype, device=input.device
+    )
+
+
+def _fft_c2c_aten(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    forward: bool,
+) -> TensorLikeType:
+    normalization = 0  # No normalization
+    return torch._fft_c2c(input, dim, normalization, forward)
+
+
+_fft_c2c_doc = """
+    Performs either a Fast Fourier Transform, or its inverse
+"""
+
+
+fft_c2c = _make_prim(
+    schema="fft_c2c(Tensor self, *, int[] dim, bool forward) -> Tensor",
+    meta=_fft_c2c_meta,
+    impl_aten=_fft_c2c_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_fft_c2c_doc,
+)
+
+
+def _fft_c2r_meta(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    last_dim_size: int,
+) -> TensorLikeType:
+    dim = utils.canonicalize_dims(input.ndim, dim)
+    utils.validate_no_repeating_dims(dim)
+
+    shape = list(input.shape)
+    shape[dim[-1]] = last_dim_size
+    dtype = utils.corresponding_real_dtype(input.dtype)
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
+
+
+def _fft_c2r_aten(
+    input: TensorLike,
+    *,
+    dim: DimsSequenceType,
+    last_dim_size: int,
+) -> TensorLikeType:
+    normalization = 0  # No normalization
+    return torch._fft_c2r(input, dim, normalization, last_dim_size)
+
+
+_fft_c2r_doc = """
+    Performs a complex to real Inverse Fast Fourier Transform
+"""
+
+
+fft_c2r = _make_prim(
+    schema="fft_c2r(Tensor self, *, int[] dim, int last_dim_size) -> Tensor",
+    meta=_fft_c2r_meta,
+    impl_aten=_fft_c2r_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_fft_c2r_doc,
 )
