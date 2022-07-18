@@ -3850,29 +3850,29 @@ torch.cuda.synchronize()
             real_inputs = [torch.rand_like(x) for _ in range(10)]
             real_targets = [torch.rand_like(y) for _ in range(10)]
 
-            with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
-                for m, opt, loss_fn in zip((model_graphed, model_control),
-                                           (opt_graphed, opt_control),
-                                           (loss_fn_graphed, loss_fn_control)):
-                    # Resets RNC states before iterations for graphed and ungraphed models,
-                    # so dropout math should be bitwise identical for both.
-                    torch.manual_seed(5)
-                    torch.cuda.manual_seed(5)
-                    for data, target in zip(real_inputs, real_targets):
-                        opt.zero_grad(set_to_none=True)
+
+            for m, opt, loss_fn in zip((model_graphed, model_control),
+                                       (opt_graphed, opt_control),
+                                       (loss_fn_graphed, loss_fn_control)):
+                # Resets RNC states before iterations for graphed and ungraphed models,
+                # so dropout math should be bitwise identical for both.
+                torch.manual_seed(5)
+                torch.cuda.manual_seed(5)
+                for data, target in zip(real_inputs, real_targets):
+                    opt.zero_grad(set_to_none=True)
+                    with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
                         y_pred = m(data)
                         loss = loss_fn(y_pred, target)
                         loss.backward()
-                        opt.step()
-                        torch.clear_autocast_cache()
+                    opt.step()
+ 
+            for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
+                self.assertEqual(pg, pc)
 
-                for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
-                    self.assertEqual(pg, pc)
-
-                # We graphed the models in training mode. Eval should still run ungraphed.
-                model_graphed.eval()
-                model_control.eval()
-                self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+            # We graphed the models in training mode. Eval should still run ungraphed.
+            model_graphed.eval()
+            model_control.eval()
+            self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]), exact_dtype=False)
 
             del model_graphed
             del opt_graphed
