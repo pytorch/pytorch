@@ -719,11 +719,11 @@ TEST_F(VulkanAPITest, quantized_sub) {
   float r3 = 2.0;
   float r4 = 5.0;
   const auto in_cpu = (r1 - r2) *
-          at::rand({1, 4, 2, 2}, at::device(at::kCPU).dtype(at::kFloat)) +
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
       r2;
   const auto in_vulkan = in_cpu.vulkan();
   const auto in_cpu2 = (r3 - r4) *
-          at::rand({1, 4, 2, 2}, at::device(at::kCPU).dtype(at::kFloat)) +
+          at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) +
       r4;
   const auto in_vulkan2 = in_cpu2.vulkan();
 
