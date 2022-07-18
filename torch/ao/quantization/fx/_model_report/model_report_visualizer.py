@@ -1,4 +1,5 @@
-from typing import Any, Set, List, Tuple, OrderedDict
+import torch
+from typing import Any, Set, Dict, List, Tuple, OrderedDict
 
 class ModelReportVisualizer:
     r"""
@@ -68,7 +69,8 @@ class ModelReportVisualizer:
         Returns all the unique module fqns present in the reports the ModelReportVisualizer
         instance was initialized with.
         """
-        pass
+        # returns the keys of the ordered dict
+        return set(self.generated_reports.keys())
 
     def get_all_unique_feature_names(self, plottable: bool) -> Set[str]:
         r"""
@@ -84,7 +86,23 @@ class ModelReportVisualizer:
         Returns all the unique module fqns present in the reports the ModelReportVisualizer
         instance was initialized with.
         """
-        pass
+        unique_feature_names = set()
+        for module_fqn in self.generated_reports:
+            # get dict of the features
+            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
+
+            # loop through features
+            for feature_name in feature_dict:
+                # if we need plottable, ensure type of val is tensor
+                if plottable:
+                    if type(feature_dict[feature_name]) == torch.Tensor:
+                        unique_feature_names.add(feature_name)
+                else:
+                    # any and all features
+                    unique_feature_names.add(feature_name)
+
+        # return our compiled set of unique feature names
+        return unique_feature_names
 
     def generate_table_view(self, feature: str = "", module_fqn_prefix_filter: str = "") -> Tuple[List[List[Any]], str]:
         r"""
