@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+
+from torchgen.api import cpp
 
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
-from torchgen.api import cpp
 from torchgen.gen import pythonify_default
 from torchgen.model import (
     Argument,
@@ -793,7 +794,11 @@ def signature(
                 name="dtype",
                 type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
-                default_init=topt_default_init("dtype"),
+                default_init=(
+                    "self.scalar_type()"
+                    if is_like_or_new_function
+                    else topt_default_init("dtype")
+                ),
             )
         )
         tensor_options_args.append(
