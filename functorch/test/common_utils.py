@@ -144,7 +144,22 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=2):
         yield batched_args, in_dims, kwarg_values
 
 
-def get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size=2):
+def is_batch_norm_training(op_name, kwarg_values):
+    batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
+    if op_name not in batch_norm_fns:
+        return False
+
+    # batch norm and instance norm require the value to be a plain bool
+    default_training = op_name == "nn.functional.instance_norm"  # instance norm defaults to training, batch norm doesn't
+    is_training = tuple(arg for arg in tuple(kwarg_values.values()) if isinstance(arg, bool))
+    if len(is_training) == 0:
+        return default_training
+    else:
+        assert len(is_training) == 1
+        return is_training[0]
+
+
+def get_exhaustive_batched_inputs_batch_norm_is_training(arg_values, kwarg_values, batch_size=2):
     flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
     is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
     num_tensors = sum(is_tensors)
@@ -169,13 +184,12 @@ def get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_siz
         yield batched_args, in_dims, kwarg_values
 
 
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, opinfo=None, compute_loop_out=True):
+def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm_and_training=False, compute_loop_out=True):
     out_dim = 0
     batch_size = 2
-    batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
 
-    if opinfo is not None and opinfo.name in batch_norm_fns:
-        generator = get_exhaustive_batched_inputs_batch_norm(arg_values, kwarg_values, batch_size)
+    if is_batch_norm_and_training:
+        generator = get_exhaustive_batched_inputs_batch_norm_is_training(arg_values, kwarg_values, batch_size)
     else:
         generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
 
