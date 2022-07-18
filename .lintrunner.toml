@@ -670,7 +670,9 @@ code = 'UFMT'
 # After that, we can use **/*.py to apply the formatter to all entries
 # currently enforced by BLACK linter
 include_patterns = [
+    'test/onnx/**/*.py',
     'tools/**/*.py',
+    'torchgen/**/*.py',
 ]
 command = [
     'python3',
