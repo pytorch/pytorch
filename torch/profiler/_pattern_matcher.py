@@ -4,6 +4,7 @@ from typing import Dict, List, Set
 
 import torch
 from torch.profiler import profile
+from torch.profiler._utils import index_of_first_match
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_Backend, _ExtraFields_Allocation,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
@@ -191,11 +192,29 @@ class ForLoopIndexingPattern(Pattern):
         _, next = self.siblings_of(event)
         if len(next) <= 1:
             return False
-        for sibling in next[1::2]:
-            if sibling.name() != "aten::select":
+
+        # Custom event list matching
+        def same_ops(list1, list2):
+            if len(list1) != len(list2):
+                return False
+            for op1, op2 in zip(list1, list2):
+                if op1.name() != op2.name():
+                    return False
+            return True
+
+        # Record the ops between two aten::select
+        next_select_idx = index_of_first_match(
+            next, lambda e: e.name() == "aten::select")
+        if next_select_idx is None:
+            return False
+        indexing_ops = [event] + next[:next_select_idx]
+        next = next[len(indexing_ops) - 1:]
+        for i in range(0, len(next), len(indexing_ops)):
+            if same_ops(indexing_ops, next[i:i + len(indexing_ops)]):
+                repeat_count += 1
+                self.visited.add(next[i].id)
+            else:
                 break
-            self.visited.add(sibling.id)
-            repeat_count += 1
         return repeat_count >= 10
 
 
@@ -212,7 +231,7 @@ class FP32MatMulPattern(Pattern):
     def skip(self):
         has_tf32 = all(
             int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
-        return has_tf32
+        return has_tf32 is False
 
     def match(self, event: _ProfilerEvent):
         # If we saw this pattern once, we don't need to match it again

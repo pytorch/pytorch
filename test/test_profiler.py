@@ -1524,7 +1524,8 @@ aten::mm""")
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @unittest.skipIf(TEST_WITH_CROSSREF,
+                     "crossref intercepts calls and changes the callsite.")
     def test_profiler_for_loop_indexing_pattern(self):
         x = torch.ones((100, 100))
 
@@ -1547,7 +1548,11 @@ aten::mm""")
             for _ in range(100):
                 y = y @ x
 
-        cases = ((1, case1), (1, case2), (1, case3), (0, case4))
+        def case5():
+            for i in range(100):
+                x[i, :] = torch.arange(100) + i
+
+        cases = ((1, case1), (1, case2), (1, case3), (0, case4), (1, case5))
         num_matched = []
         for _, fn in cases:
             with profile(with_stack=True) as prof:
