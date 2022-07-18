@@ -1097,6 +1097,27 @@ size_t dataTypeSize(DataType type, DataType index_type) {
   return dataTypeSize(type);
 }
 
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const DoubleBufferLoopStage loop_stage) {
+  switch (loop_stage) {
+    case DoubleBufferLoopStage::NotApplicable:
+      break;
+    case DoubleBufferLoopStage::Prolog:
+      os << "{DoubleBufferProlog}";
+      break;
+    case DoubleBufferLoopStage::Main:
+      os << "{DoubleBufferMainLoop}";
+      break;
+    case DoubleBufferLoopStage::Epilog:
+      os << "{DoubleBufferEpilog}";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown double buffer stage");
+  }
+  return os;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

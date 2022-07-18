@@ -1,4 +1,5 @@
 {
+  "being_migrated": {},
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -620,66 +621,6 @@
     "Optional",
     "get_remote_module_template"
   ],
-  "torch.distributed.optim.functional_adadelta": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.distributed.optim.functional_adagrad": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.distributed.optim.functional_adam": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.distributed.optim.functional_adamax": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.distributed.optim.functional_adamw": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.distributed.optim.functional_rmsprop": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.distributed.optim.functional_rprop": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.distributed.optim.functional_sgd": [
-    "Dict",
-    "List",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.distributed.optim.optimizer": [
-    "List",
-    "Lock",
-    "Optional",
-    "RRef",
-    "Tensor",
-    "defaultdict"
-  ],
   "torch.distributed.optim.utils": [
     "Type"
   ],
@@ -1208,6 +1149,7 @@
     "tensorinv",
     "tensorsolve",
     "vander",
+    "vecdot",
     "vector_norm"
   ],
   "torch.multiprocessing": [
