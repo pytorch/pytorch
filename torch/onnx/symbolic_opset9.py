@@ -643,9 +643,11 @@ def sign(g, self):
     return g.op("Sign", self)
 
 
+@symbolic_helper.quantized_args(True)
 def _slice(g, input, axes, starts, ends):
+    INT64_MAX = 9223372036854775807
     assert len(starts) == len(ends)
-    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == INT64_MAX:
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
@@ -699,6 +701,8 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
+
+        @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() == "onnx::Constant":
@@ -712,6 +716,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
+        @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", dim_desc, "i", "none")
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
@@ -766,10 +771,12 @@ def _standard_gamma(g, self, generator):
         return symbolic_helper._onnx_unsupported("_standard_gamma")
 
 
+@symbolic_helper.quantized_args(True)
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+@symbolic_helper.quantized_args(True)
 def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     perm = list(reversed(range(0, ndim)))
@@ -795,6 +802,7 @@ def expand(g, self, size, implicit):
     return g.op("Expand", self, size)
 
 
+@symbolic_helper.quantized_args(True, True)
 def expand_as(g, self, other):
     self_t = symbolic_helper._maybe_get_const(self, "t")
     if isinstance(self_t, torch.Tensor):
