@@ -150,7 +150,7 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
-    "lift",
+    "lift.*",
     "normal_functional",  # only used by the functionalization pas
 ]
 

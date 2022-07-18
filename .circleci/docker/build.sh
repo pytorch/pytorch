@@ -141,6 +141,16 @@ case "$image" in
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.7.0
+    CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=7
     PROTOBUF=yes
@@ -262,6 +272,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.7
     CUDNN_VERSION=8
     CLANG_VERSION=12
     PROTOBUF=yes
