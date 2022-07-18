@@ -1,3 +1,4 @@
+#include <ATen/ArrayRef.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <torch/library.h>
@@ -7,6 +8,21 @@ namespace native {
 namespace vulkan {
 namespace ops {
 namespace {
+
+bool broadcast_input(IntArrayRef input_size_1, IntArrayRef input_size_2) {
+  return ((input_size_1[3] > 1 && input_size_2[3] == 1) ||
+          (input_size_2[3] > 1 && input_size_1[3] == 1) ||
+          (input_size_2[3] == input_size_1[3])) &&
+      ((input_size_1[2] > 1 && input_size_2[2] == 1) ||
+       (input_size_2[2] > 1 && input_size_1[2] == 1) ||
+       (input_size_2[2] == input_size_1[2])) &&
+      ((input_size_1[1] > 1 && input_size_2[1] == 1) ||
+       (input_size_2[1] > 1 && input_size_1[1] == 1) ||
+       (input_size_2[1] == input_size_1[1])) &&
+      ((input_size_1[0] > 1 && input_size_2[0] == 1) ||
+       (input_size_2[0] > 1 && input_size_1[0] == 1) ||
+       (input_size_2[0] == input_size_1[0]));
+}
 
 void check_inputs(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(
@@ -25,29 +41,48 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
 
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
-  if (input1_h != input2_h) {
-    if (input1_h > input2_h) {
-      TORCH_CHECK(input2_h == 1, broadcast_error_msg);
-      TORCH_CHECK(input2_w == input1_w || input2_w == 1, broadcast_error_msg);
-    } else if (input2_h > input1_h) {
-      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
-      TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
-    }
-  } else if (input1_w != input2_w) {
-    if (input1_w > input2_w) {
-      TORCH_CHECK(input2_w == 1, broadcast_error_msg);
-    } else if (input2_w > input1_w) {
-      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
-    }
-  }
+
+  const Tensor self = input1.is_vulkan() ? input1 : input2.vulkan();
+  const vTensor& v_self = convert(self);
+
+  const Tensor other = input2.is_vulkan() ? input1 : input2.vulkan();
+  const vTensor& v_other = convert(other);
+  TORCH_CHECK(
+      broadcast_input(v_self.sizes(), v_other.sizes()), broadcast_error_msg);
 }
 
-bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
-  return (
-      (input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1) ||
-      (input2.extents().data[2u] > 1 && input1.extents().data[2u] == 1) ||
-      input2.extents().data[0u] > input1.extents().data[0u]);
+std::vector<int64_t> broadcast_size(
+    IntArrayRef input_size_1,
+    IntArrayRef input_size_2) {
+  std::vector<int64_t> out = {
+      input_size_1[0], input_size_1[1], input_size_1[2], input_size_1[3]};
+  if (input_size_1[3] > 1 && input_size_2[3] == 1) {
+    out[3] = input_size_1[3];
+  } else if (input_size_2[3] > 1 && input_size_1[3] == 1) {
+    out[3] = input_size_2[3];
+  }
+
+  if (input_size_1[2] > 1 && input_size_2[2] == 1) {
+    out[2] = input_size_1[2];
+  } else if (input_size_2[2] > 1 && input_size_1[2] == 1) {
+    out[2] = input_size_2[2];
+  }
+
+  if (input_size_1[1] > 1 && input_size_2[1] == 1) {
+    out[1] = input_size_1[1];
+  } else if (input_size_2[1] > 1 && input_size_1[1] == 1) {
+    out[1] = input_size_2[1];
+  }
+
+  if (input_size_1[0] > 1 && input_size_2[0] == 1) {
+    out[0] = input_size_1[0];
+  } else if (input_size_2[0] > 1 && input_size_1[0] == 1) {
+    out[0] = input_size_2[0];
+  }
+
+  return out;
 }
+
 } // namespace
 using namespace api::utils;
 
@@ -178,7 +213,7 @@ Tensor arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_first_input(v_self, v_other) ? v_other.sizes() : v_self.sizes(),
+      broadcast_size(v_self.sizes(), v_other.sizes()),
       v_self.options(),
   };
 
@@ -252,7 +287,7 @@ Tensor quantized_arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_first_input(v_self, v_other) ? v_other.sizes() : v_self.sizes(),
+      broadcast_size(v_self.sizes(), v_other.sizes()),
       self.options().dtype(c10::kQUInt8),
       scale,
       zero_point};

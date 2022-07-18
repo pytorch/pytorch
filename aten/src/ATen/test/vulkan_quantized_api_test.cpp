@@ -295,10 +295,10 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
   }
 
   const auto in_cpu =
-      at::rand({2, 13, 1, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+      at::rand({2, 13, 1, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan = in_cpu.vulkan();
   const auto in_cpu2 =
-      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+      at::rand({2, 13, 32, 1}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto in_vulkan2 = in_cpu2.vulkan();
 
   const double scale = 0.1;
@@ -320,9 +320,11 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
   const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
       out_vulkan, out_vulkan2, scale3, zero_point3);
 
+  const auto in_cpu3 =
+      at::rand({2, 13, 32, 27}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   const auto out_vulkan_deq =
       at::native::vulkan::ops::dequantize(vulk_added_tensors);
-  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu3);
 
   float rtol = 0;
   float atol = 0.5;
