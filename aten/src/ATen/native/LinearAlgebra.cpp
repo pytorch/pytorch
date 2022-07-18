@@ -40,7 +40,7 @@ namespace detail {
           " for ", isComplexType(self_dtype) ? "complex" : "real", " inputs, but got ", dtype);
       TORCH_CHECK(promoteTypes(self_dtype, dtype) == dtype,
           name, ": the dtype of the input ", "(", self_dtype, ") should be convertible ",
-          "without narrowing to the specified dtype (", dtype, ").");
+          "without narrowing to the specified dtype (", dtype, ")");
     }
   }
 }
@@ -89,13 +89,14 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce the whole tensor
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
-    TORCH_CHECK(opt_dim.has_value(),
+    // dim=None or dim=() reduces the whole tensor
+    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
       TORCH_CHECK(self.size(dim_num) != 0,
-        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
-        "dimension because the operation does not have an identity");
+        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on the dimension ", dim_num ,
+        "because this dimension is empty and the operation does not have an identity");
     }
   }
 
@@ -125,6 +126,29 @@ TORCH_META_FUNC(_linalg_det)(const Tensor& A) {
 
   // pivots
   set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
+}
+
+TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
+  at::native::squareCheckInputs(A, "linalg.slogdet");
+  at::native::checkFloatingOrComplex(A, "linalg.slogdet", /*low_precision*/false);
+
+  auto shape= A.sizes();
+  auto ndim = shape.size();
+
+  auto shape_outputs = shape.slice(0, ndim - 2);
+
+  // sign
+  set_output_contiguous(0, shape_outputs, A.options());
+
+  // logabsdet
+  set_output_contiguous(1, shape_outputs, A.options().dtype(toRealValueType(A.scalar_type())));
+
+  // LU
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
+  set_output_strided(2, shape, LU_strides, A.options());
+
+  // pivots
+  set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
 }
 
 template <typename Meta>
@@ -206,7 +230,10 @@ Tensor lu_det_P(const Tensor& pivots) {
 TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivots) {
   // info is an aux tensor
   auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A);
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
   // det = det_P * prod(diag(LU))
   at::mul_out(const_cast<Tensor&>(result), lu_det_P(pivots), at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
@@ -228,71 +255,59 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self, "logdet");
-  checkFloatingOrComplex(self, "logdet");
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.slogdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = lu_det_P(pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+// Auxiliary function that returns the LU decomposition to use it in the backward
+TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
+  // info is an aux tensor
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
-  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
-  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
-  if (self.dim() > 2) {
-    auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
-  } else if (det_sign.item<double>() < 0) {
-    logdet_vals.fill_(NAN);
+  auto diag_U = LU.diagonal(0, -2, -1);
+  // sign
+  at::mul_out(const_cast<Tensor&>(sign), diag_U.sgn().prod(-1), lu_det_P(pivots));
+
+  // logabsdet
+  at::sum_out(const_cast<Tensor&>(logabsdet), diag_U.abs().log_(), -1);
+}
+
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {
+  auto out = at::_linalg_slogdet(A);
+  return std::make_tuple(std::move(std::get<0>(out)), std::move(std::get<1>(out)));
+}
+
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  at::_linalg_slogdet_out(sign, logabsdet, LU, pivots, A);
+  return std::tie(sign, logabsdet);
+}
+
+// Alias
+std::tuple<Tensor, Tensor> slogdet(const Tensor& A) {
+  return at::linalg_slogdet(A);
+}
+
+std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
+  return at::linalg_slogdet_out(sign, logabsdet, A);
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor logdet(const Tensor& A) {
+  squareCheckInputs(A, "logdet");
+  checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
+  Tensor sign, logabsdet;
+  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
+
+  if (A.is_complex()) {
+    return sign.log() + logabsdet;
+  } else {
+    return at::where(sign == -1., NAN, logabsdet);
   }
-  return logdet_vals;
-}
-
-std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self, "linalg.slogdet");
-  ScalarType t = self.scalar_type();
-  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-              "linalg.slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
-
-  Tensor pivs, lu;
-  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = lu_det_P(pivs);
-  const auto diag_U = lu.diagonal(0, -2 ,-1);
-  const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
-  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
-  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
-  // Since abslogdet_val cannot take nan, no special case handling is required.
-  // in-place abs is not supported for complex tensors
-  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
-  return std::make_tuple(det_sign, abslogdet_val);
-}
-
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  checkSameDevice("linalg.slogdet", sign, input, "sign");
-  checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
-  checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
-  ScalarType real_dtype = toRealValueType(input.scalar_type());
-  // logabsdet is always real-valued here
-  checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
-
-  Tensor sign_tmp, logabsdet_tmp;
-  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
-
-  at::native::resize_output(sign, sign_tmp.sizes());
-  sign.copy_(sign_tmp);
-  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
-  logabsdet.copy_(logabsdet_tmp);
-
-  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
-}
-
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  return at::linalg_slogdet(self);
 }
 
 namespace {
@@ -1237,11 +1252,6 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
-  if (use_mkldnn_bf16_matmul(m1, m2, result)){
-    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
-    return;
-  }
-
   bool transpose_c = false;
   Tensor c;
 
@@ -1312,14 +1322,15 @@ static void addmm_impl_cpu_(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
+        using opmath_t = at::opmath_type<scalar_t>;
         at::native::cpublas::gemm(
             transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
             m, n, k,
-            alpha.to<scalar_t>(),
+            alpha.to<opmath_t>(),
             a.data_ptr<scalar_t>(), lda,
             b.data_ptr<scalar_t>(), ldb,
-            beta.to<scalar_t>(),
+            beta.to<opmath_t>(),
             c.data_ptr<scalar_t>(), ldc);
       });
 
@@ -2008,6 +2019,19 @@ inline Tensor _blob_to_Tensor(
   return _move_memory_if_cuda_input(tensor, in);
 }
 
+template <typename scalar_t>
+inline Tensor _linear_combination(
+    const Tensor& t,
+    std::initializer_list<scalar_t> blob) {
+  // _blob_to_Tensor converts blob to a 2D tensor for _compute_linear_combination.
+  // If this tensor is of shape (1, *), the result of _compute_linear_combination
+  // is going to be of shape (1, *t.shape) so we squeeze(0) so that
+  // for any t with t.dim() >= 1: t.dim() == _compute_linear_combination(t, ...).dim().
+  return at::native::_compute_linear_combination(
+      t, _blob_to_Tensor<scalar_t>(blob, t))
+    .squeeze(0);
+}
+
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -2039,15 +2063,15 @@ Tensor compute_T4(const Tensor& A) {
     // contains A^2
     As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 3),
-      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+      {1 / 2.0, 1 / 6.0, 1 / 24.0}
     )
   );
 
   // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
-  return at::native::_compute_linear_combination(
-    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, 0.0, 1.0}
   );
 }
 
@@ -2074,10 +2098,10 @@ Tensor compute_T8(const Tensor& A) {
     view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       // extract {A, A^2} from As
       As.narrow(0, 1, 2),
-      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+      {x1, x2}
     )
   );
 
@@ -2087,20 +2111,19 @@ Tensor compute_T8(const Tensor& A) {
   _matmul_impl(
     view_out,
     // x3 * A2 + A4
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 2, 2),
-      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+      {x3, 1.0}
     ),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 4),
-      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+      {x4, x5, x6, x7}
     )
   );
 
   // return I + A + y2 * A2 + A8;
-  return at::native::_compute_linear_combination(
-    As,
-    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, y2, 0.0, 1.0}
   );
 }
 

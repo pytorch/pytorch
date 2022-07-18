@@ -6,16 +6,16 @@ import contextlib
 import io
 import itertools
 import unittest
-from typing import Dict, Optional, Type, Callable, Iterable, Tuple, Union, List
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
 import onnx
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import symbolic_helper, utils, symbolic_registry
+from torch.onnx import symbolic_helper, symbolic_registry, utils
 from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
-import torch.nn.functional as F
 
 
 def export_to_onnx(
@@ -134,27 +134,6 @@ class TestOptionalOutput(common_utils.TestCase):
                 for attr in node.attribute:
                     if attr.name in ("then_branch", "else_branch"):
                         self.assertEqual(expected_output_type, attr.g.output[0].type)
-
-    def test_uninitialized_optional(self):
-        class Module(torch.nn.Module):
-            def forward(self, y: Optional[Tensor]) -> Optional[Tensor]:
-                if y is not None:
-                    if y.shape[1] < 5:
-                        if y.size(0) == 1:
-                            y = y + 4
-                        else:
-                            return y
-                return y
-
-        y = torch.ones((3, 4), dtype=torch.int)
-        torch.onnx.export(
-            torch.jit.script(Module()),
-            y,
-            io.BytesIO(),
-            opset_version=15,
-            dynamic_axes={"y": {0: "y0", 1: "y1"}},
-            input_names=["y"],
-        )
 
 
 class TestONNXExport(common_utils.TestCase):
