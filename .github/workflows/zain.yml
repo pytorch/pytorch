@@ -16,11 +16,11 @@ jobs:
     uses: ./.github/workflows/_zain-reusable.yml
     with:
       action-name: ${{ github.workspace }}
-  job-two:
-    name: job two
-    uses: ./.github/workflows/_zain-reusable.yml
-    with:
-      action-name: ${{ env.GITHUB_WORKSPACE }}
+  # job-two:
+  #   name: job two
+  #   uses: ./.github/workflows/_zain-reusable.yml
+  #   with:
+  #     action-name: ${{ env.GITHUB_WORKSPACE }}
 
   # the-first-job:
   #   runs-on: linux.20_04.16x
