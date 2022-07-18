@@ -441,8 +441,10 @@ class TestDecomp(TestCase):
         def check_decomposed(aten_name):
             self.assertTrue(
                 any(overload_to_aten_name(c) == aten_name for c in decomposed),
-                msg=f"aten.{aten_name} was not decomposed, saw calls for: "
-                + ", ".join(map(str, list(called))),
+                msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
+                     f"{', '.join(map(str, list(called)))}. If your op is  "
+                     f"CompositeImplicitAutograd you may need to specify "
+                     "`decomp_aten_name` in its OpInfo")
             )
 
         aten_name = op.decomp_aten_name or op.aten_name

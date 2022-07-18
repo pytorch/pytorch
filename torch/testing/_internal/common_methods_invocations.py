@@ -15044,6 +15044,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nn.functional.relu6',
                    ref=_NOTHING,
                    aten_name="relu6",
+                   decomp_aten_name="hardtanh",
                    dtypes=all_types_and(torch.bfloat16),
                    backward_dtypes=floating_types(),
                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
