@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <c10/util/TypeCast.h>
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -10,35 +9,22 @@
 namespace torch {
 namespace utils {
 
-template <typename T>
-inline T unpackIntegral(PyObject* obj, const char* type) {
-#if PY_VERSION_HEX >= 0x030a00f0
-  // In Python-3.10 floats can no longer be silently converted to integers
-  // Keep backward compatible behavior for now
-  if (PyFloat_Check(obj)) {
-    return c10::checked_convert<T>(THPUtils_unpackDouble(obj), type);
-  }
-#endif
-
-  return c10::checked_convert<T>(THPUtils_unpackLong(obj), type);
-}
-
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   switch (scalarType) {
     case at::kByte:
-      *(uint8_t*)data = unpackIntegral<uint8_t>(obj, "uint8");
+      *(uint8_t*)data = (uint8_t)THPUtils_unpackLong(obj);
       break;
     case at::kChar:
-      *(int8_t*)data = unpackIntegral<int8_t>(obj, "int8");
+      *(int8_t*)data = (int8_t)THPUtils_unpackLong(obj);
       break;
     case at::kShort:
-      *(int16_t*)data = unpackIntegral<int16_t>(obj, "int16");
+      *(int16_t*)data = (int16_t)THPUtils_unpackLong(obj);
       break;
     case at::kInt:
-      *(int32_t*)data = unpackIntegral<int32_t>(obj, "int32");
+      *(int32_t*)data = (int32_t)THPUtils_unpackLong(obj);
       break;
     case at::kLong:
-      *(int64_t*)data = unpackIntegral<int64_t>(obj, "int64");
+      *(int64_t*)data = THPUtils_unpackLong(obj);
       break;
     case at::kHalf:
       *(at::Half*)data =
