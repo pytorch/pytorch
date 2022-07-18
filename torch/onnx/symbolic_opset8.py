@@ -299,8 +299,8 @@ def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
-@symbolic_helper.parse_args("v", "i", "v", "v", "v")
-def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
+def zeros(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return _constant_fill(g, sizes, dtype, 0)
 
@@ -311,8 +311,8 @@ def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
     return _constant_fill(g, shape, dtype, 0)
 
 
-@symbolic_helper.parse_args("v", "i", "v", "v", "v")
-def ones(g, sizes, dtype, layout, device, pin_memory=False):
+@symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
+def ones(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return _constant_fill(g, sizes, dtype, 1)
 
 
@@ -322,7 +322,7 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=N
     return _constant_fill(g, shape, dtype, 1)
 
 
-def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False, memory_format=None):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
