@@ -323,6 +323,9 @@ __all__ = [
     "zeros",
 ]
 
+
+INT64_MAX = 9223372036854775807
+
 # used to represent "missing" optional inputs
 def unused(g):
     n = g.op("prim::Constant")
@@ -645,7 +648,6 @@ def sign(g, self):
 
 @symbolic_helper.quantized_args(True)
 def _slice(g, input, axes, starts, ends):
-    INT64_MAX = 9223372036854775807
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == INT64_MAX:
         return input
@@ -1006,7 +1008,7 @@ def select(g, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
-            end_index = 9223372036854775807
+            end_index = INT64_MAX
         else:
             end_index = index + 1
         slice_node = symbolic_helper._slice_helper(
@@ -3045,7 +3047,7 @@ def slice(g, self, *args):
         else:
             start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
             end = (
-                9223372036854775807
+                INT64_MAX
                 if is_end_none
                 else symbolic_helper._parse_arg(end, "i")
             )
@@ -3065,7 +3067,7 @@ def slice(g, self, *args):
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
         end = (
-            9223372036854775807 if is_end_none else symbolic_helper._parse_arg(end, "i")
+            INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
         )
         return symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[start], ends=[end]
