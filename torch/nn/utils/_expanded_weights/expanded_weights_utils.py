@@ -68,20 +68,20 @@ def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
                          for (name, arg) in expanded_kwargs.items()}
     return unexpanded_args, unexpanded_kwargs
 
-def set_grad_sample_if_exists(maybe_expanded_weight, grad_output, per_sample_grad_fn):
-    def loss_reduction_wrapper(unpacked, grad_output):
-        loss_reduction = maybe_expanded_weight.loss_reduction
-        batch_size = maybe_expanded_weight.batch_size
-        grad_output = grad_output if loss_reduction == "sum" else grad_output * batch_size
-        res = per_sample_grad_fn(unpacked, grad_output)
-        return res
+def maybe_scale_by_batch_size(grad_sample, expanded_weight):
+    if expanded_weight.loss_reduction == "mean":
+        return grad_sample * expanded_weight.batch_size
+    else:
+        return grad_sample
 
+def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
+        grad_sample_contribution = maybe_scale_by_batch_size(per_sample_grad_fn(unpacked), maybe_expanded_weight)
         if hasattr(unpacked, "grad_sample") and unpacked.grad_sample is not None:
-            unpacked.grad_sample = unpacked.grad_sample + loss_reduction_wrapper(unpacked, grad_output)
+            unpacked.grad_sample = unpacked.grad_sample + grad_sample_contribution
         else:
-            unpacked.grad_sample = loss_reduction_wrapper(unpacked, grad_output)
+            unpacked.grad_sample = grad_sample_contribution
 
 def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
     if isinstance(maybe_expanded_weight, ExpandedWeight):
