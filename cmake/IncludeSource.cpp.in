@@ -1,1 +1,1 @@
-#include "@IMPL@"
+#include "@IMPL@" // IWYU pragma: associated

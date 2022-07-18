@@ -1,4 +1,3 @@
-import sys
 import re
 
 QUOTE_INCLUDE_RE = re.compile(r'^#include "(.*)"')
@@ -35,26 +34,44 @@ STD_C_HEADER_MAP = {
 }
 
 
-def main() -> None:
-    for line in sys.stdin:
-        # Convert all quoted includes to angle brackets
-        match = QUOTE_INCLUDE_RE.match(line)
-        if match is not None:
-            print(f"#include <{match.group(1)}>{line[match.end(0):]}", end="")
-            continue
+def use_angled_includes(line: str) -> str:
+    match = QUOTE_INCLUDE_RE.match(line)
+    if match is None:
+        return line
 
-        match = ANGLE_INCLUDE_RE.match(line)
-        if match is not None:
-            path = f"<{match.group(1)}>"
-            new_path = STD_C_HEADER_MAP.get(path, path)
-            tail = line[match.end(0) :]
-            if len(tail) > 1:
-                tail = " " + tail
-            print(f"#include {new_path}{tail}", end="")
-            continue
-
-        print(line, end="")
+    return f"#include <{match.group(1)}>{line[match.end(0):]}"
 
 
-if __name__ == "__main__":
-    main()
+def use_quotes_for_project_includes(line: str) -> str:
+    match = ANGLE_INCLUDE_RE.match(line)
+    if match is None:
+        return line
+
+    filename = match.group(1)
+    if not filename.endswith(".h"):
+        return line
+
+    if (
+        filename.startswith("c10")
+        or filename.startswith("ATen")
+        or filename.startswith("torch")
+    ):
+        return f'#include "{filename}"{line[match.end(0):]}'
+
+    return line
+
+
+def normalize_c_headers(line: str) -> str:
+    match = ANGLE_INCLUDE_RE.match(line)
+    if match is None:
+        return line
+
+    path = f"<{match.group(1)}>"
+    new_path = STD_C_HEADER_MAP.get(path, None)
+    if new_path is None:
+        return line
+
+    tail = line[match.end(0) :]
+    if len(tail) > 1:
+        tail = " " + tail
+    return f"#include {new_path}{tail}"

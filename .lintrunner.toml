@@ -17,6 +17,7 @@ exclude_patterns = [
     'venv/**',
     '**/*.pyi',
     'tools/test/test_selective_build.py',
+    'tools/linter/adapters/iwyu/fix_includes.py',
 ]
 command = [
     'python3',
@@ -73,6 +74,34 @@ command = [
 is_formatter = true
 
 [[linter]]
+code = 'IWYU'
+include_patterns = [
+]
+exclude_patterns = [
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=iwyu',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=iwyu',
+]
+command = [
+    'python3',
+    '-m',
+    'tools.linter.adapters.iwyu.adapter',
+    '--binary=/usr/bin/iwyu_tool',
+    '--build_dir=./build',
+    '--mapping_file=tools/linter/adapters/iwyu/system_headers.imp',
+    '--',
+    '@{{PATHSFILE}}',
+]
+is_formatter = true
+
+
+[[linter]]
 code = 'MYPY'
 include_patterns = [
     'torch/**/*.py',
@@ -105,6 +134,7 @@ exclude_patterns = [
     'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
     'test/test_numpy_interop.py',
     'torch/torch_version.py',
+    'tools/linter/adapters/iwyu/fix_includes.py',
 ]
 command = [
     'python3',
@@ -150,6 +180,7 @@ exclude_patterns = [
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
+    'tools/linter/adapters/iwyu/fix_includes.py',
 ]
 command = [
     'python3',
@@ -573,6 +604,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
+    'tools/linter/adapters/iwyu/fix_includes.py',
 ]
 command = [
     'python3',
