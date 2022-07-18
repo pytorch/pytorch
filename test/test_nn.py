@@ -14255,7 +14255,7 @@ class TestNNDeviceType(NNTestCase):
             x2 = x[..., 0]
             inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
             backend_actual = torch._C._select_conv_backend(*inputs)
-            backend_expected = torch._C._ConvBackend.Slow2d
+            backend_expected = torch._C._ConvBackend.Mkldnn
             y = conv(x2)
             self.assertEqual(backend_actual, backend_expected)
 
