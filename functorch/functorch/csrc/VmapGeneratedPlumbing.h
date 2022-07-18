@@ -5431,6 +5431,24 @@ at::Tensor logdet_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor linalg_householder_product_generated_plumbing(const at::Tensor & input, const at::Tensor & tau) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(input, cur_level) && !isBatchedAtLevel(tau, cur_level)) {
+    return at::_ops::linalg_householder_product::call(input, tau);
+  }
+  Tensor input_value;
+  optional<int64_t> input_bdim;
+  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  Tensor tau_value;
+  optional<int64_t> tau_bdim;
+  std::tie(tau_value, tau_bdim) = unwrapTensorAtLevel(tau, cur_level);
+  auto results = batch_rule(input_value, input_bdim, tau_value, tau_bdim);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor linalg_pinv_generated_plumbing(const at::Tensor & self, double rcond, bool hermitian) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
