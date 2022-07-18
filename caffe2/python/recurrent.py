@@ -282,7 +282,7 @@ def recurrent_net(
     cell_net.Proto().type = 'simple'
 
     # The last output is a list of step workspaces,
-    # which is only needed internally for gradient propogation
+    # which is only needed internally for gradient propagation
     return results[:-1]
 
 
