@@ -1588,7 +1588,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     self.assertEqual(matched_max, param_size / 2)
 
 
-class TestFxModelReportVisualization(QuantizationTestCase):
+class TestFxModelReportVisualizer(QuantizationTestCase):
 
     def test_simple_pass(self):
         pass
