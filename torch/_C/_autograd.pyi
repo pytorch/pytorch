@@ -1,4 +1,4 @@
-from typing import List, Set, Callable, Any
+from typing import List, Set, Callable, Any, Union
 from enum import Enum
 
 import torch
@@ -94,7 +94,40 @@ class _ProfilerEvent:
     duration_time_ns: int
     parent: _ProfilerEvent
     children: List[_ProfilerEvent]
+    extra_fields: Union[_ExtraFields_Allocation, _ExtraFields_Backend,
+                        _ExtraFields_PyCall, _ExtraFields_PyCCall,
+                        _ExtraFields_TorchOp]
     def name(self) -> str: ...
+    ...
+
+class _PyFrameState:
+    line_number: int
+    function_name: str
+    file_name: str
+    ...
+
+class _EventType(Enum):
+    Allocation = ...
+    Backend = ...
+    PyCall = ...
+    PyCCall = ...
+    TorchOp = ...
+
+class _ExtraFields_TorchOp:
+    ...
+
+class _ExtraFields_Backend:
+    ...
+
+class _ExtraFields_Allocation:
+    ...
+
+class _ExtraFields_PyCCall:
+    caller: _PyFrameState
+    ...
+
+class _ExtraFields_PyCall:
+    caller: _PyFrameState
     ...
 
 class _ProfilerResult:
