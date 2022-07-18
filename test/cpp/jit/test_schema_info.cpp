@@ -277,5 +277,105 @@ TEST(FunctionSchemaMayContainAliasTest, InputAndOutputContainers) {
   ASSERT_TRUE(schema.may_contain_alias(
       {SchemaArgType::input, 0}, {SchemaArgType::output, 0}, false));
 }
+
+TEST(SchemaInfoMayContainAliasTest, ContainAliasInputsEqual) {
+  SchemaInfo schema(
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", input);
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}, false));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 1}, {SchemaArgType::input, 0}, false));
+}
+
+TEST(SchemaInfoMayContainAliasTest, ContainAliasInputsContained) {
+  SchemaInfo schema(
+      "aten::test.Tensor(Tensor[] self, Tensor other, *, Scalar alpha=1) -> Tensor");
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("self", c10::List<at::Tensor>({input}));
+  schema.addArgumentValue("other", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}, false));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 1}, {SchemaArgType::input, 0}, false));
+}
+
+TEST(SchemaInfoMayContainAliasTest, ContainAliasOutputs) {
+  SchemaInfo schema(
+      "aten::aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)");
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::output, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("min", input);
+  schema.addArgumentValue("max", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::output, 1}));
+}
+
+TEST(SchemaInfoMayContainAliasTest, ContainAliasInputOutput) {
+  SchemaInfo schema(
+      "aten::test.tensor(Tensor(a) self, Tensor[] other) -> Tensor(a)");
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("other", c10::List<at::Tensor>({input}));
+  schema.addArgumentValue("self", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 1}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 1}, false));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 1}, {SchemaArgType::output, 0}, false));
+}
+
+TEST(SchemaInfoMayContainAliasTest, InputAndOutputContainers) {
+  SchemaInfo schema(
+      "aten::test.tensor(Tensor self, Tensor[] other) -> Tensor[]");
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 1}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 0}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("other", c10::List<at::Tensor>({input}));
+  schema.addArgumentValue("self", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::output, 0}, {SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+}
+
+TEST(SchemaInfoMayContainAliasTest, Wildcard) {
+  SchemaInfo schema(
+      "aten::test.tensor(Tensor a, Tensor[] b, Tensor(*) c) -> Tensor[]");
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 2}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 2}, {SchemaArgType::input, 1}));
+  at::Tensor input = at::randn({3, 3});
+  schema.addArgumentValue("b", c10::List<at::Tensor>({input}));
+  schema.addArgumentValue("a", input);
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 2}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 0}, {SchemaArgType::input, 1}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {SchemaArgType::input, 2}, {SchemaArgType::input, 1}));
+}
 } // namespace utils
 } // namespace torch
