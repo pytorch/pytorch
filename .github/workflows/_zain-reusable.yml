@@ -16,5 +16,7 @@ jobs:
   the-job:
     name: choose a step
     steps:
-      - name: Running ${{ inputs.action-name}}
-        uses: ./.github/actions/zainr-action
+      - name: Running action
+        shell: bash
+        run: |
+          echo ${{ inputs.action-name}}
