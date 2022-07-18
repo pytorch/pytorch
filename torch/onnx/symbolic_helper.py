@@ -13,6 +13,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
+from torch.onnx import _constants
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -161,7 +162,7 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     return list(list_node.inputs())
 
 
-def _unpack_tuple(tuple_value):
+def _unpack_tuple(tuple_value) -> List[_C.Value]:
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
         raise RuntimeError(
@@ -169,6 +170,32 @@ def _unpack_tuple(tuple_value):
             f"got `{tuple_node}`"
         )
     return list(tuple_node.inputs())
+
+
+def _unpack_quantized_tensor(
+    tuple_value: _C.Value,
+) -> Union[
+    Tuple[_C.Value, _C.Value, _C.Value], Tuple[_C.Value, _C.Value, _C.Value, _C.Value]
+]:
+    """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
+
+    Args:
+        tuple_value: A tuple of tensor, scale, zero_point, and optionally axis.
+
+    Returns:
+        A tuple of tensor, scale, zero_point, and optionally axis.
+    """
+    tuple_node = tuple_value.node()
+    # A quantized tensor is represented as tuple of the form (tensor, scale, zero_point, <axis>)
+    if tuple_node.kind() != "prim::TupleConstruct":
+        raise RuntimeError(
+            f"ONNX symbolic expected the output of `{tuple_node}` to be a quantized "
+            f"tensor. Is this likely due to missing support for quantized "
+            f"`{tuple_value.type()}`. Please create an issue on {_constants.PYTORCH_GITHUB_ISSUES_URL}"
+        )
+    unpacked = tuple(tuple_node.inputs())
+    assert len(unpacked) == 3 or len(unpacked) == 4
+    return unpacked
 
 
 # Check if list_value is output from prim::ListConstruct
@@ -314,27 +341,23 @@ def quantized_args(
                 len(args) - len(arg_q_descriptors)
             )
             descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
-            # Run regular symbolic function if none of the argument is QTensor.
-            if not any(
-                (descriptor and arg.node().kind() == "prim::TupleConstruct")
-                for descriptor, arg in descriptor_args
-            ):
-                return fn(g, *args, **kwargs)
 
-            dequantized_args = []
+            # Dequantize arguments that are quantized
+            maybe_dequantized_args = []
             for descriptor, arg in descriptor_args:
-                if descriptor:
+                if descriptor and arg.node().kind() == "prim::TupleConstruct":
                     dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
-                    dequantized_args.append(dequantized_arg)
+                    maybe_dequantized_args.append(dequantized_arg)
+                    # Set scale and zero_point to the first quantized input if not already set
                     if _scale is None:
                         _scale = scale
                     if _zero_point is None:
                         _zero_point = zero_point
                 else:
-                    dequantized_args.append(arg)
+                    maybe_dequantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
-            output = fn(g, *dequantized_args, **kwargs)
+            output = fn(g, *maybe_dequantized_args, **kwargs)
 
             return quantize_helper(g, output, _scale, _zero_point)
 
@@ -1226,13 +1249,15 @@ def dequantize_helper(
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
-        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point) for per tensor quantization,
-          or (quantized_tensor, scale, zero_point, axis) for per channel quantization.
-          Representing the quantized tensor.
-        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the data type of quantized tensor.
-          It must be either torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
+        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point)
+            for per tensor quantization, or
+            (quantized_tensor, scale, zero_point, axis) for per channel quantization,
+            representing the quantized tensor.
+        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the
+            data type of quantized tensor. It must be either
+            torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
     """
-    unpacked_qtensors = _unpack_tuple(qtensor)
+    unpacked_qtensors = _unpack_quantized_tensor(qtensor)
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
