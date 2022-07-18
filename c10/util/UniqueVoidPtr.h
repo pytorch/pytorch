@@ -1,5 +1,7 @@
 #pragma once
+#include <iosfwd>
 #include <memory>
+#include <utility>
 
 #include <c10/macros/Macros.h>
 

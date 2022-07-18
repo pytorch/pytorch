@@ -2,10 +2,13 @@
 #define C10_UTIL_LOGGING_H_
 
 #include <climits>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <limits>
+#include <map>
 #include <sstream>
+#include <string>
 
 // include-what-you-use want to put these includes in the wrong place
 // IWYU pragma: no_include "c10/util/Logging.h"

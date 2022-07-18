@@ -1,6 +1,7 @@
 #include <c10/util/thread_name.h>
 
 #include <algorithm>
+#include <cstddef>
 
 #ifdef __GLIBC__
 #include <features.h>

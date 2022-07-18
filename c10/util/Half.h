@@ -9,6 +9,7 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
+#include <type_traits>
 
 // include-what-you-use want to put this include in the wrong place
 // IWYU pragma: no_include "c10/util/Half-inl.h"
@@ -16,7 +17,6 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
-#include <type_traits>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>

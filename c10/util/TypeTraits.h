@@ -1,7 +1,9 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <functional>
+#include <type_traits>
+
+#include <c10/util/C++17.h>
 
 namespace c10 {
 namespace guts {

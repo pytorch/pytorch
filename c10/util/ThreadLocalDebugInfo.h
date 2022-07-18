@@ -1,11 +1,12 @@
 #pragma once
 
-#include <c10/macros/Export.h>
-#include <c10/util/Exception.h>
-
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 

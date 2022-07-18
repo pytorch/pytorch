@@ -1,7 +1,5 @@
 #include <c10/util/Half.h>
 
-#include <iostream>
-
 namespace c10 {
 
 static_assert(

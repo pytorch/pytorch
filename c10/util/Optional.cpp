@@ -1,8 +1,7 @@
 #include <c10/util/Optional.h>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
-
-#include <type_traits>
 
 static_assert(
     C10_IS_TRIVIALLY_COPYABLE(c10::optional<int>),

@@ -18,6 +18,10 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+
+#include <c10/macros/Macros.h>
+
 using namespace c10;
 
 // Check that no bytes are wasted and everything is well-aligned.

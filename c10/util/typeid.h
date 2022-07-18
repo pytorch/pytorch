@@ -4,8 +4,11 @@
 #include <cassert>
 #include <complex>
 #include <cstdlib>
+#include <iosfwd>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,6 +19,7 @@
 
 #include <exception>
 
+#include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
@@ -25,9 +29,8 @@
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/flat_hash_map.h>
-
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/string_view.h>
 
 /*
  * TypeIdentifier is a small type containing an id.

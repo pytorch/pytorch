@@ -1,11 +1,17 @@
 #include <c10/util/Flags.h> // IWYU pragma: associated
 
+#ifndef C10_USE_GFLAGS
+
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
-#ifndef C10_USE_GFLAGS
+#include <c10/macros/Export.h>
+#include <c10/util/Registry.h>
 
 namespace c10 {
 

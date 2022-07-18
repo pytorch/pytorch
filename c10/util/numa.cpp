@@ -1,11 +1,19 @@
 #include <c10/util/numa.h>
 
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Flags.h>
+
 C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
 
 #if defined(__linux__) && defined(C10_USE_NUMA) && !defined(C10_MOBILE)
 #include <numa.h>
 #include <numaif.h>
+#include <sched.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstdint>
+
 #define C10_ENABLE_NUMA
 #endif
 

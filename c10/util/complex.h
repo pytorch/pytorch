@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <complex>
+#include <istream>
+#include <type_traits>
 
 #include <c10/macros/Macros.h>
 

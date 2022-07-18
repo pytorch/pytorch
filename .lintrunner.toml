@@ -76,6 +76,7 @@ is_formatter = true
 [[linter]]
 code = 'IWYU'
 include_patterns = [
+    'c10/util/*.cpp',
 ]
 exclude_patterns = [
 ]

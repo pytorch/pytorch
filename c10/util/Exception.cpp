@@ -1,13 +1,15 @@
 #include <c10/util/Exception.h>
 
-#include <c10/util/Backtrace.h>
-#include <c10/util/Logging.h>
-#include <c10/util/Type.h>
-
-#include <iostream>
-#include <numeric>
+#include <algorithm>
+#include <ostream>
 #include <sstream>
 #include <string>
+#include <typeinfo>
+#include <utility>
+
+#include <c10/util/Logging.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/Type.h>
 
 namespace c10 {
 

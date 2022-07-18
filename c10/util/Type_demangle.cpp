@@ -4,10 +4,11 @@
 #include <functional>
 #include <memory>
 
+#include <c10/macros/Macros.h>
+
 #if HAS_DEMANGLE
 
 #include <cxxabi.h>
-#include <execinfo.h>
 
 namespace c10 {
 

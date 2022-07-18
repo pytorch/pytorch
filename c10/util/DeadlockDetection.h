@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
 /// This file provides some simple utilities for detecting common deadlocks in

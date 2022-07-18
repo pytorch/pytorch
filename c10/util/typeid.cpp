@@ -1,12 +1,12 @@
 #include <c10/util/typeid.h>
 
-#include <c10/util/Exception.h>
-
 #include <atomic>
 
-#if !defined(_MSC_VER)
-#include <cxxabi.h>
-#endif
+#include <c10/core/ScalarType.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/TypeIndex.h>
+#include <c10/util/irange.h>
 
 using std::string;
 

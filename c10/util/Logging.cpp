@@ -1,16 +1,19 @@
 #include <c10/util/Logging.h>
 
 #include <c10/util/Backtrace.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
+#include <c10/util/StringUtil.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
-#include <numeric>
+#include <sstream>
+#include <utility>
 
 // Common code that we use regardless of whether we use glog or not.
 

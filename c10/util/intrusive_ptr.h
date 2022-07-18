@@ -1,13 +1,19 @@
 #pragma once
 
+#include <atomic>
+#include <climits>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+
+#include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
-#include <atomic>
-#include <climits>
-#include <memory>
-#include <stdexcept>
 
 namespace pybind11 {
 template <typename, typename...>
@@ -16,6 +22,7 @@ class class_;
 
 namespace c10 {
 class intrusive_ptr_target;
+
 namespace raw {
 namespace weak_intrusive_ptr {
 inline void incref(intrusive_ptr_target* self);

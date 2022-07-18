@@ -2,7 +2,7 @@
 #ifndef C10_UTIL_CPP17_H_
 #define C10_UTIL_CPP17_H_
 
-#include <c10/macros/Macros.h>
+#include <array>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -10,6 +10,8 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+
+#include <c10/macros/Macros.h>
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
     __GNUC__ < 5

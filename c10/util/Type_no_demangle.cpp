@@ -1,3 +1,4 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Type.h> // IWYU pragma: keep
 
 #if HAS_DEMANGLE == 0

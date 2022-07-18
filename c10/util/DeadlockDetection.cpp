@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 
+#include <c10/util/Exception.h>
+
 namespace c10 {
 namespace impl {
 

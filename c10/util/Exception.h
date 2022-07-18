@@ -1,16 +1,17 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
-#include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
-#include <c10/util/StringUtil.h>
-
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
+#include <c10/util/StringUtil.h>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__

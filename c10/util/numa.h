@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+
+#include <c10/macros/Export.h>
+#include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 
