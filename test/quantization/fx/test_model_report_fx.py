@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
-#TODO Remove
-
-from pprint import pprint
-
 import torch
 import torch.nn as nn
 import torch.ao.quantization.quantize_fx as quantize_fx
@@ -1651,22 +1647,22 @@ class TestFxDetectOutliers(QuantizationTestCase):
 class TestFxModelReportVisualizer(QuantizationTestCase):
 
     def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
-            r"""
-            Callibrates the passed in model, generates report, and returns the visualizer
-            """
-            # now we actually callibrate the model
-            example_input = model.get_example_inputs()[0]
-            example_input = example_input.to(torch.float)
+        r"""
+        Callibrates the passed in model, generates report, and returns the visualizer
+        """
+        # now we actually callibrate the model
+        example_input = model.get_example_inputs()[0]
+        example_input = example_input.to(torch.float)
 
-            prepared_for_callibrate_model(example_input)
+        prepared_for_callibrate_model(example_input)
 
-            # now get the report by running it through ModelReport instance
-            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+        # now get the report by running it through ModelReport instance
+        generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
 
-            # now we get the visualizer should not error
-            mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
+        # now we get the visualizer should not error
+        mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
 
-            return mod_rep_visualizer
+        return mod_rep_visualizer
 
     @skipIfNoFBGEMM
     def test_get_modules_and_features(self):
