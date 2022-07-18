@@ -712,7 +712,8 @@ def run_tests(argv=UNITTEST_ARGS):
                                     '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
             del os.environ["USING_PYTEST"]
             sanitize_pytest_xml(f'{pytest_report_path}')
-            # exitcode of 5 means no tests were found, which happens for some test configs
+            # exitcode of 5 means no tests were found, which happens since some test configs don't 
+            # run tests from certain files
             exit(0 if exit_code == 5 else exit_code)
         else:
             os.makedirs(test_report_path, exist_ok=True)
