@@ -5842,7 +5842,7 @@ class TestTorch(TestCase):
                          torch.ones(2, 3, 0, 4, 5, 2))
 
         # test invalid args: tensor, str, sizes
-        with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+        with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
             torch.tensor([1]).unflatten('A', (1, 1))
 
         # test invalid args: tensor, str, namedshape
