@@ -2311,8 +2311,37 @@ torch.cuda.synchronize()
         try_pickle = True
         self._run_scaling_case(run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor)
 
+    # Assure the parity between optim.Adam and optim._fused.Adam when `GradScaler` is used
+    # as the fused one unscales gradients inside its kernel.
     def test_grad_scaling_autocast_fusedadam(self):
-        self.test_grad_scaling_autocast(torch.optim._fused.Adam, 5e-3)
+        (
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
+        ) = self._create_scaling_case(optimizer_ctor=torch.optim._fused.Adam)
+        opt_control = torch.optim.Adam(mod_control.parameters(), lr=1.0)
+
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        for input, target in data:
+            opt_control.zero_grad()
+            with torch.autocast('cuda'):
+                output_control = mod_control(input)
+                loss_control = loss_fn(output_control, target)
+            scaler.scale(loss_control).backward()
+            scaler.step(opt_control)
+            scaler.update()
+
+            opt_scaling.zero_grad()
+            with torch.autocast('cuda'):
+                output_scaling = mod_scaling(input)
+                loss_scaling = loss_fn(output_scaling, target)
+            scaler.scale(loss_scaling).backward()
+            scaler.step(opt_scaling)
+            scaler.update()
+
+            self.assertEqual(loss_control, loss_scaling)
+            for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertEqual(param_control.grad, param_scaling.grad)
+                self.assertEqual(param_control, param_scaling)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
