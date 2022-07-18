@@ -2,7 +2,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -584,7 +584,7 @@ OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
     .NumInputs(2)
     .NumOutputs(1);
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     IDEEPFallbackOp<BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp, SkipIndices<0>>);

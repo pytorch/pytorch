@@ -13,6 +13,7 @@ from torch._prims_common import (
     StrideType,
     Number,
     NumberType,
+    type_to_dtype,
 )
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
@@ -203,6 +204,7 @@ __all__ = [
 # longer than necessary.x
 prim_fake_mode_ref = None
 
+
 def get_prim_fake_mode():
     global prim_fake_mode_ref
     if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
@@ -266,6 +268,7 @@ def TensorMeta(
             torch.empty(shape, dtype=dtype, device="meta"),
             device,
         )
+
 
 #
 # Common datastructures and helpers
@@ -392,7 +395,7 @@ def _wrap_tensor_meta(f):
             and not isinstance(t, FakeTensor)
             and not t.device.type == "meta"
         ):
-            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
+            return FakeTensor.from_tensor(t, get_prim_fake_mode())
         else:
             return t
 
