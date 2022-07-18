@@ -58,7 +58,7 @@ batch_norm_batch_rule(
   auto running_mean = *running_mean_maybe_owned;
   c10::MaybeOwned<Tensor> running_var_maybe_owned = at::borrow_from_optional_tensor(running_var_opt);
   auto running_var = *running_var_maybe_owned;
-  TORCH_CHECK(!input_bdim || ((!running_mean.defined() || running_mean_bdim) && (!running_var.defined() || running_var_bdim)),
+  TORCH_CHECK(!training || (!input_bdim || ((!running_mean.defined() || running_mean_bdim) && (!running_var.defined() || running_var_bdim))),
       "Batch norm got a batched tensor as input while the running_mean or running_var, which will be updated in place, ",
       "were not batched.\nIf you are using a module and do not need eval mode, please set `track_running_stats` to be False.",
       "If you are using a prebuilt module and do not need eval mode, please see the functorch website for resources on ",
@@ -85,18 +85,12 @@ batch_norm_batch_rule(
     if (running_mean.defined()) {
       running_mean_ = moveBatchDimToFront(running_mean, running_mean_bdim);
       running_mean_ = ensure_has_bdim(*running_mean_, running_mean_bdim.has_value(), bdim_size.value());
-      running_mean_ = reshape_dim_into(0, 0, *running_mean_);
-      if (training) {
-        running_mean_ = running_mean_->contiguous();
-      }
+      running_mean_ = reshape_dim_into(0, 0, *running_mean_).contiguous();
     }
     if (running_var.defined()) {
       running_var_ = moveBatchDimToFront(running_var, running_var_bdim);
       running_var_ = ensure_has_bdim(*running_var_, running_var_bdim.has_value(), bdim_size.value());
-      running_var_ = reshape_dim_into(0, 0, *running_var_);
-      if (training) {
-        running_var_ = running_var_->contiguous();
-      }
+      running_var_ = reshape_dim_into(0, 0, *running_var_).contiguous();
     }
 
     const auto dummy_weight = at::ones(input_.size(1), input_.options());  // cudnn and miopen require a weight
