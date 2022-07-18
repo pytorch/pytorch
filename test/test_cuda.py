@@ -3866,7 +3866,7 @@ torch.cuda.synchronize()
                         loss = loss_fn(y_pred, target)
                         loss.backward()
                     opt.step()
- 
+
             for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
                 self.assertEqual(pg, pc)
 
