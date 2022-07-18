@@ -5368,7 +5368,7 @@ a")
         def func2(x):
             return x.sum(dim=4)
 
-        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
+        # test that shape analysis is written correctly for sum with OptionalIntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
@@ -7441,6 +7441,9 @@ a")
                 for option in option_pairs:
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
+                        continue
+                    # Skip unsigned tensor initializaton for signed values on 3.10
+                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
