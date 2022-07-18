@@ -1220,8 +1220,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
   }
-  // return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
-  return THPSize_New(THPVariable_Unpack(self));
+  return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2311,13 +2310,15 @@ c10::IntArrayRef concrete_strides_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
 
   py::object values = py::reinterpret_steal<py::object>(out.ptr());
 
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  c10::optional<PyObject*> mb_obj = self->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   PyObject* subclass = *mb_obj;
@@ -2369,6 +2370,9 @@ c10::IntArrayRef concrete_sizes_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
 

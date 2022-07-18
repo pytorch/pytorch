@@ -54,8 +54,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  ProfilerEventStub cuda_event_start_ = nullptr;
+  ProfilerEventStub cuda_event_end_ = nullptr;
 };
 
 template <>
@@ -188,7 +188,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
-  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
+  libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
   int64_t endTimeNS() const;
   uint64_t endTID() const;
