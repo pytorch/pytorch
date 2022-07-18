@@ -34,6 +34,7 @@ from common_utils import (
     check_vmap_fallback,
     tol1,
     opsToleranceOverride,
+    is_batch_norm_training,
 )
 import types
 from collections import namedtuple
@@ -3159,8 +3160,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
+            is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
             try:
-                generator = get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values, opinfo=op)
+                generator = get_fallback_and_vmap_exhaustive(
+                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
                 for loop_out, batched_out in generator:
                     # empty_like and new_empty produce garbage values so we just check the shapes.
                     if op.name == 'empty_like' or op.name == 'new_empty':
@@ -3168,7 +3171,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                         continue
                     self.assertEqual(loop_out, batched_out)
                 for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, opinfo=op)
+                    a_generator = get_fallback_and_vmap_exhaustive(
+                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
                     for loop_out, batched_out in a_generator:
                         self.assertEqual(loop_out, batched_out)
             # todo(chilli): Garbage hack I added to deal with indexing not working
@@ -3303,7 +3307,9 @@ class TestVmapOperatorsOpInfo(TestCase):
             for sample_input in sample_inputs_itr:
                 arg_values = [sample_input.input] + list(sample_input.args)
                 kwarg_values = sample_input.kwargs
-                generator = get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values, opinfo=op)
+                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
+                generator = get_fallback_and_vmap_exhaustive(
+                    op.op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
                 for loop_out, batched_out in generator:
                     # empty_like and new_empty produce garbage values so we just check the shapes.
                     if op.name == 'empty_like' or op.name == 'new_empty':
@@ -3311,7 +3317,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                         continue
                     self.assertEqual(loop_out, batched_out)
                 for a_op in op.aliases:
-                    a_generator = get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, opinfo=op)
+                    a_generator = get_fallback_and_vmap_exhaustive(
+                        a_op, arg_values, kwarg_values, is_batch_norm_and_training=is_batch_norm_and_training)
                     for loop_out, batched_out in a_generator:
                         self.assertEqual(loop_out, batched_out)
         check_vmap_fallback(self, test, op)

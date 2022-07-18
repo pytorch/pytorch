@@ -19,7 +19,7 @@ from functorch_additional_op_db import additional_op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
-    get_exhaustive_batched_inputs_batch_norm,
+    get_exhaustive_batched_inputs_batch_norm_is_training,
     xfail,
     skip,
     skipOps,
@@ -27,6 +27,7 @@ from common_utils import (
     # tol2,
     opsToleranceOverride,
     check_vmap_fallback,
+    is_batch_norm_training,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
@@ -553,7 +554,9 @@ class TestOperators(TestCase):
                 result_vjps, _ = tree_flatten(result_vjps)
                 return (*result, *result_vjps)
 
-            generator = get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}, opinfo=op)
+            is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
+            generator = get_fallback_and_vmap_exhaustive(
+                vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
@@ -628,7 +631,10 @@ class TestOperators(TestCase):
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
+            is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
+            generator = get_fallback_and_vmap_exhaustive(
+                fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
+            for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
@@ -709,7 +715,10 @@ class TestOperators(TestCase):
             kwarg_values = sample.kwargs
             args = tuple(arg_values) + tuple(kwarg_values)
             fn, args = get_jvp_variant_primals_tangents(op, sample)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
+            is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
+            generator = get_fallback_and_vmap_exhaustive(
+                fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
+            for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -793,8 +802,9 @@ class TestOperators(TestCase):
                 kwarg_values = sample.kwargs
                 args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
+                is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
-                        fn, args, {}, opinfo=op, compute_loop_out=False):
+                        fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
 
@@ -911,13 +921,14 @@ class TestOperators(TestCase):
             for sample in samples:
                 cotangents = get_sample_cotangents(op, sample)
                 fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
+                is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
-                        fn, args, {}, opinfo=op, compute_loop_out=False):
+                        fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
                 for a_op in op.aliases:
                     fn, args = get_vjp_fn_and_args_with_cotangents(a_op, sample, cotangents)
                     for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
-                            fn, args, {}, opinfo=op, compute_loop_out=False):
+                            fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                         pass
 
         check_vmap_fallback(self, test, op, dry_run=False)
@@ -979,8 +990,8 @@ class TestOperators(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            if is_batch_norm:
-                generator = get_exhaustive_batched_inputs_batch_norm(args, kwargs)
+            if is_batch_norm and is_batch_norm_training(op.name, kwargs):
+                generator = get_exhaustive_batched_inputs_batch_norm_is_training(args, kwargs)
             else:
                 generator = get_exhaustive_batched_inputs(args, kwargs)
 
@@ -1311,7 +1322,10 @@ class TestOperators(TestCase):
         for sample_input in sample_inputs:
             cotangents = get_sample_cotangents(op, sample_input)
             f, args = get_autograd_fn_and_args_with_cotangents(op, sample_input, cotangents)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}, opinfo=op):
+            is_batch_norm_and_training = is_batch_norm_training(op, sample_input.kwargs)
+            generator = get_fallback_and_vmap_exhaustive(
+                f, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
+            for loop_out, batched_out in generator:
                 if all(was_skipped_from_batched_tensors(bo, lo.shape[0]) for (bo, lo) in zip(batched_out, loop_out)):
                     continue  # we weren't able to use the batched tensor in autograd.grad
                 self.assertEqual(loop_out, batched_out)
