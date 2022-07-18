@@ -3,7 +3,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/ops/view_copy.h>
 namespace at {
 namespace functionalization {
 
