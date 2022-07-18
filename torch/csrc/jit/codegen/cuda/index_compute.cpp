@@ -29,69 +29,6 @@ namespace cuda {
 
 namespace {
 
-// Update the HaloInfo mappings for a reference tensor by propagating
-// the halo information from the consumer tensor.
-void updateHaloInfoForReference(
-    const ReferenceTensor& reference,
-    const TensorView* consumer_tv) {
-  const auto gpu_lower = GpuLower::current();
-
-  auto& halo_info = gpu_lower->haloInfo();
-
-  auto reference_domain = reference.domain;
-
-  // First, propagate the halo information of the consumer root domain
-  // to the reference root domain.
-  for (auto consumer_root_id : consumer_tv->getRootDomain()) {
-    auto consumer_index_concrete_id = gpu_lower->caMap()->getConcreteMappedID(
-        consumer_root_id, IdMappingMode::EXACT);
-    auto reference_it =
-        reference.concrete_to_id.find(consumer_index_concrete_id);
-    if (reference_it == reference.concrete_to_id.end()) {
-      // This happens when consumer_root_id is a broadcast or an
-      // initialization of a reduction buffer. In those cases, since
-      // the domain is not going to be predicated, it's not necessary
-      // to propagate halo information to the reference tensor.
-      continue;
-    }
-    auto reference_id = reference_it->second;
-    halo_info.setRootAxisInfo(
-        reference_id, halo_info.getRootAxisInfo(consumer_root_id));
-  }
-
-  // Now that the reference root has halo information copied from
-  // the cosumer, propagate it down to non-root domains.
-  halo_info.build(reference_domain);
-
-  return;
-}
-
-// Get a map of IterDomains to halo-extended extents of corresponding
-// reference IterDomains.
-//
-// ref_map: ref-to-consumer in consumer indexing; ref-to-producer in
-// producer indexing
-std::unordered_map<IterDomain*, Val*> getReferenceHaloExtentMap(
-    const ReferenceTensor& reference,
-    const std::unordered_map<IterDomain*, IterDomain*>& index_map_from_ref) {
-  const auto& halo_info = GpuLower::current()->haloInfo();
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map;
-
-  // Propagate halo extents of the reference to the consumer or
-  // producer tensor
-  for (auto kv : index_map_from_ref) {
-    auto ref_id = kv.first;
-    auto producer_or_consumer_id = kv.second;
-    auto extent = halo_info.getExtent(ref_id);
-    if (extent != nullptr) {
-      reference_halo_extent_map[producer_or_consumer_id] = extent;
-    }
-  }
-
-  return reference_halo_extent_map;
-}
-
 //! Offset of an index of a producer axis with respect to its
 //! corresponding consumer index
 int getProducerHaloOffset(
@@ -254,49 +191,6 @@ Val* getConcreteProducerOffsetWithGather(
   auto producer_offset = SimplifyingIrBuilder::subExpr(
       window_idx, SimplifyingIrBuilder::create<Int>(pad_width));
   return producer_offset;
-}
-
-//! Offset a producer index of a gather expression
-//!
-//! Given an index of a producer root axis, build a new index
-//! expression that accesses a window position that the current loop
-//! structure refers to. Use getGatherProducerOffset to create an
-//! offset Val.
-Val* getProducerIndexWithGather(
-    Val* producer_index,
-    size_t producer_root_axis,
-    const TensorView* producer_tv,
-    const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& concrete_to_ref_map,
-    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
-  auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
-
-  // Just return the producer index as is if this is not a gather
-  if (gather_op == nullptr) {
-    return producer_index;
-  }
-
-  // Consumer axis that corresponds to the producer axis
-  int consumer_axis = -1;
-  for (const auto i : c10::irange(producer_root_axis + 1)) {
-    if (producer_tv->getMaybeRFactorDomain()[i]->isReduction() ||
-        producer_tv->getMaybeRFactorDomain()[i]->isStride()) {
-      continue;
-    }
-    ++consumer_axis;
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      consumer_axis >= 0 &&
-          consumer_axis < (int)gather_op->windowShape().size(),
-      "Invalid consumer axis",
-      consumer_axis,
-      ", producer_axis: ",
-      producer_root_axis);
-
-  auto offset = getProducerOffsetWithGather(
-      consumer_axis, consumer_tv, ref_index_map, true, concrete_to_ref_map);
-  return SimplifyingIrBuilder::addExpr(producer_index, offset);
 }
 
 //! Offset a producer index of a gather expression

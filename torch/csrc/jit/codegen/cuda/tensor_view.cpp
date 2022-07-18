@@ -665,8 +665,8 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   FusionGuard fg(fusion());
   TORCH_CHECK(
       definition() != nullptr &&
-              definition()->getExprType() == ExprType::ReductionOp ||
-          definition()->getExprType() == ExprType::MmaOp,
+          (definition()->getExprType() == ExprType::ReductionOp ||
+           definition()->getExprType() == ExprType::MmaOp),
       "Error rfactoring ",
       this,
       " its definition is either a nullptr or not a reduction.");
