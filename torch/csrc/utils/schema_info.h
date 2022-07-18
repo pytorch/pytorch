@@ -16,10 +16,14 @@ namespace utils {
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(c10::FunctionSchema schema)
-      : schema_(std::move(schema)), alias_maps_current_(false) {}
+      : schema_(std::move(schema)), alias_maps_current_(false) {
+    initSchemaInfo();
+  }
   explicit SchemaInfo(const char* signature)
       : schema_(torch::jit::parseSchema(signature)),
-        alias_maps_current_(false) {}
+        alias_maps_current_(false) {
+    initSchemaInfo();
+  }
 
   bool has_side_effects() const;
 
@@ -44,9 +48,21 @@ struct TORCH_API SchemaInfo {
       const std::unordered_map<std::string, at::IValue>& values);
 
  private:
+  // This function enforces more conservative results when the TORCH_WARN is
+  // triggered from above due to duplicates in an argument list
+  void ensureConservativity(
+      const std::unordered_set<at::Symbol>& duplicates,
+      const std::vector<c10::Argument>& arguments_list,
+      c10::SchemaArgType type);
+
+  void initSchemaInfo();
+
   void generateAliasMaps();
 
   static std::vector<c10::FunctionSchema> getNonDeterministicOps();
+
+  // Set of all wildcard arguments
+  std::unordered_set<c10::SchemaArgument> wildcard_set_;
 
   // Map of argument IValues
   std::unordered_map<std::string, at::IValue> value_map_;
@@ -57,7 +73,7 @@ struct TORCH_API SchemaInfo {
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
 
-  c10::FunctionSchema schema_;
+  const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;
 };
