@@ -198,8 +198,6 @@ def get_invoking_file_times(
         # run in parallel, we take the time reported by the testsuite
         if key in pytest_parallel_times:
             val["time"] = pytest_parallel_times[key]
-        else:
-            val["time"] = val["time"]
 
     return list(ret.values())
 
