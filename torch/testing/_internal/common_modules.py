@@ -1127,6 +1127,8 @@ module_db: List[ModuleInfo] = [
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
                                 dtypes=(torch.chalf,), device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
+                                dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule',
                                 'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',

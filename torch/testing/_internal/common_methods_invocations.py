@@ -13782,6 +13782,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
+           # `ref` for this function is backward of
+           # corresponding `conv*d` whose correctness
+           # is verified via `gradcheck` tests on
+           # the `conv*d` op.
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
            dtypes=floating_and_complex_types_and(torch.int64),
