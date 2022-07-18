@@ -496,6 +496,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
 
 # TODO(crcrpar): Make this generic when there's more fused optimizers.
+# TODO(crcrpar): Think of rewriting this in C++.
 @torch.no_grad()
 def _group_params_by_device_and_dtype(
     params: List[Tensor],
@@ -568,7 +569,6 @@ def _fused_adam(
             weight_decay=weight_decay,
             eps=eps,
             maximize=maximize,
-            capturable=capturable,
             grad_scale=device_grad_scale,
             found_inf=device_found_inf,
         )

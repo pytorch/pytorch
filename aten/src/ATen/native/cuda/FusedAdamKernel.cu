@@ -182,7 +182,6 @@ void _fused_adam_kernel_cuda_(
     const double eps,
     const bool amsgrad,
     const bool maximize,
-    const bool capturable,
     const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf
 ) {
