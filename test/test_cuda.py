@@ -3813,7 +3813,7 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_amp_graph_make_graphed_callables(self):
-        seed = int(os.getenv("SEED"))
+        seed = 123
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
 
