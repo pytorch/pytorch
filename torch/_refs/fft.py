@@ -12,29 +12,33 @@ from torch._prims.wrappers import (
 )
 from torch._decomp import register_decomposition
 
-from typing import Union, Tuple, Optional, Iterable, Sequence, NamedTuple
+from typing import Union, Tuple, Optional, Iterable, Sequence, NamedTuple, List
 from typing_extensions import Literal
 import math
 
 __all__ = [
+    # Transforms
     "fft",
-    "ifft",
-    "rfft",
-    "irfft",
-    "hfft",
-    "ihfft",
-    "fftn",
-    "ifftn",
-    "rfftn",
-    "irfftn",
-    "hfftn",
-    "ihfftn",
     "fft2",
-    "ifft2",
-    "rfft2",
-    "irfft2",
+    "fftn",
+    "hfft",
     "hfft2",
+    "hfftn",
+    "rfft",
+    "rfft2",
+    "rfftn",
+    "ifft",
+    "ifft2",
+    "ifftn",
+    "ihfft",
     "ihfft2",
+    "ihfftn",
+    "irfft",
+    "irfft2",
+    "irfftn",
+    # Helpers
+    "fftshift",
+    "ifftshift",
 ]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
@@ -546,3 +550,27 @@ def ihfft2(
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.ihfftn(input, s=s, dim=dim, norm=norm)
+
+
+def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
+    """Convert Optional[DimsType] to a simple list, defaulting to all dimensions"""
+    if dim is None:
+        return list(range(x.ndim))
+    elif not isinstance(dim, Sequence):
+        return [dim]
+    else:
+        return list(dim)
+
+
+@register_decomposition(torch.ops.aten.fft_fftshift)
+def fftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+    dims = _default_alldims(dim, input)
+    shift = [input.shape[d] // 2 for d in dims]
+    return torch.roll(input, shift, dims)
+
+
+@register_decomposition(torch.ops.aten.fft_ifftshift)
+def ifftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+    dims = _default_alldims(dim, input)
+    shift = [(input.shape[d] + 1) // 2 for d in dims]
+    return torch.roll(input, shift, dims)
