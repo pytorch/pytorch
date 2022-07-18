@@ -451,10 +451,10 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
         elif not (self.norm1.eps == self.norm2.eps):
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
-        elif src.is_nested and (src_key_padding_mask is not None or src_mask is not None):
-            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask are not supported with NestedTensor input"
-        elif (not src.is_nested) and (src_key_padding_mask is not None and src_mask is not None):
-            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask were both supplied"
+        elif src_mask is not None:
+            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
+        elif src.is_nested and src_key_padding_mask is not None:
+            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -503,7 +503,7 @@ class TransformerEncoderLayer(Module):
                     self.linear1.bias,
                     self.linear2.weight,
                     self.linear2.bias,
-                    src_mask if src_mask is not None else src_key_padding_mask,
+                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
                 )
 
         x = src
