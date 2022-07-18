@@ -13,7 +13,7 @@ from torch.ao.quantization.fx._model_report.detector import (
     OutlierDetector,
 )
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
-from torch.ao.quantization.fx._model_report.model_report_visualization import ModelReportVisualization
+from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
@@ -1086,9 +1086,9 @@ class TestFxModelReportClass(QuantizationTestCase):
             model_single_report = model_report_single.generate_model_report(False)
 
     @skipIfNoFBGEMM
-    def test_generate_visualization(self):
+    def test_generate_visualizer(self):
         """
-        Tests that the ModelReport class can properly create the ModelReportVisualization instance
+        Tests that the ModelReport class can properly create the ModelReportVisualizer instance
         Checks that:
             - Correct number of modules are represented
             - Modules are sorted
@@ -1117,17 +1117,17 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # try to visualize without generating report, should throw error
             with self.assertRaises(Exception):
-                mod_rep_visualizaiton = mod_report.generate_visualization()
+                mod_rep_visualizaiton = mod_report.generate_visualizer()
 
             # now get the report by running it through ModelReport instance
             generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
 
-            # now we get the visualization should not error
-            mod_rep_visualization: ModelReportVisualization = mod_report.generate_visualization()
+            # now we get the visualizer should not error
+            mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
 
             # since we tested with outlier detector, which looks at every base level module
             # should be six entries in the ordered dict
-            mod_fqns_to_features = mod_rep_visualization.generated_reports
+            mod_fqns_to_features = mod_rep_visualizer.generated_reports
 
             self.assertEqual(len(mod_fqns_to_features), 6)
 
@@ -1644,7 +1644,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     self.assertEqual(matched_max, param_size / 2)
 
 
-class TestFxModelReportVisualization(QuantizationTestCase):
+class TestFxModelReportVisualizer(QuantizationTestCase):
 
     def test_simple_pass(self):
         pass

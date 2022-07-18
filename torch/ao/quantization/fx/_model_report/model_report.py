@@ -8,7 +8,7 @@ from torch.ao.quantization.fx._model_report.detector import (
     DETECTOR_IS_POST_OBS_KEY,
     DETECTOR_TARGET_NODE_KEY
 )
-from torch.ao.quantization.fx._model_report.model_report_visualization import ModelReportVisualization
+from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 
@@ -66,7 +66,7 @@ class ModelReport:
     4.) Callibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     Optional
-        6.) Call model_report.generate_visualization to get a ModelReportVisualization instance
+        6.) Call model_report.generate_visualizer to get a ModelReportVisualizer instance
         7.) To help in parsing report information and debugging, view report info as a:
             - Table
             - Histogram
@@ -95,8 +95,8 @@ class ModelReport:
         >>> # finally we generate the reports and optionally remove the observers we inserted
         >>> reports = tracer_reporter.generate_model_report(remove_inserted_observers=True)
 
-        >>> # Optional: we get a ModelReportVisualization instance to do any visualizations desired
-        >>> model_report_visualization = tracer_reporter.generate_visualization()
+        >>> # Optional: we get a ModelReportVisualizer instance to do any visualizations desired
+        >>> model_report_visualizer = tracer_reporter.generate_visualizer()
 
     """
 
@@ -308,10 +308,10 @@ class ModelReport:
         # return the reports of interest
         return reports_of_interest
 
-    def _reformat_reports_for_visualization(self) -> OrderedDict:
+    def _reformat_reports_for_visualizer(self) -> OrderedDict:
         r"""
         Takes the generated reports and reformats them into the format that is desired by the
-        ModelReportVisualization
+        ModelReportVisualizer
 
         Returns an OrderedDict mapping module_fqns to their features
         """
@@ -352,24 +352,24 @@ class ModelReport:
         # return the ordered dict of info we created
         return features_by_module
 
-    def generate_visualization(self) -> ModelReportVisualization:
+    def generate_visualizer(self) -> ModelReportVisualizer:
         r"""
-        Generates a ModelReportVisualization instance using the reports generated
+        Generates a ModelReportVisualizer instance using the reports generated
         by the generate_model_report() method.
 
-        Returns the generated ModelReportVisualization instance initialized
+        Returns the generated ModelReportVisualizer instance initialized
 
         Note:
-            Throws exception if attempt to get visualizations without generating report
+            Throws exception if attempt to get visualizers without generating report
         """
         # check if user has generated reports at least once
         if len(self._generated_reports) == 0:
-            raise Exception("You need to generate reports before you generate visualizations")
+            raise Exception("You need to generate reports before you generate visualizers")
 
         # get the ordered dict mapping modules to their full set of collected features / stats
-        module_fqns_to_features: OrderedDict = self._reformat_reports_for_visualization()
+        module_fqns_to_features: OrderedDict = self._reformat_reports_for_visualizer()
 
-        # create and return ModelReportVisualization instance
-        visualization: ModelReportVisualization = ModelReportVisualization(module_fqns_to_features)
+        # create and return ModelReportVisualizer instance
+        visualizer: ModelReportVisualizer = ModelReportVisualizer(module_fqns_to_features)
 
-        return visualization
+        return visualizer
