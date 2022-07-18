@@ -537,18 +537,20 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 
 _ScalarAndTensorElementTypeGroup = collections.namedtuple(
-    "ScalarAndTensorElementTypeGroup", ("tensor_element_types", "scalar_types"))
+    "_ScalarAndTensorElementTypeGroup", ("tensor_element_types", "scalar_types")
+)
 _FPTypeGroup = _ScalarAndTensorElementTypeGroup(
-    (torch.float16, torch.float32, torch.float64, torch.bfloat16), ("Float", "Double", "Half", "BFloat16"))
+    (torch.float16, torch.float32, torch.float64, torch.bfloat16),
+    ("Float", "Double", "Half", "BFloat16"),
+)
 _BoolTypeGroup = _ScalarAndTensorElementTypeGroup((torch.bool,), ("Bool",))
 
 
-def _is_in_type_group(value: Union[torch.Tensor, torch._C.Value], type_set: _ScalarAndTensorElementTypeGroup):
-  if not value:
-    return False
-  if isinstance(value, torch.Tensor):
-    return value.dtype in type_set.tensor_element_types
-  else:
+def _is_in_type_group(value, type_set):
+    if not value:
+        return False
+    if isinstance(value, torch.Tensor):
+        return value.dtype in type_set.tensor_element_types
     scalar_type = value.type().scalarType()
     if scalar_type is None:
         warnings.warn(
