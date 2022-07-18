@@ -1922,6 +1922,12 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    # TODO: Handle half_to_float.
+    return log_softmax(g, input, dim)
+
+
 @symbolic_helper.parse_args(
     "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
 )
