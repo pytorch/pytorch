@@ -187,7 +187,7 @@ def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
         raise RuntimeError(
             f"ONNX symbolic expected the output of `{tuple_node}` to be a quantized "
             f"tensor. Is this likely due to missing support for quantized "
-            f"`{tuple_value.type()}`. Please create an issue on {_constants.PYTORCH_GITHUB_ISSUES_URL}"
+            f"`{tuple_node.kind()}`. Please create an issue on {_constants.PYTORCH_GITHUB_ISSUES_URL}"
         )
     unpacked = tuple(tuple_node.inputs())
     assert len(unpacked) == 3 or len(unpacked) == 4
