@@ -8,20 +8,20 @@ import os
 import shutil
 import tempfile
 
-from pytorch_test_common import (
-    BATCH_SIZE,
-    RNN_HIDDEN_SIZE,
-    RNN_INPUT_SIZE,
-    RNN_SEQUENCE_LENGTH,
-    flatten,
-)
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx
+
+from pytorch_test_common import (
+    BATCH_SIZE,
+    flatten,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+)
 from torch.autograd import Function, Variable
-from torch.nn import Module, functional
+from torch.nn import functional, Module
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,

@@ -53,7 +53,6 @@ from torch.utils.data.datapipes.utils.decoder import (
 from torch.utils.data.datapipes.utils.snapshot import (
     _simple_graph_snapshot_restoration
 )
-from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
@@ -3036,8 +3035,6 @@ class TestIterDataPipeGraphFastForward(TestCase):
         list(datapipe)
 
         # Test Case: fast forward works with list
-        datapipe.reset()
-        datapipe._snapshot_state = _SnapshotState.NotStarted
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         actual_res = list(datapipe)
@@ -3045,8 +3042,6 @@ class TestIterDataPipeGraphFastForward(TestCase):
         self.assertEqual(expected_full_res[n_iterations:], actual_res)
 
         # Test Case: fast forward works with iterator
-        datapipe.reset()
-        datapipe._snapshot_state = _SnapshotState.NotStarted
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         it = iter(datapipe)
@@ -3084,6 +3079,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         # Raises an exception if the graph has already been restored
         with self.assertRaisesRegex(RuntimeError, "Snapshot restoration cannot be applied."):
+            _simple_graph_snapshot_restoration(graph7, 1)
             _simple_graph_snapshot_restoration(graph7, 1)
 
     def test_simple_snapshot_custom_non_generator(self):
