@@ -302,9 +302,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
 
         per_callable_static_outputs.append(outputs)
 
-    # Clear AMP autocast cache after the forward graph is captured
-    torch.clear_autocast_cache()
-
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
@@ -367,9 +364,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                         static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
                 assert isinstance(static_outputs, tuple)
-                out_forward = tuple(o.detach() for o in static_outputs)
-                torch.clear_autocast_cache()
-                return out_forward
+                return tuple(o.detach() for o in static_outputs)
 
             @staticmethod
             @torch.autograd.function.once_differentiable
