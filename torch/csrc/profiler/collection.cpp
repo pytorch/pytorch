@@ -190,7 +190,7 @@ auto scopeToType(at::RecordScope scope) {
       : libkineto::ActivityType::CPU_OP;
 }
 
-auto torchOpEndNS(
+int64_t torchOpEndNS(
     const ExtraFields<EventType::TorchOp>& e,
     const bool finished,
     const std::weak_ptr<Result>& parent) {
@@ -215,7 +215,7 @@ std::string Result::name() const {
       ATTRIBUTE(Allocation, std::string("[memory]")),
       ATTRIBUTE(PyCall, toString(e)),
       ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
-      [](const auto& e) { return e.name_; }));
+      [](const auto& e) -> std::string { return e.name_; }));
 }
 
 libkineto::ActivityType Result::kinetoType() const {
@@ -246,8 +246,7 @@ int64_t Result::endTimeNS() const {
 
 uint64_t Result::endTID() const {
   return visit(c10::overloaded(
-      ATTRIBUTE(TorchOp, e.end_tid_),
-      [&](const auto&) { return start_tid_; }));
+      ATTRIBUTE(TorchOp, e.end_tid_), [&](const auto&) { return start_tid_; }));
 }
 
 c10::DeviceType Result::deviceType() const {
