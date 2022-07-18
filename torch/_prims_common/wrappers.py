@@ -20,11 +20,12 @@ from itertools import chain
 def _maybe_convert_to_dtype(
     a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
 ) -> Union[TensorLikeType, NumberType, Sequence]:
+    import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
             # NOTE: this is incorrect on the CPU
             # See https://github.com/pytorch/pytorch/issues/77553
-            return a.to(dtype=dtype)
+            return prims.to_dtype(a, dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type(dtype)(a)
