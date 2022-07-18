@@ -75,7 +75,10 @@ class TestHash(JitTestCase):
         self.checkScript(fn, (1.2345, float("inf")))
         self.checkScript(fn, (float("inf"), float("inf")))
         self.checkScript(fn, (1.2345, float('nan')))
-        self.checkScript(fn, (float("nan"), float("nan")))
+        if sys.version_info < (3, 10):
+            # Hash of two nans are not guaranteed to be equal. From https://docs.python.org/3/whatsnew/3.10.html :
+            # Hashes of NaN values of both float type and decimal.Decimal type now depend on object identity.
+            self.checkScript(fn, (float("nan"), float("nan")))
         self.checkScript(fn, (float("nan"), float("inf")))
 
     def test_hash_int(self):
