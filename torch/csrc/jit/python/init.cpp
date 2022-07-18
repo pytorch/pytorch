@@ -213,6 +213,16 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
     return dispatch_common_(__FUNCTION__, other);
   }
 
+  virtual std::shared_ptr<SymbolicIntNode> le(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual std::shared_ptr<SymbolicIntNode> ge(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -1256,6 +1266,20 @@ void initJITBindings(PyObject* module) {
              py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
             auto snb = toSymIntNode(a, b);
             return a->lt(snb);
+          })
+      .def(
+          "__le__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->le(snb);
+          })
+      .def(
+          "__ge__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->ge(snb);
           })
       .def(
           "__bool__",

@@ -355,10 +355,11 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
-                if datapipe._snapshot_state in (_SnapshotState.NotStarted, _SnapshotState.Iterating):
+                if datapipe._snapshot_state == _SnapshotState.Iterating:
                     # Reset `NotStarted` is necessary because the `source_datapipe` of a DataPipe might have
                     # already begun iterating.
                     datapipe._number_of_samples_yielded = 0
+                    datapipe._fast_forward_iterator = None
                     reset_func(*args, **kwargs)
                 datapipe._snapshot_state = _SnapshotState.Iterating
 
@@ -370,7 +371,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             @functools.wraps(setstate_func)
             def wrap_setstate(*args, **kwargs):
                 r"""
-                Set `_SnapshotState` to `Deserialized` during `__setstate__`, such that the next `reset()` call during
+                Set `_SnapshotState` to `NotStarted` during `__setstate__`, such that the next `reset()` call during
                 iterator creation will not actually reset the state of the DataPipe.
                 """
                 try:
