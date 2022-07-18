@@ -54,7 +54,8 @@
       "name": "CI Pinned Hashes",
       "patterns": [
          ".github/ci_commit_pins/vision.txt",
-         ".github/ci_commit_pins/torchdynamo.txt"
+         ".github/ci_commit_pins/torchdynamo.txt",
+         ".github/ci_commit_pins/functorch.txt"
       ],
       "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
