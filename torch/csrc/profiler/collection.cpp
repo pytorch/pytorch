@@ -1,12 +1,14 @@
 #include <torch/csrc/profiler/collection.h>
 
 #include <algorithm>
+#include <limits>
 #include <queue>
 
 #include <fmt/format.h>
 
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -210,12 +212,24 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-using torch::profiler::impl::kineto::KinetoActivityType;
 namespace {
-KinetoActivityType scopeToType(at::RecordScope scope) {
+auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
-      ? KinetoActivityType::USER_ANNOTATION
-      : KinetoActivityType::CPU_OP;
+      ? libkineto::ActivityType::USER_ANNOTATION
+      : libkineto::ActivityType::CPU_OP;
+}
+
+auto torchOpEndNS(
+    const ExtraFields<EventType::TorchOp>& e,
+    const bool finished,
+    const std::weak_ptr<Result>& parent) {
+  if (finished && e.end_time_ns_ == std::numeric_limits<time_t>::min()) {
+    auto p = parent.lock();
+    if (p) {
+      return p->endTimeNS();
+    }
+  }
+  return e.end_time_ns_;
 }
 } // namespace
 
@@ -230,13 +244,13 @@ DEFINE_VISITOR(
     kinetoType,
     scopeToType(e.scope_),
     scopeToType(e.scope_),
-    KinetoActivityType::CPU_INSTANT_EVENT,
-    KinetoActivityType::PYTHON_FUNCTION,
-    KinetoActivityType::PYTHON_FUNCTION);
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
+    libkineto::ActivityType::PYTHON_FUNCTION,
+    libkineto::ActivityType::PYTHON_FUNCTION);
 DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
 DEFINE_VISITOR(
     endTimeNS,
-    e.end_time_ns_,
+    torchOpEndNS(e, finished_, parent_),
     e.end_time_us_ * 1000,
     start_time_ns_,
     e.end_time_ns_,
@@ -391,6 +405,32 @@ auto steal_or_default(T& it) {
   }
 }
 
+void mark_finished(std::shared_ptr<Result>& r) {
+  TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
+  r->finished_ = true;
+  TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
+}
+
+void addKinetoEvents(
+    std::vector<std::shared_ptr<Result>>& results,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
+  torch::profiler::impl::kineto::TraceWrapper cpu_trace(
+      start_time_us, "PyTorch Profiler");
+
+  for (auto& e : results) {
+    e->kineto_activity_ = cpu_trace.addCPUActivity(
+        e->name(),
+        e->kinetoType(),
+        e->kineto_info_,
+        e->correlationID(),
+        e->start_time_ns_ / 1000,
+        e->endTimeNS() / 1000);
+  }
+
+  cpu_trace.transferCpuTrace(end_time_us);
+}
+
 struct EvaluateFunctionVisitor {
   void operator()(
       ExtraFields<EventType::TorchOp>& first,
@@ -468,11 +508,11 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
       // encounter such a case we don't push to `end_events_`.
       stacks[event->start_tid_] = event;
     } else {
-      event->finished_ = true;
+      mark_finished(event);
     }
   };
 
-  auto pop_event = [&stacks](const std::shared_ptr<Result>& event) {
+  auto pop_event = [&stacks](std::shared_ptr<Result> event) {
     if (event->finished_) {
       // This event was marked finished by a previous `pop_event` call.
       return;
@@ -483,12 +523,12 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      frame->finished_ = true;
+      mark_finished(frame);
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
 
-    event->finished_ = true;
+    mark_finished(event);
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
@@ -515,7 +555,9 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 } // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
-    std::function<time_t(approx_time_t)> time_converter) {
+    std::function<time_t(approx_time_t)> time_converter,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<time_t>::min()
@@ -590,6 +632,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     tracer.clear();
   }
 
+  addKinetoEvents(out, start_time_us, end_time_us);
   build_tree(out);
   return out;
 }
