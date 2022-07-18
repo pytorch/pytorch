@@ -107,7 +107,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
   auto outs = tracer::trace(
       std::move(trace_inputs),
       [&](Stack inputs) -> Stack {
-        // We just leave the inputs_dict as it was and pass it to forward method.
+        // We just leave the inputs_dict as it was and pass it to forward
+        // method.
         auto out = func(**inputs_dict);
         if (out.ptr() == Py_None) {
           AT_ERROR(

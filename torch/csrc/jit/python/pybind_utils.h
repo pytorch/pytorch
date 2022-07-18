@@ -568,8 +568,8 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
 // Serialize the python dictionary into a traceable stack.
 inline Stack toTraceableStack(const py::dict& inputs) {
   Stack res;
-  for(auto it = inputs.begin(); it != inputs.end(); it++) {
-    if(THPVariable_Check(it->second.ptr())) {
+  for (auto it = inputs.begin(); it != inputs.end(); it++) {
+    if (THPVariable_Check(it->second.ptr())) {
       res.push_back(toIValue(it->second, tryToInferType(it->second).type()));
     }
   }
