@@ -103,21 +103,30 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
           !allowSibling(next_hop.to, sibling_tv)) {
         continue;
       }
-      insertNextHop(NextHopWithInfo(NextHop(NextHopType::SIBLING, next_hop.to, sibling_tv), next_hop_info.info_to, computeInfoSibling(next_hop.to, sibling_tv, next_hop_info.info_to)));
+      insertNextHop(NextHopWithInfo(
+          NextHop(NextHopType::SIBLING, next_hop.to, sibling_tv),
+          next_hop_info.info_to,
+          computeInfoSibling(next_hop.to, sibling_tv, next_hop_info.info_to)));
     }
 
     for (auto consumer_tv : ir_utils::consumerTvsOf(next_hop.to)) {
       if (replayed.count(consumer_tv) || !allowP2C(next_hop.to, consumer_tv)) {
         continue;
       }
-      insertNextHop(NextHopWithInfo(NextHop(NextHopType::C_AS_P, next_hop.to, consumer_tv), next_hop_info.info_to, computeInfoCasP(next_hop.to, consumer_tv, next_hop_info.info_to)));
+      insertNextHop(NextHopWithInfo(
+          NextHop(NextHopType::C_AS_P, next_hop.to, consumer_tv),
+          next_hop_info.info_to,
+          computeInfoCasP(next_hop.to, consumer_tv, next_hop_info.info_to)));
     }
 
     for (auto producer_tv : ir_utils::producerTvsOf(next_hop.to)) {
       if (replayed.count(producer_tv) || !allowC2P(next_hop.to, producer_tv)) {
         continue;
       }
-      insertNextHop(NextHopWithInfo(NextHop(NextHopType::P_AS_C, next_hop.to, producer_tv), next_hop_info.info_to, computeInfoPasC(next_hop.to, producer_tv, next_hop_info.info_to)));
+      insertNextHop(NextHopWithInfo(
+          NextHop(NextHopType::P_AS_C, next_hop.to, producer_tv),
+          next_hop_info.info_to,
+          computeInfoPasC(next_hop.to, producer_tv, next_hop_info.info_to)));
     }
   }
 }
