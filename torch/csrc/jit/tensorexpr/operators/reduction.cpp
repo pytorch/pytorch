@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/tensorexpr/operators/quantization.h>
 #include <torch/csrc/jit/tensorexpr/operators/reduction.h>
 
 using namespace torch::jit::tensorexpr;
@@ -181,6 +182,77 @@ Tensor computeAdaptiveAvgPool2d(
           "nnc_aten_adaptive_avg_pool2d",
           {c10::get<BufHandle>(inputs[0])},
           c10::fmap<ExprHandle>(out_size_param)));
+}
+
+Tensor computeMaxPool2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto x = c10::get<BufHandle>(inputs[0]);
+  auto kernel_size = c10::get<IntList>(inputs[1]);
+  auto stride = c10::get<IntList>(inputs[2]);
+  auto padding = c10::get<IntList>(inputs[3]);
+  auto dilation = c10::get<IntList>(inputs[4]);
+  auto ceil_mode = c10::get<bool>(inputs[5]);
+
+  // Expand the dims as needed, to facilitate external call params processing
+  if (kernel_size.size() == 1) {
+    kernel_size.push_back(kernel_size[0]);
+  }
+  if (padding.size() == 1) {
+    padding.push_back(padding[0]);
+  }
+  if (dilation.size() == 1) {
+    dilation.push_back(dilation[0]);
+  }
+  if (stride.empty()) {
+    stride.push_back(kernel_size[0]);
+    stride.push_back(kernel_size[1]);
+  };
+
+  Dtype dtype = (outputType == c10::nullopt) ? kFloat : Dtype(*outputType);
+
+  ExprHandle qx_qscale = DoubleImm::make(0.0f);
+  ExprHandle qx_qzero = LongImm::make(1l);
+  int64_t qx_qdtype = -1l;
+  if (isQuantized(x)) {
+    qx_qscale = ExprHandle(x.node()->qscale());
+    qx_qzero = ExprHandle(x.node()->qzero());
+    qx_qdtype = (int64_t)immQDType(x);
+  }
+
+  auto strides = x.is_contiguous(c10::MemoryFormat::ChannelsLast)
+      ? make_channels_last_strides(outputShape)
+      : make_contiguous_strides(outputShape);
+
+  BufHandle ResultBuf = Buf::make(
+      "max_pool2d",
+      outputShape,
+      Dtype(*outputType),
+      c10::nullopt, // initializer
+      ExprVectorToExprHandleVector(strides),
+      qx_qscale,
+      qx_qzero);
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_max_pool2d",
+      {x},
+      {qx_qscale,
+       qx_qzero,
+       qx_qdtype,
+       kernel_size[0],
+       kernel_size[1],
+       stride[0],
+       stride[1],
+       padding[0],
+       padding[1],
+       dilation[0],
+       dilation[1],
+       (int64_t)ceil_mode});
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

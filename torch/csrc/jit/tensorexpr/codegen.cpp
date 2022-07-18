@@ -245,6 +245,7 @@ std::unordered_map<std::string, std::string> ExtCallMemoryReuse::
       {"nnc_aten_quantized_mul_scalar", "nnc_aten_quantized_mul_scalar_out"},
       {"nnc_aten_max_red", "nnc_aten_max_red_out"},
       {"nnc_aten_conv1d", "nnc_aten_conv1d_out"},
+      {"nnc_aten_max_pool2d", "nnc_aten_max_pool2d_out"},
   };
 }
 

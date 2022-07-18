@@ -1888,6 +1888,10 @@ int nnc_lowerings_lazy_registration() {
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> (Tensor)"},
       computeAdaptiveAvgPool2d);
 
+  RegisterNNCLoweringsFunction aten_max_pool2d(
+      {"aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor)"},
+      computeMaxPool2d);
+
   RegisterNNCLoweringsFunction aten_add(
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
        "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> (Tensor)"},

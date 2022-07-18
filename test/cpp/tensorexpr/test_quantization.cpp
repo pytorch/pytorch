@@ -449,5 +449,79 @@ TEST_F(Quantization, QuantCatDequantUInt8) {
   TORCH_CHECK_EQ(check, 1);
 }
 
+TEST_F(Quantization, QuantMaxPool2dDequantUInt8) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(4, 2, 9, 9, strides=[162, 81, 9, 1], device=cpu)):
+        %1 : int = prim::Constant[value=13]()
+        %2 : int[] = prim::Constant[value=[1, 1]]()
+        %3 : int[] = prim::Constant[value=[0, 0]]()
+        %4 : int[] = prim::Constant[value=[2, 2]]()
+        %5 : bool = prim::Constant[value=0]()
+        %qz : int = prim::Constant[value=52]()
+        %qs : float = prim::Constant[value=0.0549519]()
+        %q : QUInt8(4, 2, 9, 9, strides=[162, 81, 9, 1], requires_grad=0, device=cpu) = aten::quantize_per_tensor(%x, %qs, %qz, %1)
+        %qu : QUInt8(4, 2, 4, 4, strides=[32, 16, 4, 1], requires_grad=0, device=cpu) = aten::max_pool2d(%q, %4, %4, %3, %2, %5)
+        %6 : Float(4, 2, 4, 4, strides=[32, 16, 4, 1], requires_grad=0, device=cpu) = aten::dequantize(%qu)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({4, 2, 9, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto q = at::quantize_per_tensor(x, 0.0549519f, 52, at::kQUInt8);
+  auto qu = at::max_pool2d(q, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false);
+  auto y_expected = at::dequantize(qu);
+
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "x:\n" << x << std::endl;
+    std::cout << "q:\n" << q << std::endl;
+    std::cout << "qu:\n" << qu << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  TORCH_CHECK_EQ(check, 1);
+}
+
+TEST_F(Quantization, MaxPool2dFloat) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(4, 2, 9, 9, strides=[162, 1, 18, 2], device=cpu)):
+        %2 : int[] = prim::Constant[value=[1, 1]]()
+        %3 : int[] = prim::Constant[value=[0, 0]]()
+        %4 : int[] = prim::Constant[value=[2, 2]]()
+        %5 : bool = prim::Constant[value=0]()
+        %qu : Float(4, 2, 4, 4, strides=[32, 1, 8, 2], device=cpu) = aten::max_pool2d(%x, %4, %4, %3, %2, %5)
+        return (%qu))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = at::rand({4, 2, 9, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  x = x.contiguous(c10::MemoryFormat::ChannelsLast);
+  auto y_expected = at::max_pool2d(x, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false);
+
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "x:\n" << x << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  TORCH_CHECK_EQ(check, 1);
+}
+
 } // namespace jit
 } // namespace torch

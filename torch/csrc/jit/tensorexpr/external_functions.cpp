@@ -1313,6 +1313,84 @@ void nnc_aten_mean(
   }
 }
 
+void nnc_aten_max_pool2d(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const int64_t x_qdtype = extra_args[2];
+  c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
+  if (x_qdtype != -1) {
+    qdata = {
+        {1u,
+         {((double*)extra_args)[0],
+          extra_args[1],
+          at::toQIntType(static_cast<c10::ScalarType>(x_qdtype))}}};
+  }
+  auto tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
+
+  auto r = at::max_pool2d(
+      /*input=*/tensors[1],
+      /*kernel_size=*/at::IntArrayRef({extra_args[3], extra_args[4]}),
+      /*stride=*/at::IntArrayRef({extra_args[5], extra_args[6]}),
+      /*padding=*/at::IntArrayRef({extra_args[7], extra_args[8]}),
+      /*dilation=*/at::IntArrayRef({extra_args[9], extra_args[10]}),
+      /*ceil_mode=*/(bool)extra_args[11]);
+
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_max_pool2d_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const int64_t x_qdtype = extra_args[2];
+  c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
+  if (x_qdtype != -1) {
+    qdata = {
+        {1u,
+         {((double*)extra_args)[0],
+          extra_args[1],
+          at::toQIntType(static_cast<c10::ScalarType>(x_qdtype))}}};
+  }
+  const size_t bufs_out_num = 1u;
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      qdata,
+      bufs_out_num);
+
+  at::Tensor r;
+  try {
+    r = at::max_pool2d(
+        tensors[1],
+        at::IntArrayRef({extra_args[3], extra_args[4]}),
+        at::IntArrayRef({extra_args[5], extra_args[6]}),
+        at::IntArrayRef({extra_args[7], extra_args[8]}),
+        at::IntArrayRef({extra_args[9], extra_args[10]}),
+        (bool)extra_args[11]);
+  } catch (...) {
+  }
+
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_max_red(
     int64_t bufs_num,
     void** buf_data,
@@ -1613,6 +1691,12 @@ const static RegisterNNCExternalFunction nnc_triangular_solve(
 const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
+const static RegisterNNCExternalFunction nnc_max_pool2d(
+    "nnc_aten_max_pool2d",
+    nnc_aten_max_pool2d);
+const static RegisterNNCExternalFunction nnc_max_pool2d_out(
+    "nnc_aten_max_pool2d_out",
+    nnc_aten_max_pool2d_out);
 
 #if AT_MKLDNN_ENABLED()
 const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
