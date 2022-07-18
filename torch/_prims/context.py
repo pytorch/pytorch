@@ -34,6 +34,9 @@ def torch_to_refs_map():
         torch.Tensor.__and__: torch._refs.bitwise_and,
         torch.Tensor.__or__: torch._refs.bitwise_or,
         torch.Tensor.__eq__: torch._refs.eq,
+        # TODO: Should these methods be mapped some other way?
+        torch.Tensor.copy_: torch._prims.copy_to,
+        torch.Tensor.resize: torch._prims.resize,
     }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]

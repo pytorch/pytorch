@@ -124,7 +124,7 @@ class elementwise_type_promotion_wrapper(object):
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
-        return torch.resize(out, shape)
+        return out.resize_(shape)
 
     if out.numel() != reduce(operator.mul, shape, 1):
         msg = (
@@ -137,7 +137,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
             )
         )
         warnings.warn(msg)
-        return torch.resize(out, shape)
+        return out.resize_(shape)
 
     return out
 
@@ -145,7 +145,6 @@ def _maybe_resize_out(out: TensorLikeType, shape):
 def _safe_copy_out(
     *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
 ):
-    from torch._prims import copy_to
     # Checks same device
     if copy_from.device != copy_to.device:
         msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
@@ -167,7 +166,7 @@ def _safe_copy_out(
             "but this can't be cast because it is not safe!",
         )
 
-    return copy_to(copy_to, copy_from)
+    return copy_to.copy_(copy_from)
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
@@ -201,7 +200,22 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 and len(result) == len(out_names)
             )
             if out is not None:
-                assert type(out) == type(result)
+                # Naively you might expect this assert to be true, but
+                # it's not:
+                #
+                #   assert type(out) == type(result)
+                #
+                # The reason is that functions under this wrapper can
+                # get registered to the Meta dispatch key, and that
+                # means they can be executed in a context where tensor
+                # subclasses are disabled (with no_dispatch), which is a
+                # handy way for an is-a tensor subclass (e.g.,
+                # FakeTensor) to have the normal meta backend create a
+                # meta tensor, to be wrapped once it gets returned.
+                # In this situation, you will get a FakeTensor as
+                # the output tensor, but not the result--which will
+                # be a normal meta tensor, but this is perfectly
+                # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
@@ -267,4 +281,3 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
-
