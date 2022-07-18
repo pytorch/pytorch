@@ -353,7 +353,6 @@ class _AllGatherBase(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank(group=ctx.group)
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:
