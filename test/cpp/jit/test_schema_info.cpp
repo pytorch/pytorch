@@ -62,6 +62,27 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
   ASSERT_TRUE(schema.is_mutable(1));
   ASSERT_TRUE(schema.is_mutable("other"));
 }
+
+TEST(SchemaInfoIsMutableTest, InstanceNorm) {
+  SchemaInfo schema_info(
+      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor");
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("use_input_stats", true);
+  ASSERT_TRUE(schema_info.is_mutable("running_mean"));
+  ASSERT_TRUE(schema_info.is_mutable("running_var"));
+}
+
+TEST(SchemaInfoIsMutableTest, BatchNorm) {
+  SchemaInfo schema_info(
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor");
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("training", true);
+  ASSERT_TRUE(schema_info.is_mutable("running_mean"));
+  ASSERT_TRUE(schema_info.is_mutable("running_var"));
+}
+
 TEST(SchemaInfoIsNonDeterministicTest, Basic) {
   SchemaInfo deterministic_schema_info(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
@@ -69,6 +90,14 @@ TEST(SchemaInfoIsNonDeterministicTest, Basic) {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor");
   ASSERT_FALSE(deterministic_schema_info.is_nondeterministic());
   ASSERT_TRUE(nondeterministic_schema_info.is_nondeterministic());
+}
+
+TEST(SchemaInfoIsNonDeterministicTest, Dropout) {
+  SchemaInfo droupout_schema_info(
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor");
+  ASSERT_TRUE(droupout_schema_info.is_nondeterministic());
+  droupout_schema_info.addArgumentValue("train", false);
+  ASSERT_FALSE(droupout_schema_info.is_nondeterministic());
 }
 
 TEST(FunctionSchemaMayAliasTest, Basic) {
@@ -144,5 +173,43 @@ TEST(SchemaInfoMayAliasTest, AliasingInputOutput) {
       {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
 }
 
+TEST(FunctionSchemaMayContainAliasTest, Basic) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::output, 0}));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {c10::SchemaArgType::input, 1}, {c10::SchemaArgType::input, 0}));
+}
+
+TEST(FunctionSchemaMayContainAliasTest, Wildcard) {
+  c10::FunctionSchema schema = torch::jit::parseSchema(
+      "aten::test.Tensor(Tensor(*) self) -> (Tensor[], Tensor)");
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}, false));
+  ASSERT_FALSE(schema.may_contain_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}, false));
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 1}, {c10::SchemaArgType::input, 0}));
+}
+
+TEST(FunctionSchemaMayContainAliasTest, InputAndOutputContainers) {
+  c10::FunctionSchema schema =
+      torch::jit::parseSchema("aten::test.Tensor(Tensor[] self) -> Tensor[]");
+  ASSERT_FALSE(schema.may_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::output, 0}, {c10::SchemaArgType::input, 0}, false));
+  ASSERT_TRUE(schema.may_contain_alias(
+      {c10::SchemaArgType::input, 0}, {c10::SchemaArgType::output, 0}, false));
+}
 } // namespace utils
 } // namespace torch
