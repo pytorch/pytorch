@@ -10,8 +10,15 @@
 #define AT_USE_CUSPARSE_GENERIC_API() 0
 #endif
 
-// hipSparse Generic API
+// hipSparse Generic API ROCm 5.2
 #if defined(USE_ROCM) && ROCM_VERSION >= 50200
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 1
+#else
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#endif
+
+// hipSparse Generic API ROCm 5.1
+#if defined(USE_ROCM) && ROCM_VERSION >= 50100
 #define AT_USE_HIPSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_HIPSPARSE_GENERIC_API() 0
