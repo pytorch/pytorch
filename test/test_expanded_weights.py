@@ -76,30 +76,30 @@ class TestExpandedWeightHelperFunction(TestCase):
                 forward_helper(nn.functional.linear, expanded_args, expanded_kwargs)
 
     def test_set_grad_sample_if_exists(self, device):
-        def test_fn(a, b):
+        def test_fn(a):
             return True
 
         orig_weight = torch.randn(4, device=device, requires_grad=True)
         expanded_weight = ExpandedWeight(orig_weight, 3, loss_reduction="sum")
-        set_grad_sample_if_exists(expanded_weight, torch.ones_like(orig_weight), test_fn)
+        set_grad_sample_if_exists(expanded_weight, test_fn)
         self.assertTrue(hasattr(orig_weight, 'grad_sample'))
         self.assertTrue(orig_weight.grad_sample)
 
         basic_tensor = torch.randn(4, device=device)
-        set_grad_sample_if_exists(basic_tensor, torch.ones_like(basic_tensor), test_fn)
+        set_grad_sample_if_exists(basic_tensor, test_fn)
         self.assertFalse(hasattr(basic_tensor, 'grad_sample'))
 
         non_tensor = 3
-        set_grad_sample_if_exists(non_tensor, 1, test_fn)
+        set_grad_sample_if_exists(non_tensor, test_fn)
         self.assertFalse(hasattr(non_tensor, 'grad_sample'))
 
     def test_set_grad_sample_if_exists_failure(self, device):
-        def test_fn(a, b):
+        def test_fn(a):
             return True
 
         grad_tensor = torch.randn(4, requires_grad=True, device=device)
         with self.assertRaisesRegex(RuntimeError, r"does not support a mixture of ExpandedWeight parameters and normal Parameters"):
-            set_grad_sample_if_exists(grad_tensor, torch.ones_like(grad_tensor), test_fn)
+            set_grad_sample_if_exists(grad_tensor, test_fn)
 
     def test_unpack_expanded_weight_or_tensor(self, device):
         input = torch.randn(3, requires_grad=True, device=device)
@@ -168,8 +168,6 @@ class TestExpandedWeightFunctional(TestCase):
             expanded_weight_grad = expanded_weight_grad[1:]
             per_sample_grad = per_sample_grad[1:]
         for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
-            if result_grad is None:
-                result_grad = torch.zeros_like(expected_grad)
             self.assertEqual(result_grad, expected_grad)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
