@@ -162,6 +162,20 @@ void _linalg_check_errors_batch_rule(const Tensor& info, optional<int64_t> info_
   at::_linalg_check_errors(info_, api_name, false);
 }
 
+std::tuple<Tensor, c10::optional<int64_t>>
+householder_product_batch_rule(const Tensor &input, c10::optional<int64_t> input_bdim,
+                               const Tensor &tau, c10::optional<int64_t> tau_bdim)
+{
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  auto tau_ = moveBatchDimToFront(tau, tau_bdim);
+
+  auto batch_size = get_bdim_size2(input, input_bdim, tau, tau_bdim);
+
+  input_ = ensure_has_bdim(input_, input_bdim.has_value(), batch_size);
+  tau_ = ensure_has_bdim(tau_, tau_bdim.has_value(), batch_size);
+  return std::make_tuple(at::linalg_householder_product(input_, tau_), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
   m.impl("addmv", addmv_decomp);
@@ -172,6 +186,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
   m.impl("linear", linear_decomp);
+  VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
