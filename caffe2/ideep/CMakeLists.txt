@@ -1,4 +1,4 @@
-if(USE_MKLDNN)
+if(CAFFE2_USE_MKLDNN)
   message(STATUS "Including IDEEP operators")
 
   # ---[ CPU files.
