@@ -1497,7 +1497,7 @@ class TestTags(TestCase):
 
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
