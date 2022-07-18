@@ -10541,8 +10541,8 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     in_shape = input.shape
     in_dim = len(in_shape)
     for d in start_dim, end_dim:
-        if d < -in_dim or d >= in_dim:
-            raise IndexError("Dimension out of range (expected to be in range of [-{in_dim}, {in_dim-1}], but got {d}")
+        if not((in_dim == 0 and d in (-1, 0)) or -in_dim <= d < in_dim):
+            raise IndexError(f"Dimension out of range (expected to be in range of [{-in_dim}, {in_dim-1}], but got {d}")
     start_dim = start_dim if start_dim >= 0 else in_dim + start_dim
     end_dim = end_dim if end_dim >= 0 else in_dim + end_dim
     if in_dim == 0:
