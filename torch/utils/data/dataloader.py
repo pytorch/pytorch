@@ -583,7 +583,8 @@ class DataLoader(Generic[T_co]):
                     while _shared_seed_recv_cnt < ws:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
-                        if timedelta(seconds=(time.time() - start)) > _utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT:
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
                             raise RuntimeError("Timed out receiving signals on Rank 0 in the distribtued "
                                                "store that all other Ranks have received the shared seed. "
                                                f"(world_size={ws}, received={_shared_seed_recv_cnt}, "
@@ -598,7 +599,8 @@ class DataLoader(Generic[T_co]):
                     while len(_shared_seed_str) == 0:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
-                        if timedelta(seconds=(time.time() - start)) > _utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT:
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
                             raise RuntimeError("Timed out receiving the shared seed in the distribtued store "
                                                f"on Rank {rank}. (world_size={ws}, "
                                                f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
