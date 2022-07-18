@@ -10,11 +10,11 @@ class _SnapshotState(Enum):
     These are the snapshotting-related states that IterDataPipes can be in.
     `NotStarted` - allows you to restore a snapshot and create an iterator without reset
     `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
-    `Iterating` - cannot restore, will reset if you create a new iterator
+    `Iterating` - can restore, will reset if you create a new iterator
     """
-    NotStarted = 1
-    Restored = 2
-    Iterating = 3
+    NotStarted = 0
+    Restored = 1
+    Iterating = 2
 
 
 def _simplify_obj_name(obj) -> str:
@@ -155,11 +155,13 @@ def hook_iterator(namespace, profile_name):
             gen = func(*args, **kwargs)
             datapipe = args[0]
             if datapipe._fast_forward_iterator:
+                it = datapipe._fast_forward_iterator
+                datapipe._fast_forward_iterator = None
+                datapipe._snapshot_state = _SnapshotState.Iterating
                 while True:
                     try:
-                        yield next(datapipe._fast_forward_iterator)
+                        yield next(it)
                     except StopIteration:
-                        datapipe._fast_forward_iterator = None
                         return
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             _profiler_enabled = torch.autograd._profiler_enabled()
@@ -227,10 +229,10 @@ def hook_iterator(namespace, profile_name):
         def wrap_iter(*args, **kwargs):
             iter_ret = func(*args, **kwargs)
             datapipe = args[0]
+            datapipe._snapshot_state = _SnapshotState.Iterating
             if datapipe._fast_forward_iterator:
                 iter_ret = datapipe._fast_forward_iterator
                 datapipe._fast_forward_iterator = None
-                datapipe._snapshot_state = _SnapshotState.Iterating
                 return iter_ret
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)

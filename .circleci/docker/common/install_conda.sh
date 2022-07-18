@@ -76,7 +76,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # DO NOT install cmake here as it would install a version newer than 3.13, but
   # we want to pin to version 3.13.
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
