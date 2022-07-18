@@ -1299,7 +1299,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
-    @ops(filter(lambda op: op.name == "nn.functional.group_norm", functorch_lagging_op_db + additional_op_db),
+    @ops(tuple(filter(lambda op: op.name == "nn.functional.group_norm", functorch_lagging_op_db + additional_op_db)),
          allowed_dtypes=(torch.float32, torch.double))  # TODO: generalize
     def test_group_norm_backward(self, device, dtype, op):
         # hacky, only works since no group norm inputs can be scalars
