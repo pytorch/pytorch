@@ -958,10 +958,11 @@ class Tensor(torch._C._TensorBase):
         if not sizes:
             raise RuntimeError("unflatten: sizes must be non-empty")
 
-        names = None
         if isinstance(sizes, OrderedDict) or (isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))):
             names, sizes = unzip_namedshape(sizes)
-        return super(Tensor, self).unflatten(dim, sizes, names)
+            return super(Tensor, self).unflatten(dim, sizes, names)
+        else:
+            return super(Tensor, self).unflatten(dim, sizes)
 
 
     def rename_(self, *names, **rename_map):
