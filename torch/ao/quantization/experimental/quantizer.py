@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+import numpy as np
 from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # class to store APoT quantizer and
@@ -59,7 +60,12 @@ class APoTQuantizer():
         apot_tensor_data = apot_tensor.data
 
         # map apot_to_float over tensor2quantize elements
-        result = apot_tensor_data.apply_(lambda x: float(apot_to_float(x, self.quantization_levels, self.level_indices)))
+        result_temp = np.empty(apot_tensor_data.size())
+        for ele in apot_tensor_data:
+            new_ele = apot_to_float(ele, self.quantization_levels, self.level_indices)
+            np.append(result_temp, new_ele)
+
+        result = torch.from_numpy(result_temp).int()
 
         return result
 
