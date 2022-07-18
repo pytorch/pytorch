@@ -148,12 +148,12 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         # we make the first stored shard smaller
         self.assertTrue(
-            ".sharded" in metadata.state_dict_metadata,
+            "sharded" in metadata.state_dict_metadata,
             f"keys: {metadata.state_dict_metadata.keys()}",
         )
 
         sizes = (
-            metadata.state_dict_metadata[".sharded"]
+            metadata.state_dict_metadata["sharded"]
             .storage_metadata[0]
             .shard_metadata.shard_sizes
         )
@@ -172,12 +172,12 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         # we make the first stored shard smaller
         self.assertTrue(
-            ".sharded" in metadata.state_dict_metadata,
+            "sharded" in metadata.state_dict_metadata,
             f"keys: {metadata.state_dict_metadata.keys()}",
         )
 
         sizes = (
-            metadata.state_dict_metadata[".sharded"]
+            metadata.state_dict_metadata["sharded"]
             .storage_metadata[0]
             .shard_metadata.shard_sizes
         )
@@ -197,12 +197,12 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         metadata = self.gen_metadata()
         regular = metadata.state_dict_metadata["regular"]
-        metadata.state_dict_metadata[".sharded"] = regular
+        metadata.state_dict_metadata["sharded"] = regular
         with self.assertRaisesRegex(ValueError, "ShardedTensorStorageMetadata but found"):
             validate_metadata(module.state_dict(), metadata)
 
         metadata = self.gen_metadata()
-        sharded = metadata.state_dict_metadata[".sharded"]
+        sharded = metadata.state_dict_metadata["sharded"]
         metadata.state_dict_metadata["regular"] = sharded
         with self.assertRaisesRegex(ValueError, "TensorStorageMetadata but found"):
             validate_metadata(module.state_dict(), metadata)
@@ -225,7 +225,6 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         (_, md) = _prepare_sharded_tensor_write(st, "tensor", mapping)
 
         self.assertEqual(1, len(md.storage_metadata))
-        self.assertEqual(4 * 4 * 8, md.storage_metadata[0].length)
         self.assertEqual(1, len(mapping))
 
 

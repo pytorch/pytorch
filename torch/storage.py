@@ -16,7 +16,6 @@ except ModuleNotFoundError:
 T = TypeVar('T', bound='Union[_StorageBase, _TypedStorage]')
 class _StorageBase(object):
     _cdata: Any
-    is_cuda: bool = False
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
@@ -65,6 +64,8 @@ class _StorageBase(object):
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
+    @property
+    def is_cuda(self): ...  # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -113,6 +114,13 @@ class _StorageBase(object):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
         if self.device.type != 'cpu':
             return torch._UntypedStorage(self.size()).copy_(self, False)
+        else:
+            return self
+
+    def mps(self):
+        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        if self.device.type != 'mps':
+            return torch._UntypedStorage(self.size(), device="mps").copy_(self, False)
         else:
             return self
 
@@ -220,6 +228,9 @@ class _UntypedStorage(torch._C.StorageBase, _StorageBase):
             raise NotImplementedError("Not available for 'meta' device type")
         return super().__getitem__(*args, **kwargs)
 
+    @property
+    def is_cuda(self):
+        return self.device.type == 'cuda'
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
@@ -435,7 +446,7 @@ class _TypedStorage:
 
     @property
     def is_cuda(self):
-        return self._storage.device.type == 'cuda'
+        return self.device.type == 'cuda'
 
     def _untyped(self):
         return self._storage

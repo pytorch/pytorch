@@ -120,6 +120,7 @@ Dropout functions
     dropout
     alpha_dropout
     feature_alpha_dropout
+    dropout1d
     dropout2d
     dropout3d
 

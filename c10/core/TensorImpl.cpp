@@ -390,12 +390,12 @@ IntArrayRef TensorImpl::sizes_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
+
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have sym sizes");
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_sizes(this);
+  }
+  return sym_sizes_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
@@ -416,6 +416,7 @@ IntArrayRef TensorImpl::strides_custom() const {
       tensorimpl_type_name(),
       " do not have strides");
 }
+
 int64_t TensorImpl::dim_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->dim(this);
@@ -423,9 +424,18 @@ int64_t TensorImpl::dim_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
+
 int64_t TensorImpl::numel_custom() const {
   TORCH_CHECK(
       false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
+}
+
+c10::Layout TensorImpl::layout_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->layout(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have layout");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -516,8 +526,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
+
+  // We currently don't support refresh_numel() and refresh_contiguous(). It's
+  // plausible that we could support it, but currently done to unblock.
+  if (!has_symbolic_sizes_strides()) {
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+  }
   return impl;
 }
 
@@ -550,6 +565,9 @@ void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
+  dest_impl->has_symbolic_sizes_strides_ =
+      src_impl->has_symbolic_sizes_strides_;
+
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
@@ -741,7 +759,12 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
 
 void TensorImpl::FreeMemory() {
   // We'll detach from the old Storage and create a new one
-  storage_ = Storage::create_legacy(storage_.device());
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
+    storage_ = Storage::create_legacy(storage_.device());
+  } else {
+    storage_.reset_legacy();
+  }
   storage_offset_ = 0;
 }
 

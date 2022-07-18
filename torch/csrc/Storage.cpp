@@ -4,6 +4,7 @@
 #endif
 #include <structmember.h>
 
+#include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -93,6 +94,10 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::kCUDA) {
       at::globalContext().lazyInitCUDA();
       allocator = c10::cuda::CUDACachingAllocator::get();
+#endif
+#ifdef USE_MPS
+    } else if (device.type() == at::kMPS) {
+      allocator = at::mps::GetMPSAllocator();
 #endif
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());

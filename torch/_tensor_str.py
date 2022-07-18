@@ -335,9 +335,9 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
-    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # representable format. These operations on ipu/xla/lazy tensor results in compilations. Hence,
     # to avoid compilations, copying the tensor to cpu before printing.
-    if self.device.type == 'xla' or self.device.type == 'lazy':
+    if self.device.type in ['xla', 'lazy', 'ipu']:
         self = self.to('cpu')
 
     # TODO: add an API to map real -> complex dtypes
@@ -415,6 +415,9 @@ def _str_intern(inp, *, tensor_contents=None):
                 return "\n".join(f"  {line}" for line in s.split("\n"))
             strs = ",\n".join(indented_str(str(t), indent + 1) for t in torch.ops.aten.unbind.int(self, 0))
             tensor_str = f"[\n{strs}\n]"
+    elif torch._is_functional_tensor(self):
+        prefix = "_to_functional_tensor("
+        tensor_str = repr(torch._from_functional_tensor(self))
     else:
         if self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))

@@ -18,6 +18,8 @@ from torch._C._autograd import (
 )
 from torch.autograd import ProfilerActivity, kineto_available
 
+__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
+           'ExecutionGraphObserver']
 
 def supported_activities():
     """
@@ -56,7 +58,7 @@ class _KinetoProfile(object):
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
 
     .. note::
-        This API is an experimental and subject to change in future.
+        This API is experimental and subject to change in the future.
 
         Enabling shape and stack tracing results in additional overhead.
         When record_shapes=True is specified, profiler will temporarily hold references to the tensors;

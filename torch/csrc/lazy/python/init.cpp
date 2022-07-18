@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/python/init.h>
 
+#include <ATen/FunctionalTensorWrapper.h>
 #include <c10/core/Device.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
@@ -46,8 +47,9 @@ std::string GetTensorsDump(
   std::vector<torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
+    auto inner = at::functionalization::impl::from_functional_tensor(tensor);
     torch::lazy::LazyTensorPtr lazy_tensor =
-        torch::lazy::TryGetLtcTensor(tensor);
+        torch::lazy::TryGetLtcTensor(inner);
     values.push_back(lazy_tensor->GetIrValue());
     nodes.push_back(values.back().node.get());
   }
@@ -127,6 +129,8 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_reset_metrics", []() { torch::lazy::MetricsArena::Get()->Reset(); });
   lazy.def("_counter_names", []() { return torch::lazy::GetCounterNames(); });
+  lazy.def(
+      "_metrics_report", []() { return torch::lazy::CreateMetricReport(); });
   lazy.def("_counter_value", [](const std::string& name) -> py::object {
     torch::lazy::CounterData* data = torch::lazy::GetCounter(name);
     return data != nullptr ? py::cast<int64_t>(data->Value()) : py::none();

@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 
-#include <aten/src/ATen/AccumulateType.h>
+#include <ATen/AccumulateType.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -445,6 +445,8 @@ class NaiveTypePropagator {
         break;
       }
       case prim::unsqueeze_copy:
+      case prim::expand_copy:
+      case prim::expand_as_copy:
       case prim::squeeze_copy:
       case prim::reshape_copy:
       case prim::view_copy:
