@@ -703,7 +703,6 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
-
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
@@ -3046,11 +3045,7 @@ def slice(g, self, *args):
                 )
         else:
             start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-            end = (
-                INT64_MAX
-                if is_end_none
-                else symbolic_helper._parse_arg(end, "i")
-            )
+            end = INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
             dim = symbolic_helper._parse_arg(dim, "i")
             return symbolic_helper._slice_helper(
                 g, self, axes=[dim], starts=[start], ends=[end]
@@ -3066,9 +3061,7 @@ def slice(g, self, *args):
             end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-        end = (
-            INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
-        )
+        end = INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
         return symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[start], ends=[end]
         )
