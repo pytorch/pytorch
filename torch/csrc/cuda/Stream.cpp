@@ -33,7 +33,7 @@ static PyObject* THCPStream_pynew(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iKKKK",
+          "|iKKK",
           kwlist,
           &priority,
           &stream_id,
