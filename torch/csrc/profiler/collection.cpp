@@ -442,7 +442,9 @@ class TraceActivityKey {
   template <typename T>
   explicit TraceActivityKey(const T* kineto_activity) {
 #ifdef USE_KINETO
-    static_assert(std::is_base_of<libkineto::ITraceActivity, T>::value);
+    static_assert(
+        std::is_base_of<libkineto::ITraceActivity, T>::value,
+        "Invalid key type.");
     TORCH_INTERNAL_ASSERT(kineto_activity != nullptr);
     auto activity =
         static_cast<const libkineto::ITraceActivity*>(kineto_activity);
