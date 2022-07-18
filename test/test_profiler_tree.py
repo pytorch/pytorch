@@ -82,8 +82,8 @@ class ProfilerTree:
             return f"{filename}.py({lineno}): {fn}"
 
         name = re.sub(
-            r"void at::native::vectorized_elementwise_kernel<.+>\(",
-            "void at::native::vectorized_elementwise_kernel<...>(",
+            r"void at::native::vectorized_elementwise_kernel<.+>\(.+\)$",
+            "void at::native::vectorized_elementwise_kernel<...>(...)",
             name)
 
         return re.sub(
@@ -565,20 +565,20 @@ class TestProfilerTree(TestCase):
                 [memory]
               aten::fill_
                 cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+                  void at::native::vectorized_elementwise_kernel<...>(...)
             aten::ones
               aten::empty
                 [memory]
               aten::fill_
                 cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+                  void at::native::vectorized_elementwise_kernel<...>(...)
             aten::add
               cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(int, at::native::CUDAFunctor_add<float>, at::detail::Array<char*, 3>)
+                void at::native::vectorized_elementwise_kernel<...>(...)
               [memory]
             aten::pow
               cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(at::TensorIteratorBase&, float)::{lambda(float)#1}, at::detail::Array<char*, 2>)
+                void at::native::vectorized_elementwise_kernel<...>(...)
               aten::result_type
               aten::to
               [memory]
@@ -588,7 +588,7 @@ class TestProfilerTree(TestCase):
                   [memory]
               aten::fill_
                 cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+                  void at::native::vectorized_elementwise_kernel<...>(...)
             autograd::engine::evaluate_function: PowBackward0
               PowBackward0
                 aten::pow
@@ -602,12 +602,12 @@ class TestProfilerTree(TestCase):
                   [memory]
                   aten::mul
                     cudaLaunchKernel
-                      void at::native::vectorized_elementwise_kernel<...>(int, at::native::AUnaryFunctor<float, float, float, at::native::MulFunctor<float> >, at::detail::Array<char*, 2>)
+                      void at::native::vectorized_elementwise_kernel<...>(...)
                     [memory]
                   [memory]
                 aten::mul
                   cudaLaunchKernel
-                    void at::native::vectorized_elementwise_kernel<...>(int, at::native::BinaryFunctor<float, float, float, at::native::MulFunctor<float> >, at::detail::Array<char*, 3>)
+                    void at::native::vectorized_elementwise_kernel<...>(...)
                   [memory]
                 [memory]
                 [memory]
@@ -637,7 +637,7 @@ class TestProfilerTree(TestCase):
                 detach
               aten::add_
                 cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::CUDAFunctor_add<float>, at::detail::Array<char*, 3>)
+                  void at::native::vectorized_elementwise_kernel<...>(...)
             [memory]"""  # noqa: B950
         )
 
