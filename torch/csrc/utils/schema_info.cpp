@@ -133,11 +133,14 @@ bool SchemaInfo::may_alias(
   if (basic_check) {
     return true;
   }
-  bool types_can_alias = schema_.canAliasTypeSetsAlias(
+  c10::optional<c10::AliasTypeSet> lhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(lhs.type)[lhs.index].type()),
+          schema_.getCorrectList(lhs.type)[lhs.index].type());
+  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
-          schema_.getCorrectList(rhs.type)[rhs.index].type()));
+          schema_.getCorrectList(rhs.type)[rhs.index].type());
+  bool types_can_alias =
+      schema_.canAliasTypeSetsAlias(lhsAliasTypeSet, rhsAliasTypeSet);
   if (!types_can_alias) {
     return false;
   }
@@ -168,6 +171,39 @@ bool SchemaInfo::may_alias(
   } else {
     return output_alias_map_[rhs.index].count(lhs.index);
   }
+}
+
+bool SchemaInfo::may_contain_alias(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs,
+    bool bidirectional) {
+  bool basic_check = schema_.may_contain_alias(lhs, rhs) || may_alias(lhs, rhs);
+  if (basic_check) {
+    return true;
+  }
+  if (!alias_maps_current_) {
+    generateAliasMaps();
+  }
+  if (bidirectional) {
+    return mayContainAliasImpl(lhs, rhs) || mayContainAliasImpl(rhs, lhs);
+  } else {
+    return mayContainAliasImpl(lhs, rhs);
+  }
+}
+
+bool SchemaInfo::mayContainAliasImpl(
+    const c10::SchemaArgument& lhs,
+    const c10::SchemaArgument& rhs) {
+  c10::optional<c10::AliasTypeSet> lhsContainedAliasTypeSet =
+      schema_.getAliasTypeSetContainedTypes(schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(lhs.type)[lhs.index].type()));
+  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
+      schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(rhs.type)[rhs.index].type());
+  bool types_can_alias =
+      schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
+  return types_can_alias && container_set_.count(lhs) &&
+      wildcard_set_.count(rhs);
 }
 
 std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
@@ -229,15 +265,16 @@ void SchemaInfo::initSchemaInfo() {
                                    c10::SchemaArgType type) {
     std::unordered_set<at::Symbol> seen;
     for (size_t i = 0; i < arguments_list.size(); i++) {
-      if (arguments_list[i].alias_info()) {
-        if (arguments_list[i].alias_info()->isWildcardAfter()) {
+      const c10::Argument& argument = arguments_list[i];
+      if (argument.alias_info()) {
+        if (argument.alias_info()->isWildcardAfter()) {
           wildcard_set_.insert({type, i});
         } else {
           // This check is to ensure that the FunctionSchema will accurately
           // be represented when calling may_alias and may_contain_alias
           // on schemas with more than one argument within arguments_list that
           // shares an alias set.
-          for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+          for (const auto& set : argument.alias_info()->afterSets()) {
             if (seen.count(set)) {
               TORCH_WARN(
                   set.toQualString(),
@@ -248,6 +285,12 @@ void SchemaInfo::initSchemaInfo() {
             }
           }
         }
+      }
+      c10::optional<c10::AliasTypeSet> contained_types =
+          schema_.getAliasTypeSetContainedTypes(
+              schema_.mapTypeToAliasTypeSet(argument.type()));
+      if (contained_types && contained_types->size() > 0) {
+        container_set_.insert({type, i});
       }
     }
   };
@@ -284,6 +327,26 @@ void SchemaInfo::generateAliasMaps() {
           } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
+        }
+      }
+    }
+  }
+
+  // Fills wildcard_set with container created wildcards.
+  // For instance, given the schema:
+  // test(Tensor a, Tensor(*) b, Tensor[] c) -> Tensor
+  // where value(a) is contained in value(c), then a will be added to the
+  // wildcard set where it can now alias b.
+  for (size_t i = 0; i < schema_.arguments().size(); i++) {
+    for (size_t j = 0; j < schema_.arguments().size(); j++) {
+      // if they are already aliasing, there is no way one contains the other
+      if (!input_alias_map_[i].count(j) &&
+          value_map_.count(schema_.arguments()[i].name()) &&
+          value_map_.count(schema_.arguments()[j].name())) {
+        c10::IValue::HashAliasedIValues subValues;
+        value_map_[schema_.arguments()[i].name()].getSubValues(subValues);
+        if (subValues.count(value_map_[schema_.arguments()[j].name()])) {
+          wildcard_set_.insert({c10::SchemaArgType::input, j});
         }
       }
     }
