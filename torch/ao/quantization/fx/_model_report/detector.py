@@ -107,6 +107,11 @@ class PerChannelDetector(DetectorBase):
                 Default value is current torch.backends.quantized.engine
     """
 
+    # Keys for return dictionary
+    BACKEND_KEY = "backend"
+    PER_CHAN_SUPPORTED_KEY = "per_channel_supported"
+    PER_CHAN_USED_KEY = "per_channel_used"
+
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
         "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
@@ -138,7 +143,7 @@ class PerChannelDetector(DetectorBase):
         return {}
 
 
-    def _detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
+    def _detect_per_channel_helper(self, model: nn.Module):
         r"""
         determines if per_channel quantization is supported in modules and submodules.
 
@@ -150,13 +155,11 @@ class PerChannelDetector(DetectorBase):
 
         Returns dictionary mapping fqns to if per_channel quantization is possible
         """
-        for named_mod in model.named_modules():
+        # create dict we will return
+        per_channel_info: Dict = {}
 
-            # get the fully qualified name and check if in list of modules to include and list of modules to ignore
-            fqn, module = named_mod
-
-            # asserts for MyPy
-            assert isinstance(fqn, str) and isinstance(per_channel_info["per_channel_status"], dict)
+        # get the fully qualified name and check if in list of modules to include and list of modules to ignore
+        for fqn, module in model.named_modules():
 
             is_in_include_list = sum(list(map(lambda x: isinstance(module, x), self.supported_modules))) > 0
 
@@ -189,9 +192,10 @@ class PerChannelDetector(DetectorBase):
                     else:
                         raise ValueError("Should be either observer or fake quant")
 
-                per_channel_info["per_channel_status"][fqn] = {
-                    "per_channel_supported": per_channel_supported,
-                    "per_channel_used": per_channel_used,
+                per_channel_info[fqn] = {
+                    self.PER_CHAN_SUPPORTED_KEY: per_channel_supported,
+                    self.PER_CHAN_USED_KEY: per_channel_used,
+                    self.BACKEND_KEY: self.backend_chosen
                 }
 
         return per_channel_info
@@ -213,22 +217,16 @@ class PerChannelDetector(DetectorBase):
                 if it is being utilized in the current model
         """
 
-        # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
-        per_channel_info = {"backend": self.backend_chosen, "per_channel_status": {}}
-
         # run the helper function to populate the dictionary
-        per_channel_info = self._detect_per_channel_helper(model, per_channel_info)
+        per_channel_info = self._detect_per_channel_helper(model)
 
         # String to let the user know of further optimizations
         further_optims_str = "Further Optimizations for backend {}: \n".format(self.backend_chosen)
 
-        # assert for MyPy check
-        assert isinstance(per_channel_info["per_channel_status"], dict)
-
         optimizations_possible = False
-        for fqn in per_channel_info["per_channel_status"]:
-            fqn_dict = per_channel_info["per_channel_status"][fqn]
-            if fqn_dict["per_channel_supported"] and not fqn_dict["per_channel_used"]:
+        for fqn in per_channel_info:
+            fqn_dict = per_channel_info[fqn]
+            if fqn_dict[self.PER_CHAN_SUPPORTED_KEY] and not fqn_dict[self.PER_CHAN_USED_KEY]:
                 optimizations_possible = True
                 further_optims_str += "Module {module_fqn} can be configured to use per_channel quantization.\n".format(
                     module_fqn=fqn
