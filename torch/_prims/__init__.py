@@ -178,6 +178,10 @@ __all__ = [
     #
     "svd",
     #
+    # Ops with data-dependent shape
+    #
+    "repeat_interleave",
+    #
     # Randomness Prims
     #
     "uniform",
@@ -2586,6 +2590,37 @@ svd = _make_prim(
     doc=_svd_doc,
 )
 
+
+_repeat_interleave_doc = """
+    Repeats elements of a tensor
+
+    `repeats` is required to be a 1-D tensor
+"""
+
+def _repeat_interleave_meta(a: TensorLikeType, repeats: TensorLikeType, dim: Optional[int] = None):
+    # This doesn't work yet
+    total = 0
+    for i in range(repeats.size(0)):
+        total += repeats[i].item()
+
+    if dim == None:
+        assert repeats.dim() == 1
+        return TensorMeta(shape=(total,), strides=(1,), dtype=a.dtype, device=a.device)
+
+    shape = tuple(total if i != dim else s for i, s in enumerate(a.shape))
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=a.dtype, device=a.device)
+
+def _repeat_interleave_aten(self: TensorLikeType, repeats: TensorLikeType, dim: Optional[int] = None):
+    return torch.repeat_interleave(self, repeats, dim)
+
+repeat_interleave = _make_prim(
+    schema="repeat_interleave(Tensor self, Tensor repeats, int? dim=None) -> Tensor",
+    meta=_repeat_interleave_meta,
+    impl_aten=_repeat_interleave_aten,
+    return_type=(RETURN_TYPE.NEW,),
+    doc=_repeat_interleave_doc,
+)
 
 #
 # Randomness Prims

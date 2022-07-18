@@ -3004,6 +3004,41 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     assert isinstance(value, TensorLike)
     return where(mask, prims.to_dtype(value, a.dtype), a)
 
+@register_decomposition(torch.ops.aten.repeat_interleave)
+def repeat_interleave(a: TensorLikeType, repeats: Union[TensorLikeType, int], dim: Optional[int] = None):
+    # This ref/decomp handles two overloads
+
+    if not dim:
+        a = a.flatten()
+        dim = 0
+    else:
+        check(
+            dim >= -a.dim() and dim < a.dim(),
+            "dim must be within the range [-a.dim(), a.dim())"
+        )
+        dim = dim if dim > 0 else dim + a.dim()
+
+    if isinstance(repeats, int):
+        # Emulates https://github.com/pytorch/pytorch/pull/51869
+        if repeats == 1:
+            return a
+        a = a.unsqueeze(dim + 1)
+        # repeats cannot be negative should be already checked
+        repeat_shape = tuple(repeats if i == dim + 1 else 1 for i in range(a.dim()))
+        return a.repeat(repeat_shape).flatten(dim, dim + 1)
+    if isinstance(repeats, torch.Tensor):
+        if repeats.dim() == 0 or (repeats.dim() == 1 and repeats.size(0) == 1):
+            repeats = repeats.reshape(1).expand(a.size(dim))
+        elif repeats.dim() == 1:
+            check(
+                repeats.size(0) == a.size(dim),
+                "repeats must have the same size as input along dim"
+            )
+        else:
+            raise ValueError("repeats must be 0-dim or 1-dim tensor")
+
+        return prims.repeat_interleave(a, repeats, dim)
+
 
 # TODO: add OpInfo for torch.equal and refs.equal
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:

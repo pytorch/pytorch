@@ -20309,6 +20309,14 @@ python_ref_db = [
         "_refs.reciprocal",
         torch_opinfo_name="reciprocal",
     ),
+    PythonRefInfo(
+        "_refs.repeat_interleave",
+        torch_opinfo_name="repeat_interleave",
+        # Maybe checking whether the output is a view or not is too restrictive
+        # What really matters is whether the output is a view of the input, and we
+        # shouldn't care if one output is a view of an intermediate
+        validate_view_consistency=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.round",
         torch_opinfo_name="round",
