@@ -672,6 +672,7 @@ code = 'UFMT'
 include_patterns = [
     'test/onnx/**/*.py',
     'tools/**/*.py',
+    'torchgen/**/*.py',
 ]
 command = [
     'python3',
