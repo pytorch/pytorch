@@ -11,6 +11,7 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -244,7 +245,7 @@ struct EventFieldsVisitor {
     std::string name_;
   };
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
   std::reference_wrapper<KinetoEvent> kineto_event_;
   std::reference_wrapper<const post_process_t> post_process_;
   std::vector<PythonMetadata> py_metadata_;
@@ -583,7 +584,8 @@ void reportBackendEventToActiveKinetoProfiler(
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (config.state == ProfilerState::NVTX) {
+  if (config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::ITT) {
     return;
   }
   TORCH_CHECK(
@@ -602,6 +604,9 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
+  TORCH_CHECK(
+      config.state != ProfilerState::ITT,
+      "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
       GlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
@@ -618,6 +623,9 @@ void enableProfiler(
   TORCH_CHECK(!profilerEnabled(), "Profiler is already enabled on this thread");
   if (config.state == ProfilerState::NVTX) {
     torch::profiler::impl::pushNVTXCallbacks(config, scopes);
+    return;
+  } else if (config.state == ProfilerState::ITT) {
+    torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
   }
 
@@ -662,7 +670,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX),
+           config.state == ProfilerState::NVTX ||
+           config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {
