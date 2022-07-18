@@ -466,8 +466,9 @@ struct FencePool final {
 template <typename Block>
 inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
   const VulkanBuffer::MemoryProperties mem_props{
-      DEFAULT_ALLOCATION_STRATEGY,
-      VMA_MEMORY_USAGE_CPU_TO_GPU,
+      DEFAULT_ALLOCATION_STRATEGY |
+          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+      VMA_MEMORY_USAGE_AUTO,
       0u,
       0u,
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
