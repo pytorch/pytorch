@@ -27,7 +27,7 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable();
 
-  bool is_mutable(size_t index);
+  bool is_mutable(const c10::SchemaArgument& argument);
 
   bool is_mutable(c10::string_view name);
 

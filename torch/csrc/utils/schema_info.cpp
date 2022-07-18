@@ -35,16 +35,17 @@ void SchemaInfo::addArgumentValues(
 
 bool SchemaInfo::is_mutable() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
-    if (is_mutable(i)) {
+    if (is_mutable({c10::SchemaArgType::input, i})) {
       return true;
     }
   }
   return false;
 }
 
-bool SchemaInfo::is_mutable(size_t index) {
+bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
   TORCH_INTERNAL_ASSERT(
-      index < schema_.arguments().size(), "Invalid index for schema.");
+      argument.index < schema_.getCorrectList(argument.type).size(),
+      "Invalid index for schema.");
   if (!alias_maps_current_) {
     generateAliasMaps();
   }
@@ -54,8 +55,8 @@ bool SchemaInfo::is_mutable(size_t index) {
   // of cases where either running_mean or running_var alias another input
   // argument causing its alias status to change.
   return std::any_of(
-      input_alias_map_[index].begin(),
-      input_alias_map_[index].end(),
+      input_alias_map_[argument.index].begin(),
+      input_alias_map_[argument.index].end(),
       [this](size_t aliasing_index) {
         bool special_case =
             (this->schema_.arguments()[aliasing_index].name() ==
@@ -76,7 +77,8 @@ bool SchemaInfo::is_mutable(size_t index) {
               value_map_.at("use_input_stats").toBool();
           return has_training || has_train || has_use_input_stats;
         } else {
-          return this->schema_.is_mutable(aliasing_index);
+          return this->schema_.is_mutable(
+              {c10::SchemaArgType::input, aliasing_index});
         }
       });
 }
@@ -86,7 +88,7 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
 
-  return is_mutable(*index);
+  return is_mutable({c10::SchemaArgType::input, *index});
 }
 
 bool SchemaInfo::is_nondeterministic() const {

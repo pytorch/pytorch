@@ -376,11 +376,11 @@ struct TORCH_API FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
-  bool is_mutable(size_t index) const {
+  bool is_mutable(const c10::SchemaArgument &argument) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size(),
+        argument.index < getCorrectList(argument.type).size(),
         "Invalid index for schema.");
-    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
   bool is_mutable(c10::string_view name) const {
@@ -388,7 +388,7 @@ struct TORCH_API FunctionSchema {
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
-    return is_mutable(*index);
+    return is_mutable({c10::SchemaArgType::input, *index});
   }
 
   // Returns whether lhs and rhs may alias directly.
