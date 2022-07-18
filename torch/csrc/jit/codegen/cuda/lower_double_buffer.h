@@ -128,12 +128,20 @@ class TORCH_CUDA_CU_API DoubleBufferInfo {
 
   Val* getOriginalAllocSize(const TensorView* tv);
 
+  //! Returns true if the iterdomain will be realized
+  //!  as a double buffer loop.
+  bool isDoubleBufferedIterDomain(IterDomain* id);
+
  private:
   TvInfo& getTvInfo(const TensorView* tv);
 
  private:
   //! Keeps track of information for lowering double buffered tensors
   std::unordered_map<const TensorView*, TvInfo> map_;
+
+  //! Keeps track of which concrete loop map is realizing double buffer
+  //!  iterdomains.
+  std::unordered_set<const IterDomain*> concrete_double_buffered_loop_id_;
 };
 
 } // namespace cuda
