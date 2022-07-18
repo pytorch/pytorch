@@ -106,7 +106,7 @@ class TestProfilerTree(TestCase):
         # simply coerce them into a platform independent form. If you made a
         # change in the codebase which changes the trace produced, simply use
         # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
-
+        self.maxDiff = None
         replicate = getattr(self, "tree_replicate", None)
         self.assertIsNotNone(replicate, "Please annotate test with `@ProfilerTree.test`")
 
