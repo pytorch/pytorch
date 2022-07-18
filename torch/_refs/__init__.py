@@ -2683,6 +2683,8 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 # This not an op, just a method on tensor, so we don't register decomp
 def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
+    if len(sizes) == 0:
+        raise RuntimeError("unflatten: sizes must be non-empty")
     dim = utils.canonicalize_dim(a.ndim, dim)
     out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
     return reshape(a, out_shape)
