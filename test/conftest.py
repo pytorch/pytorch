@@ -52,7 +52,7 @@ def pytest_addoption(parser: Parser) -> None:
         "junit_duration_report_reruns",
         "Duration time to report: one of total|call",
         default="total",
-    )  # choices=['total', 'call'])
+    )
     parser.addini(
         "junit_family_reruns",
         "Emit XML for schema: one of legacy|xunit1|xunit2",
@@ -101,7 +101,6 @@ class LogXMLReruns(LogXML):
         super().__init__(*args, **kwargs)
 
     def append_rerun(self, reporter: _NodeReporter, report: TestReport) -> None:
-        # msg = str(report.longrepr.reprtraceback.extraline)
         if hasattr(report, "wasxfail"):
             reporter._add_simple("skipped", "xfail-marked test passes unexpectedly")
         else:
