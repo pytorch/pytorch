@@ -121,5 +121,5 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
         state (DefaultState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
     """
-    bp16_hook = functools.partial(lower_precision_hook, torch.bfloat16)
-    return bp16_hook(state, grad)
+    bf16_hook = functools.partial(lower_precision_hook, torch.bfloat16)
+    return bf16_hook(state, grad)
