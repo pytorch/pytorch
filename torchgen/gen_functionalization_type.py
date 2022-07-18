@@ -1,46 +1,46 @@
+from typing import Callable, List, Optional, Tuple, Union
+
 from torchgen.api import cpp, dispatcher
+from torchgen.api.translate import translate
 from torchgen.api.types import (
-    DispatcherSignature,
-    Binding,
-    FunctionalizationLambda,
-    ViewInverseSignature,
-    NativeSignature,
-    CType,
     BaseCType,
-    VectorCType,
+    Binding,
+    CType,
+    DispatcherSignature,
+    FunctionalizationLambda,
+    NativeSignature,
     tensorListT,
     tensorT,
+    VectorCType,
+    ViewInverseSignature,
 )
-from torchgen.api.translate import translate
 from torchgen.context import (
+    native_function_manager,
     with_native_function,
     with_native_function_and,
-    native_function_manager,
 )
 from torchgen.model import (
     Argument,
-    Return,
+    BackendIndex,
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
     NativeFunction,
     NativeFunctionsGroup,
-    BackendIndex,
-    FunctionSchema,
+    NativeFunctionsViewGroup,
+    Return,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    BaseTy,
-    NativeFunctionsViewGroup,
-    ListType,
 )
 from torchgen.native_function_generation import (
-    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
-    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
     INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
+    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
+    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
 )
 
 from torchgen.selective_build.selector import SelectiveBuilder
-
-from typing import List, Optional, Union, Tuple, Callable
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -688,6 +688,9 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
+        # See Note [Functionalization <> torch.Tensor constructor]
+        if str(g.view.func.name) == "lift_fresh":
+            return []
         view_str = [emit_registration_helper(g.view)]
         if g.view_inplace is not None:
             assert g.view_inplace.is_view_op
