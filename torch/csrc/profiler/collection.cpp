@@ -458,7 +458,7 @@ class NameEncoder {
   }
 
   static long long decode(const std::string& encoded_name) {
-    const std::string prefix {sentinelPrefix};
+    const std::string prefix{sentinelPrefix};
     if (encoded_name.compare(0, prefix.size(), prefix) == 0) {
       const auto out =
           std::stoll(encoded_name.substr(prefix.size(), encoded_name.size()));
@@ -613,9 +613,7 @@ addKinetoEvents(
                                const bool if_invalid) {
     if (activity == nullptr) {
       return if_invalid;
-    } else if (
-        kineto_events.find(activity) !=
-        kineto_events.end()) {
+    } else if (kineto_events.find(activity) != kineto_events.end()) {
       return true;
     } else if (
         activity->type() == libkineto::ActivityType::CPU_OP ||
@@ -676,12 +674,17 @@ addKinetoEvents(
 
   // Set linked activities
   for (const auto* kineto_activity : *trace_activities) {
+    const auto* activity = static_cast<const activity_t*>(kineto_activity);
     const auto* linked_activity =
         static_cast<const activity_t*>(kineto_activity->linkedActivity());
     if (linked_activity) {
-      auto& fields = c10::get<ExtraFields<EventType::Kineto>>(
-          kineto_events.at(linked_activity)->extra_fields_);
-      fields.linked_activity_ = kineto_events.at(linked_activity);
+      c10::visit(
+          c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.linked_activity_ = kineto_events.at(linked_activity);
+              },
+              [](auto&) { TORCH_INTERNAL_ASSERT(false); }),
+          kineto_events.at(activity)->extra_fields_);
     }
   }
 #endif // USE_KINETO
