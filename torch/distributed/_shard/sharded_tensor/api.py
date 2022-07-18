@@ -533,7 +533,7 @@ class ShardedTensor(torch.Tensor):
         list_shards: List[Shard] = []
 
         for shard in self._local_shards:
-            new_tensor = shard.tensor.to(
+            new_tensor = shard.tensor.to(  # type: ignore[call-overload]
                 device=device_to,
                 dtype=dtype_to,
                 non_blocking=non_blocking,
