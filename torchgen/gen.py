@@ -1,45 +1,22 @@
-import os
-from typing import List, Dict, Optional, Tuple, Set, Any, Union, Sequence, TypeVar
-from typing_extensions import Literal
-import yaml
-from collections import OrderedDict, defaultdict, namedtuple
 import argparse
-import pathlib
-import json
-from dataclasses import dataclass
 import functools
+import json
+import os
+import pathlib
+from collections import defaultdict, namedtuple, OrderedDict
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
-from torchgen.model import (
-    STRUCTURED_DISPATCH_KEYS,
-    Argument,
-    DispatchKey,
-    FunctionSchema,
-    Location,
-    NativeFunction,
-    NativeFunctionsGroup,
-    OperatorName,
-    BackendIndex,
-    BackendMetadata,
-    OptionalType,
-    SchemaKind,
-    SelfArgument,
-    TensorOptionsArguments,
-    Type,
-    Variant,
-    is_cuda_dispatch_key,
-    is_generic_dispatch_key,
-    is_ufunc_dispatch_key,
-    NativeFunctionsViewGroup,
-    ViewSchemaKind,
-    BaseOperatorName,
-    DEFAULT_KERNEL_NAMESPACE,
-)
-from torchgen.native_function_generation import (
-    pre_group_native_functions,
-    add_generated_native_functions,
-    gen_composite_functional_kernel,
-    gen_composite_out_kernel,
-)
+import yaml
+from typing_extensions import Literal
+
+import torchgen.api.dispatcher as dispatcher
+import torchgen.api.meta as meta
+import torchgen.api.native as native
+import torchgen.api.structured as structured
+import torchgen.dest as dest
+from torchgen.api import cpp
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,
     CppSignatureGroup,
@@ -48,38 +25,63 @@ from torchgen.api.types import (
     NativeSignature,
     SpecialArgName,
 )
-from torchgen.api import cpp
-import torchgen.api.dispatcher as dispatcher
-import torchgen.api.native as native
-import torchgen.api.meta as meta
-import torchgen.api.structured as structured
-from torchgen.api.translate import translate
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import (
-    Target,
-    concatMap,
-    context,
-    mapMaybe,
-    YamlDumper,
-    YamlLoader,
-    FileManager,
-    assert_never,
-    make_file_manager,
-    NamespaceHelper,
-)
 from torchgen.context import (
     method_with_native_function,
     native_function_manager,
-    with_native_function_and_indices,
     with_native_function,
+    with_native_function_and_indices,
 )
-import torchgen.dest as dest
 from torchgen.gen_functionalization_type import (
+    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
-    gen_composite_view_copy_kernel,
     gen_symint_view_copy_kernel,
+)
+
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    BackendMetadata,
+    BaseOperatorName,
+    DEFAULT_KERNEL_NAMESPACE,
+    DispatchKey,
+    FunctionSchema,
+    is_cuda_dispatch_key,
+    is_generic_dispatch_key,
+    is_ufunc_dispatch_key,
+    Location,
+    NativeFunction,
+    NativeFunctionsGroup,
+    NativeFunctionsViewGroup,
+    OperatorName,
+    OptionalType,
+    SchemaKind,
+    SelfArgument,
+    STRUCTURED_DISPATCH_KEYS,
+    TensorOptionsArguments,
+    Type,
+    Variant,
+    ViewSchemaKind,
+)
+from torchgen.native_function_generation import (
+    add_generated_native_functions,
+    gen_composite_functional_kernel,
+    gen_composite_out_kernel,
+    pre_group_native_functions,
+)
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import (
+    assert_never,
+    concatMap,
+    context,
+    FileManager,
+    make_file_manager,
+    mapMaybe,
+    NamespaceHelper,
+    Target,
+    YamlDumper,
+    YamlLoader,
 )
 
 T = TypeVar("T")

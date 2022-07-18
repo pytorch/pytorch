@@ -228,7 +228,29 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser_result = compiled_module(inputs)
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_aten_where(self, device, dtype):
 
+        def fn(x):
+            where = torch.ops.aten.where(x < 0, -x, x)
+            a = where + 1
+            b = a + 1
+            return b
+
+        inputs = torch.randn(4, device=device)
+        traced = make_fx(fn)(inputs)
+
+        nvfuser = NvFuserBackend()
+        compiled_module = nvfuser.compile(copy.deepcopy(traced))
+
+        for node in compiled_module.graph.nodes:
+            if node.op == "call_function":
+                assert "fused" in str(node.target), "the entire function should be fused into a single fusion group"
+
+        eager_result = traced(inputs)
+        nvfuser_result = compiled_module(inputs)
+        torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
 instantiate_device_type_tests(TestFxNvFuserBackend, globals(), only_for="cuda")
 

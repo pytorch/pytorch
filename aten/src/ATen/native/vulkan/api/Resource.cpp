@@ -19,11 +19,14 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
       return VK_FORMAT_R32G32B32A32_SFLOAT;
 #endif /* USE_VULKAN_FP16_INFERENCE */
 
-    default:
-      return VK_FORMAT_UNDEFINED;
-  }
-}
+    case c10::kQUInt8:
+      return VK_FORMAT_R8G8B8A8_UINT;
 
+    default:
+      TORCH_CHECK(false, "Vulkan tensor format not supported!");
+  }
+  return VK_FORMAT_UNDEFINED;
+}
 //
 // MemoryBarrier
 //
@@ -531,10 +534,11 @@ MemoryAllocator::~MemoryAllocator() {
   vmaDestroyAllocator(allocator_);
 }
 
-VulkanImage MemoryAllocator::create_image3d_fp(
+VulkanImage MemoryAllocator::create_image3d(
     const VkExtent3D& extents,
     const VulkanImage::SamplerProperties& sampler_props,
     const VkSampler sampler,
+    const caffe2::TypeMeta dtype,
     bool allow_transfer) {
   VkImageUsageFlags usage =
       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
@@ -543,6 +547,8 @@ VulkanImage MemoryAllocator::create_image3d_fp(
         (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
   }
 
+  const VkFormat image_format = vk_format(dtype);
+
   const VulkanImage::MemoryProperties mem_props{
       DEFAULT_ALLOCATION_STRATEGY,
       VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
@@ -550,12 +556,6 @@ VulkanImage MemoryAllocator::create_image3d_fp(
       0u,
       usage,
   };
-
-#ifdef USE_VULKAN_FP16_INFERENCE
-  const VkFormat image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-  const VkFormat image_format = VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* USE_VULKAN_FP16_INFERENCE */
 
   const VulkanImage::ImageProperties image_props{
       VK_IMAGE_TYPE_3D,
