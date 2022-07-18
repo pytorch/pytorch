@@ -1678,7 +1678,16 @@
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
-  self: not_implemented("lift")
+  self: grad
+  result: auto_linear
+
+- name: lift_fresh(Tensor self) -> Tensor
+  self: grad
+  result: auto_linear
+
+- name: lift_fresh_copy(Tensor self) -> Tensor
+  self: grad
+  result: auto_linear
 
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
