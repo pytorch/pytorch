@@ -609,6 +609,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if(${USE_ITT})
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
+    )
+  endif()
+
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -1149,9 +1156,11 @@ endif()
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include)
+
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
-      ${TORCH_ROOT}/third_party/kineto/libkineto/include
       ${TORCH_ROOT}/third_party/kineto/libkineto/src)
   endif()
 

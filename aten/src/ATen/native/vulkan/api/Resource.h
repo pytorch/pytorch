@@ -16,6 +16,9 @@ typedef uint8_t MemoryAccessFlags;
 
 VkFormat vk_format(const caffe2::TypeMeta dtype);
 
+constexpr VmaAllocationCreateFlags DEFAULT_ALLOCATION_STRATEGY =
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT;
+
 enum MemoryAccessType : MemoryAccessFlags {
   NONE = 0u << 0u,
   READ = 1u << 0u,
@@ -33,6 +36,8 @@ struct MemoryBarrier final {
 class VulkanBuffer final {
  public:
   struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
+
     VmaMemoryUsage memory_usage;
     VkMemoryPropertyFlags required_mem_flags;
     VkMemoryPropertyFlags preferred_mem_flags;
@@ -183,6 +188,8 @@ class ImageSampler final {
 class VulkanImage final {
  public:
   struct MemoryProperties final {
+    VmaAllocationCreateFlags create_flags;
+
     VmaMemoryUsage memory_usage;
     VkMemoryPropertyFlags required_mem_flags;
     VkMemoryPropertyFlags preferred_mem_flags;
@@ -360,10 +367,11 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d_fp(
+  VulkanImage create_image3d(
       const VkExtent3D&,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
+      const caffe2::TypeMeta dtype,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
@@ -458,6 +466,7 @@ struct FencePool final {
 template <typename Block>
 inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
   const VulkanBuffer::MemoryProperties mem_props{
+      DEFAULT_ALLOCATION_STRATEGY,
       VMA_MEMORY_USAGE_CPU_TO_GPU,
       0u,
       0u,
