@@ -200,7 +200,22 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 and len(result) == len(out_names)
             )
             if out is not None:
-                assert type(out) == type(result)
+                # Naively you might expect this assert to be true, but
+                # it's not:
+                #
+                #   assert type(out) == type(result)
+                #
+                # The reason is that functions under this wrapper can
+                # get registered to the Meta dispatch key, and that
+                # means they can be executed in a context where tensor
+                # subclasses are disabled (with no_dispatch), which is a
+                # handy way for an is-a tensor subclass (e.g.,
+                # FakeTensor) to have the normal meta backend create a
+                # meta tensor, to be wrapped once it gets returned.
+                # In this situation, you will get a FakeTensor as
+                # the output tensor, but not the result--which will
+                # be a normal meta tensor, but this is perfectly
+                # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
