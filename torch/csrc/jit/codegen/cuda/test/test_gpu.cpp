@@ -18608,6 +18608,44 @@ TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionPointwiseVectorize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int size = 1024 * 64;
+
+  TensorView* x = makeContigTensor(1);
+  fusion.addInput(x);
+  auto y = sin(x);
+  fusion.addOutput(y);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // PyTorch's CUDA caching allocator should always return aligned pointer for
+  // freshly allocated tensor
+  at::Tensor at_x = at::randn({size}, options);
+
+  schedulePointwise(&fusion, {at_x});
+
+  for (auto x_consumer : ir_utils::consumerTvsOf(x)) {
+    bool found_vec_in_input = false;
+    for (auto id : x_consumer->domain()->domain()) {
+      if (isParallelTypeVectorize(id->getParallelType())) {
+        found_vec_in_input = true;
+        break;
+      }
+    }
+    TORCH_CHECK(found_vec_in_input, "Expect input to be vectorized");
+  }
+
+  for (auto id : y->domain()->domain()) {
+    if (isParallelTypeVectorize(id->getParallelType())) {
+      return;
+    }
+  }
+  TORCH_CHECK(false, "Expect output to be vectorized");
+}
+
 TEST_F(NVFuserTest, FusionSmemAliasSerial_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
