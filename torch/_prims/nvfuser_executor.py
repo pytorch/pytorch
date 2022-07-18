@@ -2,14 +2,18 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import torch
+import torch.overrides
+from torch._prims.utils import getnvFuserDtype, Number
 
 from torch.fx import GraphModule
-from torch._prims.utils import getnvFuserDtype, Number
-import torch.overrides
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+    from torch._C._nvfuser import (  # type: ignore[import]
+        DataType,
+        Fusion,
+        FusionDefinition,
+    )
 else:
     DataType = None
 

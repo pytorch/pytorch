@@ -1,20 +1,21 @@
+import inspect
+import operator
+import warnings
+from functools import reduce, wraps
+from itertools import chain
+
+from typing import Callable, NamedTuple, Sequence, Tuple, Union
+
 import torch
+import torch._prims.utils as utils
 from torch._prims.utils import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
     NumberType,
     TensorLike,
     TensorLikeType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims.utils as utils
 from torch.utils._pytree import tree_flatten
-
-from typing import Callable, Sequence, Union, Tuple, NamedTuple
-import inspect
-from functools import wraps, reduce
-import operator
-import warnings
-from itertools import chain
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(

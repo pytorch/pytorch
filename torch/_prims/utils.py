@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
-from enum import Enum
-from functools import reduce, cmp_to_key
 import operator
 import weakref
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from enum import Enum
+from functools import cmp_to_key, reduce
+
+from typing import Any, Callable, List, Optional, overload, Sequence, Tuple, Type, Union
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 # nvFuser imports are conditional on being compiled with CUDA
 if hasattr(torch._C, "_nvfuser"):
