@@ -19,7 +19,7 @@ The BaseDataSparsifier handles all the housekeeping while allowing the user to j
 # Code snippets
 ```BaseDataSparsifier```: base class with abstract method ```update_mask``` that computes the new mask for all the data.
 
-```add_data```: Accepts name, data tuple and registers the data as a parametrized buffer inside the container model. Note that the data is always associated to a name.
+```add_data```: Accepts name, data tuple and registers the data as a parametrized buffer inside the container model. Note that the data is always associated to a name. A custom sparse config can be provided along with the name, data pair. If not provided, the default config will be applied while doing the sparsification.
 
 ```
 data_sparsifier = ImplementedDataSparsifier()
@@ -30,6 +30,8 @@ data_sparsifier.add_data(name=name, data=data, **some_config)
 ```
 data_sparsifier.step()
 ```
+```get_mask```: retrieves the mask given the name of the data.
+
 ```squash_mask```: removes the parametrizations on the data and applies mask to the data when ```leave_parametrized=True```.Also, accepts list of strings to squash mask for. If none, squashes mask for all the keys.
 ```
 data_sparsifier.squash_mask()
@@ -46,7 +48,14 @@ class ImplementedDataSparsifier(BaseDataSparsifier):
 
 Note::
 1. It is the responsibility of the ```BaseDataSparsifier``` to call the ```self.update_mask``` when appropriate.
-2. The mask should be modified in place. Some valid inplace operations are
+2. The mask should be modified in place.
+
+    Some valid inplace operations are:
     1. Change a portion of a mask: ```mask[:10] = torch.zeros(10)```
     2. Use an inplace operator: ```mask *= another_mask```
     3. Change the underlying data: ```mask.data = torch.zeros_like(mask)```
+
+    Non-inplace operations are not valid, and might lead to bugs. For example:
+
+    1. Reassignment of a mask: ```mask = torch.zeros_like(mask)```
+    2. Non-inplace arithmetic operations: ```mask = mask * another_mask```
