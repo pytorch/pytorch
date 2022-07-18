@@ -499,11 +499,11 @@ Tensor full(IntArrayRef size, const Scalar& fill_value,
 }
 
 Tensor full(IntArrayRef size, const Scalar& fill_value,
+            c10::optional<MemoryFormat> memory_format,
             c10::optional<ScalarType> dtype,
             c10::optional<Layout> layout,
             c10::optional<Device> device,
-            c10::optional<bool> pin_memory,
-            c10::optional<MemoryFormat> memory_format) {
+            c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).memory_format(memory_format);
 
@@ -628,7 +628,7 @@ Tensor ones(IntArrayRef size,
             c10::optional<Device> device,
             c10::optional<bool> pin_memory,
             c10::optional<MemoryFormat> memory_format) {
-  return native::full(size, /*fill_value=*/1., dtype, layout, device, pin_memory, memory_format);
+  return native::full(size, /*fill_value=*/1., memory_format, dtype, layout, device, pin_memory);
 }
 
 Tensor& ones_out(IntArrayRef size, Tensor& result) {
@@ -1154,7 +1154,7 @@ Tensor zeros_like(
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
-    auto res = at::empty({0}, options); // to be resized
+    auto res = at::empty({0}, self.options().merge_in(options)); // to be resized
 
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
