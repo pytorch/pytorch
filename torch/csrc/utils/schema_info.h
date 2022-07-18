@@ -48,6 +48,13 @@ struct TORCH_API SchemaInfo {
       const std::unordered_map<std::string, at::IValue>& values);
 
  private:
+  // This function enforces more conservative results when the TORCH_WARN is
+  // triggered from above due to duplicates in an argument list
+  void ensureConservativity(
+      const std::unordered_set<at::Symbol>& duplicates,
+      const std::vector<c10::Argument>& arguments_list,
+      c10::SchemaArgType type);
+
   void initSchemaInfo();
 
   void generateAliasMaps();
