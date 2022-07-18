@@ -431,7 +431,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     if (has_kernels) {
       str << ", ";
     }
-    str << static_cast<DispatchKey>(iter);
+    str << k;
     has_kernels = true;
   }
   str << "]";

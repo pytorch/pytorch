@@ -239,7 +239,35 @@ const char* toString(DispatchKey t) {
       return "AutogradFunctionality";
 
     default:
-      return "UNKNOWN_TENSOR_TYPE_ID";
+      auto bc = toBackendComponent(t);
+      auto fk = toFunctionalityKey(t);
+#define FORALL_BC(fk) \
+  switch (bc) { \
+    case BackendComponent::CPUBit: return fk "CPU"; \
+    case BackendComponent::CUDABit: return fk "CUDA"; \
+    case BackendComponent::HIPBit: return fk "HIP"; \
+    case BackendComponent::XLABit: return fk "XLA"; \
+    case BackendComponent::MPSBit: return fk "MPS"; \
+    case BackendComponent::IPUBit: return fk "IPU"; \
+    case BackendComponent::XPUBit: return fk "XPU"; \
+    case BackendComponent::HPUBit: return fk "HPU"; \
+    case BackendComponent::VEBit: return fk "VE"; \
+    case BackendComponent::LazyBit: return fk "Lazy"; \
+    case BackendComponent::MetaBit: return fk "Meta"; \
+    case BackendComponent::PrivateUse1Bit: return fk "PrivateUse1"; \
+    case BackendComponent::PrivateUse2Bit: return fk "PrivateUse2"; \
+    case BackendComponent::PrivateUse3Bit: return fk "PrivateUse3"; \
+    default: return fk "Unknown"; \
+  }
+
+    switch (fk) {
+      case DispatchKey::Dense: FORALL_BC("Dense")
+      case DispatchKey::Quantized: FORALL_BC("Quantized")
+      case DispatchKey::Sparse: FORALL_BC("Sparse")
+      case DispatchKey::NestedTensor: FORALL_BC("NestedTensor")
+      case DispatchKey::AutogradFunctionality: FORALL_BC("AutogradFunctionality")
+      default: FORALL_BC("UnknownFunctionality")
+    }
   }
 }
 
