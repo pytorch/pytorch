@@ -15,7 +15,7 @@ concurrency:
 jobs:
   the-job:
     name: choose a step
-    runs-on: linux.4xlarge
+    runs-on: linux.2xlarge
     steps:
       - name: Running action
         shell: bash
