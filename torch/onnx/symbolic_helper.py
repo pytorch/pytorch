@@ -320,17 +320,18 @@ def quantized_args(
     """
 
     def decorator(fn):
-        fn._scale = scale
-        fn._zero_point = zero_point
-
         @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
-            _scale = fn._scale
-            if _scale is not None:
-                _scale = g.op("Constant", value_t=torch.tensor(_scale))
-            _zero_point = fn._zero_point
-            if _zero_point is not None:
-                _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
+            nonlocal scale
+            nonlocal zero_point
+            if scale is not None:
+                _scale = g.op("Constant", value_t=torch.tensor(scale))
+            else:
+                _scale = None
+            if zero_point is not None:
+                _zero_point = g.op("Constant", value_t=torch.tensor(zero_point))
+            else:
+                _zero_point = None
 
             # Support variable length arguments by marking unspecified ones as non-quantized
             arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
@@ -338,22 +339,36 @@ def quantized_args(
             )
             descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
 
+            # Run regular symbolic function if none of the argument is QTensor.
+            if not any(
+                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                for descriptor, arg in descriptor_args
+            ):
+                return fn(g, *args, **kwargs)
+
             # Dequantize arguments that are quantized
             maybe_dequantized_args = []
             for descriptor, arg in descriptor_args:
                 if descriptor and arg.node().kind() == "prim::TupleConstruct":
-                    dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
+                    dequantized_arg, arg_scale, arg_zero_point, _ = dequantize_helper(
+                        g, arg
+                    )
                     maybe_dequantized_args.append(dequantized_arg)
                     # Set scale and zero_point to the first quantized input if not already set
                     if _scale is None:
-                        _scale = scale
+                        _scale = arg_scale
                     if _zero_point is None:
-                        _zero_point = zero_point
+                        _zero_point = arg_zero_point
                 else:
                     maybe_dequantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
             output = fn(g, *maybe_dequantized_args, **kwargs)
+
+            assert _scale is not None, "Bug: Scale must be set for quantized operator"
+            assert (
+                _zero_point is not None
+            ), "Bug: Zero point must be set for quantized operator"
 
             return quantize_helper(g, output, _scale, _zero_point)
 
