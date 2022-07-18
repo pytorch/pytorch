@@ -1,9 +1,9 @@
 import sys
 
-import onnx
-from test_pytorch_common import flatten
-
 import caffe2.python.onnx.backend as c2
+
+import onnx
+import pytorch_test_common
 import torch
 import torch.jit
 from torch.autograd import Variable
@@ -41,7 +41,9 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
         parameters = list(model.state_dict().values())
 
     W = {}
-    for k, v in zip(model_def.graph.input, flatten((input, parameters))):
+    for k, v in zip(
+        model_def.graph.input, pytorch_test_common.flatten((input, parameters))
+    ):
         if isinstance(v, Variable):
             W[k.name] = v.data.cpu().numpy()
         else:
