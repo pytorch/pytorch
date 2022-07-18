@@ -388,7 +388,7 @@ struct TORCH_API FunctionSchema {
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
-    return is_mutable({c10::SchemaArgType::input, *index});
+    return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
 
   // Returns whether lhs and rhs may alias directly.

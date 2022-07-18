@@ -88,7 +88,7 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
 
-  return is_mutable({c10::SchemaArgType::input, *index});
+  return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
 }
 
 bool SchemaInfo::is_nondeterministic() const {
