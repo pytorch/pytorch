@@ -534,14 +534,15 @@ class ShardedTensor(torch.Tensor):
 
         for shard in self._local_shards:
             new_tensor = shard.tensor.to(
-                dtype=dtype_to,
                 device=device_to,
+                dtype=dtype_to,
                 non_blocking=non_blocking,
                 copy=copy_tensor,
                 memory_format=memory_format
             )
             metadata = copy.deepcopy(shard.metadata)
-            metadata.placement._device = device_to
+            if metadata.placement is not None:
+                metadata.placement._device = device_to
             list_shards.append(Shard(new_tensor, metadata))
 
         # update metadata

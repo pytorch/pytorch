@@ -1716,7 +1716,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(st_cuda_32.local_tensor().device.type, "cuda")
 
         # test pass additional process group
-        gloo_pg = dist.new_group(backend="gloo") 
+        gloo_pg = dist.new_group(backend="gloo")
         st_gloo = st.to(device="cpu", process_group=gloo_pg)
         self.assertFalse(st_gloo is st)
         self.assertEqual(st_gloo.local_tensor().device.type, "cpu")
@@ -1741,7 +1741,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st = sharded_tensor.zeros(spec, h, w)
         current_device = torch.device(torch.cuda.current_device())
         self.assertEqual(current_device, st.device)
-        
+
         # test after to cpu, device get changed
         cpu_device = torch.device("cpu")
         st_cpu = st.to(device=cpu_device)
