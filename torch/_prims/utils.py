@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -56,8 +56,11 @@ torch_function_passthrough = {
     torch.Tensor.numel,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -540,7 +543,17 @@ def canonicalize_dim(rank: int, idx: int) -> int:
 
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
-def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
+@overload
+def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+    pass
+
+
+@overload
+def canonicalize_dims(rank: int, indices: int) -> int:
+    pass
+
+
+def canonicalize_dims(rank, indices):
     if isinstance(indices, int):
         return canonicalize_dim(rank, indices)
 
@@ -704,7 +717,7 @@ def extract_shape_from_varargs(
     """
 
     # Handles tuple unwrapping
-    if len(shape) == 1 and isinstance(shape[0], tuple):
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
     validate_shape(shape)  # type: ignore[arg-type]
@@ -1326,6 +1339,18 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
+def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    ndim = len(shape) if isinstance(shape, Sequence) else 1
+    if ndim == 4:
+        return make_channels_last_2d_strides_for(shape)
+    elif ndim == 5:
+        return make_channels_last_3d_strides_for(shape)
+    else:
+        raise RuntimeError(
+            f"no channels last format strides exist in {ndim} dimensions"
+        )
+
+
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
 ) -> Tuple[int, ...]:
@@ -1393,3 +1418,46 @@ def check(
     """
     if not b:
         raise exc_type(s())
+
+
+# This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
+# c10/core/MemoryFormat.h into one function
+def are_strides_like_channels_last(
+    shape: Sequence[int], strides: Sequence[int]
+) -> bool:
+    ndim = len(shape)
+
+    if ndim == 4:
+        # Check for channels_last_2d
+        dim_order = [1, 3, 2, 0]
+    elif ndim == 5:
+        # Check for channels_last_3d
+        dim_order = [1, 4, 3, 2, 0]
+    else:
+        return False
+
+    if strides[1] == 0:
+        return False
+
+    min = 0
+    for d in dim_order:
+        if shape[d] == 0:
+            return False
+        if strides[d] < min:
+            return False
+        if d == 0 and min == strides[1]:
+            return False
+        min = strides[d]
+        if strides[d] > 1:
+            min *= shape[d]
+    return True
+
+
+def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    if x.layout != torch.strided:
+        return torch.contiguous_format
+
+    if are_strides_like_channels_last(x.shape, x.stride()):
+        return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
+
+    return torch.contiguous_format
