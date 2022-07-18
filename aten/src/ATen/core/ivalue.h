@@ -880,9 +880,14 @@ public:
   }
 
   //Stream
-  IValue(c10::Stream stream)
+//  IValue(c10::Stream stream)
+//    : tag(Tag::Stream) {
+//    payload.u.as_int = stream.pack();
+//  }
+  IValue(c10::Stream s)
     : tag(Tag::Stream) {
-    payload.u.as_int = stream.pack();
+    auto v = c10::make_intrusive<ivalue::StreamData3Holder>(s.pack3());
+    payload.u.as_intrusive_ptr = v.release();
   }
   c10::Stream toStream() &&;
   c10::Stream toStream() const &;
