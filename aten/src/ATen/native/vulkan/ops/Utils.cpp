@@ -31,6 +31,9 @@ void pack_buffer_to_vtensor(
   };
 
   api::UniformParamsBuffer params(context, block);
+  bool is_quantized = v_self.is_quantized();
+  api::ShaderSource kernel = is_quantized ? VK_KERNEL(nchw_to_image_quantized)
+                                          : VK_KERNEL(nchw_to_image);
 
   context->submit_compute_job(
       // shader layout signature
@@ -40,7 +43,7 @@ void pack_buffer_to_vtensor(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       // shader descriptor
-      VK_KERNEL(nchw_to_image),
+      kernel,
       // pipeline barrier
       pipeline_barrier,
       // global work group size
@@ -90,6 +93,15 @@ void pack_vtensor_to_staging(
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
+  bool is_quantized = v_self.is_quantized();
+  api::utils::uvec3 copy_extents;
+  copy_extents.data[0u] = 1;
+  copy_extents.data[1u] = 1;
+  copy_extents.data[2u] =
+      ((v_self.sizes()[1] * v_self.sizes()[2] * v_self.sizes()[3]) / 4);
+  api::ShaderSource kernel = is_quantized ? VK_KERNEL(image_to_nchw_quantized)
+                                          : VK_KERNEL(image_to_nchw);
+  api::utils::uvec3 extents_to_use = is_quantized ? copy_extents : extents;
 
   context->submit_compute_job(
       // shader layout signature
@@ -99,13 +111,13 @@ void pack_vtensor_to_staging(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       // shader descriptor
-      VK_KERNEL(image_to_nchw),
+      kernel,
       // pipeline barrier
       pipeline_barrier,
       // global work group size
-      extents,
+      extents_to_use,
       // local work group size
-      adaptive_work_group_size(extents),
+      adaptive_work_group_size(extents_to_use),
       // fence handle
       fence_handle,
       // shader arguments
