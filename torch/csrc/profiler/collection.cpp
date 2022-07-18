@@ -22,7 +22,6 @@
 namespace torch {
 namespace profiler {
 namespace impl {
-using torch::profiler::impl::kineto::activity_t;
 
 void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
@@ -450,8 +449,12 @@ void checkedInsert(
 // we can use to stash profiler specific metadata is `name`. It is far from
 // ideal to use `name` as a load bearing interface between profiler and Kineto;
 // however it will suffice for now.
-class NameEncoder {
- public:
+
+// This should be a private member of `NameEncoder`, but NVCC doesn't handle
+// it correctly. (See [static constexpr char* members for windows NVCC])
+static constexpr char* sentinelPrefix = "PROFILER_DETAIL_EVENT_ID_";
+
+struct NameEncoder {
   static std::string encode(long long index) {
     TORCH_INTERNAL_ASSERT(index >= 0);
     return fmt::format("{}{}", sentinelPrefix, index);
@@ -469,9 +472,6 @@ class NameEncoder {
   }
 
   static constexpr long long notMatched = -1;
-
- private:
-  static constexpr char* sentinelPrefix = "PROFILER_DETAIL_EVENT_ID_";
 };
 
 template <typename T>
