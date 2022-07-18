@@ -6362,7 +6362,7 @@ def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
 
     # NOTE: primTorch is more strict about the type of the fill value argument
     # So we must cast it to the correct dtype
-    from torch._prims.utils import dtype_to_type
+    from torch._prims_common import dtype_to_type
     scalar_type = dtype_to_type(dtype)
 
     def drop_mode_argument(input, pad, mode=None, value=None):
