@@ -1,5 +1,6 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
@@ -313,6 +314,11 @@ void gemm(
         *(c++) = c10::convert<at::BFloat16>(cv);
       }
       return;
+   }
+#endif
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
    }
 #endif
    gemm_stub(
