@@ -838,7 +838,6 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
 
 
 @symbolic_helper.quantized_args(True)
-# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 def embedding_bag(
     g,
@@ -2321,6 +2320,7 @@ def unfold(g, input, dimension, size, step):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
     sizes = symbolic_helper._get_tensor_sizes(input)
+    # FIXME(justinchuby): Get rid of the try catch here to improve readability
     try:
         sizedim = sizes[dimension]
     except Exception:
@@ -2349,7 +2349,6 @@ def unfold(g, input, dimension, size, step):
 
 
 @symbolic_helper.quantized_args(True)
-# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "t", "t", "t")
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
@@ -2363,7 +2362,6 @@ def elu(g, input, alpha, scale, input_scale):
 
 
 @symbolic_helper.quantized_args(True)
-# TODO(justinchuby): check scale
 def selu(g, input):
     return g.op("Selu", input)
 
@@ -3070,7 +3068,6 @@ def slice(g, self, *args):
 
 
 @symbolic_helper.quantized_args(True)
-# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
     return op_with_optional_float_cast(
@@ -3079,7 +3076,6 @@ def hardtanh(g, self, min_val, max_val):
 
 
 @symbolic_helper.quantized_args(True)
-# TODO(justinchuby): check scale
 @symbolic_helper.parse_args("v")
 def hardswish(g, self):
     hs = hardsigmoid(g, self)
