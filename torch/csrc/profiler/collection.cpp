@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <queue>
+#include <type_traits>
 
 #include <fmt/format.h>
 
@@ -14,6 +15,7 @@
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -425,17 +427,61 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-template <typename T0, typename T1>
-void checkedInsert(ska::flat_hash_map<T0, T1>& map, const T0& k, const T1& v) {
+template <typename T, typename Hash>
+void checkedInsert(
+    ska::flat_hash_map<T, std::shared_ptr<Result>, Hash>& map,
+    const T& k,
+    const std::shared_ptr<Result>& v) {
   auto inserted = map.insert({k, v});
-  TORCH_INTERNAL_ASSERT(inserted.second, "Duplicate key: ", k);
+  TORCH_INTERNAL_ASSERT(
+      inserted.second,
+      "Duplicate key: ",
+      k,
+      " ",
+      v->name(),
+      " ",
+      inserted.first->second->name());
 }
+
+// We are working towards guaranteed address stability in Kineto. However for
+// now that is still an aspirational goal, and thus we are forced to improvise
+// in the mean time. The only field in `libkineto::GenericTraceActivity` which
+// we can use to stash profiler specific metadata is `name`. It is far from
+// ideal to use `name` as a load bearing interface between profiler and Kineto;
+// however it will suffice for now.
+
+// This should be a private member of `NameEncoder`, but NVCC doesn't handle
+// it correctly. (See [static constexpr char* members for windows NVCC])
+static constexpr char* sentinelPrefix = "PROFILER_DETAIL_EVENT_ID_";
+
+struct NameEncoder {
+  static std::string encode(long long index) {
+    TORCH_INTERNAL_ASSERT(index >= 0);
+    return fmt::format("{}{}", sentinelPrefix, index);
+  }
+
+  static long long decode(const std::string& encoded_name) {
+    const std::string prefix{sentinelPrefix};
+    if (encoded_name.compare(0, prefix.size(), prefix) == 0) {
+      const auto out =
+          std::stoll(encoded_name.substr(prefix.size(), encoded_name.size()));
+      TORCH_INTERNAL_ASSERT(out >= 0);
+      return out;
+    }
+    return notMatched;
+  }
+
+  static constexpr long long notMatched = -1;
+};
 
 template <typename T>
 std::shared_ptr<Result> resultFromActivity(
     const T* kineto_activity,
     std::shared_ptr<Result>& parent) {
   using namespace torch::profiler::impl::kineto;
+  const auto name = kineto_activity->name();
+  TORCH_INTERNAL_ASSERT(
+      NameEncoder::decode(name) == NameEncoder::notMatched, name);
 
   // Kineto is inconsistent with types, so we have to cast to int32.
   DeviceAndResource device_and_resource{
@@ -447,10 +493,11 @@ std::shared_ptr<Result> resultFromActivity(
       parent ? parent->start_tid_ : at::RecordFunction::currentThreadId(),
       device_and_resource,
       ExtraFields<EventType::Kineto>{
-          kineto_activity->name(),
+          name,
           kineto_activity->duration(),
           parent ? parent->correlationID() : kineto_activity->correlationId(),
           kineto_activity->type()});
+  event->kineto_activity_ = static_cast<const activity_t*>(kineto_activity);
 
   if (parent) {
     event->parent_ = parent;
@@ -493,27 +540,29 @@ addKinetoEvents(
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
   TraceWrapper cpu_trace(start_time_us, "PyTorch Profiler");
+  const bool is_ondemand = (config.state == ProfilerState::KINETO_ONDEMAND);
 
   // Generate Kineto events for each event recorded by the PyTorch profiler.
-  ska::flat_hash_map<const void*, std::shared_ptr<Result>> kineto_events;
+  ska::flat_hash_map<const activity_t*, std::shared_ptr<Result>> kineto_events;
+  long long event_index = 0;
   for (auto& e : results) {
-    e->kineto_activity_ = cpu_trace.addCPUActivity(
-        e->name(),
+    const auto* activity = cpu_trace.addCPUActivity(
+        is_ondemand ? e->name() : NameEncoder::encode(event_index++),
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),
         e->start_time_ns_ / 1000,
         e->endTimeNS() / 1000);
 
-    TORCH_INTERNAL_ASSERT(e->kineto_activity_ || !kKinetoAvailable);
-    checkedInsert(kineto_events, (const void*)e->kineto_activity_, e);
+    TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
+    checkedInsert(kineto_events, activity, e);
   }
 
   // Kineto adds the events that it collected.
   cpu_trace.transferCpuTrace(end_time_us);
 
   // In on demand mode kineto is directly controlled by other machinery.
-  if (config.state == ProfilerState::KINETO_ONDEMAND) {
+  if (is_ondemand) {
     return nullptr;
   }
 
@@ -524,6 +573,35 @@ addKinetoEvents(
   auto* trace_activities = trace->get()->activities();
   TORCH_INTERNAL_ASSERT(trace_activities != nullptr);
 
+  // Reassociate profiler events with the corresponding kineto events. Kineto
+  // may have moved or copied the activities, so we have to recover the
+  // relationship between `libkineto::GenericTraceActivity` and `Result`.
+  size_t match_count{0};
+  for (const auto* kineto_activity : *trace_activities) {
+    TORCH_INTERNAL_ASSERT(kineto_activity != nullptr);
+    const auto index = NameEncoder::decode(kineto_activity->name());
+    if (index != NameEncoder::notMatched) {
+      auto& e = results.at(index);
+      TORCH_INTERNAL_ASSERT(
+          e->kineto_activity_ == nullptr,
+          kineto_activity->name(),
+          " vs. ",
+          e->kineto_activity_->name());
+      e->kineto_activity_ = static_cast<const activity_t*>(kineto_activity);
+
+      // Set `name` to the correct value now that we've linked the events.
+      const_cast<activity_t*>(e->kineto_activity_)->activityName = e->name();
+    }
+  }
+  if (match_count != kineto_events.size()) {
+    TORCH_WARN_ONCE(
+        "Failed to recover relationship between all profiler and kineto events: ",
+        kineto_events.size(),
+        " collected vs. ",
+        match_count,
+        " reassociated.");
+  }
+
   // We rely on `kineto_events` to determine which events were derived from a
   // `Result`, and which were provided by Kineto. However Kineto makes heavy
   // use of raw pointers to determine identity, and as a result we use the
@@ -531,7 +609,7 @@ addKinetoEvents(
   // stability for the events that PyTorch provided. This heuristic should be
   // removed once there is a stronger contract between Kineto and PyTorch.
   auto already_processed = [&kineto_events](
-                               const libkineto::ITraceActivity* activity,
+                               const activity_t* activity,
                                const bool if_invalid) {
     if (activity == nullptr) {
       return if_invalid;
@@ -558,45 +636,55 @@ addKinetoEvents(
   ska::flat_hash_map<int, std::shared_ptr<Result>> flow_map;
   for (const auto* kineto_activity : *trace_activities) {
     TORCH_INTERNAL_ASSERT(kineto_activity != nullptr);
-    auto* linked_activity = kineto_activity->linkedActivity();
+    const auto* activity = static_cast<const activity_t*>(kineto_activity);
+    const auto* linked_activity =
+        static_cast<const activity_t*>(kineto_activity->linkedActivity());
     if (linked_activity &&
-        kineto_activity->flowType() == libkineto::kLinkAsyncCpuGpu &&
-        kineto_activity->flowStart() &&
-        !already_processed(kineto_activity, /*if_invalid=*/true) &&
+        activity->flowType() == libkineto::kLinkAsyncCpuGpu &&
+        activity->flowStart() &&
+        !already_processed(activity, /*if_invalid=*/true) &&
         already_processed(linked_activity, /*if_invalid=*/false)) {
       auto parent = kineto_events.at(linked_activity);
       auto event = resultFromActivity(kineto_activity, parent);
-      checkedInsert(kineto_events, (const void*)kineto_activity, event);
+      checkedInsert(kineto_events, activity, event);
       results.push_back(event);
-      checkedInsert(flow_map, kineto_activity->flowId(), event);
+      checkedInsert(flow_map, activity->flowId(), event);
     }
   }
 
   // Then process the remaining events
   for (const auto* kineto_activity : *trace_activities) {
-    if (!already_processed(kineto_activity, /*if_invalid=*/true)) {
+    const auto* activity = static_cast<const activity_t*>(kineto_activity);
+    const auto* linked_activity =
+        static_cast<const activity_t*>(kineto_activity->linkedActivity());
+    if (!already_processed(activity, /*if_invalid=*/true)) {
       std::shared_ptr<Result> parent;
       if (kineto_activity->flowType() == libkineto::kLinkAsyncCpuGpu &&
           !kineto_activity->flowStart() &&
           flow_map.find(kineto_activity->flowId()) != flow_map.end()) {
         parent = flow_map.at(kineto_activity->flowId());
-      } else if (already_processed(
-                     kineto_activity->linkedActivity(), /*if_invalid=*/false)) {
-        parent = kineto_events.at(kineto_activity->linkedActivity());
+      } else if (already_processed(linked_activity, /*if_invalid=*/false)) {
+        parent = kineto_events.at(linked_activity);
       }
       auto event = resultFromActivity(kineto_activity, parent);
-      checkedInsert(kineto_events, (const void*)kineto_activity, event);
+      checkedInsert(kineto_events, activity, event);
       results.push_back(event);
     }
   }
 
   // Set linked activities
   for (const auto* kineto_activity : *trace_activities) {
-    auto* linked_activity = kineto_activity->linkedActivity();
+    const auto* activity = static_cast<const activity_t*>(kineto_activity);
+    const auto* linked_activity =
+        static_cast<const activity_t*>(kineto_activity->linkedActivity());
     if (linked_activity) {
-      c10::get<ExtraFields<EventType::Kineto>>(
-          kineto_events.at(kineto_activity)->extra_fields_)
-          .linked_activity_ = kineto_events.at(linked_activity);
+      c10::visit(
+          c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.linked_activity_ = kineto_events.at(linked_activity);
+              },
+              [](auto&) { TORCH_INTERNAL_ASSERT(false); }),
+          kineto_events.at(activity)->extra_fields_);
     }
   }
 #endif // USE_KINETO

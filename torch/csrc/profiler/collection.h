@@ -57,8 +57,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  ProfilerEventStub cuda_event_start_ = nullptr;
+  ProfilerEventStub cuda_event_end_ = nullptr;
 };
 
 template <>
@@ -222,7 +222,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
   template <EventType E>
