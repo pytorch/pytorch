@@ -3813,8 +3813,9 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_amp_graph_make_graphed_callables(self):
-        torch.manual_seed(5)
-        torch.cuda.manual_seed(5)
+        seed = int(os.getenv("SEED"))
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
 
         N = 20
         C_in, L_in, C_out, L_out = 16, 50, 16, 14
@@ -3856,8 +3857,8 @@ torch.cuda.synchronize()
                                        (loss_fn_graphed, loss_fn_control)):
                 # Resets RNC states before iterations for graphed and ungraphed models,
                 # so dropout math should be bitwise identical for both.
-                torch.manual_seed(5)
-                torch.cuda.manual_seed(5)
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
                 for data, target in zip(real_inputs, real_targets):
                     opt.zero_grad(set_to_none=True)
                     with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
@@ -3873,10 +3874,6 @@ torch.cuda.synchronize()
             model_graphed.eval()
             model_control.eval()
             self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]), exact_dtype=False)
-
-            del model_graphed
-            del opt_graphed
-            del loss_fn_graphed
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
