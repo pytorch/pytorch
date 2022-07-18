@@ -11,6 +11,7 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 import functools
 
+# a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
 xml_key = StashKey["LogXMLReruns"]()
 
@@ -123,7 +124,7 @@ class LogXMLReruns(LogXML):
         if report.outcome == "skipped":
             if isinstance(report.longrepr, tuple):
                 fspath, lineno, reason = report.longrepr
-                reason = f'{report.nodeid}: {_get_raw_skip_reason(report)}'
+                reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
