@@ -274,6 +274,7 @@ allowlist = {
     'gcd',
     'igamma',
     'igammac',
+    'linalg_householder_product',
     'logaddexp',
     'logaddexp2',
     'lcm',
