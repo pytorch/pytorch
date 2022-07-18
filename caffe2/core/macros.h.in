@@ -40,8 +40,9 @@ static_assert(
 #cmakedefine CAFFE2_USE_GOOGLE_GLOG
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL
-#cmakedefine CAFFE2_USE_MKLDNN
+#cmakedefine USE_MKLDNN
 #cmakedefine CAFFE2_USE_NVTX
+#cmakedefine CAFFE2_USE_ITT
 #cmakedefine CAFFE2_USE_TRT
 
 #ifndef EIGEN_MPL2_ONLY
@@ -80,7 +81,8 @@ static_assert(
   {"USE_EIGEN_FOR_BLAS", "${CAFFE2_USE_EIGEN_FOR_BLAS}"}, \
   {"USE_LITE_PROTO", "${CAFFE2_USE_LITE_PROTO}"}, \
   {"USE_MKL", "${CAFFE2_USE_MKL}"}, \
-  {"USE_MKLDNN", "${CAFFE2_USE_MKLDNN}"}, \
+  {"USE_MKLDNN", "${USE_MKLDNN}"}, \
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
+  {"USE_ITT", "${CAFFE2_USE_ITT}"}, \
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
 }
