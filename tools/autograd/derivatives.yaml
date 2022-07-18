@@ -1681,11 +1681,7 @@
   self: grad
   result: auto_linear
 
-- name: lift_fresh(Tensor self) -> Tensor
-  self: grad
-  result: auto_linear
-
-- name: lift_fresh_copy(Tensor self) -> Tensor
+- name: lift_fresh(Tensor(a) self) -> Tensor(a)
   self: grad
   result: auto_linear
 
