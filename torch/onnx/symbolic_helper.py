@@ -1303,6 +1303,9 @@ def quantize_helper(
         zero_point: torch._C.Value, quantized zero point.
         axis: Optional[torch._C.Value] default None, if None, represents per tensor quantization.
             Otherwise, represents per channel quantization, along given axis.
+
+    Returns:
+        A TupleConstruct storing information of the quantized tensor.
     """
     if (
         axis is not None
