@@ -339,6 +339,13 @@ struct TORCH_API FunctionSchema {
     }
   }
 
+  // Returns whether the two AliasTypeSets contain any similarities
+  // ie: whether the two type sets can alias.
+  bool canAliasTypeSetsAlias(const c10::optional<std::vector<TypePtr>> &lhs, const c10::optional<std::vector<TypePtr>> &rhs) const;
+
+  // Recursively Finds all contained types within the AliasTypeSet.
+  c10::optional<std::vector<TypePtr>> getAliasTypeSetContainedTypes(const c10::optional<std::vector<TypePtr>> &aliasTypeSet) const ;
+
   // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
   // Used to map types to a type such that all types that can alias will be mapped to the same type.
   // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
@@ -401,6 +408,12 @@ struct TORCH_API FunctionSchema {
   // may contain elements that alias the other argument.
   // FunctionSchema::may_contain_alias will include that functionality.
   bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
+
+  // Returns whether lhs and rhs may alias directly or whether lhs/rhs are a container
+  // that may contain elements that alias the other argument.
+  // bidirectional = false only returns whether lhs may contain an alias of rhs
+  // while bidirectional = true returns both directions.
+  bool may_contain_alias(const SchemaArgument& lhs, const SchemaArgument& rhs, bool bidirectional = true) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {

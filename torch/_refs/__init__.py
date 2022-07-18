@@ -33,6 +33,7 @@ from collections.abc import Iterable
 from functools import reduce, partial, wraps
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
+import builtins
 import warnings
 import math
 from enum import Enum
@@ -55,6 +56,7 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "conj_physical",
     "cos",
     "cosh",
     "digamma",
@@ -189,6 +191,8 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "conj",
+    "constant_pad_nd",
     "contiguous",
     "dsplit",
     "dstack",
@@ -403,6 +407,14 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@register_decomposition(torch.ops.aten.conj_physical)
+@out_wrapper()
+def conj_physical(input: TensorLikeType):
+    if not input.dtype.is_complex:
+        return input
+    return prims.conj_physical(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -2077,6 +2089,91 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+def conj(input: TensorLikeType) -> TensorLikeType:
+    if not input.dtype.is_complex:
+        return input
+    if input.is_sparse:
+        return torch.conj_physical(input)
+    return prims.conj(input)
+
+
+# This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
+@register_decomposition(torch.ops.aten.constant_pad_nd)
+def constant_pad_nd(
+    input: TensorLikeType, pad: List[int], value: NumberType = 0
+) -> TensorLikeType:
+    check(
+        len(pad) % 2 == 0,
+        lambda: f"Length of pad must be even but instead it equals {len(pad)}",
+    )
+
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    check(
+        l_inp >= l_pad,
+        lambda: "Length of pad should be no more than twice the number of "
+        f"dimensions of the input. Pad length is {len(pad)} while the input has "
+        f"{l_inp} dimensions.",
+    )
+
+    c_input = input
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] < 0:
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
+
+        if pad[pad_idx + 1] < 0:
+            c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
+
+    # if none of the pads are positive we can just return the result
+    if builtins.all(p <= 0 for p in pad):
+        return c_input.clone()
+
+    new_shape = list(input_sizes[:l_diff])
+
+    for i in range(l_pad):
+        pad_idx = len(pad) - ((i + 1) * 2)
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        check(
+            new_dim > 0,
+            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
+            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+            f"which is invalid. Check dimension {l_diff + i} of your input.",
+        )
+        new_shape.append(new_dim)
+
+    memory_format = utils.suggest_memory_format(input)
+    output = torch.empty(
+        new_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+        memory_format=memory_format,
+    )
+
+    if value == 0 and input.dtype == torch.bool:
+        value = False
+    # torch.fill isn't typed to allow complex values
+    output = torch.fill(output, value)  # type: ignore[arg-type]
+
+    c_output = output
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] > 0:
+            c_output = c_output.narrow(
+                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+            )
+        if pad[pad_idx + 1] > 0:
+            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
+
+    prims.copy_to(c_output, c_input)
+    return output
+
+
 def contiguous(
     a: Tensor, *, memory_format: torch.memory_format = torch.contiguous_format
 ) -> Tensor:
@@ -3064,3 +3161,4 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.fft

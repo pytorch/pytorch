@@ -151,6 +151,7 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    "fill",
     "t",
     "view",
     "reshape",

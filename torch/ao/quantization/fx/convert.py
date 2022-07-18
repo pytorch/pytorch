@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
+from torch.ao.quantization.quant_type import QuantType
 import torch
 import copy
 import warnings
@@ -318,7 +319,7 @@ def convert_standalone_module(
     """
     # TODO: remove is_reference flag
     if is_reference:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference
+        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference_fx
     else:
         convert_fn = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
@@ -473,7 +474,7 @@ def convert_custom_module(
         node: Node,
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
-        custom_module_class_mapping: Dict[Callable, Callable],
+        custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
         statically_quantized_custom_module_nodes: Set[Node]):
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
