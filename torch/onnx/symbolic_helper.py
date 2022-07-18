@@ -172,11 +172,7 @@ def _unpack_tuple(tuple_value) -> List[_C.Value]:
     return list(tuple_node.inputs())
 
 
-def _unpack_quantized_tensor(
-    tuple_value: _C.Value,
-) -> Union[
-    Tuple[_C.Value, _C.Value, _C.Value], Tuple[_C.Value, _C.Value, _C.Value, _C.Value]
-]:
+def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
 
     Args:
