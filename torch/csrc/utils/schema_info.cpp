@@ -222,6 +222,21 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   return nondeterministic_ops;
 }
 
+void SchemaInfo::ensureConservativity(
+    const std::unordered_set<at::Symbol>& duplicates,
+    const std::vector<c10::Argument>& arguments_list,
+    c10::SchemaArgType type) {
+  for (size_t i = 0; i < arguments_list.size(); i++) {
+    if (arguments_list[i].alias_info()) {
+      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+        if (duplicates.count(set)) {
+          wildcard_set_.insert({type, i});
+        }
+      }
+    }
+  }
+}
+
 std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
   // This is a list of ops where the a boolean variable (either "training",
   // "train" or "use_input_stats") affects the mutability of running_mean and
@@ -263,6 +278,8 @@ void SchemaInfo::initSchemaInfo() {
         } else {
           // This check is to ensure that the FunctionSchema will accurately
           // be represented when calling may_alias and may_contain_alias
+          // on schemas with more than one argument within arguments_list that
+          // shares an alias set.
           for (const auto& set : argument.alias_info()->afterSets()) {
             if (seen.count(set)) {
               TORCH_WARN(
@@ -283,28 +300,13 @@ void SchemaInfo::initSchemaInfo() {
       }
     }
   };
-  // This function enforces more conservative results when the TORCH_WARN is
-  // triggered from above.
-  auto ensure_conservativity =
-      [this, &duplicates](
-          const std::vector<c10::Argument>& arguments_list,
-          c10::SchemaArgType type) {
-        for (size_t i = 0; i < arguments_list.size(); i++) {
-          if (arguments_list[i].alias_info()) {
-            for (const auto& set :
-                 arguments_list[i].alias_info()->afterSets()) {
-              if (duplicates.count(set)) {
-                wildcard_set_.insert({type, i});
-              }
-            }
-          }
-        }
-      };
 
   init_schema_arguments(schema_.arguments(), c10::SchemaArgType::input);
   init_schema_arguments(schema_.returns(), c10::SchemaArgType::output);
-  ensure_conservativity(schema_.arguments(), c10::SchemaArgType::input);
-  ensure_conservativity(schema_.returns(), c10::SchemaArgType::output);
+  ensureConservativity(
+      duplicates, schema_.arguments(), c10::SchemaArgType::input);
+  ensureConservativity(
+      duplicates, schema_.returns(), c10::SchemaArgType::output);
 }
 
 void SchemaInfo::generateAliasMaps() {

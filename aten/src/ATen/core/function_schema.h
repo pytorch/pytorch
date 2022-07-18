@@ -612,7 +612,7 @@ template<>
   struct hash<c10::SchemaArgument> {
     size_t operator()(const c10::SchemaArgument& arg) const
     {
-      return std::hash<std::string>()(std::to_string((int)(arg.type)) + ":" + std::to_string(arg.index));
+      return c10::hash_combine(std::hash<size_t>()(arg.index), std::hash<size_t>()(static_cast<std::size_t>(arg.type)));
     }
   };
 } // namespace std
