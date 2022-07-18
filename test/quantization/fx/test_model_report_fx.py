@@ -1240,7 +1240,6 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 if "block1.linear" in module_fqn:
                     block_1_lin_recs = input_weight_dict[module_fqn]
                     # get input range info and the channel axis
-                    input_range_info = block_1_lin_recs[InputWeightEqualizationDetector.INPUT_INFO_KEY]
                     ch_axis = block_1_lin_recs[InputWeightEqualizationDetector.CHANNEL_KEY]
 
                     # ensure that the min and max values extracted match properly
@@ -1249,28 +1248,54 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                     dimension_max = torch.amax(example_max, dim=ch_axis)
 
                     # make sure per channel min and max are as expected
-                    per_channel_min = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    min_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
+
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
                     self.assertEqual(per_channel_min, dimension_min)
                     self.assertEqual(per_channel_max, dimension_max)
 
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
                     # make sure the global min and max were correctly recorded and presented
-                    global_min = input_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = input_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
                     self.assertEqual(global_min, min(dimension_min))
                     self.assertEqual(global_max, max(dimension_max))
 
                     input_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
                     # ensure comparision stat passed back is sqrt of range ratios
                     # need to get the weight ratios first
-                    weight_range_info = block_1_lin_recs[InputWeightEqualizationDetector.WEIGHT_INFO_KEY]
+
+                    # make sure per channel min and max are as expected
+                    min_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
 
                     # get weight per channel and global info
-                    per_channel_min = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
 
-                    global_min = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
 
                     weight_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
 
