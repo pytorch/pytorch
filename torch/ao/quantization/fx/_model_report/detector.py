@@ -109,8 +109,8 @@ class PerChannelDetector(DetectorBase):
 
     # Keys for return dictionary
     BACKEND_KEY = "backend"
-    PER_CHAN_SUPPORTED_KEY = "per_channel_supported"
-    PER_CHAN_USED_KEY = "per_channel_used"
+    PER_CHAN_SUPPORTED_KEY = "per_channel_quantization_supported"
+    PER_CHAN_USED_KEY = "per_channel_quantization_used"
 
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
@@ -273,12 +273,12 @@ class DynamicStaticDetector(DetectorBase):
     POST_ACTIVATION_PREFIX = "post_activation_"
 
     # naming conventions for the keys of the return module info
-    TOLERANCE_KEY = "tolerance"
+    TOLERANCE_KEY = "dynamic_static_tolerance"
     DEFAULT_DYNAMIC_REC_KEY = "dynamic_recommended"
-    PRE_OBS_COMP_STAT_KEY = PRE_ACTIVATION_PREFIX + "comp_stat"
-    POST_OBS_COMP_STAT_KEY = POST_ACTIVATION_PREFIX + "comp_stat"
-    PRE_OBS_DATA_DIST_KEY = PRE_ACTIVATION_PREFIX + "data_dist"
-    POST_OBS_DATA_DIST_KEY = POST_ACTIVATION_PREFIX + "data_dist"
+    PRE_OBS_COMP_STAT_KEY = PRE_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    POST_OBS_COMP_STAT_KEY = POST_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    PRE_OBS_DATA_DIST_KEY = PRE_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    POST_OBS_DATA_DIST_KEY = POST_ACTIVATION_PREFIX + "dynamic_static_data_classification"
 
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
@@ -579,8 +579,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # keys for return dict of recommendations
     RECOMMENDED_KEY = "input_weight_equalization_recommended"
-    COMP_METRIC_KEY = "channel_comparison_metrics"
-    THRESHOLD_KEY = "threshold"
+    COMP_METRIC_KEY = "input_weight_channel_comparison_metrics"
+    THRESHOLD_KEY = "input_weight_threshold"
     CHANNEL_KEY = "input_weight_channel_axis"
 
     # default weight and info strings
@@ -986,11 +986,11 @@ class OutlierDetector(DetectorBase):
 
     # names for dict keys
     OUTLIER_KEY = "outliers_detected"
-    NUM_BATCHES_KEY = "batches_used"
-    IS_SUFFICIENT_BATCHES_KEY = "is_sufficient_batches"
-    COMP_METRIC_KEY = "percentile_ratios"
-    RATIO_THRES_KEY = "ratio_threshold"
-    REF_PERCENTILE_KEY = "reference_percentile"
+    NUM_BATCHES_KEY = "outlier_detection_batches_used"
+    IS_SUFFICIENT_BATCHES_KEY = "outlier_detection_is_sufficient_batches"
+    COMP_METRIC_KEY = "outlier_detection_percentile_ratios"
+    RATIO_THRES_KEY = "outlier_detection_ratio_threshold"
+    REF_PERCENTILE_KEY = "outlier_detection_reference_percentile"
     CHANNEL_AXIS_KEY = "outlier_detection_channel_axis"
     MAX_VALS_KEY = PRE_ACTIVATION_PREFIX + "per_channel_max"
     CONSTANT_COUNTS_KEY = "constant_batch_counts"
