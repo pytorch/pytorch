@@ -16760,7 +16760,7 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_flatten,
            ),
     OpInfo('unflatten',
-           op=torch.Tensor.unflatten,
+           op=torch.unflatten,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
