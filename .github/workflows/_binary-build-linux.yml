@@ -1,4 +1,4 @@
-name: linux-binary-build
+name: binary-build-linux
 
 on:
   workflow_call:
@@ -117,9 +117,6 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
           } >> "${GITHUB_ENV} }}"
-      - name: List the env
-        shell: bash
-        run: env
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup Linux
