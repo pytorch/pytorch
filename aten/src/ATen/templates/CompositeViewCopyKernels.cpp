@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
+#include <ATen/InferSize.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/Resize.h>
 
