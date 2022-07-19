@@ -1,12 +1,12 @@
 import torch
-from torch._prims_common import (
+from torch._prims.utils import (
     Number,
     NumberType,
     TensorLike,
     TensorLikeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims_common as utils
+import torch._prims.utils as utils
 from torch.utils._pytree import tree_flatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
@@ -20,7 +20,6 @@ from itertools import chain
 def _maybe_convert_to_dtype(
     a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
 ) -> Union[TensorLikeType, NumberType, Sequence]:
-    import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
             # NOTE: this is incorrect on the CPU
@@ -125,7 +124,7 @@ class elementwise_type_promotion_wrapper(object):
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
-        return out.resize_(shape)
+        return prims.resize(out, shape)
 
     if out.numel() != reduce(operator.mul, shape, 1):
         msg = (
@@ -138,7 +137,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
             )
         )
         warnings.warn(msg)
-        return out.resize_(shape)
+        return prims.resize(out, shape)
 
     return out
 
@@ -167,7 +166,7 @@ def _safe_copy_out(
             "but this can't be cast because it is not safe!",
         )
 
-    return copy_to.copy_(copy_from)
+    return prims.copy_to(copy_to, copy_from)
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
@@ -282,3 +281,7 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
+
+
+# avoid mypy import cycle
+import torch._prims as prims

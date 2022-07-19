@@ -4,7 +4,7 @@ from functools import lru_cache
 import torch
 
 from torch.fx import GraphModule
-from torch._prims_common import getnvFuserDtype, Number
+from torch._prims.utils import getnvFuserDtype, Number
 import torch.overrides
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 

@@ -3,10 +3,10 @@ import torch
 from torch import Tensor
 from typing import Optional
 import torch._prims as prims
-import torch._prims_common as utils
+import torch._prims.utils as utils
 import torch._refs as refs
-from torch._prims_common import TensorLikeType, ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch._prims_common.wrappers import out_wrapper, elementwise_type_promotion_wrapper
+from torch._prims.utils import TensorLikeType, ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims.wrappers import out_wrapper, elementwise_type_promotion_wrapper
 from torch._refs import (
     _make_elementwise_unary_reference,
     _make_elementwise_binary_reference,

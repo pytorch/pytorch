@@ -3,9 +3,9 @@ from torch import Tensor
 
 import torch._prims as prims
 import torch._refs as refs
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims.wrappers import out_wrapper
 
-from torch._prims_common import (
+from torch._prims.utils import (
     check,
     check_fp_or_complex,
     DimsType,
