@@ -295,6 +295,14 @@ def meta_conv(
                 )
         return ret_shape
 
+    def pick_memory_format():
+        if input_tensor.is_contiguous(memory_format=torch.channels_last):
+            return torch.channels_last
+        elif input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return torch.contiguous_format
+        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+            return torch.preserve_format
+
     kernel_size = weight.shape[2:]
     dims = input_tensor.shape[2:]
     if is_transposed:
@@ -316,7 +324,10 @@ def meta_conv(
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation
         )
-    return input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
+    out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
+    mem_fmt = pick_memory_format()
+    out = out.to(memory_format=mem_fmt)
+    return out
 
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
