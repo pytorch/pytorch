@@ -357,6 +357,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("isneginf", isneginf)
   NVFUSER_PYTHON_BINDING_UNARY_OP("isposinf", isposinf)
   NVFUSER_PYTHON_BINDING_UNARY_OP("isreal", isreal)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("real", real)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("imag", imag)
 #undef NVFUSER_PYTHON_BINDING_UNARY_OP
 
 #define NVFUSER_PYTHON_BINDING_BINARY_OP(op_str, op_name)                    \

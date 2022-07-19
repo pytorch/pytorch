@@ -122,6 +122,19 @@ class Sequential(Module):
     def __len__(self) -> int:
         return len(self._modules)
 
+    def __add__(self, other) -> 'Sequential':
+        if isinstance(other, Sequential):
+            ret = Sequential()
+            for layer in self:
+                ret.append(layer)
+            for layer in other:
+                ret.append(layer)
+            return ret
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
+
     @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
