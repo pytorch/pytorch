@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor, _TypedStorage
 
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+from torch._prims_common import (
     check,
     TensorLike,
     TensorLikeType,
@@ -13,12 +13,12 @@ from torch._prims.utils import (
     StrideType,
     Number,
     NumberType,
-    TensorMeta,
+    type_to_dtype,
 )
 from torch.overrides import has_torch_function, handle_torch_function
 import torch.library
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import contextlib
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
@@ -26,6 +26,7 @@ from functools import reduce, partial
 from enum import Enum
 import operator
 import math
+import weakref
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -191,6 +192,83 @@ __all__ = [
     "fft_c2r",
 ]
 
+
+# In order to keep things like aliasing relationships and storage
+# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
+# which caches conversions to Meta Tensors. We would like to use
+# one consistent mode among along FakeTensors, which we store here.
+# We store a weakref, so that when all previous FakeTensors are
+# the present mode will also deallocate. FakeTensorMode holds onto
+# tensors that are converted to Meta so we don't want to persist it
+# longer than necessary.x
+prim_fake_mode_ref = None
+
+
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()
+
+
+def TensorMeta(
+    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    *,
+    shape: Optional[ShapeType] = None,
+    strides: Optional[StrideType] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Union[torch.device, str]] = None,
+):
+    if isinstance(tensorlike, Number):
+        assert not shape and (shape is None or isinstance(shape, Sequence))
+        assert not strides and (strides is None or isinstance(strides, Sequence))
+        inferred_shape: Tuple[int, ...] = ()
+        inferred_strides: Tuple[int, ...] = ()
+        inferred_dtype = type_to_dtype(type(tensorlike))
+        inferred_device = torch.device("cpu")
+        # TODO: This looks wrong, a number that is wrapped into a tensor
+        # needs to behave differently than a scalar tensor for type
+        # promotion purposes
+    elif tensorlike is not None:
+        assert isinstance(tensorlike, torch.Tensor)
+        inferred_shape = tuple(tensorlike.shape)
+        inferred_strides = tuple(tensorlike.stride())
+        inferred_dtype = tensorlike.dtype
+        inferred_device = tensorlike.device
+    else:
+        # If no tensorlike "example" is given then all metadata
+        # must be provided explicitly
+        assert shape is not None
+        assert strides is not None
+        assert dtype is not None
+        assert device is not None
+
+    shape = inferred_shape if shape is None else tuple(shape)
+    strides = inferred_strides if strides is None else tuple(strides)
+    dtype = inferred_dtype if dtype is None else dtype
+    device = inferred_device if device is None else device
+
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    if isinstance(tensorlike, FakeTensor):
+        mode = tensorlike.fake_mode
+    else:
+        mode = get_prim_fake_mode()
+
+    if device.type == "meta":
+        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+    else:
+        return FakeTensor(
+            mode,
+            torch.empty(shape, dtype=dtype, device="meta"),
+            device,
+        )
+
+
 #
 # Common datastructures and helpers
 #
@@ -316,7 +394,7 @@ def _wrap_tensor_meta(f):
             and not isinstance(t, FakeTensor)
             and not t.device.type == "meta"
         ):
-            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
+            return FakeTensor.from_tensor(t, get_prim_fake_mode())
         else:
             return t
 

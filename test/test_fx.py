@@ -3280,7 +3280,6 @@ class TestFX(JitTestCase):
             .run(scripted.code)
 
     @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
-    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
     def test_assert(self):
         def f(x):
             assert x > 1
@@ -3501,44 +3500,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         gm.recompile()
         self.assertEqual(gm(2, 3), 6)
         self.assertIn("a *= b", gm.code)
-
-    def test_map_aggregate_doesnt_traverse_size(self):
-        def dont_traverse_size(a):
-            return type(a) != torch.Size
-
-        size = torch.Size([1, 2, 3])
-
-        res = torch.fx.node.map_aggregate(size, lambda a: a)
-        self.assertEqual(type(res), tuple)
-        self.assertEqual(res, (1, 2, 3))
-
-        res = torch.fx.node.map_aggregate(size, lambda a: a, dont_traverse_size)
-        self.assertEqual(type(res), torch.Size)
-        self.assertEqual(res, size)
-
-        data = (torch.empty(3, 4), size,
-                {'tensor': torch.empty(4, 5), 'size': size, 'list': [size, (size,), torch.empty(5, 6)]})
-
-        res = torch.fx.node.map_aggregate(data, lambda a: a)
-        self.assertEqual(type(res[1]), tuple)
-        self.assertEqual(res[1], (1, 2, 3))
-        self.assertEqual(type(res[2]['size']), tuple)
-        self.assertEqual(res[2]['size'], (1, 2, 3))
-        self.assertEqual(type(res[2]['list'][0]), tuple)
-        self.assertEqual(res[2]['list'][0], (1, 2, 3))
-        self.assertEqual(type(res[2]['list'][1][0]), tuple)
-        self.assertEqual(res[2]['list'][1][0], (1, 2, 3))
-
-        res = torch.fx.node.map_aggregate(data, lambda a: a, dont_traverse_size)
-        self.assertEqual(type(res[1]), torch.Size)
-        self.assertEqual(res[1], size)
-        self.assertEqual(type(res[2]['size']), torch.Size)
-        self.assertEqual(res[2]['size'], size)
-        self.assertEqual(type(res[2]['list'][0]), torch.Size)
-        self.assertEqual(res[2]['list'][0], size)
-        self.assertEqual(type(res[2]['list'][1][0]), torch.Size)
-        self.assertEqual(res[2]['list'][1][0], size)
-
 
 
 def run_getitem_target():
@@ -4056,7 +4017,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
