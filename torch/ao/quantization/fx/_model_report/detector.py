@@ -269,16 +269,16 @@ class DynamicStaticDetector(DetectorBase):
     NON_STATIONARY_STR = "non-stationary"
 
     # naming for activation
-    PRE_ACTIVATION_PREFIX = "pre_activation_"
-    POST_ACTIVATION_PREFIX = "post_activation_"
+    INPUT_ACTIVATION_PREFIX = "input_activation_"
+    OUTPUT_ACTIVATION_PREFIX = "output_activation_"
 
     # naming conventions for the keys of the return module info
     TOLERANCE_KEY = "dynamic_static_tolerance"
     DEFAULT_DYNAMIC_REC_KEY = "dynamic_recommended"
-    PRE_OBS_COMP_STAT_KEY = PRE_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
-    POST_OBS_COMP_STAT_KEY = POST_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
-    PRE_OBS_DATA_DIST_KEY = PRE_ACTIVATION_PREFIX + "dynamic_static_data_classification"
-    POST_OBS_DATA_DIST_KEY = POST_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    PRE_OBS_COMP_STAT_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    POST_OBS_COMP_STAT_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    PRE_OBS_DATA_DIST_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    POST_OBS_DATA_DIST_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
 
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
@@ -569,7 +569,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # weight / activation prefix for each of the below info
     WEIGHT_PREFIX = "weight_"
-    ACTIVATION_PREFIX = "pre_activation_"
+    ACTIVATION_PREFIX = "input_activation_"
 
     # string names for keys of info dictionaries
     PER_CHANNEL_MAX_KEY = "per_channel_max"
@@ -671,10 +671,10 @@ class InputWeightEqualizationDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a dict mapping relavent module fqns (str) to a dict with keys:
-            "pre_activation_per_channel_max" : maps to the per_channel max values
-            "pre_activation_per_channel_min" : maps to the per_channel min values
-            "pre_activation_global_max" : maps to the global max recorded
-            "pre_activation_global_min" : maps to the global min recorded
+            "input_activation_per_channel_max" : maps to the per_channel max values
+            "input_activation_per_channel_min" : maps to the per_channel min values
+            "input_activation_global_max" : maps to the global max recorded
+            "input_activation_global_min" : maps to the global min recorded
         """
 
         # return dictionary mapping observer fqns to desired info
@@ -982,7 +982,7 @@ class OutlierDetector(DetectorBase):
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
 
     # pre activation prefix
-    PRE_ACTIVATION_PREFIX = "pre_activation_"
+    INPUT_ACTIVATION_PREFIX = "input_activation_"
 
     # names for dict keys
     OUTLIER_KEY = "outliers_detected"
@@ -992,7 +992,7 @@ class OutlierDetector(DetectorBase):
     RATIO_THRES_KEY = "outlier_detection_ratio_threshold"
     REF_PERCENTILE_KEY = "outlier_detection_reference_percentile"
     CHANNEL_AXIS_KEY = "outlier_detection_channel_axis"
-    MAX_VALS_KEY = PRE_ACTIVATION_PREFIX + "per_channel_max"
+    MAX_VALS_KEY = INPUT_ACTIVATION_PREFIX + "per_channel_max"
     CONSTANT_COUNTS_KEY = "constant_batch_counts"
 
     def __init__(
