@@ -42,6 +42,7 @@ from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+from fx.test_pass_infra import TestPassManager  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -1550,7 +1551,7 @@ class TestFX(JitTestCase):
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
-        # Test shape propogation and make sure results match actual
+        # Test shape propagation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
 

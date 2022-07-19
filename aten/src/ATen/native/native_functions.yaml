@@ -2487,6 +2487,13 @@
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
 
+- func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _validate_compressed_sparse_indices_cpu
+    CUDA: _validate_compressed_sparse_indices_cuda
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
 
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
@@ -6450,6 +6457,7 @@
   dispatch:
     CPU: index_add_cpu_out
     CUDA: index_add_cuda_out
+    MPS: index_add_mps_out
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: index_add.out
