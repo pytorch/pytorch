@@ -102,6 +102,18 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
   AT_ERROR("miopen_depthwise_convolution_backward: ATen not compiled with MIOpen support");
 }
 
+
+at::Tensor miopen_convolution_add_relu(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& z,
+    const c10::optional<Scalar>& alpha, const c10::optional<Tensor>& bias, IntArrayRef stride,
+    IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  AT_ERROR("miopen_convolution_add_relu: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_convolution_relu(
+    const at::Tensor& input, const at::Tensor& weight, const c10::optional<Tensor>& bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  AT_ERROR("miopen_convolution_relu: ATen not compiled with MIOpen support");
 }}
 
 #else  // AT_ROCM_ENABLED
@@ -1446,6 +1458,119 @@ Tensor miopen_convolution_transpose(
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
+  return output_t;
+}
+
+// MIOpen fused convolution bias activation forward
+void raw_miopen_convolution_add_relu_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic) {
+}
+
+Tensor miopen_convolution_add_relu(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      input.options().memory_format(input.suggest_memory_format()));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
+  auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
+  auto _bias = bias.has_value()
+          ? bias.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt());
+
+  raw_miopen_convolution_add_relu_out(
+      output_t,
+      input,
+      weight,
+      z,
+      _alpha,
+      _bias,
+      stride,
+      padding,
+      dilation,
+      groups,
+      benchmark,
+      false // deterministic
+  );
+
+  return output_t;
+}
+
+Tensor miopen_convolution_relu(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      input.options().memory_format(input.suggest_memory_format()));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
+  auto _bias = bias.has_value()
+          ? bias.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt());
+
+  raw_miopen_convolution_add_relu_out(
+      output_t,
+      input,
+      weight,
+      output_t, // use output_t as z to satisfy API
+      0, // alpha
+      _bias,
+      stride,
+      padding,
+      dilation,
+      groups,
+      benchmark, // benchmark
+      false // deterministic
+  );
+
   return output_t;
 }
 

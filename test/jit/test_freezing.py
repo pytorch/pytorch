@@ -12,7 +12,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf
+from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
 
@@ -2189,7 +2189,7 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
-    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         conv_bias = [True, False]
         conv_ops = [nn.Conv2d, nn.Conv3d]
@@ -2224,14 +2224,20 @@ class TestFrozenOptimizations(JitTestCase):
                 scripted_mod = torch.jit.script(mod_eager)
 
             frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
-            if add_z:
-                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            if TEST_WITH_ROCM:
+                if add_z:
+                    FileCheck().check("aten::miopen_convolution_add_relu").run(frozen_mod.graph)
+                else:
+                    FileCheck().check("aten::miopen_convolution_relu").run(frozen_mod.graph)
             else:
-                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+                if add_z:
+                    FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+                else:
+                    FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
 
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
-    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion_not_forward(self):
         class Net(nn.Module):
             def __init__(self, in_channels, out_channels, **kwargs):
@@ -2258,7 +2264,10 @@ class TestFrozenOptimizations(JitTestCase):
 
         frozen_mod = torch.jit.freeze(scripted_mod, preserved_attrs=['make_prediction'])
         optimized_mod = torch.jit.optimize_for_inference(frozen_mod, other_methods=['make_prediction'])
-        FileCheck().check("aten::cudnn_convolution_relu").run(optimized_mod.make_prediction.graph)
+        if TEST_WITH_ROCM:
+            FileCheck().check("aten::miopen_convolution_relu").run(optimized_mod.make_prediction.graph)
+        else:
+            FileCheck().check("aten::cudnn_convolution_relu").run(optimized_mod.make_prediction.graph)
 
         self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
 

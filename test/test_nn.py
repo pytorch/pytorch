@@ -19758,7 +19758,6 @@ torch.cuda.synchronize()
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
@@ -19776,7 +19775,10 @@ torch.cuda.synchronize()
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
-            cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            if TEST_WITH_ROCM:
+                cudnn_out = torch.miopen_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            else:
+                cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
                 self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
@@ -19784,7 +19786,6 @@ torch.cuda.synchronize()
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
@@ -19806,7 +19807,10 @@ torch.cuda.synchronize()
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
             z = z.to(memory_format=memory_format)
-            cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
+            if TEST_WITH_ROCM:
+                cudnn_out = torch.miopen_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
+            else:
+                cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
