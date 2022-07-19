@@ -2575,7 +2575,7 @@ def _full_like_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    strides = strides = utils.compute_elementwise_output_strides(a)
+    strides = utils.compute_elementwise_output_strides(a)
     if a.numel() == 0:
         strides = a.stride()
 

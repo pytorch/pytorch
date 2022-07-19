@@ -25,7 +25,7 @@ def _maybe_convert_to_dtype(
         if a.dtype != dtype:
             # NOTE: this is incorrect on the CPU
             # See https://github.com/pytorch/pytorch/issues/77553
-            return prims.to_dtype(a, dtype)
+            return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
         return utils.dtype_to_type(dtype)(a)
