@@ -36,7 +36,7 @@ class Pattern:
         return False
 
     def report(self, event: _ProfilerEvent):
-        msg = f"{event.name()}\n{self.description}\n{source_code_location(event)}"
+        msg = f"{self.description}\n{source_code_location(event)}"
         return msg
 
     def eventTreeTraversal(self):
@@ -166,10 +166,6 @@ class ExtraCUDACopyPattern(Pattern):
             de_time = de_timer.timeit(10).mean
             shapes_factor_map[shape] = de_time / to_time
         return shapes_factor_map
-
-    def report(self, event: _ProfilerEvent):
-        msg = f"{self.description}\n{source_code_location(event)}"
-        return msg
 
     def summary(self, events: List[_ProfilerEvent]):
         shapes_factor_map = self.benchmark(events)
@@ -317,6 +313,28 @@ class FP32MatMulPattern(Pattern):
         )
 
 
+class OptimizerSingleTensorPattern(Pattern):
+    '''
+    This pattern identifies if we are using the single-tensor version of an optimizer.
+    '''
+
+    def __init__(self, prof: profile):
+        super().__init__(prof)
+        self.name = "Optimizer Single Tensor Pattern"
+        self.optimizers_with_foreach = [
+            "adam", "sgd", "adamw"
+        ]
+        self.description = (
+            "Deteced optimizer running with single tensor implementation. "
+            "Please enable multi tensor implementation by passing 'foreach=True' into optimizer.")
+
+    def match(self, event: _ProfilerEvent):
+        for optimizer in self.optimizers_with_foreach:
+            if event.name().endswith(f"_single_tensor_{optimizer}"):
+                return True
+        return False
+
+
 def source_code_location(event: _ProfilerEvent):
     while event:
         if event_type(event) == _EventType.PyCall or event_type(
@@ -324,7 +342,8 @@ def source_code_location(event: _ProfilerEvent):
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
-            return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
+            if not event.extra_fields.caller.file_name.startswith("torch/"):
+                return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
         event = event.parent
     return "No source code location found"
 
@@ -338,7 +357,8 @@ def report_all_anti_patterns(prof):
     anti_patterns = [
         ExtraCUDACopyPattern(prof),
         ForLoopIndexingPattern(prof),
-        FP32MatMulPattern(prof)
+        FP32MatMulPattern(prof),
+        OptimizerSingleTensorPattern(prof),
     ]
     reported = set()
     summaries = []

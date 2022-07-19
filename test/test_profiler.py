@@ -31,7 +31,8 @@ from torch.profiler import (
 from torch.profiler._pattern_matcher import (Pattern, NamePattern,
                                              ExtraCUDACopyPattern,
                                              ForLoopIndexingPattern,
-                                             FP32MatMulPattern)
+                                             FP32MatMulPattern,
+                                             OptimizerSingleTensorPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -1581,6 +1582,37 @@ aten::mm""")
         pattern = ExtraCUDACopyPattern(prof)
         shapes_factor_map = pattern.benchmark(pattern.matched_events())
         self.assertEqual(len(shapes_factor_map), 2)
+
+    def test_profiler_optimizer_single_tensor_pattern(self):
+        x = torch.ones((100, 100))
+        model = nn.Sequential(
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 10),
+        )
+
+        cases = (
+            (1, lambda: torch.optim.Adam(model.parameters())),
+            (1, lambda: torch.optim.SGD(model.parameters(), lr=0.01)),
+            (1, lambda: torch.optim.AdamW(model.parameters())),
+            (0, lambda: torch.optim.Adam(model.parameters(), foreach=True)),
+            (0, lambda: torch.optim.SGD(model.parameters(), lr=0.01, foreach=True)),
+            (0, lambda: torch.optim.AdamW(model.parameters(), foreach=True)),
+        )
+
+        num_matched = []
+        for _, fn in cases:
+            optimizer = torch.optim.Adam(model.parameters())
+            with profile(with_stack=True) as prof:
+                optimizer = fn()
+                optimizer.zero_grad()
+                y_hat = model(x)
+                loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+                loss.backward()
+                optimizer.step()
+            pattern = OptimizerSingleTensorPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
 
 
 if __name__ == '__main__':
