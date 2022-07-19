@@ -6,8 +6,8 @@ from typing import Tuple, Optional, List, Callable
 import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
-import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper
+import torch._prims_common as utils
+from torch._prims_common.wrappers import out_wrapper
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -759,7 +759,7 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.view(numel, grad_output.size(-1))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
     indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
@@ -1016,16 +1016,6 @@ def native_batch_norm(
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
-
-
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
@@ -1100,7 +1090,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.alias], disable_meta=True)
+@register_decomposition(
+    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
+)
 def nop_decomposition(x):
     return x
 
@@ -1245,21 +1237,3 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
         self = self.abs()
 
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
-
-
-@register_decomposition(torch.ops.aten.kl_div_backward)
-@pw_cast_for_opmath
-def kl_div_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-    log_target: bool = False,
-) -> Tensor:
-    if not log_target:
-        grad_input = torch.where(target > 0, -target * grad_output, 0)
-    else:
-        grad_input = -target.exp() * grad_output
-    if reduction == Reduction.MEAN.value:
-        return grad_input / self.numel()
-    return grad_input

@@ -372,6 +372,8 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
+    case UnaryOpType::Real:
+    case UnaryOpType::Imag:
       return false;
     default:
       return true;
@@ -466,6 +468,10 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "isposinf";
     case UnaryOpType::IsReal:
       return "isreal";
+    case UnaryOpType::Real:
+      return "std::real";
+    case UnaryOpType::Imag:
+      return "std::imag";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -1089,6 +1095,27 @@ size_t dataTypeSize(DataType type, DataType index_type) {
     return dataTypeSize(index_type);
   }
   return dataTypeSize(type);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const DoubleBufferLoopStage loop_stage) {
+  switch (loop_stage) {
+    case DoubleBufferLoopStage::NotApplicable:
+      break;
+    case DoubleBufferLoopStage::Prolog:
+      os << "{DoubleBufferProlog}";
+      break;
+    case DoubleBufferLoopStage::Main:
+      os << "{DoubleBufferMainLoop}";
+      break;
+    case DoubleBufferLoopStage::Epilog:
+      os << "{DoubleBufferEpilog}";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown double buffer stage");
+  }
+  return os;
 }
 
 } // namespace cuda
