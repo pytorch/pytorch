@@ -24,9 +24,9 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        observer = APoTObserver(b=8, k=1)
-        observer(tensor2quantize)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        apot_observer = APoTObserver(b=8, k=1)
+        apot_observer(tensor2quantize)
+        alpha, gamma, quantization_levels, level_indices = apot_observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
         qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
