@@ -103,15 +103,8 @@ Tensor _mps_max_pool2d(
     outputHeight, outputWidth, memory_format);
 
   namespace native_mps = at::native::mps;
+  using CachedGraph = native_mps::MPSUnaryCachedGraph;
   CheckedFrom c = "mps_max_pool2d";
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
 
   native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
 
@@ -161,7 +154,7 @@ Tensor _mps_max_pool2d(
                                      to_string(padW) + ":" + to_string(padH) + ":" +
                                      to_string(ceil_mode) + ":" + mem_format_key +
                                      mps::getTensorsStringKey({input_t});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
@@ -711,7 +704,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
                                        to_string(ceil_mode) + ":" + mem_format_key + ":" +
                                        to_string(divisor_override_value) +
                                        mps::getTensorsStringKey({input});
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
       if(!cachedGraph) {
         native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
