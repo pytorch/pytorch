@@ -11777,26 +11777,112 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @common_utils.parametrize(
+        "function",
+        [
+            common_utils.subtest(
+                [torch.nn.ReLU()],
+                name="relu",
+            ),
+            common_utils.subtest(
+                [torch.nn.ELU()],
+                name="elu",
+            ),
+            common_utils.subtest(
+                [torch.nn.SELU()],
+                name="selu",
+            ),
+            common_utils.subtest(
+                [torch.nn.LeakyReLU()],
+                name="swish",
+            ),
+            common_utils.subtest(
+                [torch.nn.SiLU()],
+                name="swish",
+            ),
+            common_utils.subtest(
+                [torch.nn.Hardswish()],
+                name="hardswish",
+            ),
+            common_utils.subtest(
+                [torch.nn.quantized.Hardswish(2.0, 0.1)],
+                name="quantized_hardswish",
+            ),
+            common_utils.subtest(
+                [torch.nn.Sigmoid()],
+                name="sigmoid",
+            ),
+            common_utils.subtest(
+                [torch.nn.quantized.Sigmoid(2.0, 0.1)],
+                name="quantized_sigmoid",
+            ),
+            common_utils.subtest(
+                [torch.nn.Hardsigmoid()],
+                name="hardsigmoid",
+            ),
+            common_utils.subtest(
+                [torch.nn.Tanh()],
+                name="tanh",
+            ),
+            common_utils.subtest(
+                [torch.nn.Hardtanh()],
+                name="hardtanh",
+            ),
+            common_utils.subtest(
+                [lambda x: torch.transpose(x, 0, 1)],
+                name="transpose",
+            ),
+            common_utils.subtest(
+                [lambda x: x.expand(1, 4, 2)],
+                name="expand",
+            ),
+            common_utils.subtest(
+                [lambda x: x.view(1, 4, 2)],
+                name="view",
+            ),
+            common_utils.subtest(
+                [lambda x: x.select(0, 1)],
+                name="select",
+            ),
+            common_utils.subtest(
+                [torch.nn.LayerNorm(2)],
+                name="layer_norm",
+            ),
+            common_utils.subtest(
+                [torch.nn.InstanceNorm(2)],
+                name="instance_norm",
+            ),
+            common_utils.subtest(
+                [lambda x: torch.amax(x, dim=0, keepdim=True)],
+                name="amax",
+            ),
+            common_utils.subtest(
+                [lambda x: torch.amin(x, dim=0, keepdim=True)],
+                name="amin",
+            ),
+            common_utils.subtest(
+                [torch.sort],
+                name="sort",
+            ),
+            common_utils.subtest(
+                [torch.nn.Linear(2, 3)],
+                name="linear",
+            ),
+            common_utils.subtest(
+                [lambda x: torch.as_strided(x, (2, 2), (1, 2))],
+                name="as_strided",
+            ),
+            common_utils.subtest(
+                [torch.nn.GroupNorm(2, 2)],
+                name="group_norm",
+            ),
+        ],
+    )
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_hardswish(self):
-        model = torch.nn.quantized.Hardswish(1.0, 0)
-        input = torch.randn(2, 6)
+    def test_quantized_unary_functions(self, function):
+        input = torch.randn(4, 2)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
-
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_hardsigmoid(self):
-        model = torch.nn.Hardsigmoid()
-        input = torch.randn(2, 6)
-        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
-
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_sigmoid(self):
-        model = torch.nn.Sigmoid()
-        input = torch.randn(2, 6)
-        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
+        self.run_test(function, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):

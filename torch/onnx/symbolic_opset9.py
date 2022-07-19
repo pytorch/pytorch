@@ -2599,9 +2599,7 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-@symbolic_helper.quantized_args(
-    True, True
-)  # TODO(justinchuby): Support maybe quantized args
+# TODO(justinchuby): Support multiple quantized args in output
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input)
     if dim_or_y is None and keepdim is None:
@@ -2623,7 +2621,7 @@ def maximum(g, input, other):
     return max(g, input, dim_or_y=other)
 
 
-@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): Support multiple quantized args in output
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -3196,7 +3194,7 @@ def unsqueeze(g, self, dim):
     return symbolic_helper._unsqueeze_helper(g, self, axes_i=[dim])
 
 
-@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     if out is not None:
@@ -3220,7 +3218,7 @@ def numel(g, self):
     return g.op("ReduceProd", shape, keepdims_i=0)
 
 
-@symbolic_helper.quantized_args(True)
+# TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
