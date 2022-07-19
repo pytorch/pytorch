@@ -562,7 +562,10 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
-    DEFAULT_POST_OBSERVER_NAME: str = "model_report_post_observer"
+
+    # weight / activation prefix for each of the below info
+    WEIGHT_PREFIX = "weight_"
+    ACTIVATION_PREFIX = "pre_activation_"
 
     # string names for keys of info dictionaries
     PER_CHANNEL_MAX_KEY = "per_channel_max"
@@ -575,8 +578,6 @@ class InputWeightEqualizationDetector(DetectorBase):
     COMP_METRIC_KEY = "channel_comparison_metrics"
     THRESHOLD_KEY = "threshold"
     CHANNEL_KEY = "channel_axis_selected"
-    INPUT_INFO_KEY = "input_range_info"
-    WEIGHT_INFO_KEY = "weight_range_info"
 
     # default weight and info strings
     WEIGHT_STR = "weight"
@@ -666,10 +667,10 @@ class InputWeightEqualizationDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a dict mapping relavent module fqns (str) to a dict with keys:
-            "per_channel_max" : maps to the per_channel max values
-            "per_channel_min" : maps to the per_channel min values
-            "global_max" : maps to the global max recorded
-            "global_min" : maps to the global min recorded
+            "pre_activation__per_channel_max" : maps to the per_channel max values
+            "pre_activation__per_channel_min" : maps to the per_channel min values
+            "pre_activation_global_max" : maps to the global max recorded
+            "pre_activation_global_min" : maps to the global min recorded
         """
 
         # return dictionary mapping observer fqns to desired info
@@ -682,10 +683,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
                 input_info[fqn] = {
-                    self.PER_CHANNEL_MAX_KEY: pre_obs.max_val,
-                    self.PER_CHANNEL_MIN_KEY: pre_obs.min_val,
-                    self.GLOBAL_MAX_KEY: max(pre_obs.max_val),
-                    self.GLOBAL_MIN_KEY: min(pre_obs.min_val),
+                    self.ACTIVATION_PREFIX + self.PER_CHANNEL_MAX_KEY: pre_obs.max_val,
+                    self.ACTIVATION_PREFIX + self.PER_CHANNEL_MIN_KEY: pre_obs.min_val,
+                    self.ACTIVATION_PREFIX + self.GLOBAL_MAX_KEY: max(pre_obs.max_val),
+                    self.ACTIVATION_PREFIX + self.GLOBAL_MIN_KEY: min(pre_obs.min_val),
                 }
 
         return input_info
@@ -719,10 +720,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 max_val = torch.flatten(max_val)
 
                 weight_info[fqn] = {
-                    self.PER_CHANNEL_MAX_KEY: max_val,
-                    self.PER_CHANNEL_MIN_KEY: min_val,
-                    self.GLOBAL_MAX_KEY: max(max_val),
-                    self.GLOBAL_MIN_KEY: min(min_val),
+                    self.WEIGHT_PREFIX + self.PER_CHANNEL_MAX_KEY: max_val,
+                    self.WEIGHT_PREFIX + self.PER_CHANNEL_MIN_KEY: min_val,
+                    self.WEIGHT_PREFIX + self.GLOBAL_MAX_KEY: max(max_val),
+                    self.WEIGHT_PREFIX + self.GLOBAL_MIN_KEY: min(min_val),
                 }
 
         return weight_info
@@ -740,8 +741,11 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns a tensor of values, where each value is the s_c stat for a different channel
         """
         # calculate the ratios of the info
-        per_channel_range = info_dict[self.PER_CHANNEL_MAX_KEY] - info_dict[self.PER_CHANNEL_MIN_KEY]
-        global_range = info_dict[self.GLOBAL_MAX_KEY] - info_dict[self.GLOBAL_MIN_KEY]
+        # get the prefix str
+        prefix_str = self.ACTIVATION_PREFIX if info_str == self.INPUT_STR else self.WEIGHT_PREFIX
+
+        per_channel_range = info_dict[prefix_str + self.PER_CHANNEL_MAX_KEY] - info_dict[prefix_str + self.PER_CHANNEL_MIN_KEY]
+        global_range = info_dict[prefix_str + self.GLOBAL_MAX_KEY] - info_dict[prefix_str + self.GLOBAL_MIN_KEY]
 
         if global_range == 0:
             range_zero_explanation = "We recommend removing this channel as it doesn't provide any useful information."
@@ -830,13 +834,14 @@ class InputWeightEqualizationDetector(DetectorBase):
                 channel_rec_vals.append(recommended)
 
             # build the return dict input
+            # also unpack input and weight dicts into it
             input_weight_equalization_info[module_fqn] = {
                 self.RECOMMENDED_KEY: channel_rec_vals,
                 self.COMP_METRIC_KEY: mod_comp_stat,
                 self.THRESHOLD_KEY: self.ratio_threshold,
                 self.CHANNEL_KEY: self.ch_axis,
-                self.INPUT_INFO_KEY: mod_input_info,
-                self.WEIGHT_INFO_KEY: mod_weight_info,
+                **mod_input_info,
+                **mod_weight_info,
             }
 
         # return our compiled info for each module
