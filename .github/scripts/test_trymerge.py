@@ -12,6 +12,8 @@ import os
 from hashlib import sha256
 
 from trymerge import (find_matching_merge_rule,
+                      get_land_checkrun_conclusions,
+                      validate_land_time_checks,
                       gh_graphql,
                       gh_get_team_members,
                       read_merge_rules,
@@ -74,6 +76,7 @@ def mock_parse_args(revert: bool = False,
             self.comment_id = 0
             self.on_mandatory = False
             self.on_green = False
+            self.land_checks = False
             self.reason = 'this is for testing'
 
     return Object()
@@ -90,6 +93,7 @@ def mock_merge(pr_num: int, repo: GitRepo,
                comment_id: Optional[int] = None,
                mandatory_only: bool = False,
                on_green: bool = False,
+               land_checks: bool = False,
                timeout_minutes: int = 400,
                stale_pr_days: int = 3) -> None:
     pass
@@ -255,6 +259,22 @@ class TestGitHubPR(TestCase):
         conclusions = pr.get_checkrun_conclusions()
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_many_land_checks(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched for a commit
+        """
+        conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
+        self.assertGreater(len(conclusions), 100)
+        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_failed_land_checks(self, mocked_gql: Any) -> None:
+        """ Tests that PR with Land Checks fail with a RunTime error
+        """
+        self.assertRaisesRegex(RuntimeError,
+                               ".*Failed to merge; some land checks failed.*",
+                               lambda: validate_land_time_checks('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684'))
+
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
     @mock.patch('trymerge.try_revert', side_effect=mock_revert)
@@ -273,6 +293,7 @@ class TestGitHubPR(TestCase):
                                            force=True,
                                            comment_id=mock.ANY,
                                            on_green=False,
+                                           land_checks=False,
                                            mandatory_only=False)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
@@ -286,6 +307,7 @@ class TestGitHubPR(TestCase):
                                            force=False,
                                            comment_id=mock.ANY,
                                            on_green=False,
+                                           land_checks=False,
                                            mandatory_only=False)
 
 if __name__ == "__main__":

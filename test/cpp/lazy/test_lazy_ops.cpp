@@ -22,7 +22,9 @@ namespace lazy {
 #ifndef FBCODE_CAFFE2
 
 namespace {
-// This registers the torchscript backend, without which lazy device won't work
+// This registers the torchscript backend, without which lazy device won't work.
+// FIXME: This registers the backend for the whole test binary. We should
+// probably do it and undo it in the test fixture below.
 static bool inline init_backend() {
   torch::lazy::InitTorchScriptBackend();
   return true;
@@ -90,21 +92,23 @@ TEST(LazyDynamicOpsTest, NarrowCopy) {
   auto ly = torch::lazy::TryGetLtcTensor(y);
   auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
   auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-  auto z = x.narrow_copy(X_DIM_INDEX, 0, lmn->toSymInt());
+  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, lmn->toSymInt());
   AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
 }
 
 TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
+  FLAGS_ltc_enable_symbolic_shapes = true;
   auto xc = torch::rand({10});
   auto x = xc.to(kLazy);
   const size_t Y_DIM = 3;
   const size_t X_DIM_INDEX = 0;
   auto y = torch::rand({Y_DIM}).to(kLazy);
-  auto z = x.narrow_copy(X_DIM_INDEX, 0, y.sym_sizes()[0]);
+  auto z = x.narrow_copy_symint(X_DIM_INDEX, 0, y.sym_sizes()[0]);
   auto zc = xc.narrow_copy(X_DIM_INDEX, 0, Y_DIM);
   ASSERT_EQ(z.sizes()[0], xc.sizes()[0]); // note, xc not zc
   // shape inference assumes narrow_copy can copy the whole tensor
   AllClose(z.cpu(), zc);
+  FLAGS_ltc_enable_symbolic_shapes = false;
 }
 
 TEST_F(LazyOpsTest, TestScalarTensor) {

@@ -8,9 +8,9 @@ import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
-from torch.testing._internal.common_dtype import floating_types
+from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
+    _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
@@ -104,25 +104,13 @@ class modules(_TestParametrizer):
                 _update_param_kwargs(param_kwargs, 'training', training)
 
                 try:
-                    active_decorators = [set_single_threaded_if_parallel_tbb]
-                    if module_info.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
-                        active_decorators.append(skipIf(True, "Skipped!"))
-
-                    if module_info.decorators is not None:
-                        for decorator in module_info.decorators:
-                            # Can't use isinstance as it would cause a circular import
-                            if decorator.__class__.__name__ == 'DecorateInfo':
-                                if decorator.is_active(generic_cls.__name__, test.__name__,
-                                                       device_cls.device_type, dtype):
-                                    active_decorators += decorator.decorators
-                            else:
-                                active_decorators.append(decorator)
 
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in active_decorators:
+                    for decorator in module_info.get_decorators(generic_cls.__name__, test.__name__,
+                                                                device_cls.device_type, dtype):
                         test_wrapper = decorator(test_wrapper)
 
                     yield (test_wrapper, test_name, param_kwargs)
@@ -187,16 +175,22 @@ class ModuleInfo(object):
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
-        self.skips = skips
-        self.decorators = decorators
+        self.decorators = (*(decorators if decorators else []), *(skips if skips else []))
         self.dtypes = dtypes
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
 
-    def should_skip(self, cls_name, test_name, device_type, dtype):
-        return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
+    def get_decorators(self, test_class, test_name, device, dtype):
+        result = [set_single_threaded_if_parallel_tbb]
+        for decorator in self.decorators:
+            if isinstance(decorator, DecorateInfo):
+                if decorator.is_active(test_class, test_name, device, dtype):
+                    result.extend(decorator.decorators)
+            else:
+                result.append(decorator)
+        return result
 
     @property
     def name(self):
@@ -706,6 +700,26 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 desc='no_batch_dim'
             ))
 
+    def fast_path_reference_fn(module, parameters, *args, **kwargs):
+        assert not module.training
+        module = module.train(True)
+        output = module(*args, **kwargs)
+        module = module.train(False)
+        return output
+
+    if not training:
+        for norm_first in (True, False):
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first),
+                    forward_input=FunctionInput(
+                        make_input((2, 3, 4)),
+                    ),
+                    reference_fn=fast_path_reference_fn,
+                    desc="fast_path_norm_first" if norm_first else "fast_path"
+                )
+            )
+
     return samples
 
 
@@ -1074,6 +1088,10 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='cuda', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1088,6 +1106,9 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1096,12 +1117,28 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False, transposed=True),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
+               dtypes=floating_and_complex_types_and(torch.chalf),
                skips=(
                    # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # Not implmented for chalf on CPU
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                                dtypes=(torch.chalf,), device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
+                                dtypes=(torch.chalf,), device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule',
+                                'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
+                                dtypes=(torch.chalf,), device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_multiple_device_transfer',
+                                dtypes=(torch.chalf,), device_type='cuda'),
+                   # Ref: https://github.com/pytorch/pytorch/issues/73502
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1116,6 +1153,11 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
+                                dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1130,6 +1172,9 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1176,6 +1221,10 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='cuda', dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1193,6 +1242,9 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1227,6 +1279,11 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
+                                dtypes=[torch.float64]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1244,6 +1301,9 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See https://github.com/pytorch/pytorch/issues/80247
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),

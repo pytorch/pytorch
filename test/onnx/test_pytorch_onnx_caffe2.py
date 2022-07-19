@@ -6,11 +6,20 @@ import sys
 import unittest
 from typing import Tuple
 
+import caffe2.python.onnx.backend as c2
+
 import model_defs.dcgan as dcgan
 import model_defs.word_language_model as word_language_model
 import numpy as np
 import onnx
+import torch.onnx
+import torch.onnx.operators
+import torch.utils.model_zoo as model_zoo
 import verify
+from caffe2.python.operator_test.torch_integration_test import (
+    create_bbox_transform_inputs,
+    generate_rois_rotated,
+)
 from debug_embed_params import run_embed_params
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.mnist import MNIST
@@ -18,20 +27,23 @@ from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
-from test_pytorch_common import (
+from pytorch_test_common import (
     BATCH_SIZE,
     RNN_BATCH_SIZE,
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     skipIfNoCuda,
-    skipIfNoLapack,
     skipIfTravis,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
-    TestCase,
-    run_tests,
 )
+from torch import nn
+from torch.autograd import function, Variable
+from torch.nn.utils import rnn as rnn_utils
+from torch.onnx import ExportTypes
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
@@ -39,19 +51,6 @@ from torchvision.models.densenet import densenet121
 from torchvision.models.inception import inception_v3
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
-
-import caffe2.python.onnx.backend as c2
-import torch.onnx
-import torch.onnx.operators
-import torch.utils.model_zoo as model_zoo
-from caffe2.python.operator_test.torch_integration_test import (
-    create_bbox_transform_inputs,
-    generate_rois_rotated,
-)
-from torch import nn
-from torch.autograd import Variable, function
-from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import ExportTypes
 
 skip = unittest.skip
 
@@ -130,11 +129,13 @@ model_urls = {
 }
 
 
-class TestCaffe2Backend_opset9(TestCase):
+class TestCaffe2Backend_opset9(common_utils.TestCase):
     opset_version = 9
     embed_params = False
 
     def setUp(self):
+        # the following should ideally be super().setUp(), https://github.com/pytorch/pytorch/issues/79630
+        common_utils.TestCase.setUp(self)
         torch.manual_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
@@ -3197,44 +3198,44 @@ setup_rnn_tests()
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9 = type(
     "TestCaffe2BackendEmbed_opset9",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 
 # opset 7 tests
 TestCaffe2Backend_opset7 = type(
     "TestCaffe2Backend_opset7",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=7),
 )
 TestCaffe2BackendEmbed_opset7 = type(
     "TestCaffe2BackendEmbed_opset7",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=7),
 )
 
 # opset 8 tests
 TestCaffe2Backend_opset8 = type(
     "TestCaffe2Backend_opset8",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=8),
 )
 TestCaffe2BackendEmbed_opset8 = type(
     "TestCaffe2BackendEmbed_opset8",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=8),
 )
 
 # opset 10 tests
 TestCaffe2Backend_opset10 = type(
     "TestCaffe2Backend_opset10",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=10),
 )
 
 TestCaffe2BackendEmbed_opset10 = type(
     "TestCaffe2BackendEmbed_opset10",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=10),
 )
 
@@ -3242,9 +3243,9 @@ TestCaffe2BackendEmbed_opset10 = type(
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9_new_jit_API = type(
     "TestCaffe2BackendEmbed_opset9_new_jit_API",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

@@ -30,22 +30,15 @@
 #   message, but use what's there
 #
 
-from collections import defaultdict
 import itertools
 import re
+from collections import defaultdict
+
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+
 import yaml
-
-from .gen_trace_type import should_trace
-
-from torchgen.code_template import CodeTemplate
 from torchgen.api import cpp
-from torchgen.api.types import CppSignatureGroup
 from torchgen.api.python import (
-    PythonArgument,
-    PythonSignature,
-    PythonSignatureDeprecated,
-    PythonSignatureGroup,
-    PythonSignatureNativeFunctionPair,
     arg_parser_output_exprs,
     argument_type_str,
     cpp_dispatch_exprs,
@@ -55,20 +48,22 @@ from torchgen.api.python import (
     dispatch_lambda_return_str,
     has_tensor_options,
     namedtuple_fieldnames,
+    PythonArgument,
+    PythonSignature,
+    PythonSignatureDeprecated,
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair,
     signature,
 )
-from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
-from torchgen.context import with_native_function
-from torchgen.model import (
-    Argument,
-    BaseOperatorName,
-    NativeFunction,
-    Type,
-    Variant,
-)
-from torchgen.utils import split_name_params, YamlLoader, FileManager
+from torchgen.api.types import CppSignatureGroup
 
-from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
+from torchgen.code_template import CodeTemplate
+from torchgen.context import with_native_function
+from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
+from torchgen.model import Argument, BaseOperatorName, NativeFunction, Type, Variant
+from torchgen.utils import FileManager, split_name_params, YamlLoader
+
+from .gen_trace_type import should_trace
 
 #
 # declarations blocklist
@@ -155,7 +150,8 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
-    "lift",
+    "lift.*",
+    "normal_functional",  # only used by the functionalization pas
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -1113,6 +1109,8 @@ def group_overloads(
 def sort_overloads(
     grouped_overloads: Sequence[PythonSignatureGroup],
 ) -> Sequence[PythonSignatureGroup]:
+    # NB: Smaller here means lower priority
+
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (
             str(t1) == "Scalar"
@@ -1131,6 +1129,10 @@ def sort_overloads(
             # last in signature ordering. See discussion: https://github.com/pytorch/pytorch/issues/58087
             str(t1) == "Tensor[]"
             and str(t2).find("[]") != -1
+            or
+            # Prioritize SymIntArrayRef overload over IntArrayRef
+            str(t1) == "int[]"
+            and str(t2) == "SymInt[]"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:

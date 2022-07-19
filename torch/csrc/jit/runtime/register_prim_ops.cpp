@@ -148,14 +148,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, a.mH());
         },
         aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.layout());
-        },
-        aliasAnalysisFromSchema()),
 
     // only used internally in range() translation
     OperatorGeneratorArgs(
@@ -419,6 +411,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
+        sym_size,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -469,6 +465,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> int"),
         dtype,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> Layout"),
+        layout,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__not__(bool self) -> bool"),

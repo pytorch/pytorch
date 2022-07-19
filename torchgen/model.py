@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-from torchgen.utils import assert_never
+from torchgen.utils import assert_never, NamespaceHelper
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -454,12 +454,11 @@ class NativeFunction:
         funcs = e.pop("func")
         assert isinstance(funcs, str), f"not a str: {funcs}"
         # only support one level of namespace. E.g., aten::add
-        namespaced_funcs = funcs.split("::", 1)
-        if len(namespaced_funcs) == 1:
-            namespace = "aten"
-        else:
-            namespace = namespaced_funcs[0]
-        func = FunctionSchema.parse(namespaced_funcs[-1])
+        namespace_helper = NamespaceHelper.from_namespaced_entity(
+            namespaced_entity=funcs, max_level=1
+        )
+        namespace = namespace_helper.get_cpp_namespace(default="aten")
+        func = FunctionSchema.parse(namespace_helper.entity_name)
 
         cpp_no_default_args_list = e.pop("cpp_no_default_args", [])
         assert isinstance(cpp_no_default_args_list, list)
@@ -579,19 +578,20 @@ class NativeFunction:
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
-                    # We only allow one level of namespace for kernels and operator.
+                    # We only allow at most 2 levels of namespace for kernels.
                     # We will append "native" to a custom kernel namespace.
-                    tokens = v.split("::", 1)
+                    namespace_helper = NamespaceHelper.from_namespaced_entity(
+                        v, max_level=2
+                    )
+                    kernel_namespace = namespace_helper.get_cpp_namespace(default="at")
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
                     dispatch[dispatch_key] = BackendMetadata(
-                        kernel=tokens[-1],
+                        kernel=namespace_helper.entity_name,
                         structured=structured
                         and is_structured_dispatch_key(dispatch_key),
-                        cpp_namespace=(tokens[0] + "::native")
-                        if len(tokens) > 1
-                        else DEFAULT_KERNEL_NAMESPACE,
+                        cpp_namespace=(kernel_namespace + "::native"),
                     )
                     if (
                         dispatch_key is DispatchKey.CompositeImplicitAutograd
@@ -661,6 +661,11 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
+
+            # Delay import ufunc here to avoid circular import issue
+            # See: https://github.com/pytorch/pytorch/issues/81294
+            import torchgen.api.ufunc as ufunc
+
             for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
@@ -834,7 +839,7 @@ class NativeFunction:
         return self.func.name.name.base
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable"))
+SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -872,6 +877,8 @@ class NativeFunctionsGroup:
         if self.mutable is not None:
             assert self.mutable.func.kind() == SchemaKind.mutable
             assert self.mutable.namespace == self.functional.namespace
+            # See Note [Overload Ambiguity With Functional Variants]
+            assert self.functional.func.name.name.functional_overload
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
@@ -901,7 +908,7 @@ class NativeFunctionsGroup:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
                 f" To do so, it expects a line: 'autogen: {generated_fns_str}'."
-                f" Instead, it found 'autogen: {generated_fns_str}'"
+                f" Instead, it found 'autogen: {expected_generated_fns_str}'"
             )
 
     def signature(self) -> "FunctionSchema":
@@ -1201,7 +1208,15 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                assert len(self.arguments.out) == len(
+                # mutable keyward arguments whose name has _scratch_ prefix are
+                # scratch tensors for memory planning and should not be returned
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1240,6 +1255,10 @@ class FunctionSchema:
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
 
+    def is_symint_fn(self) -> bool:
+        # TODO: make this more robust
+        return "SymInt" in self.name.overload_name
+
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
         #
@@ -1277,6 +1296,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write
@@ -1292,7 +1314,15 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -2112,6 +2142,26 @@ class BaseOperatorName:
     base: str
     inplace: bool
     dunder_method: bool
+    # Note [Overload Ambiguity With Functional Variants]
+    # A handful of operators have both a "mutable" and a "functional" variant.
+    # (native_batch_norm is a good example, although this isn't the case today).
+    # For those operators, the mutable and functional variant take in the same set of
+    # arguments, but have different alias annotations.
+    # this makes it ambiguous when you try to resolve an OverloadPacket into an overload,
+    # given a set of input arguments.
+    #
+    # So instead of making the "functional" variant in this case a real overload, e.g:
+    #   native_batch_norm (mutable variant)
+    #   native_batch_norm.functional (functional variant)
+    # we make it a new base operator,
+    #   native_batch_norm_functional (functional variant)
+    #
+    # In an ideal world, we would probably invert this so the operators were:
+    #   native_batch_norm.mutable (mutable variant)
+    #   native_batch_norm (functional variant)
+    #
+    # Doing that is BC-breaking though, so we're stuck with the above modeling.
+    functional_overload: bool = False
 
     @staticmethod
     def parse(op: str) -> "BaseOperatorName":
@@ -2142,7 +2192,24 @@ class BaseOperatorName:
                 base = base[:-1]
             else:
                 inplace = False
-        r = BaseOperatorName(base=base, inplace=inplace, dunder_method=dunder_method)
+
+        # See Note [Overload Ambiguity With Functional Variants]
+        functional_suffix = "_functional"
+        if base.endswith(functional_suffix):
+            functional_overload = True
+            base = base[: -len(functional_suffix)]
+            # This seems complicated and unnecessary, so banning dunder methods
+            # for now on ops that have a functional + mutable variant (like native_batch_norm).
+            assert not dunder_method and not inplace
+        else:
+            functional_overload = False
+
+        r = BaseOperatorName(
+            base=base,
+            inplace=inplace,
+            dunder_method=dunder_method,
+            functional_overload=functional_overload,
+        )
         assert str(r) == op, f"{str(r)} != {op}"
         return r
 
@@ -2151,7 +2218,13 @@ class BaseOperatorName:
             i = "i" if self.inplace else ""
             return f"__{i}{self.base}__"
         else:
-            i = "_" if self.inplace else ""
+            i = (
+                "_"
+                if self.inplace
+                else "_functional"
+                if self.functional_overload
+                else ""
+            )
             return f"{self.base}{i}"
 
 
@@ -2402,6 +2475,3 @@ class Precompute:
             replace_list.append(f"{kernel_param} -> {replacements}")
 
         return replace_list
-
-
-import torchgen.api.ufunc as ufunc

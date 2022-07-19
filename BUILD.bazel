@@ -1357,7 +1357,7 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.0.8",
+        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1424,7 +1424,7 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         ":caffe2_protos",
-        "//third_party/miniz-2.0.8:miniz",
+        "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
@@ -1605,6 +1605,7 @@ cc_library(
         "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
+        "third_party/kineto/libkineto/include",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1645,7 +1646,8 @@ cc_library(
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
     ],
     copts = TORCH_COPTS,
     defines = [
@@ -1655,6 +1657,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",

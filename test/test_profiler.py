@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: profiler"]
 import collections
+import expecttest
 import gc
 import io
 import json
 import os
 import re
 import tempfile
+from typing import List, Optional
 import unittest
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
@@ -25,6 +28,7 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
+from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -210,13 +214,14 @@ class TestExecutionGraph(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
-            y = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 y = y.cuda()
             z = x + y + x * y + x * y
+            z.backward(z)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -1108,6 +1113,237 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+def find_node_with_name(nodes, name):
+    for node in nodes:
+        if node.name() == name:
+            return node
+        result = find_node_with_name(node.children, name)
+        if result is not None:
+            return result
+
+class TestTorchTidyProfiler(TestCase):
+    def test_extra_fields(self):
+        with profile(with_stack=True, profile_memory=True) as p:
+            _ = torch.ones((1,))
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::ones")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        self.assertIsInstance(
+            node.parent.extra_fields,
+            torch._C._autograd._ExtraFields_PyCCall)
+
+        self.assertEqual(node.children[0].name(), "aten::empty")
+        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertIsInstance(
+            node.children[0].children[0].extra_fields,
+            torch._C._autograd._ExtraFields_Allocation)
+
+    def test_tensor_sizes(self):
+        x = torch.ones(10, 10)
+        y = torch.ones(1, 10)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + y
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        # The alpha scalar has a [] size
+        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
+        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
+
+
+@dataclass(frozen=True)
+class MockKinetoEvent():
+    _name: str
+    _start_us: int
+    _duration_us: int
+    _linked_correlation_id: int
+    _device_type: int
+
+    def name(self) -> str:
+        return self._name
+
+    def start_us(self) -> int:
+        return self._start_us
+
+    def duration_us(self) -> int:
+        return self._duration_us
+
+    def linked_correlation_id(self) -> int:
+        return self._linked_correlation_id
+
+    def device_type(self) -> DeviceType:
+        return DeviceType.CUDA if self._device_type == 1 else DeviceType.CPU
+
+
+@dataclass(frozen=True)
+class MockProfilerEvent():
+    _name: str
+    id: int
+    start_time_ns: int
+    duration_time_ns: int
+    correlation_id: int = 0
+    children: List["MockProfilerEvent"] = field(default_factory=list)
+    parent: Optional["MockProfilerEvent"] = None
+
+    @property
+    def end_time_ns(self):
+        return self.start_time_ns + self.duration_time_ns
+
+    def name(self) -> str:
+        return self._name
+
+    def __post__init__(self, parent, children):
+        object.__setattr__(self, "parent", parent)
+        object.__setattr__(self, "children", children)
+
+
+class TestExperimentalUtils(TestCase):
+
+    @staticmethod
+    def generate_mock_profile():
+        cuda_events = [
+            MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, 0),
+            MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, 0),
+            MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, 0),
+            MockKinetoEvent("cudaLaunchKernel", 700, 100, 4, 0),
+            MockKinetoEvent("cudaLaunchKernel", 800, 100, 5, 0),
+            MockKinetoEvent("cudaLaunchKernel", 1500, 100, 6, 0),
+            MockKinetoEvent("GPU", 900, 100, 1, 1),
+            MockKinetoEvent("GPU", 1000, 100, 2, 1),
+            MockKinetoEvent("GPU", 1100, 100, 3, 1),
+            MockKinetoEvent("GPU", 1200, 100, 4, 1),
+            MockKinetoEvent("GPU", 1300, 100, 5, 1),
+            MockKinetoEvent("GPU", 1700, 100, 6, 1)
+        ]
+        cpu_events = [
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000,
+                              100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000,
+                              100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000,
+                              100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000,
+                              100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000,
+                              100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000,
+                              100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000,
+                              100000),
+            MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 12, 1200000, 500000),
+        ]
+
+        profiler = unittest.mock.Mock()
+        profiler.kineto_results = unittest.mock.Mock()
+        profiler.kineto_results.events = unittest.mock.Mock(
+            return_value=cuda_events)
+        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+            return_value=cpu_events)
+        return profiler
+
+    @staticmethod
+    def load_mock_profile():
+        accept = expecttest.ACCEPT
+        json_file_path = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "profiler_utils_mock_events.json")
+        if accept and torch.cuda.is_available():
+
+            def garbage_code(x):
+                for i in range(5):
+                    x[0, i] = i
+
+            x = torch.ones((4096, 4096), device="cuda")
+            x = x @ x
+            with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=True,
+                    with_stack=True) as prof:
+                for _ in range(5):
+                    x = x @ x
+                garbage_code(x)
+                for _ in range(5):
+                    x = x @ x
+
+            kineto_events = [{
+                '_name':
+                e.name(),
+                '_start_us':
+                e.start_us(),
+                '_duration_us':
+                e.duration_us(),
+                '_linked_correlation_id':
+                e.linked_correlation_id(),
+                '_device_type':
+                1 if e.device_type() == DeviceType.CUDA else 0
+            } for e in prof.profiler.kineto_results.events()]
+
+            def EventTreeDFS(event_tree):
+                from collections import deque
+                stack = deque(event_tree)
+                while stack:
+                    curr_event = stack.pop()
+                    yield curr_event
+                    for child_event in curr_event.children:
+                        stack.append(child_event)
+
+            profiler_events = [{
+                '_name': e.name(),
+                'id': e.id,
+                'start_time_ns': e.start_time_ns,
+                'duration_time_ns': e.duration_time_ns,
+                'correlation_id': e.correlation_id,
+                'children': [child.id for child in e.children],
+                'parent': e.parent.id if e.parent else None
+            } for e in EventTreeDFS(
+                prof.profiler.kineto_results.experimental_event_tree())]
+
+            with open(json_file_path, "w") as f:
+                json.dump([kineto_events, profiler_events], f)
+
+        assert (os.path.exists(json_file_path))
+        with open(json_file_path, "r") as f:
+            kineto_events, profiler_events = json.load(f)
+
+        cuda_events = [
+            MockKinetoEvent(*event.values()) for event in kineto_events
+        ]
+        cpu_events = []
+        id_map = {}
+        for e in profiler_events:
+            event = MockProfilerEvent(**e)
+            id_map[event.id] = event
+            cpu_events.append(event)
+        for event in cpu_events:
+            parent = None if event.parent is None else id_map[event.parent]
+            children = [id_map[child] for child in event.children]
+            event.__post__init__(parent, children)
+        cpu_events = [event for event in cpu_events if event.parent is None]
+        profiler = unittest.mock.Mock()
+        profiler.kineto_results = unittest.mock.Mock()
+        profiler.kineto_results.events = unittest.mock.Mock(
+            return_value=cuda_events)
+        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+            return_value=cpu_events)
+        return profiler
+
     def test_utils_compute_self_time(self):
         with profile() as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
@@ -1116,8 +1352,8 @@ class TestProfiler(TestCase):
             y = torch.ones(1)
             loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
             loss.backward()
-        metrics = dict()
-        _utils.compute_self_time(prof.profiler, metrics)
+        basic_eval = _utils.BasicEvaluation(prof.profiler)
+        metrics = basic_eval.metrics
         self.assertTrue(len(metrics) > 0)
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
@@ -1126,6 +1362,163 @@ class TestProfiler(TestCase):
                     child.duration_time_ns
                     for child in event_key.event.children
                 ]))
+
+    def test_utils_intervals_overlap(self):
+        event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
+        intervals = [
+            _utils.Interval(0, 9),
+            _utils.Interval(1, 2),
+            _utils.Interval(2, 3),
+            _utils.Interval(3, 4),
+            _utils.Interval(4, 5),
+            _utils.Interval(8, 12),
+        ]
+        print(event.intervals_overlap(intervals))
+        self.assertEqual(event.intervals_overlap(intervals), 5)
+
+    def test_utils_compute_queue_depth(self):
+
+        def format_queue_depth(queue_depth_list, events):
+            res = ""
+            for data, event in zip(queue_depth_list, events):
+                res += f"{data.queue_depth} [{event.name()}]\n"
+            return res
+
+        # We have to use Mock because time series data is too flaky to test
+        profiler = self.generate_mock_profile()
+        basic_evaluation = _utils.BasicEvaluation(profiler)
+        self.assertExpectedInline(
+            format_queue_depth(basic_evaluation.queue_depth_list,
+                               basic_evaluation.cuda_events), """\
+1 [cudaLaunchKernel]
+2 [cudaLaunchKernel]
+3 [cudaLaunchKernel]
+4 [cudaLaunchKernel]
+5 [cudaLaunchKernel]
+4 [GPU]
+3 [GPU]
+2 [GPU]
+1 [GPU]
+0 [GPU]
+1 [cudaLaunchKernel]
+0 [GPU]
+""")
+        self.assertExpectedInline(
+            format_queue_depth([
+                basic_evaluation.metrics[k]
+                for k in basic_evaluation.event_keys
+            ], basic_evaluation.events), """\
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+1 [CPU (After cudaLaunchKernel)]
+2 [CPU (After cudaLaunchKernel)]
+3 [CPU (After cudaLaunchKernel)]
+4 [CPU (After cudaLaunchKernel)]
+5 [CPU (After GPU)]
+4 [CPU (After GPU)]
+2 [CPU (After GPU)]
+1 [CPU (After GPU)]
+""")
+
+    def test_utils_compute_queue_depth_when_no_cuda_events(self):
+        # For traces with only cpu events, we expect empty queue depth list
+        x = torch.ones((1024, 1024))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        self.assertFalse(basic_evaluation.compute_queue_depth())
+
+    def test_utils_compute_idle_time(self):
+        profiler = self.generate_mock_profile()
+        basic_evaluation = _utils.BasicEvaluation(profiler)
+        expected_output = "\n".join([
+            f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name()}]"
+            for event_key in basic_evaluation.event_keys
+        ])
+        self.assertExpectedInline(
+            expected_output, """\
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After GPU)]
+0 [CPU (After GPU)]
+0 [CPU (After GPU)]
+100000 [CPU (After GPU)]""")
+
+    def test_utils_get_optimizable_events(self):
+        basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
+        optimizable_events = basic_evaluation.get_optimizable_events(
+            2, print_enable=False)
+        expected_output = "\n".join(
+            [f"{event_key.event.name()}" for event_key in optimizable_events])
+        self.assertExpectedInline(
+            expected_output, """\
+<built-in function _cuda_synchronize>
+aten::copy_""")
+
+    def test_profiler_name_pattern(self):
+        x = torch.ones((4096, 4096))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        matched_events = NamePattern(prof, "aten::mm").matched_events()
+        output = "\n".join([f"{event.name()}" for event in matched_events])
+        self.assertExpectedInline(output, """\
+aten::mm
+aten::mm
+aten::mm
+aten::mm
+aten::mm""")
+
+    def test_profiler_pattern_match_helper(self):
+        x = torch.ones((100, 100))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+                x = x + x
+        event_tree = prof.profiler.kineto_results.experimental_event_tree()
+        pattern = Pattern(prof)
+        self.assertEqual([], pattern.siblings_of(event_tree[0])[0])
+        self.assertEqual(event_tree[1:], pattern.siblings_of(event_tree[0])[1])
+        child_nodes = event_tree[0].children
+        self.assertEqual([], pattern.siblings_of(child_nodes[0])[0])
+        self.assertEqual(child_nodes[1:], pattern.siblings_of(child_nodes[0])[1])
+        self.assertEqual(event_tree[0],
+                         pattern.root_of(event_tree[0].children[0].children[0]))
+        self.assertEqual(None, pattern.next_of(event_tree[-1]))
+        self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
+        self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern(self):
+        cases = (
+            (0, lambda: torch.ones((100, 100), device="cuda")),
+            (1, lambda: torch.ones((100, 100)).to("cuda")),
+            (1, lambda: torch.zeros((100, 100)).to("cuda")),
+            (1, lambda: torch.empty((100, 100)).fill_(5).to("cuda")),
+            (1, lambda: torch.ones((100, 100)).cuda()),
+            (1, lambda: torch.zeros((100, 100)).cuda()),
+            (1, lambda: torch.empty((100, 100)).fill_(5).cuda()),
+            (1, lambda: torch.rand((100, 100)).cuda()),
+            (1, lambda: torch.randn((100, 100)).cuda()),
+            (1, lambda: torch.full((100, 100), 10).cuda()),
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ExtraCUDACopyPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
 
 
 if __name__ == '__main__':

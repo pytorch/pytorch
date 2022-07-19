@@ -219,7 +219,8 @@ void multiReductionInliner(
     std::vector<TensorView*> reduction_tvs,
     std::vector<TensorView*> cached_inputs,
     std::vector<std::pair<TensorView*, TensorView*>> cached_outputs) {
-  TransformPropagator::from(reference_tv);
+  TransformPropagator propagator(reference_tv);
+  MaxRootDomainInfoSpanningTree(reference_tv).traverse(&propagator);
 
   // Apply rfactor to all reductions if applicable
   std::vector<TensorView*> rfactor_tvs;

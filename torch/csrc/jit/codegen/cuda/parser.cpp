@@ -15,6 +15,8 @@
 
 #include <ATen/native/Activation.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <unordered_map>
 #include <utility>
 
@@ -740,6 +742,13 @@ class IrParser {
                   aten_to_data_type(*tensor_type->scalarType()), out)
                   ->as<TensorView>();
       }
+
+      if (out->isFusionOutput()) {
+        // TODO: This is wasted memory bandwidth, we need to copy since we can't
+        // output a tensor twice.
+        out = set(out);
+      }
+
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
@@ -818,7 +827,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() {
+    c10::call_once(once_flag_, []() {
       std::lock_guard<std::mutex> lock(parser_mutex_);
       registerJitOperator();
     });
@@ -2478,7 +2487,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -3201,6 +3210,79 @@ class IrParser {
             nullptr);
       }
     }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_as_copy(Tensor self, Tensor other) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getPWFormatValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+            auto other = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto output = expand_as(self, other);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                expand_sizes.has_value(), "The size parameter is required.");
+
+            std::vector<CgValue> expand_sizes_vec;
+            for (const int64_t& size : expand_sizes.value()) {
+              expand_sizes_vec.push_back(IrBuilder::create<Int>(size));
+            }
+
+            // TODO: we should be able to support dynamic expand values
+            auto output = expand(self, expand_sizes_vec);
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            // expand_sizes needs to be constant
+            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            if (!expand_sizes.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
   }
 
   void processJitNode(const JitOp* node) {
@@ -3389,7 +3471,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::once_flag once_flag_;
+  static c10::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
@@ -3400,7 +3482,7 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::once_flag IrParser::once_flag_;
+c10::once_flag IrParser::once_flag_;
 
 ProfileIValueOp* insertProfileIValueOp(
     Node* node,
@@ -3855,7 +3937,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto reduction_operator_schema =
       getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
           ->schema();
   if (node->matches(reduction_operator_schema)) {
     switch (offset) {

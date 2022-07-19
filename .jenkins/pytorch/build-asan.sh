@@ -6,6 +6,8 @@
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 echo "Clang version:"
 clang --version

@@ -5,12 +5,11 @@ import torch
 from torch.autograd.graph import save_on_cpu
 from torch.utils.checkpoint import checkpoint
 from torch.distributed.utils import _replace_by_prefix
-from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
 import torch.nn as nn
-from typing import Dict, Any
+from typing import Any, Dict, Iterator, Tuple
 from functools import partial
 
-_CHECKPOINT_PREFIX = "mod"
+_CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
 
 class CheckpointImpl(Enum):
     REENTRANT = auto()
@@ -28,7 +27,7 @@ class CheckpointWrapper(torch.nn.Module):
         offload_to_cpu: bool = False,
     ):
         super().__init__()
-        self.mod = mod
+        self._checkpoint_wrapped_module = mod
         self.checkpoint_impl = checkpoint_impl
         self.offload_to_cpu = offload_to_cpu
         # state_dict post hook to remove prefix to allow loading into a
@@ -45,21 +44,33 @@ class CheckpointWrapper(torch.nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
-            return getattr(self.mod, name)
+            return getattr(self._checkpoint_wrapped_module, name)
 
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
-        return self.mod.__getitem__(key)  # type: ignore[operator]
+        return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
 
     def forward(self, *args, **kwargs):
         offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
         with offload_mgr:  # type: ignore[attr-defined]
             return checkpoint(
-                self.mod,
+                self._checkpoint_wrapped_module,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
                 *args,
                 **kwargs,
             )
+
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of _CHECKPOINT_PREFIX.
+        """
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            yield param_name.replace(f"{_CHECKPOINT_PREFIX}.", ""), param
 
     @staticmethod
     def _post_state_dict_hook(
@@ -156,6 +167,9 @@ def apply_activation_checkpointing_wrapper(
             ``True`` or ``False`` depending on whether input layer should be wrapped.
     Returns: None (`model` is modified inplace)
     """
+    # TODO: Importing inside function to avoid circular import issue between FSDP and
+    # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
+    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
     return _recursive_wrap(
         module=model,
         auto_wrap_policy=partial(lambda_auto_wrap_policy, lambda_fn=check_fn),

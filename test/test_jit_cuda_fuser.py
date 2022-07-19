@@ -41,6 +41,7 @@ CUDA_MAJOR, CUDA_MINOR = 0, 0
 if RUN_NVFUSER and torch.version.cuda is not None:
     CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.')[:2])
 
+os.environ['PYTORCH_NVFUSER_ENABLE'] = 'linear_decomposition,conv_decomposition'
 os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,unroll_with_rng'
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
 # TODO: enable complex when we fixes the extremal cases in OpInfo
@@ -4815,6 +4816,33 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_expand(self):
+        device = "cuda"
+        x = torch.randn(3, 5, device=device)
+        y = torch.randn(4, 2, 3, 5, device=device)
+
+        def t(x, y):
+            with torch.jit.strict_fusion():
+                x = x.relu()
+                o0 = x.expand(2, 3, 5)
+                o1 = x.expand_as(y)
+            return o0, o1
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, check_stride=True)
+
+        def t2(x, y):
+            o0 = x.expand(2, 3, 5)
+            o1 = x.expand_as(y)
+            x.add_(1)
+            return o0, o1
+
+        t2_jit = torch.jit.script(t2)
+        self._run_helper(t2_jit, t2, x, y, check_stride=True, num_fusion=0)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_scheduler_with_polymorphic_broadcast(self):
         device = "cuda"
         x0 = torch.randn(10, 128, device=device)
@@ -4946,6 +4974,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
@@ -4972,6 +5003,9 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
                                 torch.float64, torch.complex64, torch.complex128))
     def test_nvfuser_extremal_values(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("nvfuser requires tracing support")
+
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         def _get_extremal_tensor(x, val, dtype):

@@ -5,7 +5,7 @@ import functools
 import torch
 import torch.overrides
 
-from torch._prims.utils import torch_function_passthrough
+from torch._prims_common import torch_function_passthrough
 
 import torch._refs
 import torch._refs.nn
@@ -26,8 +26,18 @@ def torch_to_refs_map():
         (torch.nn, torch._refs.nn),
         (torch.nn.functional, torch._refs.nn.functional),
         (torch.special, torch._refs.special),
+        (torch.fft, torch._refs.fft),
     ]
-    r = {}
+    r: Dict[Any, Any] = {
+        torch.Tensor.__invert__: torch._refs.bitwise_not,
+        torch.Tensor.__xor__: torch._refs.bitwise_xor,
+        torch.Tensor.__and__: torch._refs.bitwise_and,
+        torch.Tensor.__or__: torch._refs.bitwise_or,
+        torch.Tensor.__eq__: torch._refs.eq,
+        # TODO: Should these methods be mapped some other way?
+        torch.Tensor.copy_: torch._prims.copy_to,
+        torch.Tensor.resize: torch._prims.resize,
+    }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
@@ -77,7 +87,9 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
-            return func(*args, **kwargs)
+            # torch calls inside func should be interpreted as refs calls
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
                 f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
