@@ -122,10 +122,10 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 1)
             self.assertEqual(list(per_channel_info)[0], "conv")
             self.assertEqual(
-                per_channel_info["conv"]["per_channel_supported"],
+                per_channel_info["conv"]["per_channel_quantization_supported"],
                 True,
             )
-            self.assertEqual(per_channel_info["conv"]["per_channel_used"], True)
+            self.assertEqual(per_channel_info["conv"]["per_channel_quantization_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -169,8 +169,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
             for linear_key in per_channel_info.keys():
                 module_entry = per_channel_info[linear_key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -240,13 +240,13 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # for each layer, should be supported but not used
             for key in per_channel_info.keys():
                 module_entry = per_channel_info[key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
 
                 # if linear False, if conv2d true cuz it uses different config
                 if "fc" in key:
-                    self.assertEqual(module_entry["per_channel_used"], False)
+                    self.assertEqual(module_entry["per_channel_quantization_used"], False)
                 elif "conv" in key:
-                    self.assertEqual(module_entry["per_channel_used"], True)
+                    self.assertEqual(module_entry["per_channel_quantization_used"], True)
                 else:
                     raise ValueError("Should only contain conv and linear layers as key values")
 
@@ -291,8 +291,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
             for key in per_channel_info.keys():
                 module_entry = per_channel_info[key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -335,8 +335,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
             for key in per_channel_info.keys():
                 module_entry = per_channel_info[key]
 
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
     """Case includes:
         Multiple conv or linear
@@ -378,8 +378,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # for each layer, should be supported but not used
             for key in per_channel_info.keys():
                 module_entry = per_channel_info[key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], True)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -445,8 +445,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # for the one conv, it should still give advice to use different qconfig
             for key in per_channel_info.keys():
                 module_entry = per_channel_info[key]
-                self.assertEqual(module_entry["per_channel_supported"], True)
-                self.assertEqual(module_entry["per_channel_used"], False)
+                self.assertEqual(module_entry["per_channel_quantization_supported"], True)
+                self.assertEqual(module_entry["per_channel_quantization_used"], False)
 
 
 """
@@ -826,8 +826,8 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             # one of the stats should be stationary, and the other non-stationary
             # as a result, dynamic should be recommended
             data_dist_info = [
-                dynam_vs_stat_dict[linear_fqn]["pre_observer_data_dist"],
-                dynam_vs_stat_dict[linear_fqn]["post_observer_data_dist"],
+                dynam_vs_stat_dict[linear_fqn][DynamicStaticDetector.PRE_OBS_DATA_DIST_KEY],
+                dynam_vs_stat_dict[linear_fqn][DynamicStaticDetector.POST_OBS_DATA_DIST_KEY],
             ]
 
             self.assertTrue("stationary" in data_dist_info)
