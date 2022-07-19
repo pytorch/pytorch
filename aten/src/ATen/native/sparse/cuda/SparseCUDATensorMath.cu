@@ -460,13 +460,7 @@ struct TensorMulOp {
 };
 
 SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
-  // t_ is allowed to be on the CPU if scalar.
-  TORCH_CHECK(!t_.dim() || t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
-  // src_ is allowed to be on the CPU if scalar.
-  TORCH_CHECK(!src_.dim() || src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-  // r_ has to be on CUDA, while t_ and src_ could be on the CPU if scalars.
-  TORCH_CHECK(cuda::check_device({r_, t_.dim() ? t_ : r_, src_.dim() ? src_ : r_}));
 
   // case mul(sparse, dense)
   if (!src_.is_sparse()) {
@@ -477,6 +471,9 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
     return _mul_dense_sparse_out(t_, src_, r_);
   }
 
+  TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
+  TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
+  TORCH_CHECK(cuda::check_device({r_, t_, src_}));
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
   SparseTensor t = t_.coalesce();

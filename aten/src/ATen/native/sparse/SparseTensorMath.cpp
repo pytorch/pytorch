@@ -778,7 +778,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
         op_name, "(): can't convert result type ", common_dtype, " to output ", res.scalar_type(), ".");
     const auto sparse_dim = static_cast<int64_t>(res_shape.size());
     const auto indices = at::empty({sparse_dim, 0}, s_._indices().options());
-    const auto values = at::empty({0}, d.options().dtype(common_dtype));
+    const auto values = at::empty({0}, s_._values().options().dtype(common_dtype));
     get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*shape=*/res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
     get_sparse_impl(res)->set_nnz_and_narrow(0);
