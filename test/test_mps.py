@@ -6242,7 +6242,8 @@ class TestConsistency(TestCase):
                                 'torch.uint8'],
         'nn.functional.selu': ['torch.float32'],
         'nn.functional.silu': ['torch.float32'],
-        'nn.functional.smooth_l1_loss': ['torch.float32'],
+        'nn.functional.smooth_l1_loss': ['torch.float32',
+                                         'torch.float16'],
         'nn.functional.softmin': ['torch.float32'],
         'nn.functional.threshold': ['torch.float32',
                                     'torch.int16',
@@ -6441,7 +6442,7 @@ class TestConsistency(TestCase):
         'nn.functional.kl_div': [torch.int16, torch.int32, torch.int64],
         'nn.functional.nll_loss': [torch.float32],
         'nn.functional.padreflect': [torch.float32], 'nn.functional.padreplicate': [torch.float32],
-        'nn.functional.smooth_l1_loss': [torch.float16], 'std': [torch.float16],
+        'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
