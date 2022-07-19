@@ -128,32 +128,14 @@ class C10_API Stream final {
   //
   // The particular way we pack streams into a uint64_t is considered an
   // implementation detail and should not be relied upon.
-  uint64_t pack() const noexcept {
-    // Are you here because this static assert failed?  Make sure you ensure
-    // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
-    static_assert(sizeof(DeviceIndex) == 1, "DeviceIndex is not 8-bit");
-    static_assert(sizeof(StreamId) == 8, "StreamId is not 64-bit");
+  uint64_t hash() const noexcept {
     // Concat these together into a 64-bit integer
-    // See Note [Hazard when concatenating signed integers]
     uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(device_type()))
             << 56 |
         static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 48 |
         // Remove the sign extension part of the 64-bit address because
         // the id might be used to hold a pointer.
         (static_cast<uint64_t>(id()) & ((1ull << 48) - 1));
-    TORCH_INTERNAL_ASSERT(
-        static_cast<DeviceIndex>((bits >> 48) & 0xFFull) == device_index(),
-        "DeviceIndex is not correctly packed");
-    TORCH_INTERNAL_ASSERT(
-        static_cast<DeviceType>((bits >> 56)) == device_type(),
-        "DeviceType is not correctly packed");
-    // Re-extend the sign of stream_id for checking
-    uint64_t mask = (1ull << 47);
-    TORCH_INTERNAL_ASSERT(
-        static_cast<StreamId>(((bits & 0xFFFFFFFFFFFFull) ^ mask) - mask) ==
-            id(),
-        "DeviceType is not correctly packed");
     return bits;
   }
 
@@ -163,21 +145,6 @@ class C10_API Stream final {
     data.device_index = static_cast<int64_t>(device_index());
     data.device_type = static_cast<int64_t>(device_type());
     return data;
-  }
-
-  static Stream unpack(uint64_t bits) {
-    // Re-extend the sign of stream_id
-    uint64_t mask = (1ull << 47);
-    const auto stream_id =
-        (static_cast<StreamId>(bits & 0xFFFFFFFFFFFFull) ^ mask) - mask;
-    bits >>= 48;
-    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFull);
-    bits >>= 8;
-    const auto device_type = static_cast<DeviceType>(bits);
-    TORCH_CHECK(isValidDeviceType(device_type));
-    // Unfortunately, we can't check if the StreamId is valid here; it
-    // will be checked upon first use.
-    return Stream(UNSAFE, Device(device_type, device_index), stream_id);
   }
 
   static Stream unpack3(
@@ -204,7 +171,7 @@ namespace std {
 template <>
 struct hash<c10::Stream> {
   size_t operator()(c10::Stream s) const noexcept {
-    return std::hash<uint64_t>{}(s.pack());
+    return std::hash<uint64_t>{}(s.hash());
   }
 };
 } // namespace std
