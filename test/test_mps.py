@@ -3332,8 +3332,14 @@ class TestNLLLoss(TestCase):
             self.assertEqual(cat, cat_cpu)
 
         helper([2, 2, 4, 5], [2, 3, 4, 5], [2, 5, 4, 5])
-        # Empty test - Currently failing! Empty tensor not handled!
-        # helper([0, 2, 4, 5], [2, 0, 4, 5], [2, 5, 0, 5])
+        helper([2, 2, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([0, 2, 4, 5], [0, 3, 4, 5], [0, 5, 4, 5])
+        helper([2, 2, 6, 5], [0], [2, 5, 6, 5])
+        helper([0], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([2, 3, 4, 5], [2, 5, 4, 5], [0])
+        helper([2, 2, 6, 5], [2, 0, 6, 5], [2, 5, 6, 5])
+        helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 0, 6, 5])
 
     def test_constant_pad(self):
         m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
