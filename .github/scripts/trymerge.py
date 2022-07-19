@@ -418,11 +418,12 @@ def _fetch_url(url: str, *,
 
 def fetch_json(url: str,
                params: Optional[Dict[str, Any]] = None,
-               data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+               data: Optional[Dict[str, Any]] = None,
+               method: Optional[str] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
         url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
+    return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load, method=method))
 
 
 def fetch_json_dict(url: str,
@@ -452,6 +453,11 @@ def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_r
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
     fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
                data={"labels": labels})
+
+
+def gh_remove_label(org: str, project: str, pr_num: int, label: str) -> None:
+    fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels/{label}',
+               method="DELETE")
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -1254,20 +1260,22 @@ def merge(pr_num: int, repo: GitRepo,
     raise RuntimeError(msg)
 
 
+def handle_exception(e: Exception, org, project, pr_num, dry_run, msg: str = "Merge failed") -> None:
+    msg += f" due to {e}"
+    run_url = os.getenv("GH_RUN_URL")
+    if run_url is not None:
+        msg += f"\nRaised by {run_url}"
+    gh_post_pr_comment(org, project, pr_num, msg, dry_run=dry_run)
+    import traceback
+    traceback.print_exc()
+
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f" due to {e}"
-        run_url = os.getenv("GH_RUN_URL")
-        if run_url is not None:
-            msg += f"\nRaised by {run_url}"
-        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-        import traceback
-        traceback.print_exc()
     if not args.land_checks:
         msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
         msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
@@ -1299,7 +1307,7 @@ def main() -> None:
               mandatory_only=args.on_mandatory,
               land_checks=args.land_checks)
     except Exception as e:
-        handle_exception(e)
+        handle_exception(e, org, project, args.pr_num, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

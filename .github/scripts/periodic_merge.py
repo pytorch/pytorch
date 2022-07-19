@@ -1,5 +1,3 @@
-import json
-import os
 from typing import Any, List
 
 from gitutils import GitRepo, get_git_remote_name, get_git_repo_dir
@@ -12,13 +10,17 @@ from trymerge import (
     MandatoryChecksMissingError,
     check_for_sev,
     find_matching_merge_rule,
+    gh_add_labels,
     gh_graphql,
+    gh_remove_label,
+    handle_exception,
     pr_get_failed_checks,
     pr_get_pending_checks,
     validate_land_time_checks,
 )
 
 LAND_PENDING_LABEL = "ciflow/trunk"
+LAND_FAILED_LABEL = "land-failed"
 
 PRS_WITH_LABEL_QUERY = GH_PULL_REQUEST_FRAGMENT + GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
 query ($owner: String!, $name: String!, $labels: [String!], $with_labels: Boolean = false) {
@@ -68,7 +70,16 @@ def validate_all_green(pr: GitHubPR):
                                           f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
 
 
+def modify_labels(org, project, pr_num):
+    try:
+        gh_add_labels(org, project, pr_num, [LAND_FAILED_LABEL])
+        gh_remove_label(org, project, pr_num, LAND_PENDING_LABEL)
+    except:
+        return
+
+
 def main() -> None:
+    gh_remove_label('pytorch', 'pytorch', 81706, 'land-failed')
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
 
@@ -78,16 +89,24 @@ def main() -> None:
     check_for_sev(org, project, False)
 
     for pr in prs:
-        labels = pr.get_labels()
+        pr_num = pr.pr_num
+        try:
+            labels = pr.get_labels()
 
-        if is_all_green(labels):
-            validate_all_green(pr)
+            if is_all_green(labels):
+                validate_all_green(pr)
 
-        if is_land_check(labels):
-            validate_land_time_checks(org, project, 'landchecks/' + pr.pr_num)
+            if is_land_check(labels):
+                validate_land_time_checks(org, project, 'landchecks/' + pr_num)
 
-        find_matching_merge_rule(pr, repo)
-        pr.merge_into(repo)
+            find_matching_merge_rule(pr, repo)
+            pr.merge_into(repo)
+        except RuntimeError as e:
+            handle_exception(e)
+            modify_labels(org, project, pr_num)
+            continue
+        except MandatoryChecksMissingError:
+            continue
 
 
 if __name__ == "__main__":
