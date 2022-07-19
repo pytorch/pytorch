@@ -33,7 +33,6 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/scalar_tensor.h>
-#include <ATen/ops/_mul_dense_sparse_native.h>
 #endif
 
 #include <thrust/device_ptr.h>
