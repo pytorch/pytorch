@@ -457,10 +457,27 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     ge_scalar = torch.ops.aten.ge.Scalar(a_1, 0);  a_1 = None
-    _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
-    _tensor_constant0 = self._tensor_constant0
-    return _tensor_constant0
+    to_dtype_layout = torch.ops.aten.to.dtype_layout(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
+    return to_dtype_layout
     """)
+
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
+    def test_metadata_change_out_op(self):
+        def f(t, y):
+            out_1 = torch.ones(1)
+            return torch.add(t, y, out=out_1)
+
+        inpt1, inpt2 = torch.tensor([1]), torch.tensor([1])
+        inpt1_func, inpt2_func = torch._to_functional_tensor(inpt1), torch._to_functional_tensor(inpt2)
+
+        out_ref = f(inpt1, inpt2)
+        torch._enable_functionalization(reapply_views=True)
+        try:
+            out_functional = f(inpt1_func, inpt2_func)
+        finally:
+            torch._disable_functionalization()
+        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
+
 
     def test_only_one_view(self):
         def f(x):
