@@ -1566,7 +1566,7 @@ class TestTorchFunctionMode(TestCase):
         self.assertTrue(called)
 
     def test_reentrant_dispatch_subclass(self):
-        def norm_decomp(x, p = 2.0):
+        def norm_decomp(x, p=2.0):
             return torch.sqrt(torch.sum(torch.square(x)))
 
         oplist = []
@@ -1613,7 +1613,7 @@ class TestTorchFunctionMode(TestCase):
 
 
     def test_reentrant_dispatch_mode(self):
-        def norm_decomp(x, p = 2.0):
+        def norm_decomp(x, p=2.0):
             return torch.sqrt(torch.sum(torch.square(x)))
 
         class TestMode(TorchDispatchMode):
