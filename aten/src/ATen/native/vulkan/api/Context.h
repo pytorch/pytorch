@@ -299,8 +299,8 @@ inline void Context::submit_compute_job(
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Factor out template parameter independent code to minimize code bloat.
-  DescriptorSet descriptor_set = submit_compute_prologue(
-      cmd_, shader_descriptor, local_work_group_size);
+  DescriptorSet descriptor_set =
+      submit_compute_prologue(cmd_, shader_descriptor, local_work_group_size);
 
   detail::bind(
       descriptor_set,
