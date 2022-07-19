@@ -1715,6 +1715,38 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names(True)
             self.assertEqual(returned_plottable_feats, plottable_set)
 
+    @skipIfNoFBGEMM
+    def test_generate_table(self):
+        """
+        Tests the generate_table_view()
+        ModelReportVisualizer
+
+        Checks whether the generated dict has proper information
+            Visual check that the tables look correct performed during testing
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(InputWeightEqualizationDetector(0.5))
+
+            model = TestFxModelReportClass.TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            mod_rep_visualizer: ModelReportVisualizer = self._callibrate_and_generate_visualizer(
+                model, prepared_for_callibrate_model, mod_report
+            )
+
+            table_dict, table_str = mod_rep_visualizer.generate_table_view(
+                feature="weight_per_channel_max", module_fqn_filter="linear"
+            )
+
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""
     # set the backend for this test

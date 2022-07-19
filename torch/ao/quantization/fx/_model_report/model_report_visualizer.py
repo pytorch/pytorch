@@ -1,5 +1,7 @@
 import torch
-from typing import Any, Set, Dict, List, Tuple, OrderedDict
+from typing import Any, Set, Dict, List, Tuple
+from collections import OrderedDict
+from tabulate import tabulate
 
 class ModelReportVisualizer:
     r"""
@@ -104,34 +106,201 @@ class ModelReportVisualizer:
         # return our compiled set of unique feature names
         return unique_feature_names
 
-    def generate_table_view(self, feature: str = "", module_fqn_prefix_filter: str = "") -> Tuple[List[List[Any]], str]:
+    def _get_filtered_data(self, feature_filter: str, module_fqn_filter: str) -> OrderedDict[str, Any]:
         r"""
-        Takes in optional filter values and generates a table with the desired information.
-
-        The generated table is presented in both a list-of-lists format for further manipulation and filtering
-        as well as a formatted string that is ready to print
-
-        Table columns:
-
-         idx  layer_fqn   type  shape  feature_1   feature_2   feature_3   .... feature_n
-        ----  ---------   ----  -----  ---------   ---------   ---------        ---------
+        Filters the data and returns it in the same ordered dictionary format so the relavent views can be displayed.
 
         Args:
-            feature (str, optional): The specific feature we wish to generate the table for
+            feature_filter (str): The feature filter, if we want to filter the set of data to only include
+                a certain set of features that include feature_filter
+                If feature = "", then we do not filter based on any features
+            module_fqn_filter (str): The filter on prefix for the module fqn. All modules that have fqn with
+                this prefix will be included
+                If module_fqn_filter = "" we do not filter based on module fqn, and include all modules
+
+        First, the data is filtered based on module_fqn, and then filtered based on feature
+        Returns an OrderedDict (sorted in order of model) mapping:
+            module_fqns -> feature_names -> values
+        """
+        # create return dict
+        filtered_dict: OrderedDict[str, Any] = OrderedDict()
+
+        for module_fqn in self.generated_reports:
+            # first filter based on module
+            if module_fqn_filter == "" or module_fqn_filter in module_fqn:
+                # create entry for module and loop through features
+                filtered_dict[module_fqn] = {}
+                module_reports = self.generated_reports[module_fqn]
+                for feature_name in module_reports:
+                    # check if filtering on features and do so if desired
+                    if feature_filter == "" or feature_filter in feature_name:
+                        filtered_dict[module_fqn][feature_name] = module_reports[feature_name]
+
+        # we have populated the filtered dict, and must return it
+
+        return filtered_dict
+
+    def generate_table_view(self, feature_filter: str = "", module_fqn_filter: str = "") -> Tuple[Dict[str, List[List[Any]]], str]:
+        r"""
+        Takes in optional filter values and generates two tables with desired information.
+
+        The generated tables are presented in both a list-of-lists format for further manipulation and filtering
+        as well as a formatted string that is ready to print
+
+        The reason for the two tables are that they handle different things:
+        1.) the first table handles all tensor level information
+        2.) the second table handles and displays all channel based information
+
+        The reasoning for this is that having all the info in one table can make it ambiguous which collected
+            statistics are global, and which are actually per-channel, so it's better to split it up into two
+            tables. This also makes the information much easier to digest given the plethora of statistics collected
+
+        Tensor table columns:
+         idx  layer_fqn  feature_1   feature_2   feature_3   .... feature_n
+        ----  ---------  ---------   ---------   ---------        ---------
+
+        Per-Channel table columns:
+
+         idx  layer_fqn  channel  feature_1   feature_2   feature_3   .... feature_n
+        ----  ---------  -------  ---------   ---------   ---------        ---------
+
+        Args:
+            feature_filter (str, optional): Filters the features presented to only those that
+                contain this filter substring
                 Default = "", results in all the features being printed
-            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
+            module_fqn_filter (str, optional): Only includes modules with this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
         Returns a tuple with two objects:
-            (List[List[Any]]) A list of lists containing the table information row by row
-                The 0th index row will contain the headers of the columns
-                The rest of the rows will contain data
-            (str) The formatted string that contains the table information to be printed
+            (Dict[strList[List[Any]]]) A dict containing two keys:
+            "tensor_level_info", "channel_level_info"
+                Each key maps to:
+                    A list of lists containing the table information row by row
+                    The 0th index row will contain the headers of the columns
+                    The rest of the rows will contain data
+            (str) The formatted string that contains the tables information to be printed
         Expected Use:
             >>> info, tabluated_str = model_report_visualizer.generate_table_view(*filters)
             >>> print(tabulated_str) # outputs neatly formatted table
         """
-        pass
+        # first get the filtered data
+        filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
+
+        # now we split into tensor and per-channel data
+        tensor_features: Set[str] = set()
+        channel_features: Set[str] = set()
+
+        # keep track of the number of channels we have
+        num_channels: int = 0
+
+        for module_fqn in filtered_data:
+            for feature_name in filtered_data[module_fqn]:
+                # get the data for that specific feature
+                feature_data = filtered_data[module_fqn][feature_name]
+
+                # if it is only a single value, is tensor, otherwise per channel
+                try:
+                    iterator = iter(feature_data)
+                except TypeError:
+                    # means is per-tensor
+                    tensor_features.add(feature_name)
+                else:
+                    # works means per channel
+                    channel_features.add(feature_name)
+                    num_channels = len(feature_data)
+
+        # we make them lists for iteration purposes
+        tensor_features_list: List[str] = sorted(list(tensor_features))
+        channel_features_list: List[str] = sorted(list(channel_features))
+
+        # now we compose the tensor information table
+        tensor_table: List[List[Any]] = []
+
+        # first add a row of headers to the table
+        tensor_headers: List[str] = ["idx", "layer_fqn"] + tensor_features_list
+        tensor_table.append(tensor_headers)
+
+        # now we add all the data
+        for index, module_fqn in enumerate(filtered_data):
+            # we make a new row for the tensor table
+            tensor_table_row = [index + 1, module_fqn]
+            for feature in tensor_features_list:
+                # we iterate in same order of added features
+
+                if feature in filtered_data[module_fqn]:
+                    # add value if applicable to module
+                    feature_val = filtered_data[module_fqn][feature]
+                else:
+                    # add that it is not applicable
+                    feature_val = "Not Applicable"
+
+                # if it's a tensor we want to extract val
+                if type(feature_val) is torch.Tensor:
+                    feature_val = feature_val.item()
+
+                # we add to our list of values
+                tensor_table_row.append(feature_val)
+
+            # append the table row to the table
+            tensor_table.append(tensor_table_row)
+
+        # now we compose the table for the channel information table
+        channel_table: List[List[Any]] = []
+
+        # first add a row of headers to the table
+        channel_headers: List[str] = ["idx", "layer_fqn", "channel"] + channel_features_list
+        channel_table.append(channel_headers)
+
+        # counter to keep track of number of entries in
+        channel_table_entry_counter: int = 1
+
+        # now we add all channel data
+        for index, module_fqn in enumerate(filtered_data):
+            # we iterate over all channels
+            for channel in range(num_channels):
+                # we make a new row for the channel
+                new_channel_row = [channel_table_entry_counter, module_fqn, channel]
+                for feature in channel_features_list:
+                    if feature in filtered_data[module_fqn]:
+                        # add value if applicable to module
+                        feature_val = filtered_data[module_fqn][feature][channel]
+                    else:
+                        # add that it is not applicable
+                        feature_val = "Not Applicable"
+
+                    # if it's a tensor we want to extract val
+                    if type(feature_val) is torch.Tensor:
+                        feature_val = feature_val.item()
+
+                    # add value to channel specific row
+                    new_channel_row.append(feature_val)
+
+                # add to table and increment row index counter
+                channel_table.append(new_channel_row)
+                channel_table_entry_counter += 1
+
+        # now we have populated the tables for each one
+        # let's create the strings to be returned
+        table_str = ""
+        if len(tensor_features_list) > 0:
+            table_str += "Tensor Level Information \n"
+            table_str += tabulate(tensor_table, headers="firstrow")
+        if len(channel_features_list) > 0:
+            table_str += "\n\n Channel Level Information \n"
+            table_str += tabulate(channel_table, headers="firstrow")
+
+        # if no features at all, let user know
+        if table_str == "":
+            table_str = "No data points to generate table with."
+
+        # let's now create the dictionary to return
+        table_dict = {
+            "tensor_level_info" : tensor_table,
+            "channel_level_info" : channel_table
+        }
+
+        return (table_dict, table_str)
+
 
     def generate_plot_view(self, feature: str, module_fqn_prefix_filter: str = "") -> List[List[Any]]:
         r"""
