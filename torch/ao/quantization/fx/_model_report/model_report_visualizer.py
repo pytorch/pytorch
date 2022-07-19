@@ -86,7 +86,7 @@ class ModelReportVisualizer:
         """
         pass
 
-    def generate_table_view(self, feature: str = "", module_fqn_prefix_filter: str = "") -> Tuple[str, List[List[Any]]]:
+    def generate_table_info(self, feature: str = "", module_fqn_prefix_filter: str = "") -> Tuple[str, List[List[Any]]]:
         r"""
         Takes in optional filter values and generates a table with the desired information.
 
@@ -110,14 +110,36 @@ class ModelReportVisualizer:
                 The 0th index row will contain the headers of the columns
                 The rest of the rows will contain data
         Expected Use:
-            >>> tabluated_str, info = model_report_visualizer.generate_table_view(*filters)
+            >>> tabluated_str, info = model_report_visualizer.generate_table_info(*filters)
             >>> print(tabulated_str) # outputs neatly formatted table
         """
         pass
 
-    def generate_plot_view(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
+    def generate_table_visualization(self, feature: str = "", module_fqn_prefix_filter: str = ""):
         r"""
-        Takes in a feature and optional module_filter and generates a line plot of the desired data.
+        Takes in optional filter values and generates a table with the desired information.
+
+        The generated table is printed as a formatted string
+
+        Table columns:
+
+         idx  layer_fqn   type  shape  feature_1   feature_2   feature_3   .... feature_n
+        ----  ---------   ----  -----  ---------   ---------   ---------        ---------
+
+        Args:
+            feature (str, optional): The specific feature we wish to generate the table for
+                Default = "", results in all the features being printed
+            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
+                Default = "", results in all the modules in the reports to be visible in the table
+
+        Expected Use:
+            >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
+        """
+        pass
+
+    def generate_plot_info(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
+        r"""
+        Takes in a feature and optional module_filter and generates the filtered data and the plot.
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
@@ -134,12 +156,30 @@ class ModelReportVisualizer:
                 The rest of the rows will contain data
         Expected Use:
             >>> # the code below both returns the info and diplays the plot
-            >>> plot_func, info = model_report_visualizer.generate_plot_view(*filters)
+            >>> plot_func, info = model_report_visualizer.generate_plot_info(*filters)
             >>> plot_func() # plots the data
         """
         pass
 
-    def generate_histogram_view(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
+    def generate_plot_visualization(self, feature: str, module_fqn_prefix_filter: str = ""):
+        r"""
+        Takes in a feature and optional module_filter and generates a line plot of the desired data.
+
+        Note:
+            Only features in the report that have tensor value data are plottable by this class
+
+        Args:
+            feature (str): The specific feature we wish to generate the plot for
+            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
+                Default = "", results in all the modules in the reports to be visible in the plot
+
+        Expected Use:
+            >>> # the code below both returns the info and diplays the plot
+            >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
+        """
+        pass
+
+    def generate_histogram_info(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
         r"""
         Takes in a feature and optional module_filter and generates a histogram of the desired data.
 
@@ -156,9 +196,28 @@ class ModelReportVisualizer:
             (List[List[Any]]) A list of lists containing the histogram information row by row
                 The 0th index row will contain the headers of the columns
                 The rest of the rows will contain data
+
         Expected Use:
             >>> # the code below both returns the info and displays the histogram
-            >>> histogram_func, info = model_report_visualizer.generate_plot_view(*filters)
+            >>> histogram_func, info = model_report_visualizer.generate_histogram_info(*filters)
             >>> histogram_func() # displays the histogram
+        """
+        pass
+
+    def generate_histogram_visualization(self, feature: str, module_fqn_prefix_filter: str = ""):
+        r"""
+        Takes in a feature and optional module_filter and plots the histogram of desired data.
+
+        Note:
+            Only features in the report that have tensor value data can be viewed as a histogram
+
+        Args:
+            feature (str): The specific feature we wish to generate the plot for
+            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
+                Default = "", results in all the modules in the reports to be visible in the histogram
+
+        Expected Use:
+            >>> # displays the histogram
+            >>> model_report_visualizer.generate_histogram_visualization(*filters) # displays the histogram
         """
         pass
