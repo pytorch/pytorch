@@ -132,6 +132,7 @@ THIRD_PARTY_LIBS = {
     "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
     "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
+    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
@@ -156,6 +157,7 @@ def get_pt_compiler_flags():
     })
 
 _PT_COMPILER_FLAGS = [
+    "-fexceptions",
     "-frtti",
     "-Os",
     "-Wno-unknown-pragmas",
@@ -1099,6 +1101,7 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
         ] + ([] if IS_OSS else ["torch/fb/observers/MobileObserverUtil.cpp"]),
+        compiler_flags = ["-fexceptions"],
         header_namespace = "",
         exported_headers = subdir_glob(
             [
@@ -1132,6 +1135,7 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             C10,
+            third_party("libkineto_headers"),
         ],
     )
 
@@ -1833,6 +1837,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/static/passes.cpp",
             "torch/csrc/jit/runtime/static/te_wrapper.cpp",
         ],
+        compiler_flags = ["-fexceptions"],
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
