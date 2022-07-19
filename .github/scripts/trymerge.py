@@ -6,15 +6,110 @@ import os
 import re
 import time
 import urllib.parse
-from datetime import datetime
 from dataclasses import dataclass
-from urllib.request import urlopen, Request
-from urllib.error import HTTPError
-from typing import Iterable, cast, Any, Callable, Dict, List, Optional, Tuple, Union
-from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
+from datetime import datetime
 from functools import lru_cache
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from warnings import warn
 
+from gitutils import (
+    GitRepo,
+    get_git_remote_name,
+    get_git_repo_dir,
+    patterns_to_regex,
+)
+
+GH_PULL_REQUEST_FRAGMENT = """
+fragment PullRequestFragment on PullRequest {
+  number
+  closed
+  isCrossRepository
+  author {
+    login
+  }
+  title
+  body
+  headRefName
+  headRepository {
+    nameWithOwner
+  }
+  baseRefName
+  baseRepository {
+    nameWithOwner
+    isPrivate
+    defaultBranchRef {
+      name
+    }
+  }
+  mergeCommit {
+    oid
+  }
+  commits_with_authors: commits(first: 100) {
+    ...CommitAuthors
+    totalCount
+  }
+  commits(last: 1) {
+    nodes {
+      commit {
+        checkSuites(first: 10) {
+          ...PRCheckSuites
+        }
+        pushedDate
+        oid
+      }
+    }
+  }
+  changedFiles
+  files(first: 100) {
+    nodes {
+      path
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+  reviews(last: 100) {
+    ...PRReviews
+  }
+  comments(last: 5) {
+    nodes {
+      bodyText
+      author {
+        login
+      }
+      authorAssociation
+      editor {
+        login
+      }
+      databaseId
+    }
+    pageInfo {
+      startCursor
+      hasPreviousPage
+    }
+  }
+  labels(first: 100) @include(if: $with_labels) {
+    edges {
+      node {
+        name
+      }
+    }
+  }
+}
+"""
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
@@ -87,84 +182,11 @@ fragment CommitAuthors on PullRequestCommitConnection {
 }
 """
 
-GH_GET_PR_INFO_QUERY = GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
-query ($owner: String!, $name: String!, $number: Int!) {
+GH_GET_PR_INFO_QUERY = GH_PULL_REQUEST_FRAGMENT + GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
+query ($owner: String!, $name: String!, $number: Int!, $with_labels: Boolean = false) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      closed
-      isCrossRepository
-      author {
-        login
-      }
-      title
-      body
-      headRefName
-      headRepository {
-        nameWithOwner
-      }
-      baseRefName
-      baseRepository {
-        nameWithOwner
-        isPrivate
-        defaultBranchRef {
-          name
-        }
-      }
-      mergeCommit {
-        oid
-      }
-      commits_with_authors: commits(first: 100) {
-        ...CommitAuthors
-        totalCount
-      }
-      commits(last: 1) {
-        nodes {
-          commit {
-            checkSuites(first: 10) {
-              ...PRCheckSuites
-            }
-            pushedDate
-            oid
-          }
-        }
-      }
-      changedFiles
-      files(first: 100) {
-        nodes {
-          path
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
-      }
-      reviews(last: 100) {
-        ...PRReviews
-      }
-      comments(last: 5) {
-        nodes {
-          bodyText
-          author {
-            login
-          }
-          authorAssociation
-          editor {
-            login
-          }
-          databaseId
-        }
-        pageInfo {
-          startCursor
-          hasPreviousPage
-        }
-      }
-      labels(first: 100) {
-        edges {
-          node {
-            name
-          }
-        }
-      }
+      ...PullRequestFragment
     }
   }
 }
@@ -373,6 +395,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 
+
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
                data: Optional[Dict[str, Any]] = None,
@@ -392,6 +415,7 @@ def _fetch_url(url: str, *,
             print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
         raise
 
+
 def fetch_json(url: str,
                params: Optional[Dict[str, Any]] = None,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -400,13 +424,15 @@ def fetch_json(url: str,
         url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
+
 def fetch_json_dict(url: str,
                     params: Optional[Dict[str, Any]] = None,
-                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
+                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
         url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
+
 
 def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
@@ -435,13 +461,15 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], rc)
 
 
-def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
-    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
+def gh_get_pr_info(org: str, proj: str, pr_no: int, with_labels: bool = False) -> Any:
+    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no, with_labels=with_labels)
     return rc["data"]["repository"]["pullRequest"]
+
 
 def gh_get_land_check_info(org: str, proj: str, commit: str) -> Any:
     rc = gh_graphql(GH_GET_COMMIT_CHECKSUITES, name=proj, owner=org, commit=commit)
     return rc["data"]["repository"]["object"]
+
 
 @lru_cache(maxsize=None)
 def gh_get_team_members(org: str, name: str) -> List[str]:
@@ -477,6 +505,7 @@ def parse_args() -> Any:
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
+
 def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -> bool:
     if comment_id is None:
         return False
@@ -496,12 +525,12 @@ class GitHubComment:
 
 
 class GitHubPR:
-    def __init__(self, org: str, project: str, pr_num: int) -> None:
+    def __init__(self, org: str, project: str, pr_num: int, info: Any = None) -> None:
         assert isinstance(pr_num, int)
         self.org = org
         self.project = project
         self.pr_num = pr_num
-        self.info = gh_get_pr_info(org, project, pr_num)
+        self.info = gh_get_pr_info(org, project, pr_num) if info is None else info
         self.changed_files: Optional[List[str]] = None
         self.labels: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
@@ -719,6 +748,14 @@ class GitHubPR:
         mc = self.info["mergeCommit"]
         return mc["oid"] if mc is not None else None
 
+    def get_labels(self) -> List[str]:
+        if self.info["labels"] is None:
+            self.info = gh_get_pr_info(self.org, self.project, self.pr_num, True)
+        labels = []
+        for node in self.info["labels"]["edges"]:
+            labels.append(node['node']['name'])
+        return labels
+
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
 
@@ -800,7 +837,8 @@ class GitHubPR:
                     continue
                 commit_msg = pr.gen_commit_message(filter_ghstack=True)
                 # Raises exception if matching rule is not found
-                find_matching_merge_rule(pr, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
+                find_matching_merge_rule(pr, repo, force=force,
+                                         skip_internal_checks=can_skip_internal_checks(self, comment_id))
 
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
@@ -822,7 +860,8 @@ class GitHubPR:
                    dry_run: bool = False,
                    comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
+        find_matching_merge_rule(self, repo, force=force,
+                                 skip_internal_checks=can_skip_internal_checks(self, comment_id))
         self.merge_changes(repo, force, comment_id)
 
         repo.push(self.default_branch(), dry_run)
@@ -1029,6 +1068,7 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
+
 def pr_get_checks_with_lambda(pr: GitHubPR, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
     checks = pr.get_checkrun_conclusions()
     return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
@@ -1089,6 +1129,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
+
 def check_for_sev(org: str, project: str, force: bool) -> None:
     if force:
         return
@@ -1109,6 +1150,7 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
                 )
     return
 
+
 def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     checks = get_land_checkrun_conclusions(org, project, commit)
     if(len(checks) == 0):
@@ -1119,7 +1161,9 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     if len(failed_checks) > 0:
         raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}")
     if len(pending_checks) > 0:
-        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
+        raise MandatoryChecksMissingError(
+            f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
+
 
 def has_ciflow_label(labels: List[str]) -> bool:
     return len(list(filter(CIFLOW_LABEL.match, labels))) > 0
@@ -1139,6 +1183,7 @@ def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
             failed_checks.append((checkname, check_runs[checkname][1]))
     return (pending_checks, failed_checks)
 
+
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
           force: bool = False,
@@ -1157,7 +1202,8 @@ def merge(pr_num: int, repo: GitRepo,
         # do not wait for any pending signals if PR is closed as part of co-development process
         return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+        raise RuntimeError(
+            "This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
@@ -1169,7 +1215,8 @@ def merge(pr_num: int, repo: GitRepo,
         check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
-        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
+        print(
+            f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         if initial_commit_sha != pr.last_commit()['oid']:
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
@@ -1206,6 +1253,7 @@ def merge(pr_num: int, repo: GitRepo,
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
@@ -1237,7 +1285,8 @@ def main() -> None:
         return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
-        gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num,
+                           "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
     try:
