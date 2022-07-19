@@ -187,7 +187,7 @@ GH_GET_PR_INFO_QUERY = (GH_PULL_REQUEST_FRAGMENT
                         + GH_CHECKSUITES_FRAGMENT
                         + GH_COMMIT_AUTHORS_FRAGMENT) + """
 query ($owner: String!, $name: String!, $number: Int!, $with_labels: Boolean = false) {
-  repository(owner: $owner, name: $name)
+  repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       ...PullRequestFragment
     }
