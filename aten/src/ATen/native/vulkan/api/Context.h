@@ -2,9 +2,9 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/QueryPool.h>
@@ -21,6 +21,7 @@ struct ContextConfig final {
   uint32_t cmdSubmitFrequency;
   CommandPoolConfig cmdPoolConfig;
   DescriptorPoolConfig descriptorPoolConfig;
+  QueryPoolConfig queryPoolConfig;
 };
 
 //
@@ -34,8 +35,7 @@ struct ContextConfig final {
 
 class Context final {
  public:
-  explicit Context(
-      const VkInstance instance, size_t adapter_i, const ContextConfig);
+  explicit Context(size_t adapter_i, const ContextConfig&);
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -49,7 +49,6 @@ class Context final {
   // Config
   ContextConfig config_;
   // Important handles
-  VkInstance instance_;
   Adapter* adapter_p_;
   VkDevice device_;
   Adapter::Queue queue_;
@@ -57,7 +56,10 @@ class Context final {
   CommandPool command_pool_;
   DescriptorPool descriptor_pool_;
   FencePool fences_;
+  // Diagnostics
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
   // Command buffers submission
   std::mutex cmd_mutex_;
   CommandBuffer cmd_;
@@ -69,18 +71,6 @@ class Context final {
   std::vector<VulkanImage> images_to_clear_;
 
  public:
-
-  inline GPU gpu() {
-    const Adapter* p_adapter = adapter_p_;
-    return {
-      instance_,
-      p_adapter,
-      device_,
-      queue_.family_index,
-      queue_.handle,
-    };
-  }
-
   // Adapter access
 
   inline Adapter* adapter_ptr() {
@@ -94,7 +84,6 @@ class Context final {
   inline VkQueue queue() {
     return queue_.handle;
   }
-
 
   // Device Caches
 
@@ -124,9 +113,18 @@ class Context final {
     return fences_;
   }
 
+  // Diagnostics
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   inline QueryPool& querypool() {
     return querypool_;
   }
+
+  inline void reset_querypool() {
+    set_cmd();
+    querypool_.reset(cmd_);
+  }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Memory Management
   void register_buffer_cleanup(VulkanBuffer& buffer) {
@@ -141,8 +139,11 @@ class Context final {
 
   // GPU RPC
 
- private:
+  inline std::unique_lock<std::mutex> dispatch_lock() {
+    return std::unique_lock<std::mutex>(cmd_mutex_);
+  }
 
+ private:
   inline void set_cmd() {
     if (!cmd_) {
       cmd_ = command_pool_.get_new_cmd();
@@ -163,8 +164,7 @@ class Context final {
       const utils::uvec3&);
 
  public:
-
-  template<typename... Arguments>
+  template <typename... Arguments>
   void submit_compute_job(
       const ShaderLayout::Signature&,
       const ShaderSource&,
@@ -184,11 +184,9 @@ class Context final {
       const VkFence fence_handle);
 
  private:
-
   void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
 
  public:
-
   void flush();
 };
 
@@ -196,13 +194,13 @@ class UniformParamsBuffer final {
  private:
   Context* context_p_;
   VulkanBuffer vulkan_buffer_;
+
  public:
-  template<typename Block>
+  template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
-    : context_p_(context_p),
-      vulkan_buffer_(
-          context_p_->adapter_ptr()->vma().create_params_buffer(block)) {
-  }
+      : context_p_(context_p),
+        vulkan_buffer_(
+            context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
   UniformParamsBuffer(const UniformParamsBuffer&) = delete;
   UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
@@ -223,13 +221,16 @@ class StagingBuffer final {
  private:
   Context* context_p_;
   VulkanBuffer vulkan_buffer_;
+
  public:
   StagingBuffer(
-      Context* context_p, const VkDeviceSize size, const bool gpuonly = false)
-    : context_p_(context_p),
-      vulkan_buffer_(
-          context_p_->adapter_ptr()->vma().create_storage_buffer(size, gpuonly)) {
-  }
+      Context* context_p,
+      const VkDeviceSize size,
+      const bool gpuonly = false)
+      : context_p_(context_p),
+        vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
+            size,
+            gpuonly)) {}
 
   StagingBuffer(const StagingBuffer&) = delete;
   StagingBuffer& operator=(const StagingBuffer&) = delete;
@@ -254,22 +255,20 @@ Context* context();
 
 namespace detail {
 
-template<
-    size_t...Indices,
-    typename ...Arguments>
+template <size_t... Indices, typename... Arguments>
 inline void bind(
     DescriptorSet& descriptor_set,
     const std::index_sequence<Indices...>,
-    Arguments&&...arguments) {
+    Arguments&&... arguments) {
   C10_UNUSED const int _[]{
-    0,
-    (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
+      0,
+      (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
 }
 
 } // namespace detail
 
-template<typename... Arguments>
+template <typename... Arguments>
 inline void Context::submit_compute_job(
     const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
@@ -278,17 +277,33 @@ inline void Context::submit_compute_job(
     const utils::uvec3& local_work_group_size,
     const VkFence fence_handle,
     Arguments&&... arguments) {
-  // Serialize recording to the shared command buffer
-  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
+  // Serialize recording to the shared command buffer. Do not initialize with a
+  // mutex just yet, since in some cases it will be externally managed.
+  std::unique_lock<std::mutex> cmd_lock;
+  // If a fence was passed, then assume that the host intends to sync with
+  // the GPU, implying there will be imminent calls to fence.wait() and flush().
+  // We therefore assume the mutex is externally managed in this case, and the
+  // calling thread has already locked the mutex prior to calling the function,
+  // and will release the mutex manually after calling flush(). This will
+  // prevent more dispatches from being recorded until we have flushed the
+  // Context.
+  if (fence_handle == VK_NULL_HANDLE) {
+    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
+  }
 
   set_cmd();
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = querypool_.shader_profile_begin(
+      cmd_,
+      shader_descriptor.kernel_name,
+      create_extent3d(global_work_group),
+      create_extent3d(local_work_group_size));
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set = submit_compute_prologue(
-      cmd_,
-      shader_layout_signature,
-      shader_descriptor,
-      local_work_group_size);
+      cmd_, shader_layout_signature, shader_descriptor, local_work_group_size);
 
   detail::bind(
       descriptor_set,
@@ -297,23 +312,16 @@ inline void Context::submit_compute_job(
 
   // Factor out template parameter independent code to minimize code bloat.
   submit_compute_epilogue(
-      cmd_,
-      descriptor_set,
-      pipeline_barrier,
-      global_work_group);
+      cmd_, descriptor_set, pipeline_barrier, global_work_group);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  querypool_.shader_profile_end(cmd_, log_idx);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
-  }
-
-  // If a fence was passed, then assume that the host intends to sync with
-  // the GPU, implying there will be imminent calls to fence.wait() and flush().
-  // We therefore release cmd_mutex_ without unlocking to prevent more dispatches
-  // from being recorded until we have flushed the Context.
-  if (fence_handle != VK_NULL_HANDLE) {
-    cmd_lock.release();
   }
 }
 

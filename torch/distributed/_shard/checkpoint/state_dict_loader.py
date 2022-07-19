@@ -35,7 +35,6 @@ from .storage import (
 from .api import CheckpointException
 
 def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
-    rank = dist.get_rank() if dist.is_initialized() else 0
     return ShardMetadata(
         shard_offsets=[0] * len(size),
         shard_sizes=list(size),
@@ -164,8 +163,6 @@ def load_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
-
     try:
         metadata = storage_reader.read_metadata()
         bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(

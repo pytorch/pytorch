@@ -611,6 +611,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
 
+  c10::SymInt sym_size(int64_t d) const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_size_custom(d);
+    }
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
+    const auto sizes = this->sym_sizes();
+    return sizes[d];
+  }
+
   /**
    * Return the stride of a tensor at some dimension, wrapping the dimension
    * if necessary.
@@ -714,8 +725,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
   }
+
+  virtual c10::SymInt sym_size_custom(int64_t d) const {
+    // TODO: We could add support to Python dispatch here.
+    // TODO: We could call into aten::size.int instead of
+    // sym_sizes_custom()[d] and enable use of the dispatcher.
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
+    return sym_sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+  }
+
   virtual IntArrayRef sizes_custom() const;
   virtual Device device_custom() const;
+  virtual Layout layout_custom() const;
 
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
@@ -996,6 +1017,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Layout layout() const {
+    if (C10_UNLIKELY(custom_layout_)) {
+      return layout_custom();
+    }
+
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.
@@ -1772,7 +1797,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // NB: this lives in header so that we can avoid actually creating the
   // c10::optional
-  c10::optional<PyObject*> check_pyobj(impl::PyInterpreter* self_interpreter) {
+  c10::optional<PyObject*> check_pyobj(
+      impl::PyInterpreter* self_interpreter) const {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);
@@ -2376,6 +2402,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+  void set_custom_layout(bool custom_layout) {
+    custom_layout_ = custom_layout;
+  }
+
  protected:
   Storage storage_;
 
@@ -2495,6 +2525,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     custom_device_ = false;
+    custom_layout_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
   }
@@ -2564,6 +2595,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call _custom() virtual method for device()
   bool custom_device_ : 1;
+
+  // Call _custom() virtual method for layout()
+  bool custom_layout_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

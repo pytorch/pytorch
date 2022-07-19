@@ -179,42 +179,37 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   int64_t numel_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: numel_custom() not supported for SparseTensorImpl.");
+        "Internal error: numel_custom() not supported for OpaqueTensorImpl.");
   }
   bool is_contiguous_custom(MemoryFormat) const override {
     TORCH_CHECK(
         false,
-        "Internal error: is_contiguous_custom() not supported for SparseTensorImpl.");
-  }
-  int64_t size_custom(int64_t d) const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: size_custom() not supported for SparseTensorImpl.");
+        "Internal error: is_contiguous_custom() not supported for OpaqueTensorImpl.");
   }
   IntArrayRef sizes_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: sizes_custom() not supported for SparseTensorImpl.");
+        "Internal error: sizes_custom() not supported for OpaqueTensorImpl.");
   }
   c10::SymIntArrayRef sym_sizes_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: sym_sizes_custom() not supported for SparseTensorImpl.");
+        "Internal error: sym_sizes_custom() not supported for OpaqueTensorImpl.");
   }
   IntArrayRef strides_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: strides_custom() not supported for SparseTensorImpl.");
+        "Internal error: strides_custom() not supported for OpaqueTensorImpl.");
   }
   Device device_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: device_custom() not supported for SparseTensorImpl.");
+        "Internal error: device_custom() not supported for OpaqueTensorImpl.");
   }
   int64_t dim_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: dim_custom() not supported for SparseTensorImpl.");
+        "Internal error: dim_custom() not supported for OpaqueTensorImpl.");
   }
 
  private:
