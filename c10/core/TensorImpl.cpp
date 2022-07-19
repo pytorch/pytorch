@@ -406,14 +406,24 @@ IntArrayRef TensorImpl::strides_custom() const {
   }
   return strides_default();
 }
+
 int64_t TensorImpl::dim_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->dim(this);
   }
   return dim_default();
 }
+
 int64_t TensorImpl::numel_custom() const {
   return numel_default();
+}
+
+c10::Layout TensorImpl::layout_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->layout(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have layout");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -504,8 +514,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  // impl->refresh_numel();
-  // impl->refresh_contiguous();
+
+  // We currently don't support refresh_numel() and refresh_contiguous(). It's
+  // plausible that we could support it, but currently done to unblock.
+  if (!has_symbolic_sizes_strides()) {
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+  }
   return impl;
 }
 
@@ -538,6 +553,9 @@ void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
+  dest_impl->has_symbolic_sizes_strides_ =
+      src_impl->has_symbolic_sizes_strides_;
+
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;

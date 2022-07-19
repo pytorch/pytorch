@@ -26,6 +26,37 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
  protected:
   bool is_contiguous_custom(MemoryFormat format) const override;
 
+  int64_t numel_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: numel_custom() not supported for UndefinedTensorImpl.");
+  }
+  IntArrayRef sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sizes_custom() not supported for UndefinedTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_sizes_custom() not supported for UndefinedTensorImpl.");
+  }
+  IntArrayRef strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: strides_custom() not supported for UndefinedTensorImpl.");
+  }
+  Device device_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: device_custom() not supported for UndefinedTensorImpl.");
+  }
+  int64_t dim_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: dim_custom() not supported for UndefinedTensorImpl.");
+  }
+
  private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;

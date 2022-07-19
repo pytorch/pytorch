@@ -89,6 +89,32 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 #ifdef DEBUG
   bool has_storage() const override;
 #endif
+ protected:
+  int64_t numel_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: numel_custom() not supported for BatchedTensorImpl.");
+  }
+  IntArrayRef sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sizes_custom() not supported for BatchedTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_sizes_custom() not supported for BatchedTensorImpl.");
+  }
+  Device device_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: device_custom() not supported for BatchedTensorImpl.");
+  }
+  int64_t dim_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: dim_custom() not supported for BatchedTensorImpl.");
+  }
 
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
