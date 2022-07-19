@@ -116,14 +116,16 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 optims_str,
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
-            self.assertEqual(per_channel_info["backend"], torch.backends.quantized.engine)
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 1)
-            self.assertEqual(list(per_channel_info["per_channel_status"])[0], "conv")
+
+            # there shoud only be one conv there in this model
+            self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
+            self.assertEqual(len(per_channel_info), 1)
+            self.assertEqual(list(per_channel_info)[0], "conv")
             self.assertEqual(
-                per_channel_info["per_channel_status"]["conv"]["per_channel_supported"],
+                per_channel_info["conv"]["per_channel_supported"],
                 True,
             )
-            self.assertEqual(per_channel_info["per_channel_status"]["conv"]["per_channel_used"], True)
+            self.assertEqual(per_channel_info["conv"]["per_channel_used"], True)
 
     """Case includes:
         Multiple conv or linear
@@ -158,12 +160,14 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 optims_str,
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
-            self.assertEqual(per_channel_info["backend"], torch.backends.quantized.engine)
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 2)
+            # pick a random key to look at
+            rand_key: str = list(per_channel_info.keys())[0]
+            self.assertEqual(per_channel_info[rand_key]["backend"], torch.backends.quantized.engine)
+            self.assertEqual(len(per_channel_info), 2)
 
             # for each linear layer, should be supported but not used
-            for linear_key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][linear_key]
+            for linear_key in per_channel_info.keys():
+                module_entry = per_channel_info[linear_key]
 
                 self.assertEqual(module_entry["per_channel_supported"], True)
                 self.assertEqual(module_entry["per_channel_used"], False)
@@ -231,11 +235,11 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_supported"], True)
 
                 # if linear False, if conv2d true cuz it uses different config
@@ -281,11 +285,11 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_supported"], True)
                 self.assertEqual(module_entry["per_channel_used"], False)
@@ -325,11 +329,11 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer and it considered the lazyConv2d
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_supported"], True)
                 self.assertEqual(module_entry["per_channel_used"], False)
@@ -369,11 +373,11 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # to ensure it got into the nested layer and it considered all the nested fusion components
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 4)
+            self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_supported"], True)
                 self.assertEqual(module_entry["per_channel_used"], True)
 
@@ -436,11 +440,11 @@ class TestFxModelReportDetector(QuantizationTestCase):
             )
 
             # make sure it was able to find the single conv in the fused model
-            self.assertEqual(len(per_channel_info["per_channel_status"]), 1)
+            self.assertEqual(len(per_channel_info), 1)
 
             # for the one conv, it should still give advice to use different qconfig
-            for key in per_channel_info["per_channel_status"].keys():
-                module_entry = per_channel_info["per_channel_status"][key]
+            for key in per_channel_info.keys():
+                module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_supported"], True)
                 self.assertEqual(module_entry["per_channel_used"], False)
 
@@ -1236,7 +1240,6 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 if "block1.linear" in module_fqn:
                     block_1_lin_recs = input_weight_dict[module_fqn]
                     # get input range info and the channel axis
-                    input_range_info = block_1_lin_recs[InputWeightEqualizationDetector.INPUT_INFO_KEY]
                     ch_axis = block_1_lin_recs[InputWeightEqualizationDetector.CHANNEL_KEY]
 
                     # ensure that the min and max values extracted match properly
@@ -1245,28 +1248,54 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                     dimension_max = torch.amax(example_max, dim=ch_axis)
 
                     # make sure per channel min and max are as expected
-                    per_channel_min = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    min_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
+
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
                     self.assertEqual(per_channel_min, dimension_min)
                     self.assertEqual(per_channel_max, dimension_max)
 
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.ACTIVATION_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
                     # make sure the global min and max were correctly recorded and presented
-                    global_min = input_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = input_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
                     self.assertEqual(global_min, min(dimension_min))
                     self.assertEqual(global_max, max(dimension_max))
 
                     input_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
                     # ensure comparision stat passed back is sqrt of range ratios
                     # need to get the weight ratios first
-                    weight_range_info = block_1_lin_recs[InputWeightEqualizationDetector.WEIGHT_INFO_KEY]
+
+                    # make sure per channel min and max are as expected
+                    min_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY
+
+                    max_per_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_per_key += InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY
 
                     # get weight per channel and global info
-                    per_channel_min = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
-                    per_channel_max = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    per_channel_min = block_1_lin_recs[min_per_key]
+                    per_channel_max = block_1_lin_recs[max_per_key]
 
-                    global_min = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
-                    global_max = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    # make sure per channel min and max are as expected
+                    min_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    min_key += InputWeightEqualizationDetector.GLOBAL_MIN_KEY
+
+                    max_key = InputWeightEqualizationDetector.WEIGHT_PREFIX
+                    max_key += InputWeightEqualizationDetector.GLOBAL_MAX_KEY
+
+                    global_min = block_1_lin_recs[min_key]
+                    global_max = block_1_lin_recs[max_key]
 
                     weight_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
 
