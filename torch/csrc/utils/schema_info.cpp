@@ -33,6 +33,13 @@ void SchemaInfo::addArgumentValues(
   }
 }
 
+bool SchemaInfo::hasInputArgumentNamed(const std::string& name) const {
+  return std::any_of(
+      schema_.arguments().begin(),
+      schema_.arguments().end(),
+      [&name](const c10::Argument& arg) { return arg.name() == name; });
+}
+
 bool SchemaInfo::is_mutable() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     if (is_mutable({c10::SchemaArgType::input, i})) {
@@ -50,13 +57,15 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
     generateAliasMaps();
   }
   static const std::vector<c10::FunctionSchema> training_ops = getTrainingOps();
-
+  const auto& correct_map = (argument.type == c10::SchemaArgType::input)
+      ? input_alias_map_
+      : output_alias_map_;
   // Note that the training_op checks depend on index because
   // of cases where either running_mean or running_var alias another input
   // argument causing its alias status to change.
   return std::any_of(
-      input_alias_map_[argument.index].begin(),
-      input_alias_map_[argument.index].end(),
+      correct_map[argument.index].begin(),
+      correct_map[argument.index].end(),
       [this](size_t aliasing_index) {
         bool special_case =
             (this->schema_.arguments()[aliasing_index].name() ==
@@ -247,13 +256,10 @@ std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)",
-      "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)",
       "aten::cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)",
-      "aten::cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon, Tensor reserveSpace) -> (Tensor, Tensor, Tensor)",
       "aten::miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
       "aten::native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))",
-      "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)",
   };
 
   std::vector<c10::FunctionSchema> training_ops;
