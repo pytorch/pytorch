@@ -13,12 +13,11 @@ T = TypeVar('T')
 # ModeInfo class, which is extended by each where they are different
 
 def _wrap_init(f):
-    undef = object()
-
     @functools.wraps(f)
-    def wrapped(self, inner=undef, *args, **kwargs):
-        if inner is not undef:
-            self.inner = inner
+    def wrapped(self, *args, **kwargs):
+        if 'inner' in kwargs:
+            self.inner = kwargs['inner']
+            del kwargs['inner']
         return f(self, *args, **kwargs)
     return wrapped
 
