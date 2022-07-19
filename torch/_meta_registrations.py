@@ -549,7 +549,15 @@ def meta_nanmedian(input):
 
 
 @register_meta(aten._to_copy.default)
-def meta__to_copy(self, dtype=None, layout=None, device=None, pin_memory=None, non_blocking=False, memory_format=None):
+def meta__to_copy(
+    self,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    non_blocking=False,
+    memory_format=None,
+):
     return self.new_empty(self.shape, dtype=dtype)
 
 
