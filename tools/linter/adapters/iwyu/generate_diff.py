@@ -33,6 +33,27 @@ import logging
 import io
 
 
+from ..iwyu import fix_includes
+
+# This changes the order that header groups are sorted.
+# Each kind will be sorted in the order it appears here
+(
+    fix_includes._MAIN_CU_INCLUDE_KIND,
+    fix_includes._PROJECT_INCLUDE_KIND,
+    fix_includes._FORWARD_DECLARE_KIND,
+    fix_includes._NONSYSTEM_INCLUDE_KIND,
+    fix_includes._C_SYSTEM_INCLUDE_KIND,
+    fix_includes._CXX_SYSTEM_INCLUDE_KIND,
+) = sorted([
+    fix_includes._MAIN_CU_INCLUDE_KIND,
+    fix_includes._PROJECT_INCLUDE_KIND,
+    fix_includes._FORWARD_DECLARE_KIND,
+    fix_includes._NONSYSTEM_INCLUDE_KIND,
+    fix_includes._C_SYSTEM_INCLUDE_KIND,
+    fix_includes._CXX_SYSTEM_INCLUDE_KIND,
+])
+
+
 T = TypeVar("T")
 U = TypeVar("U")
 
