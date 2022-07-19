@@ -1354,21 +1354,21 @@ def _broadcast_in_dim_meta(
     for idx, new_idx in enumerate(broadcast_dimensions):
         assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
 
-    # new_strides = []
-    # original_idx = 0
-    # for idx in range(len(shape)):
-    #     if idx in broadcast_dimensions:
-    #         # Assigns a stride of zero to dimensions
-    #         # which were actually broadcast
-    #         if a.shape[original_idx] != shape[idx]:
-    #             new_strides.append(0)
-    #         else:
-    #             new_strides.append(a.stride()[original_idx])
-    #         original_idx = original_idx + 1
-    #     else:
-    #         new_strides.append(0)
+    new_strides = []
+    original_idx = 0
+    for idx in range(len(shape)):
+        if idx in broadcast_dimensions:
+            # Assigns a stride of zero to dimensions
+            # which were actually broadcast
+            if a.shape[original_idx] != shape[idx]:
+                new_strides.append(0)
+            else:
+                new_strides.append(a.stride()[original_idx])
+            original_idx = original_idx + 1
+        else:
+            new_strides.append(0)
 
-    return TensorMeta(a, shape=shape, strides=create_contiguous(shape))
+    return TensorMeta(a, shape=shape, strides=new_strides)
 
 
 def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):

@@ -824,7 +824,9 @@ def add(
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
         )
+
     a, b = _maybe_broadcast(a, b)
+
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
@@ -1437,43 +1439,51 @@ def clamp(
     min: Optional[TensorOrNumberLikeType] = None,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
+    a, min, max = _maybe_broadcast(a, min, max)
+
     # NOTE: grad behavior with implementation `where` is not consistent on `nan`
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
     if min is not None:
-        a_isnan = torch.isnan(a)
-        condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
+        a_isnan = isnan(a)
+        condition = bitwise_or(ge(a, min), a_isnan)
         # we should also propagate `nan` coming from boundaries. However, that's
         # not necessary since `ge` would already `False` when either operands has
         # a `nan`. So this line below is redundant
         #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
-        a = torch.where(condition, a, min)  # type: ignore[arg-type]
+        a = prims.where(condition, a, min)
     if max is not None:
-        a_isnan = torch.isnan(a)
+        a_isnan = isnan(a)
         # same as above, no need to adjust `nan` from `max`
-        condition = torch.bitwise_or(torch.le(a, max), a_isnan)  # type: ignore[arg-type]
-        a = torch.where(condition, a, max)  # type: ignore[arg-type]
+        condition = bitwise_or(le(a, max), a_isnan)
+        a = prims.where(condition, a, max)
 
     return a
 
 
-@register_decomposition(torch.ops.aten.clamp_min)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "min"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def clamp_min(
     self: TensorLikeType,
-    min: TensorOrNumberLikeType = None,
+    min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, min=min)  # type: ignore[arg-type]
+    return clamp(self, min=min)
 
 
-@register_decomposition(torch.ops.aten.clamp_max)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "max"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def clamp_max(
     self: TensorLikeType,
-    max: TensorOrNumberLikeType = None,
+    max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, max=max)  # type: ignore[arg-type]
+    return clamp(self, max=max)
 
 
 #
@@ -1499,10 +1509,7 @@ def where(
         raise NotImplementedError
 
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
-    check(
-        pred.dtype is torch.bool,
-        lambda: f"expected predicate to be bool, got {pred.dtype}",
-    )
+    assert pred.dtype is torch.bool
 
     pred, a, b = _maybe_broadcast(pred, a, b)
     return prims.where(pred, a, b)
