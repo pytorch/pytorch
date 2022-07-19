@@ -1,4 +1,3 @@
-load("//tools/build_defs:glob_defs.bzl", "glob")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
 # kineto code should be updated to not have to
