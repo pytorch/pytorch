@@ -183,7 +183,7 @@ class TestExpandedWeightFunctional(TestCase):
 
             self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.sum)
 
-    @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    @ops(tuple(filter(lambda op: op.supports_expanded_weight, op_db)), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_expanded_weight_per_sample_grad_mean(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
         for sample_input in supported_inputs(op, sample_inputs):
@@ -192,7 +192,7 @@ class TestExpandedWeightFunctional(TestCase):
 
             self._compare_ew_and_for_loop_per_sample_grads(op, sample_input, torch.mean)
 
-    @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    @ops(tuple(filter(lambda op: op.supports_expanded_weight, op_db)), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_expanded_weights_per_sample_grad_input_no_grad(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
         for sample_input in supported_inputs(op, sample_inputs):
