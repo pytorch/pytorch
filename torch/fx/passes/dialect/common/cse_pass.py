@@ -13,14 +13,26 @@ def get_aten_target(node):
         return node.target.overloadpacket
     return node.target
 
-# random ops are banned from CSE
-rand_ops = [aten.dropout, aten._fused_dropout, aten._standard_gamma,
-            aten.bernoulli, aten.multinomial, aten.native_dropout,
-            aten.normal, aten.poisson, aten.binomial, aten.rrelu,
-            aten.rand_like, aten.rand, aten.randint, aten.randn, aten.randperm]
+# stateful ops are banned from CSE
+rand_ops = set([aten.dropout, aten._fused_dropout, aten._standard_gamma, aten.bernoulli, aten.multinomial, aten.native_dropout, aten.normal, aten.poisson, aten.binomial, aten.rrelu, aten.rand_like, aten.rand, aten.randint, aten.randn, aten.randperm])  # noqa: E501
+
+inplace_ops = set([aten.add_, aten.sub_, aten.mul_, aten.div_, aten.pow_, aten.lerp_, aten.relu_, aten.sigmoid_, aten.tanh_])  # noqa: E501
+
+
+def get_CSE_banned_ops():
+    return rand_ops.union(inplace_ops)
 
 
 class CSEPass(PassBase):
+
+    def __init__(self, banned_ops=None):
+        """
+        Constructor for CSEPass. Users can specify a list of ops to ban from CSE.
+        """
+        if banned_ops is None:
+            banned_ops = set()
+        self.banned_ops = banned_ops
+        super().__init__()
 
     def call(self, graph_module: fx.GraphModule) -> PassResult:
         """
@@ -48,7 +60,7 @@ class CSEPass(PassBase):
         for n in graph_module.graph.nodes:
             # The placeholder, output, and get_attr nodes are copied to the new grpah without change
             # do not CSE away random operations
-            if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
+            if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in self.banned_ops:
                 new_node = new_graph.node_copy(n, lambda x: env[x])
                 env[n] = new_node
             else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
