@@ -252,6 +252,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__class__,
         Tensor.__subclasshook__,
         Tensor.as_subclass,
+        Tensor.eig,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
