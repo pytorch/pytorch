@@ -3,14 +3,14 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Any
 from tempfile import TemporaryDirectory
+from typing import Any, Dict, List
 
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    upload_to_s3,
     unzip,
+    upload_to_s3,
 )
 
 

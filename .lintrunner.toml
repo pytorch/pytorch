@@ -9,6 +9,11 @@ exclude_patterns = [
     'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
+    # NOTE: [Impending functorch move]
+    # In preparation for the functorch -> pytorch merge,
+    # we are adding the following excludes so that functorch passes
+    # lint when it gets merged in. Please don't delete.
+    'functorch/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'third_party/**',
@@ -43,6 +48,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/native/vulkan/**/*.h',
+    'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -51,6 +58,7 @@ include_patterns = [
     'test/cpp/**/*.cpp',
 ]
 exclude_patterns = [
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
@@ -217,7 +225,11 @@ command = [
 [[linter]]
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = ['test/test_jit.py']
+exclude_patterns = [
+    'test/test_jit.py',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -289,6 +301,8 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -305,8 +319,11 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -332,9 +349,12 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -360,6 +380,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -415,6 +436,8 @@ exclude_patterns = [
     '**/git-pre-commit',
     '**/git-clang-format',
     '**/gradlew',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -653,3 +676,36 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'PyYAML==6.0',
 ]
+
+# This also provides the same functionality as BLACK formatter. Just to be
+# on the safe side, we will run both BLACK and UFMT for a while to make sure
+# that nothing breaks before removing the former
+[[linter]]
+code = 'UFMT'
+# This is a big bang change to reformat every python files in the repo,
+# so it's arguably safer to gradually reformat them in subsequent PR.
+# After that, we can use **/*.py to apply the formatter to all entries
+# currently enforced by BLACK linter
+include_patterns = [
+    'test/onnx/**/*.py',
+    'tools/**/*.py',
+    'torchgen/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/ufmt_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+exclude_patterns = [
+    'tools/gen_vulkan_spv.py',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'black==22.3.0',
+    'ufmt==1.3.3',
+    'usort==1.0.2',
+]
+is_formatter = true

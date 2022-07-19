@@ -3,16 +3,13 @@
 #import <CoreML/CoreML.h>
 
 @implementation PTMCoreMLExecutor {
-  MLModel *_model;
   NSArray *_featureNames;
   PTMCoreMLFeatureProvider *_inputProvider;
 }
 
-- (instancetype)initWithModel:(MLModel *)model featureNames:(NSArray<NSString *> *)featureNames {
+- (instancetype)initWithFeatureNames:(NSArray<NSString *> *)featureNames {
   if (self = [super init]) {
-    _model = model;
     _featureNames = featureNames;
-
     NSSet<NSString *> *featureNamesSet = [NSSet setWithArray:featureNames];
     _inputProvider = [[PTMCoreMLFeatureProvider alloc] initWithFeatureNames:featureNamesSet];
   }
@@ -41,7 +38,7 @@
 - (id<MLFeatureProvider>)forward {
   NSError *error;
   MLPredictionOptions *options = [[MLPredictionOptions alloc] init];
-  id<MLFeatureProvider> outputs = [_model predictionFromFeatures:_inputProvider options:options error:&error];
+  id<MLFeatureProvider> outputs = [self.model predictionFromFeatures:_inputProvider options:options error:&error];
   if (error) {
     NSLog(@"Prediction failed with error %@", error);
     return nil;

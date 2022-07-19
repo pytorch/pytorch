@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/code_template.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
@@ -726,6 +727,36 @@ void __inline__ initializeCudaContext() {
   }
 }
 
+std::string generate_code(
+    const KernelDescriptor &desc,
+    bool contiguous,
+    bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
+    bool vectorized,
+    int vec_size,
+    bool return_by_ref) {
+  c10::SmallVector<std::string> extra_args_typenames(desc.extra_args_types.size());
+  for (auto i : c10::irange(extra_args_typenames.size())) {
+    extra_args_typenames[i] = typeName(desc.extra_args_types[i]);
+  }
+
+  return generate_code(
+      desc.nInputs,
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      dynamic_casting,
+      scalar_pos,
+      extra_args_typenames,
+      vectorized,
+      vec_size,
+      return_by_ref);
+}
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -1054,6 +1085,31 @@ std::string load_code_template(const std::string& path) {
     std::istreambuf_iterator<char>(ifs),
     std::istreambuf_iterator<char>()};
   return s;
+}
+
+std::string generate_reduction_code(
+    const KernelDescriptor &desc,
+    int vt0,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen) {
+  TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
+  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
+
+  return generate_reduction_code(
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      vt0,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      vectorized,
+      vec_size,
+      max_threads_codegen
+    );
 }
 
 std::string generate_reduction_code(
