@@ -35,6 +35,7 @@
 #include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_linalg_check_errors.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -2279,11 +2280,8 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     apply_magma_eigh<scalar_t>(eigvals_working_copy, self_working_copy, infos, upper, eigenvectors);
   });
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "symeig_cuda");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "symeig_cuda");
-  }
+  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
+
   if (eigenvectors) {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
   } else {
