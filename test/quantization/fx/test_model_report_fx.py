@@ -1588,6 +1588,11 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     self.assertEqual(matched_max, param_size / 2)
 
 
+class TestFxModelReportVisualizer(QuantizationTestCase):
+
+    def test_simple_pass(self):
+        pass
+
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""
     # set the backend for this test
