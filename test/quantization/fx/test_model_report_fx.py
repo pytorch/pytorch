@@ -1743,17 +1743,17 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
                 model, prepared_for_callibrate_model, mod_report
             )
 
-            table_dict, table_str = mod_rep_visualizer.generate_table_view()
+            table_str, table_dict = mod_rep_visualizer.generate_table_view()
 
             # test primarily the dict since it has same info as str
             tensor_info_dict = table_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
             channel_info_dict = table_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
 
             # these two together should be the same as the generated report info in terms of keys
-            tensor_info_modules = set(tensor_info_dict.keys())
-            channel_info_modules = set(channel_info_dict.keys())
+            # tensor_info_modules = set(tensor_info_dict.keys())
+            # channel_info_modules = set(channel_info_dict.keys())
 
-            
+
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""
