@@ -190,6 +190,8 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     set_storage_offset(value_.storage_offset());
   }
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
+    // .to() should not re-entrantly go through functionalization.
+    at::AutoDispatchSkipFunctionalize guard;
     value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
