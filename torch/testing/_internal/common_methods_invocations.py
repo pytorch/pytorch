@@ -14730,7 +14730,8 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=(torch.cfloat,), device_type='cpu'),
-        )
+        ),
+        autodiff_nonfusible_nodes=["aten::silu"],
     ),
     # TODO: combine this with the nn.functional.silu OpInfo when
     # complex autodiff for silu is supported or when
