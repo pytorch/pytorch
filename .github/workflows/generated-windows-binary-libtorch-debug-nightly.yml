@@ -36,8 +36,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -50,6 +48,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,8 +58,6 @@ jobs:
     needs: libtorch-cpu-shared-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -72,6 +70,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -79,8 +79,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -102,8 +100,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -116,6 +112,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -124,8 +122,6 @@ jobs:
     needs: libtorch-cpu-shared-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -138,6 +134,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -145,8 +143,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -168,8 +164,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -182,6 +176,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -190,8 +186,6 @@ jobs:
     needs: libtorch-cpu-static-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -204,6 +198,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -211,8 +207,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -234,8 +228,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -248,6 +240,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -256,8 +250,6 @@ jobs:
     needs: libtorch-cpu-static-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -270,6 +262,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -277,8 +271,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -300,8 +292,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -315,6 +305,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -323,8 +315,6 @@ jobs:
     needs: libtorch-cuda11_3-shared-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -338,6 +328,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -345,8 +337,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -369,8 +359,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -384,6 +372,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -392,8 +382,6 @@ jobs:
     needs: libtorch-cuda11_3-shared-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -407,6 +395,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -414,8 +404,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -438,8 +426,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -453,6 +439,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -461,8 +449,6 @@ jobs:
     needs: libtorch-cuda11_3-static-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -476,6 +462,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -483,8 +471,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -507,8 +493,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -522,6 +506,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -530,8 +516,6 @@ jobs:
     needs: libtorch-cuda11_3-static-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -545,6 +529,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_3-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -552,8 +538,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -576,8 +560,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -591,6 +573,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -599,8 +583,6 @@ jobs:
     needs: libtorch-cuda11_6-shared-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -614,6 +596,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -621,8 +605,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -645,8 +627,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -660,6 +640,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -668,8 +650,6 @@ jobs:
     needs: libtorch-cuda11_6-shared-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -683,6 +663,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -690,8 +672,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -714,8 +694,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -729,6 +707,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -737,8 +717,6 @@ jobs:
     needs: libtorch-cuda11_6-static-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -752,6 +730,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -759,8 +739,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -783,8 +761,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -798,6 +774,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -806,8 +784,6 @@ jobs:
     needs: libtorch-cuda11_6-static-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -821,6 +797,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_6-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -828,8 +806,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -852,8 +828,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -867,6 +841,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -875,8 +851,6 @@ jobs:
     needs: libtorch-cuda11_7-shared-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -890,6 +864,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-shared-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -897,8 +873,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_7-shared-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -921,8 +895,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -936,6 +908,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -944,8 +918,6 @@ jobs:
     needs: libtorch-cuda11_7-shared-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -959,6 +931,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-shared-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -966,8 +940,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_7-shared-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -990,8 +962,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1005,6 +975,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1013,8 +985,6 @@ jobs:
     needs: libtorch-cuda11_7-static-with-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1028,6 +998,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-static-with-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1035,8 +1007,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_7-static-with-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1059,8 +1029,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1074,6 +1042,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1082,8 +1052,6 @@ jobs:
     needs: libtorch-cuda11_7-static-without-deps-debug-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1097,6 +1065,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cuda11_7-static-without-deps-debug
       build_environment: windows-binary-libtorch-debug
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.8xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1104,8 +1074,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_7-static-without-deps-debug-test
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

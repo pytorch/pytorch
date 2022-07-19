@@ -60,6 +60,8 @@ jobs:
     with:!{{ upload.binary_env_as_input(config, True) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -70,6 +72,8 @@ jobs:
     with:!{{ upload.binary_env_as_input(config, True) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       {%- if config["gpu_arch_type"] == "cuda" %}
       runs_on: windows.8xlarge.nvidia.gpu
       {%- else %}

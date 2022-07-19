@@ -31,8 +31,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -45,6 +43,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-with-deps-release
       build_environment: windows-binary-libtorch-release
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -53,8 +53,6 @@ jobs:
     needs: libtorch-cpu-shared-with-deps-release-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -67,6 +65,8 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: libtorch-cpu-shared-with-deps-release
       build_environment: windows-binary-libtorch-release
+      PYTORCH_ROOT: \pytorch
+      BUILDER_ROOT: \builder
       runs_on: windows.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -62,6 +62,8 @@ jobs:
     with:!{{ upload.binary_env_as_input(config, True) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      PYTORCH_ROOT: ${{ github.workspace }}\pytorch
+      BUILDER_ROOT: ${{ github.workspace }}\builder
       {%- if config["package_type"] == "libtorch" %}
       # libtorch builds take a long time on github hosted runners
       timeout-minutes: 720
