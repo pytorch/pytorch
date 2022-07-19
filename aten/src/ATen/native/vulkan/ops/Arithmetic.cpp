@@ -9,19 +9,15 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-bool broadcast_input(IntArrayRef input_size_1, IntArrayRef input_size_2) {
-  return ((input_size_1[3] > 1 && input_size_2[3] == 1) ||
-          (input_size_2[3] > 1 && input_size_1[3] == 1) ||
-          (input_size_2[3] == input_size_1[3])) &&
-      ((input_size_1[2] > 1 && input_size_2[2] == 1) ||
-       (input_size_2[2] > 1 && input_size_1[2] == 1) ||
-       (input_size_2[2] == input_size_1[2])) &&
-      ((input_size_1[1] > 1 && input_size_2[1] == 1) ||
-       (input_size_2[1] > 1 && input_size_1[1] == 1) ||
-       (input_size_2[1] == input_size_1[1])) &&
-      ((input_size_1[0] > 1 && input_size_2[0] == 1) ||
-       (input_size_2[0] > 1 && input_size_1[0] == 1) ||
-       (input_size_2[0] == input_size_1[0]));
+bool broadcast_input(const Tensor& input1, const Tensor& input2) {
+  return (batch_size(input1) == batch_size(input2)) &&
+      (channels_size(input1) == channels_size(input2)) &&
+      ((height_size(input1) > 1 && height_size(input2) == 1) ||
+       (height_size(input2) > 1 && height_size(input1) == 1) ||
+       (height_size(input1) == height_size(input2))) &&
+      ((width_size(input1) > 1 && width_size(input2) == 1) ||
+       (width_size(input2) > 1 && width_size(input1) == 1) ||
+       (width_size(input1) == width_size(input2)));
 }
 
 void check_inputs(const Tensor& input1, const Tensor& input2) {
@@ -34,50 +30,30 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
         "Vulkan binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
   }
 
-  const uint32_t input1_h = height_size(input1);
-  const uint32_t input1_w = width_size(input1);
-  const uint32_t input2_h = height_size(input2);
-  const uint32_t input2_w = width_size(input2);
-
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
 
-  const Tensor self = input1.is_vulkan() ? input1 : input2.vulkan();
-  const vTensor& v_self = convert(self);
-
-  const Tensor other = input2.is_vulkan() ? input1 : input2.vulkan();
-  const vTensor& v_other = convert(other);
-  TORCH_CHECK(
-      broadcast_input(v_self.sizes(), v_other.sizes()), broadcast_error_msg);
+  TORCH_CHECK(broadcast_input(input1, input2), broadcast_error_msg);
 }
 
 std::vector<int64_t> broadcast_size(
-    IntArrayRef input_size_1,
-    IntArrayRef input_size_2) {
+    const Tensor& input1,
+    const Tensor& input2) {
   std::vector<int64_t> out = {
-      input_size_1[0], input_size_1[1], input_size_1[2], input_size_1[3]};
-  if (input_size_1[3] > 1 && input_size_2[3] == 1) {
-    out[3] = input_size_1[3];
-  } else if (input_size_2[3] > 1 && input_size_1[3] == 1) {
-    out[3] = input_size_2[3];
+      batch_size(input1),
+      channels_size(input1),
+      height_size(input1),
+      width_size(input1)};
+  if (width_size(input1) > 1 && width_size(input2) == 1) {
+    out[3] = width_size(input1);
+  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
+    out[3] = width_size(input2);
   }
 
-  if (input_size_1[2] > 1 && input_size_2[2] == 1) {
-    out[2] = input_size_1[2];
-  } else if (input_size_2[2] > 1 && input_size_1[2] == 1) {
-    out[2] = input_size_2[2];
-  }
-
-  if (input_size_1[1] > 1 && input_size_2[1] == 1) {
-    out[1] = input_size_1[1];
-  } else if (input_size_2[1] > 1 && input_size_1[1] == 1) {
-    out[1] = input_size_2[1];
-  }
-
-  if (input_size_1[0] > 1 && input_size_2[0] == 1) {
-    out[0] = input_size_1[0];
-  } else if (input_size_2[0] > 1 && input_size_1[0] == 1) {
-    out[0] = input_size_2[0];
+  if (height_size(input1) > 1 && height_size(input2) == 1) {
+    out[2] = height_size(input1);
+  } else if (height_size(input2) > 1 && height_size(input1) == 1) {
+    out[2] = height_size(input2);
   }
 
   return out;
@@ -213,7 +189,7 @@ Tensor arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_size(v_self.sizes(), v_other.sizes()),
+      broadcast_size(self_arg, other_arg),
       v_self.options(),
   };
 
@@ -287,7 +263,7 @@ Tensor quantized_arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_size(v_self.sizes(), v_other.sizes()),
+      broadcast_size(self_arg, other_arg),
       self.options().dtype(c10::kQUInt8),
       scale,
       zero_point};
