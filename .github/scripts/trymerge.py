@@ -182,9 +182,12 @@ fragment CommitAuthors on PullRequestCommitConnection {
 }
 """
 
-GH_GET_PR_INFO_QUERY = GH_PULL_REQUEST_FRAGMENT + GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
+GH_GET_PR_INFO_QUERY = (GH_PULL_REQUEST_FRAGMENT
+                        + GH_PR_REVIEWS_FRAGMENT
+                        + GH_CHECKSUITES_FRAGMENT
+                        + GH_COMMIT_AUTHORS_FRAGMENT) + """
 query ($owner: String!, $name: String!, $number: Int!, $with_labels: Boolean = false) {
-  repository(owner: $owner, name: $name) {
+  repository(owner: $owner, name: $name)
     pullRequest(number: $number) {
       ...PullRequestFragment
     }
@@ -1260,7 +1263,7 @@ def merge(pr_num: int, repo: GitRepo,
     raise RuntimeError(msg)
 
 
-def handle_exception(e: Exception, org, project, pr_num, dry_run, msg: str = "Merge failed") -> None:
+def handle_exception(e: Exception, org: str, project: str, pr_num: int, dry_run: bool = False, msg: str = "Merge failed") -> None:
     msg += f" due to {e}"
     run_url = os.getenv("GH_RUN_URL")
     if run_url is not None:
@@ -1285,7 +1288,7 @@ def main() -> None:
         try:
             try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id, reason=args.reason)
         except Exception as e:
-            handle_exception(e, f"Reverting PR {args.pr_num} failed")
+            handle_exception(e, org, project, args.pr_num, args.dry_run, f"Reverting PR {args.pr_num} failed")
         return
 
     if pr.is_closed():

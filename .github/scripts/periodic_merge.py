@@ -22,11 +22,14 @@ from trymerge import (
 LAND_PENDING_LABEL = "ciflow/trunk"
 LAND_FAILED_LABEL = "land-failed"
 
-PRS_WITH_LABEL_QUERY = GH_PULL_REQUEST_FRAGMENT + GH_PR_REVIEWS_FRAGMENT + GH_CHECKSUITES_FRAGMENT + GH_COMMIT_AUTHORS_FRAGMENT + """
+PRS_WITH_LABEL_QUERY = (GH_PULL_REQUEST_FRAGMENT
+                        + GH_PR_REVIEWS_FRAGMENT
+                        + GH_CHECKSUITES_FRAGMENT
+                        + GH_COMMIT_AUTHORS_FRAGMENT) + """
 query ($owner: String!, $name: String!, $labels: [String!], $with_labels: Boolean = false) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: 5, labels: $labels, states: OPEN){
-    	nodes{
+        nodes{
         ...PullRequestFragment
       }
     }
@@ -59,7 +62,7 @@ def is_all_green(labels: List[str]) -> bool:
     return "all-green" in labels
 
 
-def validate_all_green(pr: GitHubPR):
+def validate_all_green(pr: GitHubPR) -> None:
     pending = pr_get_pending_checks(pr)
     failing = pr_get_failed_checks(pr)
     if len(failing) > 0:
@@ -70,11 +73,11 @@ def validate_all_green(pr: GitHubPR):
                                           f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
 
 
-def modify_labels(org, project, pr_num):
+def modify_labels(org: str, project: str, pr_num: int) -> None:
     try:
         gh_add_labels(org, project, pr_num, [LAND_FAILED_LABEL])
         gh_remove_label(org, project, pr_num, LAND_PENDING_LABEL)
-    except:
+    except Exception:
         return
 
 
@@ -97,12 +100,12 @@ def main() -> None:
                 validate_all_green(pr)
 
             if is_land_check(labels):
-                validate_land_time_checks(org, project, 'landchecks/' + pr_num)
+                validate_land_time_checks(org, project, 'landchecks/' + str(pr_num))
 
             find_matching_merge_rule(pr, repo)
             pr.merge_into(repo)
         except RuntimeError as e:
-            handle_exception(e)
+            handle_exception(e, org, project, pr_num)
             modify_labels(org, project, pr_num)
             continue
         except MandatoryChecksMissingError:
