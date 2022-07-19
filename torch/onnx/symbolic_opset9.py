@@ -1196,7 +1196,6 @@ def threshold(g, self, threshold, value):
     return g.op("Relu", self)
 
 
-@symbolic_helper.quantized_args(True)
 def leaky_relu(g, input, negative_slope, inplace=False):
     negative_slope = symbolic_helper._get_const(negative_slope, "t", "negative_slope")
     # See Note [Export inplace]
@@ -1204,7 +1203,6 @@ def leaky_relu(g, input, negative_slope, inplace=False):
     return g.op("LeakyRelu", input, alpha_f=symbolic_helper._scalar(negative_slope))
 
 
-@symbolic_helper.parse_args("v", "i")
 def glu(g, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
