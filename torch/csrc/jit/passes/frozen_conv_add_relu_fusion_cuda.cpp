@@ -1,7 +1,7 @@
 #include <ATen/Utils.h>
 
 #include <ATen/code_template.h>
-#include <ATen/cuda/CUDAConfig.h>
+#include <ATen/hip/HIPConfig.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -16,7 +16,7 @@ namespace jit {
 
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
-#if AT_CUDNN_ENABLED()
+#if AT_CUDNN_ENABLED() || AT_ROCM_ENABLED()
   GRAPH_DEBUG("Before fuseFrozenConvAddReluImpl: ", *graph);
   SubgraphRewriter rewriter;
 
