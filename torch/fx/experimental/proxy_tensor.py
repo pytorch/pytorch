@@ -173,7 +173,7 @@ class ProxyTensor(torch.Tensor):
 
 
     @staticmethod
-    def __new__(cls, elem, proxy, dispatch_mode=None, *, requires_grad=None, constant=None):
+    def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
@@ -182,7 +182,7 @@ class ProxyTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, elem, proxy, dispatch_mode=None, *, requires_grad=None, constant=None):
+    def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
         if elem.is_sparse:
             proxy.node.meta['tensor_meta'] = {}
         else:
@@ -193,7 +193,6 @@ class ProxyTensor(torch.Tensor):
         self.elem = elem
         self.proxy = proxy
         self.constant = constant
-        self.dispatch_mode = dispatch_mode
 
     def __deepcopy__(self, memo):
         return self.clone()
@@ -206,7 +205,7 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, self.dispatch_mode, args, kwargs)
+        return proxy_call(func_overload, None, args, kwargs)
 
 
 class PythonKeyTracer(Tracer):
