@@ -29,7 +29,7 @@ static PyObject* THCPStream_pynew(
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char* kwlist[] = {
-      "priority", "_stream_id", "_device_index", "stream_ptr", nullptr};
+      "priority", "stream_id", "device_index", "stream_ptr", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,

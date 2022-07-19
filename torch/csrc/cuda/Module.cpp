@@ -216,7 +216,7 @@ PyObject* THCPModule_setStream_wrap(PyObject* self, PyObject* obj) {
   int64_t device_type = static_cast<int64_t>(DeviceType::CUDA);
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {"_stream_id", "_device_index", nullptr};
+  static char* kwlist[] = {"stream_id", "device_index", nullptr};
   if (!PyArg_ParseTuple(obj, "|ii", &stream_id, &device_index)) {
   }
   auto stream =

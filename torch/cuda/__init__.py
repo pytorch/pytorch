@@ -600,7 +600,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     _lazy_init()
     streamdata = torch._C._cuda_getCurrentStream(
         _get_device_index(device, optional=True))
-    return Stream(_stream_id=streamdata[0], _device_index=streamdata[1])
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1])
 
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
@@ -615,7 +615,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     _lazy_init()
     streamdata = torch._C._cuda_getDefaultStream(
         _get_device_index(device, optional=True))
-    return Stream(_stream_id=streamdata[0], _device_index=streamdata[1])
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1])
 
 
 def current_blas_handle():

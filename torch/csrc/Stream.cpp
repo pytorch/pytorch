@@ -18,7 +18,7 @@ static PyObject* THPStream_pynew(
   int64_t device_type = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
   static char* kwlist[] = {
-      "_stream_id", "_device_index", "_device_type", nullptr};
+      "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
@@ -67,17 +67,17 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStream_members[] = {
-    {(char*)"_stream_id",
+    {(char*)"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
      READONLY,
      nullptr},
-    {(char*)"_device_index",
+    {(char*)"device_index",
      T_LONGLONG,
      offsetof(THPStream, device_index),
      READONLY,
      nullptr},
-    {(char*)"_device_type",
+    {(char*)"device_type",
      T_LONGLONG,
      offsetof(THPStream, device_type),
      READONLY,
