@@ -234,6 +234,7 @@ __all__ = [
     "scalar_tensor",
     "zeros",
     "zeros_like",
+    "arange",
     #
     # Randomness References
     #
@@ -2983,6 +2984,20 @@ def empty_like(
     return torch.empty_strided(
         a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
+
+@out_wrapper()
+@register_decomposition(torch.ops.aten.arange)
+def arange(
+    start: Number,
+    end: Number,
+    step: Number = 1,
+    *,
+    dtype: torch.dtype = None,
+    layout: torch.layout = None,
+    device: torch.device = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    return prims.arange(start, end, step, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints

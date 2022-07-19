@@ -176,6 +176,7 @@ __all__ = [
     #
     "empty_strided",
     "scalar_tensor",
+    "arange",
     #
     # Linear algebra (linalg) Prims
     #
@@ -2473,6 +2474,59 @@ amin = _make_reduction_prim(
     impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
+
+
+_arange_doc = """
+    Constructs a 1-D tensor with values from the interval [start, end) taken
+    with common difference `step` beginning from `start`.
+"""
+
+def _arange_meta(
+    start: Number,
+    end: Number,
+    step: Number,
+    *,
+    dtype: torch.dtype = None,
+    layout: torch.layout = None,
+    device: torch.device = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    utils.check(
+        step != 0,
+        lambda: "step must be nonzero",
+    )
+    utils.check(
+        start != float("inf") and start != float("-inf"),
+        lambda: f"unsupported range: {start} -> {end}",
+    )
+    utils.check(
+        (step > 0 and end >= start) or (step < 0 and end <= start) ,
+        lambda: f"upper bound and lower bound inconsistent with step sign",
+    )
+    shape = (math.ceil((end - start) / step),)
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+def _arange_aten(
+    start: Number,
+    end: Number,
+    step: Number,
+    *,
+    dtype: torch.dtype = None,
+    layout: torch.layout = None,
+    device: torch.device = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    return torch.arange(start, end, step, dtype=dtype, device=device, requires_grad=requires_grad)  # what about layout, pin-memory?
+
+arange = _make_prim(
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? requires_grad=False) -> Tensor",
+    return_type=RETURN_TYPE.NEW,
+    meta=_arange_meta,
+    impl_aten=_arange_aten,
+    doc=_arange_doc,
+)
+
 
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta

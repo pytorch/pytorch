@@ -3014,6 +3014,33 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
+def error_inputs_arange(op, device, dtype, requires_grad, **kwargs):
+    yield ErrorInput(SampleInput(3, kwargs={'step': 0}), error_type=RuntimeError, error_regex='nonzero')
+
+def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
+    # Try complex inputs
+    # What happens when we change dtype to be complex?
+    ends = (0, 1, 2, 10, 50)
+    starts = (1, 3, 10, 50)  # our ref does not support optional start, maybe the rest of our tests are okay with it?
+    # TODO: conditionally have this
+    steps = (None, 1, 3, 7)
+    for start, end in product(starts, ends):
+        for sign in (1, -1):
+            if (start >= end and sign == 1) or (start <= end and sign == -1):
+                continue
+            for step in steps:
+                if step is not None:
+                    step = sign * step
+                else:
+                    step = sign
+                # print(start, end, step)
+                if step is None:
+                    yield SampleInput(start, args=(end,), kwargs={'dtype': dtype, 'device': device})
+                else:
+                    yield SampleInput(start, args=(end, step), kwargs={'dtype': dtype, 'device': device})
+
+
+
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
@@ -10663,6 +10690,21 @@ op_db: List[OpInfo] = [
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
+    OpInfo('arange',
+           # bool and copmlex don't work, yet - we should fix complex?
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           supports_out=True,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_arange,
+           skips=(
+               # skip these tests since we have non tensor input
+               DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning')
+           )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -20278,6 +20320,15 @@ python_ref_db = [
         "_refs.asinh",
         torch_opinfo_name="asinh",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.arange",
+        torch_opinfo_name="arange",
+        skips=(
+            # Skipping the following only made a single test succeed?
+            # skip these tests since we have non tensor input
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
