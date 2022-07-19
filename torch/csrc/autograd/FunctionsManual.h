@@ -150,12 +150,12 @@ at::Tensor rad2deg_backward(const at::Tensor& grad);
 at::Tensor deg2rad_backward(const at::Tensor& grad);
 at::Tensor unsqueeze_multiple(
     const at::Tensor& t,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     at::IntArrayRef sizes,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef opt_dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
@@ -402,12 +402,6 @@ Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
     c10::optional<double> eps);
-at::Tensor kl_div_double_backward_grad_output(
-    const at::Tensor& grad,
-    const at::Tensor& input,
-    const at::Tensor& target,
-    int64_t reduction,
-    bool log_target);
 Tensor binary_cross_entropy_target_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -657,12 +651,6 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& x1,
     const Tensor& x2,
     const Tensor& res);
-Tensor kl_div_target_backward(
-    Tensor grad_output,
-    Tensor self,
-    Tensor target,
-    int64_t reduction,
-    bool log_target);
 Tensor fft_backward(
     const Tensor& self,
     const Tensor& grad,
