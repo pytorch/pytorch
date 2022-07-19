@@ -827,15 +827,15 @@ class TestJitTraceAutocast(JitTestCase):
                 return x.sin()
 
         fn_s = torch.jit.script(fn)
-        print(fn_s.graph)
 
         x = torch.rand((4, 4)) - 0.5
         with torch.cpu.amp.autocast():
             self.assertEqual(fn_s(x), fn(x))
 
         with torch.cpu.amp.autocast(enabled=True):
-            print(fn_s(x), fn(x), torch.is_autocast_cpu_enabled())
             self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()]))
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_script_autocast_cuda(self):
@@ -846,15 +846,16 @@ class TestJitTraceAutocast(JitTestCase):
                 return x.sin()
 
         fn_s = torch.jit.script(fn)
-        print(fn_s.graph)
 
         x = torch.rand((4, 4)) - 0.5
         with torch.cpu.amp.autocast():
             self.assertEqual(fn_s(x), fn(x))
 
         with torch.cuda.amp.autocast(enabled=True):
-            print(fn_s(x), fn(x), torch.is_autocast_enabled())
             self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+
 
     def test_scripted_aliasing(self):
         # torch.is_autocast_enabled should not be able to move inside of the autocast context.
@@ -869,7 +870,6 @@ class TestJitTraceAutocast(JitTestCase):
 
         fn_s = torch.jit.script(fn)
         graph = fn_s.graph
-        print(graph)
 
         aliasdb = graph.alias_db()
 

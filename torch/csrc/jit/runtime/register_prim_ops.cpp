@@ -653,11 +653,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
         [](Stack& stack) { push(stack, at::autocast::is_enabled()); },
-        aliasAnalysisFromSchema()),
+        aliasAnalysisConservative()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_autocast_cpu_enabled() -> bool"),
         [](Stack& stack) { push(stack, at::autocast::is_cpu_enabled()); },
-        aliasAnalysisFromSchema()),
+        aliasAnalysisConservative()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
         unInitialized,
