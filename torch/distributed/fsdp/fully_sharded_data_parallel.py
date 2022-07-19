@@ -2659,7 +2659,7 @@ class FullyShardedDataParallel(nn.Module):
                     try:
                         yield
                     finally:
-                        if offload_to_cpu:
+                        if offload_to_cpu and (not rank0_only or my_rank == 0):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
