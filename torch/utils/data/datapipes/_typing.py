@@ -380,7 +380,13 @@ class _IterDataPipeMeta(_DataPipeMeta):
                     # This needs happen after because the state being passed in
                     # may have `datapipe._SnapshotState = Iterating`.
                     datapipe = args[0]
-                    datapipe._snapshot_state = _SnapshotState.NotStarted
+                    # FIXME: Without the `if` condition below, the code snippet below would fail. We have
+                    #   investigated but no clue why. Note that this doesn't cause any functional issue.
+                    #   >>> dp = IterableWrapper(range(10))
+                    #   >>> copied_dp = pickle.loads(pickle.dumps(dp))
+                    #   >>> pickle.dumps(dp) == pickle.dumps(copied_dp)
+                    if datapipe._snapshot_state != _SnapshotState.NotStarted:
+                        datapipe._snapshot_state = _SnapshotState.NotStarted
 
             namespace['__setstate__'] = wrap_setstate
 
