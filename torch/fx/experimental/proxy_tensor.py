@@ -206,7 +206,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(func_overload, args, kwargs)
+            return self.proxy_call(func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -260,7 +260,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                 constant = None
             return wrap_output(inner_res, proxy_res, constant=constant)
 
-    def proxy_call(func_overload, args, kwargs=None):
+    def proxy_call(self, func_overload, args, kwargs=None):
         if kwargs is None:
             kwargs = {}
         func = func_overload.overloadpacket
