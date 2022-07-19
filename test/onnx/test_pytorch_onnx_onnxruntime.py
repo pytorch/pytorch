@@ -11829,24 +11829,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="select",
             ),
             common_utils.subtest(
-                torch.nn.LayerNorm(2),
+                torch.nn.quantized.LayerNorm(
+                    2, torch.nn.Parameter(), torch.nn.Parameter(), 2.0, 1
+                ),
                 name="layer_norm",
             ),
             common_utils.subtest(
-                torch.nn.InstanceNorm1d(2),
+                torch.nn.quantized.InstanceNorm1d(
+                    2, torch.nn.Parameter(), torch.nn.Parameter(), 2.0, 1
+                ),
                 name="instance_norm",
             ),
             common_utils.subtest(
-                torch.nn.GroupNorm(2, 2),
+                torch.nn.quantized.GroupNorm(
+                    2, 2, torch.nn.Parameter(), torch.nn.Parameter(), 2.0, 1
+                ),
                 name="group_norm",
             ),
             common_utils.subtest(
-                lambda x: torch.amax(x, dim=0, keepdim=True),
-                name="amax",
+                lambda x: torch.max(x, dim=0, keepdim=True),
+                name="max",
             ),
             common_utils.subtest(
-                lambda x: torch.amin(x, dim=0, keepdim=True),
-                name="amin",
+                lambda x: torch.min(x, dim=0, keepdim=True),
+                name="min",
             ),
             common_utils.subtest(
                 lambda x: torch.as_strided(x, (2, 2), (1, 2)),
@@ -11854,6 +11860,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ),
         ],
     )
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_unary_functions(self, function):
         input = torch.randn(4, 2)
