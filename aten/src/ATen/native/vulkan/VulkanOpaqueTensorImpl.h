@@ -23,8 +23,7 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes,
             false),
-        strides_(strides.vec()) {
-  }
+        strides_(strides.vec()) {}
 
   IntArrayRef strides_custom() const override {
     return strides_;
@@ -32,6 +31,33 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
 
   bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     return true;
+  }
+
+ protected:
+  int64_t numel_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: numel_custom() not supported for VulkanOpaqueTensorImpl.");
+  }
+  IntArrayRef sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sizes_custom() not supported for VulkanOpaqueTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_sizes_custom() not supported for VulkanOpaqueTensorImpl.");
+  }
+  Device device_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: device_custom() not supported for VulkanOpaqueTensorImpl.");
+  }
+  int64_t dim_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: dim_custom() not supported for VulkanOpaqueTensorImpl.");
   }
 
  private:
