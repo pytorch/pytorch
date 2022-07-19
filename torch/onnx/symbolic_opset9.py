@@ -5072,7 +5072,6 @@ def __range_length(g, lo, hi, step):
     return g.op("Cast", div, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
 
 
-@symbolic_helper.quantized_args(True, True, True)
 def linear(g, input, weight, bias):
     rank = symbolic_helper._get_tensor_rank(input)
     weight = t(g, weight)

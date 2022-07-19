@@ -11781,100 +11781,76 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         "function",
         [
             common_utils.subtest(
-                [torch.nn.ReLU()],
+                torch.nn.ReLU(),
                 name="relu",
             ),
             common_utils.subtest(
-                [torch.nn.ELU()],
-                name="elu",
+                torch.nn.LeakyReLU(),
+                name="leaky_relu",
             ),
             common_utils.subtest(
-                [torch.nn.SELU()],
-                name="selu",
-            ),
-            common_utils.subtest(
-                [torch.nn.LeakyReLU()],
-                name="swish",
-            ),
-            common_utils.subtest(
-                [torch.nn.SiLU()],
-                name="swish",
-            ),
-            common_utils.subtest(
-                [torch.nn.Hardswish()],
-                name="hardswish",
-            ),
-            common_utils.subtest(
-                [torch.nn.quantized.Hardswish(2.0, 0.1)],
+                torch.nn.quantized.Hardswish(2.0, 1),
                 name="quantized_hardswish",
             ),
             common_utils.subtest(
-                [torch.nn.Sigmoid()],
+                torch.nn.Sigmoid(),
                 name="sigmoid",
             ),
             common_utils.subtest(
-                [torch.nn.quantized.Sigmoid(2.0, 0.1)],
+                torch.nn.quantized.Sigmoid(2.0, 1),
                 name="quantized_sigmoid",
             ),
             common_utils.subtest(
-                [torch.nn.Hardsigmoid()],
+                torch.nn.Hardsigmoid(),
                 name="hardsigmoid",
             ),
             common_utils.subtest(
-                [torch.nn.Tanh()],
+                torch.nn.Tanh(),
                 name="tanh",
             ),
             common_utils.subtest(
-                [torch.nn.Hardtanh()],
+                torch.nn.Hardtanh(),
                 name="hardtanh",
             ),
             common_utils.subtest(
-                [lambda x: torch.transpose(x, 0, 1)],
+                lambda x: torch.transpose(x, 0, 1),
                 name="transpose",
             ),
             common_utils.subtest(
-                [lambda x: x.expand(1, 4, 2)],
+                lambda x: x.expand(1, 4, 2),
                 name="expand",
             ),
             common_utils.subtest(
-                [lambda x: x.view(1, 4, 2)],
+                lambda x: x.view(1, 4, 2),
                 name="view",
             ),
             common_utils.subtest(
-                [lambda x: x.select(0, 1)],
+                lambda x: x.select(0, 1),
                 name="select",
             ),
             common_utils.subtest(
-                [torch.nn.LayerNorm(2)],
+                torch.nn.LayerNorm(2),
                 name="layer_norm",
             ),
             common_utils.subtest(
-                [torch.nn.InstanceNorm(2)],
+                torch.nn.InstanceNorm1d(2),
                 name="instance_norm",
             ),
             common_utils.subtest(
-                [lambda x: torch.amax(x, dim=0, keepdim=True)],
+                torch.nn.GroupNorm(2, 2),
+                name="group_norm",
+            ),
+            common_utils.subtest(
+                lambda x: torch.amax(x, dim=0, keepdim=True),
                 name="amax",
             ),
             common_utils.subtest(
-                [lambda x: torch.amin(x, dim=0, keepdim=True)],
+                lambda x: torch.amin(x, dim=0, keepdim=True),
                 name="amin",
             ),
             common_utils.subtest(
-                [torch.sort],
-                name="sort",
-            ),
-            common_utils.subtest(
-                [torch.nn.Linear(2, 3)],
-                name="linear",
-            ),
-            common_utils.subtest(
-                [lambda x: torch.as_strided(x, (2, 2), (1, 2))],
+                lambda x: torch.as_strided(x, (2, 2), (1, 2)),
                 name="as_strided",
-            ),
-            common_utils.subtest(
-                [torch.nn.GroupNorm(2, 2)],
-                name="group_norm",
             ),
         ],
     )
@@ -11882,7 +11858,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_quantized_unary_functions(self, function):
         input = torch.randn(4, 2)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(function, q_input)
+
+        class Model(torch.nn.Module):
+            def __init__(self, function):
+                super().__init__()
+                self.function = function
+
+            def forward(self, x):
+                return self.function(x)
+
+        self.run_test(Model(function), q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
