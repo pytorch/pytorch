@@ -190,7 +190,6 @@ void FlatbufferLoader::parseAndPopulate(
   }
 }
 
-
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
