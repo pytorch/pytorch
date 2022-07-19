@@ -418,7 +418,7 @@ struct TORCH_API FunctionSchema {
 
   // Returns either arguments() or returns() depending on the SchemaArgType
   // output => returns(), input => arguments()
-  std::vector<Argument> getCorrectList(SchemaArgType type) const;
+  const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {

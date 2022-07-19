@@ -49,6 +49,15 @@ class SchemaCheckMode(TorchDispatchMode):
                 )
             return False
 
+        def has_aliased(lhs, rhs):
+            try:
+                return torch._C._overlaps(lhs, rhs)
+            except Exception as exception:
+                if str(exception).startswith("Cannot inspect value of type "):
+                    return False
+                else:
+                    raise exception
+
         def standardize_name(name):
             return name if name != "self" else "input"
 
@@ -103,7 +112,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 md = cloned_metadata.get(name)
                 after = arguments.get(name)
                 for j in range(len(tuple_out)):
-                    if torch._C._contains_alias_of(tuple_out[j], after):
+                    if has_aliased(tuple_out[j], after):
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
                                 SchemaArgument(SchemaArgType.input, i)):
@@ -118,7 +127,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         # Aliasing between outputs
         for i, j in combinations(range(len(func._schema.returns)), 2):
-            if torch._C._contains_alias_of(tuple_out[i], tuple_out[j]):
+            if has_aliased(tuple_out[i], tuple_out[j]):
                 if not schema_info.may_contain_alias(
                     SchemaArgument(SchemaArgType.output, i),
                         SchemaArgument(SchemaArgType.output, j)):
