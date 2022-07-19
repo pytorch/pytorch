@@ -243,9 +243,63 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
+bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
+  if (input.is_mkldnn()) {
+    return true;
+  }
+  auto input_dim = input.dim();
+  bool is_contiguous = input.is_contiguous(at::MemoryFormat::Contiguous);
+  bool is_channels_last = (input_dim == 4)
+      ? input.is_contiguous(at::MemoryFormat::ChannelsLast)
+      : input.is_contiguous(at::MemoryFormat::ChannelsLast3d);
+  if (!(is_contiguous || is_channels_last)) {
+    return true;
+  }
+
+  auto dims = input.sizes();
+  auto strides = input.strides();
+  bool mkldnn_conv_is_contiguous = true, mkldnn_conv_is_channels_last = true;
+  if (input_dim == 4) {
+    const auto n = 0, c = 1, h = 2, w = 3;
+    mkldnn_conv_is_contiguous =
+        (strides[n] == dims[c] * dims[h] * dims[w] &&
+         strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
+         strides[w] == 1);
+    mkldnn_conv_is_channels_last =
+        (strides[n] == dims[h] * dims[w] * dims[c] &&
+         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+         strides[c] == 1);
+  } else {
+    const auto n = 0, c = 1, d = 2, h = 3, w = 4;
+    mkldnn_conv_is_contiguous =
+        (strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
+         strides[c] == dims[d] * dims[h] * dims[w] &&
+         strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
+         strides[w] == 1);
+    mkldnn_conv_is_channels_last =
+        (strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
+         strides[d] == dims[h] * dims[w] * dims[c] &&
+         strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+         strides[c] == 1);
+  }
+  if (is_channels_last && is_contiguous) {
+    return (mkldnn_conv_is_contiguous || mkldnn_conv_is_channels_last);
+  } else if (is_channels_last) {
+    return mkldnn_conv_is_channels_last;
+  } else if (is_contiguous) {
+    return mkldnn_conv_is_contiguous;
+  }
+  return true;
+}
+
 auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (!mkldnn_conv_contiguous_check(
+          input)) { // check whether current ATen input is contiguous based on
+                    // oneDNN requirements.
     return false;
   }
   if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
@@ -1504,7 +1558,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
