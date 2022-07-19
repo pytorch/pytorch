@@ -42,7 +42,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  keyset_ = key_set_.remove(c10::DispatchKey::Dense);
+  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
