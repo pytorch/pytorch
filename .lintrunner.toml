@@ -9,6 +9,11 @@ exclude_patterns = [
     'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
+    # NOTE: [Impending functorch move]
+    # In preparation for the functorch -> pytorch merge,
+    # we are adding the following excludes so that functorch passes
+    # lint when it gets merged in. Please don't delete.
+    'functorch/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'third_party/**',
@@ -220,7 +225,11 @@ command = [
 [[linter]]
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = ['test/test_jit.py']
+exclude_patterns = [
+    'test/test_jit.py',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -292,6 +301,8 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -308,8 +319,11 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -335,9 +349,12 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -363,6 +380,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -418,6 +436,8 @@ exclude_patterns = [
     '**/git-pre-commit',
     '**/git-clang-format',
     '**/gradlew',
+    # See NOTE: [Impending functorch move]
+    'functorch/**',
 ]
 command = [
     'python3',
@@ -667,7 +687,9 @@ code = 'UFMT'
 # After that, we can use **/*.py to apply the formatter to all entries
 # currently enforced by BLACK linter
 include_patterns = [
+    'test/onnx/**/*.py',
     'tools/**/*.py',
+    'torchgen/**/*.py',
 ]
 command = [
     'python3',
