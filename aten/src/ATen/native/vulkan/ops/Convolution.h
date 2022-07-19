@@ -14,8 +14,6 @@ enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
   Conv2dSlidingWindow,
-  Conv2dQSlidingWindow,
-  Conv2dQPointwise
 };
 
 //  private:
@@ -51,15 +49,7 @@ VulkanOpContext conv2d_context_create(
     const IntArrayRef output_padding_arg,
     const int64_t groups,
     const c10::optional<Scalar>& output_min = c10::nullopt,
-    const c10::optional<Scalar>& output_max = c10::nullopt,
-    const bool is_quantized = false);
-
-Tensor conv2d_context_run_q(
-    const Tensor& input_arg,
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context,
-    double scale,
-    int64_t zero_point);
+    const c10::optional<Scalar>& output_max = c10::nullopt);
 
 Tensor conv2d_context_run(
     const Tensor& input_arg,
