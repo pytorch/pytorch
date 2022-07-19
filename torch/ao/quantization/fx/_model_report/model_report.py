@@ -308,6 +308,41 @@ class ModelReport:
         # return the reports of interest
         return reports_of_interest
 
+    def _is_same_info_for_same_key(self, info_dict_a: Dict, info_dict_b: Dict) -> bool:
+        r"""
+        Takes in two dictionaries and ensures that any common keys between the two have the same
+        values.
+
+        Args:
+            info_dict_a (Dict): First dictionary we wish to compare
+            info_dict_b (Dict): Second dictionary we wish to compare
+
+        Returns True if all shared keys have same values, false otherwise
+        """
+        # get the set of keys for both
+        dict_a_keys: Set = set(info_dict_a.keys())
+        dict_b_keys: Set = set(info_dict_b.keys())
+
+        # get the insersection keys and check if same value for both dicts
+        intersecting_keys: Set = dict_a_keys.intersection(dict_b_keys)
+
+        for key in intersecting_keys:
+            dict_a_val = info_dict_a[key]
+            dict_b_val = info_dict_b[key]
+
+            # if it's a tensor we have to handle seperately
+            if type(dict_a_val) == torch.Tensor:
+                # if dict_b_val not tensor, automatically false
+                if type(dict_b_val) != torch.Tensor or sum(dict_a_val != dict_b_val) != 0:
+                    return False
+            else:
+                # for non-tensor vals
+                if dict_a_val != dict_b_val:
+                    return False
+
+        # if no non matching shared keys found, return true
+        return True
+
     def _reformat_reports_for_visualizer(self) -> OrderedDict:
         r"""
         Takes the generated reports and reformats them into the format that is desired by the
@@ -334,7 +369,14 @@ class ModelReport:
 
                     # merge them together into the new unioned dict
                     # same features keys -> same info, so okay if override
-                    module_fqns_to_features[module_fqn] = {**new_info, **present_info}
+
+                    # do safety check to make sure shared keys have same info
+                    if self._is_same_info_for_same_key(new_info, present_info):
+                        module_fqns_to_features[module_fqn] = {**new_info, **present_info}
+                    else:
+                        error_str = "You have the same key with different values across detectors. "
+                        error_str += "Someone incorrectly implemented a detector with conflicting keys to exisiting detectors."
+                        raise ValueError(error_str)
                 else:
                     # we just set it
                     module_fqns_to_features[module_fqn] = module_info[module_fqn]
@@ -364,7 +406,7 @@ class ModelReport:
         """
         # check if user has generated reports at least once
         if len(self._generated_reports) == 0:
-            raise Exception("You need to generate reports before you generate visualizers")
+            raise Exception("Unable to generate visualizers without first generating reports")
 
         # get the ordered dict mapping modules to their full set of collected features / stats
         module_fqns_to_features: OrderedDict = self._reformat_reports_for_visualizer()
