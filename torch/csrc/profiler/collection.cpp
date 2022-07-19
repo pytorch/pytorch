@@ -438,7 +438,7 @@ void checkedInsert(
   TORCH_INTERNAL_ASSERT(
       inserted.second,
       fmt::format(
-          "Duplicate key ({}): {} {} {}", callsite, k, v->name(), ref->name()));
+          "Duplicate key ({}): {} {}", callsite, v->name(), ref->name()));
 }
 
 static constexpr char* indexKey = "Profiler Event Index";
@@ -626,9 +626,8 @@ addKinetoEvents(
       TORCH_INTERNAL_ASSERT(
           index != unmatchedIndex,
           fmt::format(
-              "lookup ({}) failed: {} {}",
+              "lookup ({}) failed: {}",
               callsite,
-              activity,
               activity->name()));
       return results.at(index);
     }
