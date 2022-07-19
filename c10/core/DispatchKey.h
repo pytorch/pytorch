@@ -66,8 +66,11 @@ enum class BackendComponent : uint8_t {
   PrivateUse1Bit,
   PrivateUse2Bit,
   PrivateUse3Bit,
-  // Don't put any more keys after here
-  EndOfBackendKeys,
+  // Define an alias to represent end of backend dispatch keys.
+  // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
+  EndOfBackendKeys = PrivateUse3Bit,
 };
 
 // Semantically, a dispatch key identifies a possible "level" in our
