@@ -28,6 +28,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -59,7 +60,6 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
-from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -71,6 +71,7 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+    ParamInfo,
 )
 from .wrap import (
     _or_policy,
@@ -84,6 +85,12 @@ try:
     from torchdistx import deferred_init, fake
 except ImportError:
     _TORCHDISTX_AVAIL = False
+
+_TORCH_FX_AVAIL = True
+if not hasattr(torch, "fx"):
+    _TORCH_FX_AVAIL = False
+if _TORCH_FX_AVAIL:
+    from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 
 
 __all__ = [
@@ -937,7 +944,11 @@ class FullyShardedDataParallel(nn.Module):
         auto_wrap_policy = kwargs["auto_wrap_policy"]
         module = kwargs["module"]
         assert hasattr(auto_wrap_policy, "tracing_config")
-        if isinstance(
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
             auto_wrap_policy.tracing_config,
             TracingConfig
         ):
@@ -961,6 +972,10 @@ class FullyShardedDataParallel(nn.Module):
                         "tracer.trace failed inside _init_param_exec_order_wrap_policy"
                         f" with the error: {e}."
                     )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
@@ -969,7 +984,7 @@ class FullyShardedDataParallel(nn.Module):
         self._param_exec_order_prep_stage: bool = True
         # A list that stores the flatten parameters and its name based on the parameter execution order
         self._fsdp_params_exec_order: List[FlatParameter] = []
-        if isinstance(
+        if _TORCH_FX_AVAIL and isinstance(
             auto_wrap_policy.tracing_config,
             TracingConfig
         ):
@@ -986,10 +1001,6 @@ class FullyShardedDataParallel(nn.Module):
                     for flat_param in module_to_fsdp[m].params:
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
-        else:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should either be an instance of TracingConfig or be None"
 
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
@@ -1921,48 +1932,90 @@ class FullyShardedDataParallel(nn.Module):
         back to sharded version after _summon_full_params ends, and also remove
         "_fsdp_wrapped_module" prefix.
         """
+        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
         # state_dict is empty for nonzero ranks if `rank0_only` was enabled.
         if not state_dict:
             return state_dict
 
+        if self._fsdp_wrapped_module.no_params:
+            return state_dict
+
+        # This can happen when rank0_only is enabled and self.rank != 0.
+        if self._fsdp_wrapped_module.orig_flat_param[0] is None:
+            assert self._fsdp_wrapped_module.flat_param is not None, (
+                "When no_params is False, one of flat_param and orig_flat_param "
+                "should have value."
+            )
+            return state_dict
+
         offload_to_cpu = self._state_dict_config.offload_to_cpu
         cpu_device = torch.device("cpu")
-        for key in state_dict:
-            clean_key = clean_tensor_name(key)
+
+        # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
+        # processing buffers.
+        sharded_param_info = [
+            ParamInfo(info[0], info[2], info[3])
+            for info in self._fsdp_wrapped_module.orig_flat_param[0]._shared_param_infos
+        ]
+        for module_name, _, param_name in (
+            self._fsdp_wrapped_module.orig_flat_param[0].param_info + sharded_param_info
+        ):
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            # Activation checkpoint adds a prefix that has to be
+            # removed as well.
+            module_name = module_name.replace(
+                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+            )
+            fqn = f"{prefix}{module_name}{param_name}"
+
+            clean_key = fqn
             clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
             # do not have prefix considered as they are not computed in `state_dict`
             # call.
             if clean_key.startswith(clean_prefix):
                 clean_key = clean_key[len(clean_prefix):]
-            # Do not need to clone buffers since they are not sharded
-            if clean_key in self._buffer_names:
-                # Offload the buffer to CPU if needed -- we do not do this in
-                # `_summon_full_params()` since without care, that would free
-                # the original buffer's GPU memory and require reallocating
-                # that memory later; this only affects the state dict's buffer
-                # variable and leaves the original buffer's GPU memory intact
-                if offload_to_cpu and state_dict[key].device != cpu_device:
-                    state_dict[key] = state_dict[key].to(cpu_device)
-                continue
+
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
+            assert fqn in state_dict, (
+                f"FSDP assumes {fqn} is in the state_dict but the state_dict "
+                f"only has {state_dict.keys()}. prefix={prefix}, "
+                f"module_name={module_name} param_name={param_name}."
+            )
             if clean_key not in self._ignored_param_names and \
-                    not getattr(state_dict[key], "_has_been_cloned", False):
+                    not getattr(state_dict[fqn], "_has_been_cloned", False):
                 try:
-                    state_dict[key] = state_dict[key].clone().detach()
-                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                    state_dict[fqn] = state_dict[fqn].clone().detach()
+                    state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
                     warnings.warn(
-                        f"Failed to clone() tensor with name {key}. This may mean "
+                        f"Failed to clone() tensor with name {fqn}. This may mean "
                         "that this state_dict entry could point to invalid memory "
                         "regions after returning from state_dict() call if this "
                         "parameter is managed by FSDP. Please check clone "
-                        f"implementation of {key}. Error: {str(e)}"
+                        f"implementation of {fqn}. Error: {str(e)}"
                     )
 
-        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+        # Offload the buffer to CPU if needed -- we do not do this in
+        # `_summon_full_params()` since without care, that would free
+        # the original buffer's GPU memory and require reallocating
+        # that memory later; this only affects the state dict's buffer
+        # variable and leaves the original buffer's GPU memory intact
+        if offload_to_cpu:
+            for clean_key in self._buffer_names:
+                # This is a hack to support activation checkpoint.
+                clean_key = clean_key.replace(
+                    f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+                )
+                fqn = f"{prefix}{clean_key}"
+                if state_dict[fqn].device != cpu_device:
+                    state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
 
     def _local_post_state_dict_hook(

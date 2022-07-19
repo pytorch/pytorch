@@ -6,7 +6,7 @@ import traceback
 
 import google.protobuf.text_format
 import onnx.backend.test
-import test_onnx_common
+import onnx_test_common
 from test_caffe2_common import run_generated_test
 
 from torch.testing._internal.common_device_type import get_all_device_types
@@ -20,7 +20,7 @@ _expect_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "expect"
 
 
 def collect_generated_testcases(
-    root_dir=test_onnx_common.pytorch_converted_dir,
+    root_dir=onnx_test_common.pytorch_converted_dir,
     verbose=False,
     fail_dir=None,
     expect=True,
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     collect_generated_testcases(verbose=verbose, fail_dir=fail_dir, expect=expect)
     # We already generate the expect files for test_operators.py.
     collect_generated_testcases(
-        root_dir=test_onnx_common.pytorch_operator_dir,
+        root_dir=onnx_test_common.pytorch_operator_dir,
         verbose=verbose,
         fail_dir=fail_dir,
         expect=False,
