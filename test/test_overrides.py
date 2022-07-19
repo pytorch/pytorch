@@ -9,6 +9,7 @@ import pickle
 import collections
 import unittest
 
+from contextlib import nullcontext
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
@@ -19,7 +20,10 @@ from torch.overrides import (
     TorchFunctionMode
 )
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
+from torch.utils._pytree import tree_map
+from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from functools import partial
+
 
 Tensor = torch.Tensor
 
@@ -1560,6 +1564,96 @@ class TestTorchFunctionMode(TestCase):
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_reentrant_dispatch_subclass(self):
+        def norm_decomp(x, p = 2.0):
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        oplist = []
+
+        class TestSubclass(torch.Tensor):
+            data: torch.Tensor
+
+            __slots__ = ["data"]
+
+            def __new__(cls, data=None):
+                r = torch.Tensor._make_subclass(cls, data)
+                r.data = data
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if kwargs == None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x.data if isinstance(x, TestSubclass) else x
+
+                def wrap(x):
+                    return TestSubclass(x) if isinstance(x, torch.Tensor) else x
+
+                if "norm" in str(func):
+                    with torch.overrides.enable_reentrant_dispatch():
+                        return norm_decomp(*args, **kwargs)
+
+                nonlocal oplist
+                oplist.append(func)
+
+                return tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+
+        x = TestSubclass(torch.rand(5, 5))
+        torch.ops.aten.norm.Scalar(x)
+
+        found_pow = False
+        for f in oplist:
+            if "pow" in str(f):
+                found_pow = True
+            self.assertFalse("square" in str(f))
+        self.assertTrue(found_pow)
+
+
+    def test_reentrant_dispatch_mode(self):
+        def norm_decomp(x, p = 2.0):
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        class TestMode(TorchDispatchMode):
+            def __init__(self, reset_mode: bool):
+                super().__init__()
+                self.reset_mode = reset_mode
+                self.oplist = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if "norm" in str(func):
+                    with enable_torch_dispatch_mode(self) if self.reset_mode else nullcontext():
+                        with torch.overrides.enable_reentrant_dispatch():
+                            return norm_decomp(*args, **kwargs)
+
+                self.oplist.append(func)
+
+                return func(*args, **kwargs)
+
+        x = torch.rand(4, 4)
+        mode = TestMode(reset_mode=False)
+        with self.assertRaisesRegex(RuntimeError, "Tried to enable reentrant dispatch but no TorchDispatchMode was set"):
+            with mode:
+                torch.ops.aten.norm.Scalar(x)
+
+        x = torch.rand(4, 4)
+        mode = TestMode(reset_mode=True)
+        with mode:
+            torch.ops.aten.norm.Scalar(x)
+
+        found_pow = False
+        for f in mode.oplist:
+            if "pow" in str(f):
+                found_pow = True
+            self.assertFalse("square" in str(f))
+        self.assertTrue(found_pow)
+
+
 
 
 if __name__ == '__main__':

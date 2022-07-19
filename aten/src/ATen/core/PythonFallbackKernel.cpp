@@ -103,6 +103,10 @@ namespace at {
 namespace impl {
 
 RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
+  if (tls_on_entry->included_.has(DispatchKey::Python)) {
+    TORCH_INTERNAL_ASSERT(at::impl::TorchDispatchModeTLS::get_state(),
+        "Tried to enable reentrant dispatch but no TorchDispatchMode was set.");
+  }
   tls_on_entry = c10::nullopt;
 }
 
