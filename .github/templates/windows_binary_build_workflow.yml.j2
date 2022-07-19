@@ -60,8 +60,6 @@ jobs:
     with:!{{ upload.binary_env_as_input(config, True) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 

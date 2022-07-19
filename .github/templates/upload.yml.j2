@@ -5,7 +5,10 @@
 {%- endmacro %}
 
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
-{%- if not is_windows %}
+{%- if is_windows %}
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
+{%- else %}
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
 {%- endif %}

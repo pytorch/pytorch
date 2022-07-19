@@ -36,6 +36,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -44,8 +46,6 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cpu
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -54,6 +54,8 @@ jobs:
     needs: conda-py3_7-cpu-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -71,6 +73,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -88,6 +92,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -97,8 +103,6 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cuda11_3
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -107,6 +111,8 @@ jobs:
     needs: conda-py3_7-cuda11_3-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -125,6 +131,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_3-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -143,6 +151,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -152,8 +162,6 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cuda11_6
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -162,6 +170,8 @@ jobs:
     needs: conda-py3_7-cuda11_6-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -180,6 +190,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_6-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -198,6 +210,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -207,8 +221,6 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: conda-py3_7-cuda11_7
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -217,6 +229,8 @@ jobs:
     needs: conda-py3_7-cuda11_7-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -235,6 +249,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cuda11_7-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -253,6 +269,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -261,8 +279,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -271,6 +287,8 @@ jobs:
     needs: conda-py3_8-cpu-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -288,6 +306,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -305,6 +325,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -314,8 +336,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_3
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -324,6 +344,8 @@ jobs:
     needs: conda-py3_8-cuda11_3-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -342,6 +364,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_3-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -360,6 +384,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -369,8 +395,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_6
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -379,6 +403,8 @@ jobs:
     needs: conda-py3_8-cuda11_6-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -397,6 +423,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_6-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -415,6 +443,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -424,8 +454,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_7
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -434,6 +462,8 @@ jobs:
     needs: conda-py3_8-cuda11_7-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -452,6 +482,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cuda11_7-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -470,6 +502,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -478,8 +512,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -488,6 +520,8 @@ jobs:
     needs: conda-py3_9-cpu-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -505,6 +539,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -522,6 +558,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -531,8 +569,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_3
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -541,6 +577,8 @@ jobs:
     needs: conda-py3_9-cuda11_3-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -559,6 +597,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_3-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -577,6 +617,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -586,8 +628,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_6
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -596,6 +636,8 @@ jobs:
     needs: conda-py3_9-cuda11_6-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -614,6 +656,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_6-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -632,6 +676,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -641,8 +687,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_7
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -651,6 +695,8 @@ jobs:
     needs: conda-py3_9-cuda11_7-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -669,6 +715,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cuda11_7-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -687,6 +735,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -695,8 +745,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -705,6 +753,8 @@ jobs:
     needs: conda-py3_10-cpu-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -722,6 +772,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -739,6 +791,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -748,8 +802,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_3
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -758,6 +810,8 @@ jobs:
     needs: conda-py3_10-cuda11_3-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -776,6 +830,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_3-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -794,6 +850,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -803,8 +861,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_6
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -813,6 +869,8 @@ jobs:
     needs: conda-py3_10-cuda11_6-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -831,6 +889,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_6-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -849,6 +909,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -858,8 +920,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_7
       build_environment: windows-binary-conda
-      PYTORCH_ROOT: \pytorch
-      BUILDER_ROOT: \builder
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -868,6 +928,8 @@ jobs:
     needs: conda-py3_10-cuda11_7-build
     uses: ./.github/workflows/_binary-test-windows.yml
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -886,6 +948,8 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cuda11_7-test
     with:
+      PYTORCH_ROOT: pytorch
+      BUILDER_ROOT: builder
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
