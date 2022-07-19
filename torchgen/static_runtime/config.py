@@ -1,6 +1,6 @@
-from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
-
 from typing import Dict, Union
+
+from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
 
 
 def func_name_base_str(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:

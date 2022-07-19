@@ -5,6 +5,7 @@
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/QuantizedConvolution.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
@@ -297,7 +298,7 @@ Tensor quantized_convolution(
         input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
   }
   const vTensor& v_input = convert(input);
-  VulkanOpContext vulkan_context = conv2d_context_create(
+  VulkanOpContext vulkan_context = conv2d_context_create_q(
       weight,
       bias,
       stride,
@@ -307,8 +308,7 @@ Tensor quantized_convolution(
       output_padding,
       groups,
       c10::nullopt,
-      c10::nullopt,
-      v_input.is_quantized());
+      c10::nullopt);
   return conv2d_context_run_q(
       input,
       vulkan_context.get_packed(),
