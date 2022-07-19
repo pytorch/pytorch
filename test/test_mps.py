@@ -6272,6 +6272,12 @@ class TestConsistency(TestCase):
                  'torch.int32',
                  'torch.int64',
                  'torch.uint8'],
+        'repeat': ['torch.float16',
+                   'torch.float32',
+                   'torch.int16',
+                   'torch.int32',
+                   'torch.int64',
+                   'torch.uint8'],
         'repeat_interleave': ['torch.bool',
                               'torch.float16',
                               'torch.float32',
@@ -6441,7 +6447,6 @@ class TestConsistency(TestCase):
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
         'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        'repeat': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         '__radd__': ['torch.bool', 'torch.uint8'],
         '__rmul__': ['torch.uint8'],
         'add': ['torch.bool', 'torch.uint8'],
