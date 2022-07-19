@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -516,7 +517,19 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
+std::vector<Val*> Fusion::terminatingMathVals() {
+  VectorOfUniqueEntries<Val*> result;
+  auto used_vals = usedMathVals();
+  for (auto v : used_vals) {
+    // Locate the vals that are not expr outputs but have valid definitions.
+    if (unordered_uses(v).empty() && v->definition() != nullptr) {
+      result.pushBack(v);
+    }
+  }
+  return result.vector();
+}
+
+std::unordered_set<Expr*> Fusion::unordered_uses(const Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 

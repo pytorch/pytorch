@@ -23335,6 +23335,226 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+// Test case for removing syncs on chain of redundant uses.
+TEST_F(NVFuserTest, FusionRedundantPredSync2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({32});
+  TensorView* tv1 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv2, tv1);
+
+  fusion.addOutput(tv3);
+
+  auto tv0c = tv0->cacheAfter();
+
+  // Make a redundant write through smem
+  tv0c->setMemoryType(MemoryType::Shared);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv3, 0);
+  tv1->computeAt(tv3, 0);
+
+  tv0c->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDy);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Utility class to make sure one block sync
+  //  is inserted by RAW pass.
+  class SyncChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+    int result() {
+      return sync_seen_;
+    }
+
+   private:
+    void handle(kir::BlockSync*) final {
+      sync_seen_++;
+    }
+
+   private:
+    int sync_seen_ = 0;
+  } checker;
+
+  GpuLower gpulw(&fusion);
+  checker.handle(gpulw.kernel()->topLevelExprs());
+  TORCH_INTERNAL_ASSERT(
+      checker.result() < 2, "More syncs were inserted than expected");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({32}, options);
+  at::Tensor t1 = at::randn({32, 32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Test case for sync insertion after redundant predicated smem write
+//  Check that syncs are removed only when all paths are redundant.
+TEST_F(NVFuserTest, FusionRedundantPredSync3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({32});
+  TensorView* tv1 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = set(tv2);
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = add(tv2, tv1);
+
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+
+  auto tv0c = tv0->cacheAfter();
+
+  // In this scheduling config,
+  //  tv0c -> tv2 -> tv3 is a redundant path for tidy
+  //  tv0c -> tv2 -> tv5 is not.
+  //  So we need a RAW sync in tv0c->tv2 to make sure
+  //  tv2 has the correct value to produce tv5.
+  tv0c->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  tv0c->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(0)->parallelize(ParallelType::TIDy);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv5->axis(0)->parallelize(ParallelType::TIDy);
+  tv5->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Utility class to make sure one block sync
+  //  is inserted by RAW pass.
+  class SyncChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+    int result() {
+      return sync_seen_;
+    }
+
+   private:
+    void handle(kir::BlockSync* sync) final {
+      if (!sync->isWarHazardSync()) {
+        sync_seen_++;
+      }
+    }
+
+   private:
+    int sync_seen_ = 0;
+  } checker;
+
+  GpuLower gpulw(&fusion);
+  checker.handle(gpulw.kernel()->topLevelExprs());
+
+  // This is implicit checking. There are exactly 2 places
+  //  where RAW hazards happen: one producing tv2 and the other
+  //  producing tv3. This test case expect syncs in both of
+  //  these places so we check that 2 RAW syncs are inserted.
+  TORCH_INTERNAL_ASSERT(
+      checker.result() == 2,
+      "Exactly 2 RAW sync expected for the two shared memory transfers");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({32}, options);
+  at::Tensor t1 = at::randn({32, 32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref, ref}, __LINE__, __FILE__);
+}
+
+// Unit test case for detecting thread redundant usage of shared tensors.
+TEST_F(NVFuserTest, FusionRedundantUseCheck_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = set(tv2);
+  auto tv4 = set(tv3);
+
+  auto tv5 = set(tv4);
+
+  auto tv6 = set(tv4);
+  auto tv7 = set(tv6);
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv7);
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Shared);
+
+  tv7->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Thread pred map cannot be built without an active lower
+  //  object. So would need to lower the whole fusion for
+  //  testing. However, lower also keeps an copy of the fusion
+  //  so the original pointers cannot be used to querry the
+  //  thread pred map. So have to traverse the new expr list
+  //  to find the pointers;
+  GpuLower gpulw(&fusion);
+
+  TensorView *lowered_tv2 = nullptr, *lowered_tv4 = nullptr;
+  auto used_vals = gpulw.kernel()->usedMathVals();
+
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    if (tv->name() == 2) {
+      lowered_tv2 = tv;
+    }
+    if (tv->name() == 4) {
+      lowered_tv4 = tv;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      lowered_tv2 != nullptr && lowered_tv4 != nullptr,
+      "tv2 or tv4 not lowered or mangled");
+
+  auto tv2_info = gpulw.threadPredMap().getPredicateInfo(lowered_tv2);
+  auto tv4_info = gpulw.threadPredMap().getPredicateInfo(lowered_tv4);
+
+  // tv2 -> tv3 -> tv4 (shared) is the only use chain for tv2,
+  //  and tv4 is redundantly written in tidx so tv2 is redundantly
+  //  consumed in tidx.
+  TORCH_INTERNAL_ASSERT(
+      tv2_info.redundant_use_types.get(ParallelType::TIDx),
+      "TV2 is redundantly used but not detected.");
+
+  // tv4->tv5 (global) is a redundant use chain, but
+  // tv4->tv6->tv7 is not, so tv4 should not be detected as
+  // a redundant used tensor in tidx.
+  TORCH_INTERNAL_ASSERT(
+      !tv4_info.redundant_use_types.get(ParallelType::TIDx),
+      "TV4 is not redundantly used but not detected.");
+}
+
 // Test a basic swizzle pattern
 TEST_F(NVFuserTest, FusionSimpleSwizzle0_CUDA) {
   Fusion fusion;

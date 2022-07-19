@@ -153,8 +153,16 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! also included as they must show up in the final code.
   std::vector<Val*> usedMathVals();
 
+  //! Returns all vals that are produced by used math expressions and
+  //!  also do not have further consumers.
+  //!
+  //! In the case of an active multi-output expressions, the returned vector
+  //!  will include the expression outputs that did not lead to an fusion
+  //!  output.
+  std::vector<Val*> terminatingMathVals();
+
   //! Return all Exprs that use val
-  std::unordered_set<Expr*> unordered_uses(Val* val) const;
+  std::unordered_set<Expr*> unordered_uses(const Val* val) const;
 
   //! Return the Expr that produces val
   Expr* definition(const Val* val) const;
