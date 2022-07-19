@@ -1,8 +1,10 @@
 import functools
 import torch
-from typing import Iterator
+from typing import Iterator, TypeVar
 from dataclasses import dataclass
 from contextlib import contextmanager
+
+T = TypeVar('T')
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -51,7 +53,7 @@ class _ModeInfo:
 # shared version of enable_torch_function/enable_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
-def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[T]:
     if not (
         mode is None or
         isinstance(mode, mode_info.mode_class) or
@@ -61,7 +63,7 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
                          f'or None as an argument got {type(mode)} instead')
     old = mode_info.get_mode()
     if old is mode:
-        yield
+        yield mode  # type: ignore[misc]
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
@@ -79,14 +81,15 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         )
     # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
     # let you directly pass a Tensor subclass type to "mode-ify" it.
-    required_fn = "__" + mode_info.mode_name + "__"
-    if not hasattr(mode, required_fn):
-        raise ValueError(
-            f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
-        )
+    if mode is not None:
+        required_fn = "__" + mode_info.mode_name + "__"
+        if not hasattr(mode, required_fn):
+            raise ValueError(
+                f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
+            )
     mode_info.set_mode(mode)
     try:
-        yield
+        yield mode  # type: ignore[misc]
     finally:
         mode_info.set_mode(old)
 
@@ -127,6 +130,10 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
             f'The callable passed to push_{mode_info.mode_name}_mode'
             f'must return a {mode_info.mode_class_name()}'
         )
+    if old is not None:
+        mode.ancestors = old.ancestors.union({old})  # type: ignore[attr-defined]
+    else:
+        mode.ancestors = set()  # type: ignore[attr-defined]
     mode_info.set_mode(mode)
     try:
         yield mode
