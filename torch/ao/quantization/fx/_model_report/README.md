@@ -28,13 +28,13 @@ prepared_model = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
 
 # create ModelReport instance and insert observers
 detector_set = set([PerChannelDetector(), InputWeightDetector(0.5), DynamicStaticDetector(), OutlierDetector()]) # TODO add all desired detectors
-model_report = ModelReport(detector_set)
-ready_for_callibrate = model_report.prepare_detailed_callibration(prepared_model)
+model_report = ModelReport(prepared_model, detector_set)
+ready_for_callibrate = model_report.prepare_detailed_callibration()
 
 # TODO run callibration of model with relavent data
 
 # generate reports for your model and remove observers if desired
-reports = model_report.generate_model_report(ready_for_callibrate, remove_inserted_observers=True)
+reports = model_report.generate_model_report(remove_inserted_observers=True)
 for report_name in report.keys():
     text_report, report_dict = reports[report_name]
     print(text_report, report_dict)
@@ -53,11 +53,11 @@ This README will be updated with a link to the tutorial upon completion of the t
 The `ModelReport` class is the primary class the user will be interacting with in the ModelReport workflow.
 There are three primary methods to be familiar with when using the ModelReport class:
 
-- `__init__(self, desired_report_detectors: Set[DetectorBase])` constructor that takes in instances of desired detectors and stores them.
+- `__init__(self, model: GraphModule, desired_report_detectors: Set[DetectorBase])` constructor that takes in instances of the model we wish to generate report for (must be traceable GraphModule) and desired detectors and stores them.
 This is so that we can keep track of where we want to insert observers on a detector by detector basis and also keep track of which detectors to generate reports for.
-- `prepare_detailed_calibration(self, model: GraphModule)` &rarr; `GraphModule` takes in a GraphModule and inserts observers into the locations specified by each detector.
-It then returns the passed in GraphModule with the detectors inserted into both the regular module structure as well as the node structure.
-- `generate_model_report(self, fx_model: GraphModule, **kwargs)` &rarr; `Dict[str, Tuple[str, Dict]]` takes in a GraphModule that has been callibrated and generates, for each detector the ModelReport instance was initialized with:
+- `prepare_detailed_calibration(self)` &rarr; `GraphModule` inserts observers into the locations specified by each detector in the model.
+It then returns the GraphModule with the detectors inserted into both the regular module structure as well as the node structure.
+- `generate_model_report(self, remove_inserted_observers: bool)` &rarr; `Dict[str, Tuple[str, Dict]]` uses callibrated GraphModule to optionally removes inserted observers, and generate, for each detector the ModelReport instance was initialized with:
   - A string-based report that is easily digestable and actionable explaining the data collected by relavent observers for that detector
   - A dictionary containing statistics collected by the relavent observers and values calculated by the detector for futher analysis or plotting
 
