@@ -274,8 +274,8 @@ CROSS_REF_EXCLUDE_SET = {
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
-    # # CompositeAutogradImplicit
-    # # See https://github.com/pytorch/pytorch/issues/81669
+    # CompositeAutogradImplicit
+    # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
 
 }
