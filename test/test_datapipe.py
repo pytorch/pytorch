@@ -897,7 +897,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp0 = input_dp.fork(num_instances=1)
+        dp0 = input_dp.fork(num_instances=1, buffer_size=0)
         self.assertEqual(dp0, input_dp)
 
         # Functional Test: making sure all child DataPipe shares the same reference
@@ -918,12 +918,16 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual([(i, i) for i in range(10)], output)
 
         # Functional Test: one child DataPipe yields all value first, but buffer_size = 5 being too small
-        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=4)
         it1 = iter(dp1)
-        for _ in range(5):
+        for _ in range(4):
             next(it1)
         with self.assertRaises(BufferError):
             next(it1)
+        with self.assertRaises(BufferError):
+            list(dp2)
+
+        dp1, dp2 = input_dp.fork(num_instances=2, buffer_size=5)
         with self.assertRaises(BufferError):
             list(dp2)
 
@@ -3074,83 +3078,98 @@ class _CustomSelfNextTestDataPipe(IterDataPipe):
 
 class TestIterDataPipeGraphFastForward(TestCase):
 
-    def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, n_iterations=3, rng=None):
+    def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, expected_res, n_iterations=3, rng=None):
         if rng is None:
             rng = torch.Generator()
-        initial_rng_state = rng.get_state()
+        rng = rng.manual_seed(0)
         torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
-        expected_full_res = list(datapipe)
 
         # The next 3 lines simulate the effect of starting another epoch
         # Then the reminder test cases show that you can restore to first epoch if needed
         # as long as you have the initial RNG state
         rng = rng.manual_seed(100)
         torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
-        list(datapipe)
 
         # Test Case: fast forward works with list
-        rng.set_state(initial_rng_state)
+        rng.manual_seed(0)
         fast_forward_fn(datapipe, n_iterations, rng)
         actual_res = list(datapipe)
         self.assertEqual(len(datapipe) - n_iterations, len(actual_res))
-        self.assertEqual(expected_full_res[n_iterations:], actual_res)
+        self.assertEqual(expected_res[n_iterations:], actual_res)
 
         # Test Case: fast forward works with iterator
-        rng.set_state(initial_rng_state)
+        rng.manual_seed(0)
         fast_forward_fn(datapipe, n_iterations, rng)
         it = iter(datapipe)
         actual_res = list(it)
         self.assertEqual(len(datapipe) - n_iterations, len(actual_res))
-        self.assertEqual(expected_full_res[n_iterations:], actual_res)
+        self.assertEqual(expected_res[n_iterations:], actual_res)
         with self.assertRaises(StopIteration):
             next(it)
 
     def test_simple_snapshot_graph(self):
         graph1 = dp.iter.IterableWrapper(range(10))
-        self._fast_forward_graph_test_helper(graph1, _simple_graph_snapshot_restoration)
+        res1 = list(range(10))
+        self._fast_forward_graph_test_helper(graph1, _simple_graph_snapshot_restoration,
+                                             expected_res=res1)
 
         graph2 = graph1.map(_mul_10)
-        self._fast_forward_graph_test_helper(graph2, _simple_graph_snapshot_restoration)
+        res2 = [10 * x for x in res1]
+        self._fast_forward_graph_test_helper(graph2, _simple_graph_snapshot_restoration,
+                                             expected_res=res2)
 
         rng = torch.Generator()
+        rng.manual_seed(0)
         graph3 = graph2.shuffle()
-        self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration, rng=rng)
+        res3 = [30, 40, 0, 70, 50, 20, 60, 10, 90, 80]
+        self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
+                                             expected_res=res3)
 
         graph4 = graph3.map(_mul_10)
-        self._fast_forward_graph_test_helper(graph4, _simple_graph_snapshot_restoration, rng=rng)
+        res4 = [10 * x for x in res3]
+        self._fast_forward_graph_test_helper(graph4, _simple_graph_snapshot_restoration,
+                                             expected_res=res4)
 
         graph5 = graph4.batch(2)
-        self._fast_forward_graph_test_helper(graph5, _simple_graph_snapshot_restoration, rng=rng)
+        res5 = [[300, 400], [0, 700], [500, 200], [600, 100], [900, 800]]
+        self._fast_forward_graph_test_helper(graph5, _simple_graph_snapshot_restoration,
+                                             expected_res=res5)
 
         # With `fork` and `zip`
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
-        self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration, rng=rng)
+        rng = rng.manual_seed(100)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        res6 = [(x, x) for x in res5]
+        self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
+                                             expected_res=res6)
 
         # With `fork` and `concat`
         graph7 = cdp1.concat(cdp2)
-        self._fast_forward_graph_test_helper(graph7, _simple_graph_snapshot_restoration, rng=rng)
+        res7 = res5 * 2
+        self._fast_forward_graph_test_helper(graph7, _simple_graph_snapshot_restoration,
+                                             expected_res=res7)
 
-        # Raises an exception if the graph has already been restored
+        # # Raises an exception if the graph has already been restored
         with self.assertRaisesRegex(RuntimeError, "Snapshot restoration cannot be applied."):
             _simple_graph_snapshot_restoration(graph7, 1)
             _simple_graph_snapshot_restoration(graph7, 1)
 
     def test_simple_snapshot_custom_non_generator(self):
         graph = _CustomNonGeneratorTestDataPipe()
-        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration)
+        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration, expected_res=range(10))
 
     def test_simple_snapshot_custom_self_next(self):
         graph = _CustomSelfNextTestDataPipe()
-        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration)
+        self._fast_forward_graph_test_helper(graph, _simple_graph_snapshot_restoration, expected_res=range(10))
 
-    def _snapshot_test_helper(self, datapipe, n_iter=3, rng=None):
+    def _snapshot_test_helper(self, datapipe, expected_res, n_iter=3, rng=None):
         """
         Extend the previous test with serialization and deserialization test.
         """
         if rng is None:
             rng = torch.Generator()
-        initial_rng_state = rng.get_state()
+        rng.manual_seed(0)
         torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
         it = iter(datapipe)
         for _ in range(n_iter):
@@ -3161,35 +3180,43 @@ class TestIterDataPipeGraphFastForward(TestCase):
         self.assertEqual(n_iter, deserialized_graph._number_of_samples_yielded)
 
         rng_for_deserialized = torch.Generator()
-        rng_for_deserialized.set_state(initial_rng_state)
+        rng_for_deserialized.manual_seed(0)
         _simple_graph_snapshot_restoration(deserialized_graph, n_iter, rng=rng_for_deserialized)
-        self.assertEqual(list(it), list(deserialized_graph))
+        self.assertEqual(expected_res[n_iter:], list(it))
+        self.assertEqual(expected_res[n_iter:], list(deserialized_graph))
 
     def test_simple_snapshot_graph_with_serialization(self):
         graph1 = dp.iter.IterableWrapper(range(10))
-        self._snapshot_test_helper(graph1)
+        res1 = list(range(10))
+        self._snapshot_test_helper(graph1, expected_res=res1)
 
         graph2 = graph1.map(_mul_10)
-        self._snapshot_test_helper(graph2)
+        res2 = [10 * x for x in res1]
+        self._snapshot_test_helper(graph2, expected_res=res2)
 
         rng = torch.Generator()
         graph3 = graph2.shuffle()
-        self._snapshot_test_helper(graph3)
+        res3 = [30, 40, 0, 70, 50, 20, 60, 10, 90, 80]
+        self._snapshot_test_helper(graph3, expected_res=res3)
 
         graph4 = graph3.map(_mul_10)
-        self._snapshot_test_helper(graph4)
+        res4 = [10 * x for x in res3]
+        self._snapshot_test_helper(graph4, expected_res=res4)
 
         graph5 = graph4.batch(2)
-        self._snapshot_test_helper(graph5)
+        res5 = [[300, 400], [0, 700], [500, 200], [600, 100], [900, 800]]
+        self._snapshot_test_helper(graph5, expected_res=res5)
 
         # With `fork` and `zip`
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
-        self._snapshot_test_helper(graph6)
+        res6 = [(x, x) for x in res5]
+        self._snapshot_test_helper(graph6, expected_res=res6)
 
         # With `fork` and `concat`
         graph7 = cdp1.concat(cdp2)
-        self._snapshot_test_helper(graph7)
+        res7 = res5 * 2
+        self._snapshot_test_helper(graph7, expected_res=res7)
 
 
 # class TestIterDataPipeFastForwardWithBuffer(TestCase):
