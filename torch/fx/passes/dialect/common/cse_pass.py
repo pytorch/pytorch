@@ -27,7 +27,13 @@ class CSEPass(PassBase):
 
     def __init__(self, banned_ops=None):
         """
-        Constructor for CSEPass. Users can specify a list of ops to ban from CSE.
+        This version of CSE Pass aims to be dialect agnostic, and it's implemented purely based on the connectivity between fx.Node.
+
+        For functional dialects, user would only need to specify the random ops in ban list.
+
+        Warning: CSE Pass cannot be safely applied on a FX graph in non-functional dialects.
+        If your dialect contains stateful operators, please customized the banned_ops.
+
         """
         if banned_ops is None:
             banned_ops = set()
