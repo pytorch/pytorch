@@ -14,6 +14,8 @@ import torch.distributed.autograd as dist_autograd
 from collections import defaultdict
 from threading import Lock
 
+__all__ = ['DistributedOptimizer']
+
 logger = logging.getLogger(__name__)
 
 # XXX: we define a _ScriptModuleOptimizer here to explicitly

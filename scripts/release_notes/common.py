@@ -1,5 +1,5 @@
 from collections import namedtuple
-from os.path import expanduser
+from pathlib import Path
 import locale
 import subprocess
 import re
@@ -58,6 +58,8 @@ topics = [
     'docs',
     'devs',
     'Untopiced',
+    "not user facing",
+    "security",
 ]
 
 
@@ -67,6 +69,8 @@ Features = namedtuple('Features', [
     'pr_number',
     'files_changed',
     'labels',
+    'author',
+    'accepters'
 ])
 
 
@@ -76,7 +80,9 @@ def dict_to_features(dct):
         body=dct['body'],
         pr_number=dct['pr_number'],
         files_changed=dct['files_changed'],
-        labels=dct['labels'])
+        labels=dct['labels'],
+        author=dct['author'],
+        accepters=tuple(dct['accepters']))
 
 
 def features_to_dict(features):
@@ -128,7 +134,7 @@ def parse_pr_number(body, commit_hash, title):
 
 def get_ghstack_token():
     pattern = 'github_oauth = (.*)'
-    with open(expanduser('~/.ghstackrc'), 'r+') as f:
+    with open(Path('~/.ghstackrc').expanduser(), 'r+') as f:
         config = f.read()
     matches = re.findall(pattern, config)
     if len(matches) == 0:
@@ -146,47 +152,77 @@ def run_query(query):
         raise Exception("Query failed to run by returning code of {}. {}".format(request.status_code, query))
 
 
-def gh_labels(pr_number):
-    query = f"""
-    {{
-      repository(owner: "pytorch", name: "pytorch") {{
-        pullRequest(number: {pr_number}) {{
-          labels(first: 10) {{
-            edges {{
-              node {{
+def github_data(pr_number):
+    query = """
+    {
+      repository(owner: "pytorch", name: "pytorch") {
+        pullRequest(number: %s ) {
+          author {
+            login
+          }
+          reviews(last: 5, states: APPROVED) {
+            nodes {
+              author {
+                login
+              }
+            }
+          }
+          labels(first: 10) {
+            edges {
+              node {
                 name
-              }}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
+              }
+            }
+          }
+        }
+      }
+    }
+    """ % pr_number
     query = run_query(query)
+
     edges = query['data']['repository']['pullRequest']['labels']['edges']
-    return [edge['node']['name'] for edge in edges]
+    labels = [edge['node']['name'] for edge in edges]
+    author = query['data']['repository']['pullRequest']['author']['login']
+    nodes = query['data']['repository']['pullRequest']['reviews']['nodes']
+
+    # using set to dedup multiple accepts from same accepter
+    accepters = {node["author"]["login"] for node in nodes}
+    accepters = tuple(sorted(accepters))
+
+    return labels, author, accepters
 
 
-def get_features(commit_hash, return_dict=False):
+def get_features(commit_hash):
     title, body, files_changed = (
         commit_title(commit_hash),
         commit_body(commit_hash),
         commit_files_changed(commit_hash))
     pr_number = parse_pr_number(body, commit_hash, title)
     labels = []
+    author = ""
+    accepters = tuple()
     if pr_number is not None:
-        labels = gh_labels(pr_number)
-    result = Features(title, body, pr_number, files_changed, labels)
-    if return_dict:
-        return features_to_dict(result)
+        labels, author, accepters = github_data(pr_number)
+    result = Features(title, body, pr_number, files_changed, labels, author, accepters)
     return result
 
-class CommitDataCache:
-    def __init__(self, path='results/data.json'):
+
+_commit_data_cache = None
+
+def get_commit_data_cache(path='results/data.json'):
+    global _commit_data_cache
+    if _commit_data_cache is None:
+        _commit_data_cache = _CommitDataCache(path)
+    return _commit_data_cache
+
+class _CommitDataCache:
+    def __init__(self, path):
         self.path = path
         self.data = {}
         if os.path.exists(path):
             self.data = self.read_from_disk()
+        else:
+            os.makedirs(Path(path).parent, exist_ok=True)
 
     def get(self, commit):
         if commit not in self.data.keys():
