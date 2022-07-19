@@ -7,13 +7,6 @@
 #include <c10/util/irange.h>
 #include <vector>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_fused_adam_native.h>
-#endif
-
 
 namespace at { namespace native {
 
