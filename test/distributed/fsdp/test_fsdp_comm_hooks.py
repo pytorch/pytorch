@@ -8,12 +8,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
 from torch.distributed.algorithms._comm_hooks import default_hooks
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    MixedPrecision
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_nccl,
+    requires_nccl_version,
+    sandcastle_skip_if,
+    skip_if_lt_x_gpu,
+    skip_if_rocm,
+)
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -24,6 +28,12 @@ from torch.testing._internal.common_utils import (
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+
+# bfloat16 is only supported by CUDA 11+
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split('.')[0]) >= 11)
 
 class Net(nn.Module):
 
@@ -329,6 +339,7 @@ class TestCommunicationHooks(FSDPTest):
         for hook_param, mp_param in zip(fsdp_with_hook.parameters(), fsdp_with_mp.parameters()):
             self.assertEqual(hook_param.grad, mp_param.grad)
 
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
     @parametrize(
@@ -347,7 +358,14 @@ class TestCommunicationHooks(FSDPTest):
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
 
+    @requires_nccl()
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
+    @sandcastle_skip_if(
+        not BFLOAT16_AVAILABLE,
+        "BFloat16 is only supported by CUDA 11+",
+    )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     @parametrize("has_wrapping", [True, False])
     @parametrize(
         "sharding_strategy",
