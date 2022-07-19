@@ -1583,7 +1583,7 @@ class TestTorchFunctionMode(TestCase):
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if kwargs == None:
+                if kwargs is None:
                     kwargs = {}
 
                 def unwrap(x):
