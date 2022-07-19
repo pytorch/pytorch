@@ -1528,7 +1528,7 @@ class TestMPS(TestCase):
 
     def test_storage_offset_greater_than_src_nbytes(self):
         # https://github.com/pytorch/pytorch/issues/80844
-        n_tensors= 100
+        n_tensors = 100
         n_tensor_elems = 784
         elems = torch.arange(n_tensors * n_tensor_elems, dtype=torch.float32)
 
