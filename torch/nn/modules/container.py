@@ -164,7 +164,13 @@ class Sequential(Module):
         return self
 
     def insert(self, index: int, module: Module) -> 'Sequential':
-        for i in range(len(self._modules), index, -1):
+        n = len(self._modules)
+        if not (-n <= index <= n):
+            raise IndexError(
+                'Index out of range: {}'.format(index))
+        if index < 0:
+            index += n
+        for i in range(n, index, -1):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
         return self

@@ -1604,11 +1604,30 @@ class TestNN(NNTestCase):
         l1 = nn.Linear(1, 2)
         l2 = nn.Linear(2, 3)
         l3 = nn.Linear(3, 4)
+
         n1 = nn.Sequential(l1, l2, l3)
-        index = 1
-        module = nn.Linear(4, 5)
-        n2 = nn.Sequential(l1, module, l2, l3)
-        self.assertEqual(n1.insert(index, module), n2)
+        module_1 = nn.Linear(4, 5)
+        n2 = nn.Sequential(l1, module_1, l2, l3)
+        self.assertEqual(n1.insert(1, module_1), n2)
+
+        # test for negative support
+        n3 = nn.Sequential(l1, l2, l3)
+        module_2 = nn.Linear(5, 6)
+        n4 = nn.Sequential(l1, module_2, l2, l3)
+        self.assertEqual(n3.insert(-2, module_2), n4)
+
+    @unittest.expectedFailure
+    def test_Sequential_insert_fail_case(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+
+        module = nn.Linear(5, 6)
+
+        # test for error case
+        n1 = nn.Sequential(l1, l2, l3)
+        with assertRaises(IndexError, "Index out of range"):
+            n1.insert(-5, module)
 
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
