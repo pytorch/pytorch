@@ -11,11 +11,9 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
+
 namespace at {
 namespace native {
-namespace templates {
-
-}
 
 Tensor& uniform_mps_(Tensor& input, double from, double to, c10::optional<Generator> gen_)
 {

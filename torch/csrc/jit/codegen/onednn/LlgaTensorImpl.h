@@ -257,6 +257,43 @@ struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {
 
   static at::Tensor llga_to_aten_tensor(LlgaTensorImpl* llgaImpl);
 
+ protected:
+  int64_t numel_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: numel_custom() not supported for LlgaTensorImpl.");
+  }
+  bool is_contiguous_custom(c10::MemoryFormat) const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: is_contiguous_custom() not supported for LlgaTensorImpl.");
+  }
+  c10::IntArrayRef sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sizes_custom() not supported for LlgaTensorImpl.");
+  }
+  c10::SymIntArrayRef sym_sizes_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_sizes_custom() not supported for LlgaTensorImpl.");
+  }
+  c10::IntArrayRef strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: strides_custom() not supported for LlgaTensorImpl.");
+  }
+  c10::Device device_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: device_custom() not supported for LlgaTensorImpl.");
+  }
+  int64_t dim_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: dim_custom() not supported for LlgaTensorImpl.");
+  }
+
  private:
   LlgaTensorDesc desc_;
 };

@@ -14,7 +14,6 @@ import functools
 import itertools
 import contextlib
 from dataclasses import dataclass
-from torch._decomp_tables import decomposition_table, meta_funcs
 
 
 aten = torch.ops.aten
@@ -279,12 +278,6 @@ def in_kernel_invocation_manager(fake_mode):
     finally:
         fake_mode.in_kernel_invocation = False
 
-def create_contiguous(shape):
-    strides = [1]
-    for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])
-    return list(reversed(strides))
-
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
@@ -297,7 +290,7 @@ class FakeTensor(torch.Tensor):
 
     def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
         # elem does not need to be recorded, because FakeTensor *is a* elem
-        assert elem.device.type == "meta"
+        assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
         assert device.type != "meta"
         self.fake_device = device
@@ -311,18 +304,6 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
-
-    def numel(self):
-        val = 1
-        for s in self.shape:
-            val = val * s
-        return val
-
-    def stride(self):
-        return create_contiguous(self.shape)
-
-    def new_empty(self, shape):
-        return torch.empty(shape)
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -353,6 +334,14 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        # Because fake mode can return NotImplemented (if it sees a subclass
+        # it doesn't know how to deal with), this test here is important
+        # because the next dispatch after a fake mode will attempt to use
+        # subclasses of tensors to dispatch, and any FakeTensor arguments
+        # will be considered eligible.
+        if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
+            return NotImplemented
+
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
@@ -360,6 +349,7 @@ class FakeTensor(torch.Tensor):
                     fake_mode = arg.fake_mode
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+
         with enable_torch_dispatch_mode(fake_mode):
             return func(*args, **kwargs)
 
@@ -444,7 +434,6 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -454,56 +443,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        # import pdb; pdb.set_trace()
-        # if func in meta_funcs:
-        #     return meta_funcs[func](*args, **kwargs)
 
-        with enable_torch_dispatch_mode(self):
-            if func in meta_funcs:
-                r = meta_funcs[func](*args, **kwargs)
-                return r
-            elif func in decomposition_table:
-                r = decomposition_table[func](*args, **kwargs)
-                return r
-
-        with no_dispatch():
-            if func == torch.ops.aten.sym_size.default:
-                return None
-            if func == torch.ops.aten.size.default:
-                return args[0].shape
-            if func == torch.ops.aten.stride.default:
-                return args[0].stride()
-            if func == torch.ops.aten.dim.default:
-                return len(args[0].shape)
-            if func == torch.ops.aten.is_contiguous.default:
-                return True
-            if func == torch.ops.aten.stride:
-                return create_contiguous(args[0].shape)
-
-        constructors = [torch.ops.aten.empty.SymInt]
-        if 'prims' not in func.overloadpacket._qualified_op_name and func not in constructors:
-            raise RuntimeError(f"Couldn't find meta function/decomposition, {func}")
-        # prims already wrap FakeTensor inputs to FakeTensor outputs
-        # and do device logic, we dont need do anything but run them
-        if "prims::" in func._schema.name:
-            with no_dispatch():
-                return func(*args, **kwargs)
-
-        with no_dispatch():
-            # TODO: apply as no_dispatch decorator
-            converter = self.fake_tensor_converter
-
-            # this is generated from torch.tensor(), which does not use the
-            # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            # we need to handle before error checking
-            if func == torch.ops.aten.lift.default:
-                assert (
-                    len(kwargs) == 0
-                    and len(args) == 1
-                    and type(args[0]) is torch.Tensor
-                )
-                with no_dispatch():
-                    return converter(self, args[0])
 
             def wrap(e, device=None):
                 if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
@@ -515,20 +455,54 @@ class FakeTensorMode(TorchDispatchMode):
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
+            subclass_seen = False
 
             def check_non_fake_tensor(x):
-                nonlocal conversion_made
+                nonlocal conversion_made, subclass_seen
                 conversion_made = conversion_made or (
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                )
+                subclass_seen = subclass_seen or (
+                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                    and type(x) is not torch.Tensor
                 )
 
             tree_map(check_non_fake_tensor, args)
             tree_map(check_non_fake_tensor, kwargs)
 
+            # Suppose we enable fake tensor mode.  This means that fake tensor
+            # mode will run first.  But what if we do an operation that
+            # involves a tensor subclass that will desugar into normal tensor
+            # operations?  Without this line, fake tensor mode will run first,
+            # decide that a conversion was made (since there was a non fake
+            # tensor argument), and report an error that converting non
+            # fake tensor is not supported.  What we actually wanted to happen
+            # was to give the subclass a chance to figure out what it wants to
+            # before erroring out.  Returning NotImplemented here allows this.
+            #
+            # NB: If you're seeing a mysterious infinite loop involving fake
+            # tensor, it might be related to this line.  Though I'm not sure
+            # how you'll know to read this comment, as this line won't show up
+            # in the stack trace.
+            if subclass_seen:
+                return NotImplemented
+
+            # this is generated from torch.tensor(), which does not use the
+            # dispatcher, to allow wrapper subclasses to wrap the new tensor
+            # we need to handle before error checking
+            if func in [torch.ops.aten.lift_fresh.default, torch.ops.aten.lift_fresh_copy.default]:
+                assert (
+                    len(kwargs) == 0
+                    and len(args) == 1
+                    and type(args[0]) is torch.Tensor
+                ), f"{args} {kwargs}"
+                with no_dispatch():
+                    return converter(self, args[0])
+
             if conversion_made:
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                    f"Please convert all Tensors to FakeTensors first. Found in {func}"
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
                 )
 
             for run_impl_check, op_impl in op_implementations:
@@ -552,8 +526,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             common_device = FakeTensor._find_common_device(func, args, kwargs)
 
-            out = tree_map(partial(wrap, device=common_device), r)
-            return out
+            return tree_map(partial(wrap, device=common_device), r)
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
