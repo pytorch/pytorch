@@ -13,7 +13,7 @@ class IDEEPNHWC2NCHWOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
-    CAFFE_ENFORCE(X.get_desc().is_nhwc());
+    CAFFE_ENFORCE(X.get_desc().is_nhwc(true));
 
     auto *Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
