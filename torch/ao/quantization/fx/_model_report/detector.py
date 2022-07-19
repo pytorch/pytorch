@@ -11,6 +11,12 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize import is_activation_post_process
 
+# Names for observer insert keys
+DETECTOR_TARGET_NODE_KEY = "target_node"
+DETECTOR_OBS_TO_INSERT_KEY = "observer_to_insert"
+DETECTOR_IS_POST_OBS_KEY = "is_post_observer"
+DETECTOR_OBS_ARGS_KEY = "observer_args"
+
 # Adding base class for detectors
 class DetectorBase(ABC):
     r""" Base Detector Module
@@ -101,6 +107,11 @@ class PerChannelDetector(DetectorBase):
                 Default value is current torch.backends.quantized.engine
     """
 
+    # Keys for return dictionary
+    BACKEND_KEY = "backend"
+    PER_CHAN_SUPPORTED_KEY = "per_channel_supported"
+    PER_CHAN_USED_KEY = "per_channel_used"
+
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
         "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
@@ -132,7 +143,7 @@ class PerChannelDetector(DetectorBase):
         return {}
 
 
-    def _detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
+    def _detect_per_channel_helper(self, model: nn.Module):
         r"""
         determines if per_channel quantization is supported in modules and submodules.
 
@@ -144,13 +155,11 @@ class PerChannelDetector(DetectorBase):
 
         Returns dictionary mapping fqns to if per_channel quantization is possible
         """
-        for named_mod in model.named_modules():
+        # create dict we will return
+        per_channel_info: Dict = {}
 
-            # get the fully qualified name and check if in list of modules to include and list of modules to ignore
-            fqn, module = named_mod
-
-            # asserts for MyPy
-            assert isinstance(fqn, str) and isinstance(per_channel_info["per_channel_status"], dict)
+        # get the fully qualified name and check if in list of modules to include and list of modules to ignore
+        for fqn, module in model.named_modules():
 
             is_in_include_list = sum(list(map(lambda x: isinstance(module, x), self.supported_modules))) > 0
 
@@ -183,9 +192,10 @@ class PerChannelDetector(DetectorBase):
                     else:
                         raise ValueError("Should be either observer or fake quant")
 
-                per_channel_info["per_channel_status"][fqn] = {
-                    "per_channel_supported": per_channel_supported,
-                    "per_channel_used": per_channel_used,
+                per_channel_info[fqn] = {
+                    self.PER_CHAN_SUPPORTED_KEY: per_channel_supported,
+                    self.PER_CHAN_USED_KEY: per_channel_used,
+                    self.BACKEND_KEY: self.backend_chosen
                 }
 
         return per_channel_info
@@ -207,22 +217,16 @@ class PerChannelDetector(DetectorBase):
                 if it is being utilized in the current model
         """
 
-        # store information on submodules and if per_channel quantization is supported and used as well as qconfig information
-        per_channel_info = {"backend": self.backend_chosen, "per_channel_status": {}}
-
         # run the helper function to populate the dictionary
-        per_channel_info = self._detect_per_channel_helper(model, per_channel_info)
+        per_channel_info = self._detect_per_channel_helper(model)
 
         # String to let the user know of further optimizations
         further_optims_str = "Further Optimizations for backend {}: \n".format(self.backend_chosen)
 
-        # assert for MyPy check
-        assert isinstance(per_channel_info["per_channel_status"], dict)
-
         optimizations_possible = False
-        for fqn in per_channel_info["per_channel_status"]:
-            fqn_dict = per_channel_info["per_channel_status"][fqn]
-            if fqn_dict["per_channel_supported"] and not fqn_dict["per_channel_used"]:
+        for fqn in per_channel_info:
+            fqn_dict = per_channel_info[fqn]
+            if fqn_dict[self.PER_CHAN_SUPPORTED_KEY] and not fqn_dict[self.PER_CHAN_USED_KEY]:
                 optimizations_possible = True
                 further_optims_str += "Module {module_fqn} can be configured to use per_channel quantization.\n".format(
                     module_fqn=fqn
@@ -295,8 +299,8 @@ class DynamicStaticDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
 
@@ -316,20 +320,20 @@ class DynamicStaticDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(),
+                    DETECTOR_IS_POST_OBS_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args
                 }
 
                 # add entry for post-observer
                 post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
 
                 obs_fqn_to_info[post_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(),
-                    "insert_post": True,
-                    "observer_args": (targeted_node,)
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(),
+                    DETECTOR_IS_POST_OBS_KEY: True,
+                    DETECTOR_OBS_ARGS_KEY: (targeted_node,)
                 }
 
         return obs_fqn_to_info
@@ -558,7 +562,10 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
-    DEFAULT_POST_OBSERVER_NAME: str = "model_report_post_observer"
+
+    # weight / activation prefix for each of the below info
+    WEIGHT_PREFIX = "weight_"
+    ACTIVATION_PREFIX = "pre_activation_"
 
     # string names for keys of info dictionaries
     PER_CHANNEL_MAX_KEY = "per_channel_max"
@@ -571,8 +578,6 @@ class InputWeightEqualizationDetector(DetectorBase):
     COMP_METRIC_KEY = "channel_comparison_metrics"
     THRESHOLD_KEY = "threshold"
     CHANNEL_KEY = "channel_axis_selected"
-    INPUT_INFO_KEY = "input_range_info"
-    WEIGHT_INFO_KEY = "weight_range_info"
 
     # default weight and info strings
     WEIGHT_STR = "weight"
@@ -620,8 +625,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
 
@@ -641,10 +646,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(ch_axis=self.ch_axis),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args,
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis),
+                    DETECTOR_IS_POST_OBS_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info
@@ -662,10 +667,10 @@ class InputWeightEqualizationDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a dict mapping relavent module fqns (str) to a dict with keys:
-            "per_channel_max" : maps to the per_channel max values
-            "per_channel_min" : maps to the per_channel min values
-            "global_max" : maps to the global max recorded
-            "global_min" : maps to the global min recorded
+            "pre_activation__per_channel_max" : maps to the per_channel max values
+            "pre_activation__per_channel_min" : maps to the per_channel min values
+            "pre_activation_global_max" : maps to the global max recorded
+            "pre_activation_global_min" : maps to the global min recorded
         """
 
         # return dictionary mapping observer fqns to desired info
@@ -678,10 +683,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
                 input_info[fqn] = {
-                    self.PER_CHANNEL_MAX_KEY: pre_obs.max_val,
-                    self.PER_CHANNEL_MIN_KEY: pre_obs.min_val,
-                    self.GLOBAL_MAX_KEY: max(pre_obs.max_val),
-                    self.GLOBAL_MIN_KEY: min(pre_obs.min_val),
+                    self.ACTIVATION_PREFIX + self.PER_CHANNEL_MAX_KEY: pre_obs.max_val,
+                    self.ACTIVATION_PREFIX + self.PER_CHANNEL_MIN_KEY: pre_obs.min_val,
+                    self.ACTIVATION_PREFIX + self.GLOBAL_MAX_KEY: max(pre_obs.max_val),
+                    self.ACTIVATION_PREFIX + self.GLOBAL_MIN_KEY: min(pre_obs.min_val),
                 }
 
         return input_info
@@ -715,10 +720,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                 max_val = torch.flatten(max_val)
 
                 weight_info[fqn] = {
-                    self.PER_CHANNEL_MAX_KEY: max_val,
-                    self.PER_CHANNEL_MIN_KEY: min_val,
-                    self.GLOBAL_MAX_KEY: max(max_val),
-                    self.GLOBAL_MIN_KEY: min(min_val),
+                    self.WEIGHT_PREFIX + self.PER_CHANNEL_MAX_KEY: max_val,
+                    self.WEIGHT_PREFIX + self.PER_CHANNEL_MIN_KEY: min_val,
+                    self.WEIGHT_PREFIX + self.GLOBAL_MAX_KEY: max(max_val),
+                    self.WEIGHT_PREFIX + self.GLOBAL_MIN_KEY: min(min_val),
                 }
 
         return weight_info
@@ -736,8 +741,11 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns a tensor of values, where each value is the s_c stat for a different channel
         """
         # calculate the ratios of the info
-        per_channel_range = info_dict[self.PER_CHANNEL_MAX_KEY] - info_dict[self.PER_CHANNEL_MIN_KEY]
-        global_range = info_dict[self.GLOBAL_MAX_KEY] - info_dict[self.GLOBAL_MIN_KEY]
+        # get the prefix str
+        prefix_str = self.ACTIVATION_PREFIX if info_str == self.INPUT_STR else self.WEIGHT_PREFIX
+
+        per_channel_range = info_dict[prefix_str + self.PER_CHANNEL_MAX_KEY] - info_dict[prefix_str + self.PER_CHANNEL_MIN_KEY]
+        global_range = info_dict[prefix_str + self.GLOBAL_MAX_KEY] - info_dict[prefix_str + self.GLOBAL_MIN_KEY]
 
         if global_range == 0:
             range_zero_explanation = "We recommend removing this channel as it doesn't provide any useful information."
@@ -826,13 +834,14 @@ class InputWeightEqualizationDetector(DetectorBase):
                 channel_rec_vals.append(recommended)
 
             # build the return dict input
+            # also unpack input and weight dicts into it
             input_weight_equalization_info[module_fqn] = {
                 self.RECOMMENDED_KEY: channel_rec_vals,
                 self.COMP_METRIC_KEY: mod_comp_stat,
                 self.THRESHOLD_KEY: self.ratio_threshold,
                 self.CHANNEL_KEY: self.ch_axis,
-                self.INPUT_INFO_KEY: mod_input_info,
-                self.WEIGHT_INFO_KEY: mod_weight_info,
+                **mod_input_info,
+                **mod_weight_info,
             }
 
         # return our compiled info for each module
@@ -1014,9 +1023,6 @@ class OutlierDetector(DetectorBase):
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
         return num_children == 0 and not is_activation_post_process(module)
-        # check to see if module is of a supported type
-        num_children = len(list(module.children()))
-        is_supported_type = num_children == 0 and not isinstance(module, ObserverBase)
 
     def _supports_report_gen(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for report generation
@@ -1043,8 +1049,8 @@ class OutlierDetector(DetectorBase):
 
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
             key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_to_insert" -> the observer we wish to insert (ObserverBase)
+            key "is_post_observer" -> True if this is meant to be a post-observer for target_node, False if pre-observer
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
         # observer for this detector is ModelReportObserver
@@ -1063,10 +1069,10 @@ class OutlierDetector(DetectorBase):
                 pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
 
                 obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
-                    "insert_post": False,
-                    "observer_args": targeted_node.args,
+                    DETECTOR_TARGET_NODE_KEY: targeted_node,
+                    DETECTOR_OBS_TO_INSERT_KEY: obs_ctr(ch_axis=self.ch_axis, comp_percentile=self.reference_percentile),
+                    DETECTOR_IS_POST_OBS_KEY: False,
+                    DETECTOR_OBS_ARGS_KEY: targeted_node.args,
                 }
 
         return obs_fqn_to_info
