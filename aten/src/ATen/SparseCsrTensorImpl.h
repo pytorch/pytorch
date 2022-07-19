@@ -57,43 +57,55 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     return col_indices_.size(-1);
   }
 
+  inline int64_t batch_dim() const noexcept {
+    return crow_indices_.dim() - 1;
+  }
+
+  inline int64_t sparse_dim() const noexcept {
+    return 2;
+  }
+
+  inline int64_t dense_dim() const noexcept {
+    return values_.dim() - batch_dim() - block_dim() - 1;
+  }
+
+ private:
+  inline int64_t block_dim() const noexcept {
+    return (layout_ == kSparseBsr || layout_ == kSparseBsc ? 2 : 0);
+  }
+
  protected:
   IntArrayRef strides_custom() const override;
 
   int64_t numel_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: numel_custom() not supported for SparseTensorImpl.");
+        "Internal error: numel_custom() not supported for SparseCsrTensorImpl.");
   }
   bool is_contiguous_custom(MemoryFormat) const override {
     TORCH_CHECK(
         false,
-        "Internal error: is_contiguous_custom() not supported for SparseTensorImpl.");
-  }
-  int64_t size_custom(int64_t d) const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: size_custom() not supported for SparseTensorImpl.");
+        "Internal error: is_contiguous_custom() not supported for SparseCsrTensorImpl.");
   }
   IntArrayRef sizes_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: sizes_custom() not supported for SparseTensorImpl.");
+        "Internal error: sizes_custom() not supported for SparseCsrTensorImpl.");
   }
   c10::SymIntArrayRef sym_sizes_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: sym_sizes_custom() not supported for SparseTensorImpl.");
+        "Internal error: sym_sizes_custom() not supported for SparseCsrTensorImpl.");
   }
   Device device_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: device_custom() not supported for SparseTensorImpl.");
+        "Internal error: device_custom() not supported for SparseCsrTensorImpl.");
   }
   int64_t dim_custom() const override {
     TORCH_CHECK(
         false,
-        "Internal error: dim_custom() not supported for SparseTensorImpl.");
+        "Internal error: dim_custom() not supported for SparseCsrTensorImpl.");
   }
 
  public:

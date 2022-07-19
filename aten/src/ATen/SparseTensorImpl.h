@@ -388,11 +388,6 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         false,
         "Internal error: is_contiguous_custom() not supported for SparseTensorImpl.");
   }
-  int64_t size_custom(int64_t d) const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: size_custom() not supported for SparseTensorImpl.");
-  }
   IntArrayRef sizes_custom() const override {
     TORCH_CHECK(
         false,
