@@ -1616,7 +1616,6 @@ class TestNN(NNTestCase):
         n4 = nn.Sequential(l1, module_2, l2, l3)
         self.assertEqual(n3.insert(-2, module_2), n4)
 
-    @unittest.expectedFailure
     def test_Sequential_insert_fail_case(self):
         l1 = nn.Linear(1, 2)
         l2 = nn.Linear(2, 3)
@@ -1626,8 +1625,11 @@ class TestNN(NNTestCase):
 
         # test for error case
         n1 = nn.Sequential(l1, l2, l3)
-        with assertRaises(IndexError, "Index out of range"):
+        with self.assertRaises(IndexError):
             n1.insert(-5, module)
+
+        with self.assertRaises(AssertionError):
+            n1.insert(1, [nn.Linear(6, 7)])
 
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]

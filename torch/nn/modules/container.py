@@ -164,6 +164,9 @@ class Sequential(Module):
         return self
 
     def insert(self, index: int, module: Module) -> 'Sequential':
+        if not isinstance(module, Module):
+            raise AssertionError(
+                'module should be of type: {}'.format(Module))
         n = len(self._modules)
         if not (-n <= index <= n):
             raise IndexError(
