@@ -90,7 +90,7 @@ class CapabilityBasedPartitioner:
         logging.debug("Collecting supported nodes...")
         supported_nodes = []
         for node in self.graph_module.graph.nodes:
-            if self.operator_support.is_node_supported(self.graph_module.named_modules(), node):
+            if self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node):
                 supported_nodes.append(node)
         return supported_nodes
 
