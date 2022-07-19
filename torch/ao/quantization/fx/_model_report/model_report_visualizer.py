@@ -52,6 +52,10 @@ class ModelReportVisualizer:
 
     """
 
+    # keys for table dict
+    TABLE_TENSOR_KEY = "tensor_level_info"
+    TABLE_CHANNEL_KEY = "channel_level_info"
+
     def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
         Initializes the ModelReportVisualizer instance with the necessary reports.
@@ -295,8 +299,8 @@ class ModelReportVisualizer:
 
         # let's now create the dictionary to return
         table_dict = {
-            "tensor_level_info" : tensor_table,
-            "channel_level_info" : channel_table
+            self.TABLE_TENSOR_KEY : tensor_table,
+            self.TABLE_CHANNEL_KEY : channel_table
         }
 
         return (table_dict, table_str)
