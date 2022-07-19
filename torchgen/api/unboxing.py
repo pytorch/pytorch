@@ -1,15 +1,15 @@
 from typing import List, Tuple
 
 from torchgen.api import cpp
-from torchgen.api.types import Binding, CType, CppSignatureGroup
+from torchgen.api.types import Binding, CppSignatureGroup, CType
 from torchgen.model import (
     Argument,
-    NativeFunction,
-    Type,
-    BaseType,
-    OptionalType,
-    ListType,
     BaseTy,
+    BaseType,
+    ListType,
+    NativeFunction,
+    OptionalType,
+    Type,
 )
 
 # This file generates the code for unboxing wrappers, i.e., the glue logic to unbox a boxed operator and convert the

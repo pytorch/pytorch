@@ -69,9 +69,7 @@ Tensor cumsum(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
