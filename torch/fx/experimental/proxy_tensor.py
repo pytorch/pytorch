@@ -70,101 +70,6 @@ def maybe_disable_fake_tensor_mode():
         return nullcontext()
 
 
-def proxy_call(func_overload, args, kwargs=None):
-    if kwargs is None:
-        kwargs = {}
-    func = func_overload.overloadpacket
-    if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
-    if func_overload == aten._local_scalar_dense.default:
-        t, = args
-        assert not kwargs
-        if t.constant is not None:
-            with maybe_disable_fake_tensor_mode():
-                return t.constant.item()
-        raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-                           "It's likely that this is caused by data-dependent control flow or similar."
-                           "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
-
-    def unwrap_proxy(e):
-        return e.proxy if isinstance(e, ProxyTensor) else e
-
-    def unwrap_elem(e):
-        if isinstance(e, ProxyTensor):
-            return e.elem
-        return e
-
-    proxy_args = pytree.tree_map(unwrap_proxy, args)
-    proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
-
-    proxy_res = func_overload(*proxy_args, **proxy_kwargs)
-    # Kind of a hacky way to test if an op is in-place or not
-    if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        args[0].proxy = proxy_res
-        proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-    inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
-
-    # Needed to sync up metadata for in-place operators that modify metadata
-    # TODO: instead forward the metadata to the inner tensor so updating
-    # is not necessary
-    if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
-        with no_dispatch():
-            func_overload(*args, **kwargs)
-
-    # In some circumstances, we will be tracing in a situation where a tensor
-    # is *statically* known to be a constant (currently, this only happens if
-    # you run torch.tensor; deterministic factory functions like torch.arange
-    # don't get this treatment).  When the tensor in question is small, it's
-    # helpful to due constant propagation in case we call item() (in which
-    # case we can return the constant value that is known, rather than give
-    # an error.)  The logic here tests if constant propagation is possible
-    # (because all of the inputs are constant).  If so, we disable fake tensor
-    # mode (if it is on) and do true compute on the constant.
-    #
-    # It's worth highlighting that we're making a policy decision here.
-    # There is a potential that the tensor is actually quite large, and we
-    # don't actually want to run the compute.  The tensor being quite large
-    # is one of the reasons why factory functions don't get this treatment
-    # (since they can be quite large; if a parameter is initialized to a
-    # constant value it will be!)  Similarly, there is also a potential
-    # to run an operator that blows up the size of a small tensor; we don't
-    # protect against this case, but we could force, e.g., only single
-    # element constant computation by testing the numel of the result before
-    # propagating const-ness.  Similarly, we don't require the constant to
-    # live on CPU, but we could.
-    all_constant = True
-    any_constant = False
-
-    def check_constant(e):
-        nonlocal all_constant, any_constant
-        if isinstance(e, ProxyTensor):
-            if e.constant is None:
-                all_constant = False
-            else:
-                any_constant = True
-
-    pytree.tree_map(check_constant, args)
-    pytree.tree_map(check_constant, kwargs)
-
-    def unwrap_constant(e):
-        if isinstance(e, ProxyTensor):
-            return e.constant
-        return e
-
-    constant = None
-    # NB: do NOT include factories as constants
-    if all_constant and any_constant:
-        with maybe_disable_fake_tensor_mode():
-            constant = func_overload(
-                *pytree.tree_map(unwrap_constant, args),
-                **pytree.tree_map(unwrap_constant, kwargs)
-            )
-
-    # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
-    # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
-    return wrap_output(inner_res, proxy_res, constant=constant)
-
-
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
@@ -354,6 +259,100 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             else:
                 constant = None
             return wrap_output(inner_res, proxy_res, constant=constant)
+
+    def proxy_call(func_overload, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        func = func_overload.overloadpacket
+        if func_overload in CURRENT_DECOMPOSITION_TABLE:
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        if func_overload == aten._local_scalar_dense.default:
+            t, = args
+            assert not kwargs
+            if t.constant is not None:
+                with maybe_disable_fake_tensor_mode():
+                    return t.constant.item()
+            raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
+                               "It's likely that this is caused by data-dependent control flow or similar."
+                               "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
+
+        def unwrap_proxy(e):
+            return e.proxy if isinstance(e, ProxyTensor) else e
+
+        def unwrap_elem(e):
+            if isinstance(e, ProxyTensor):
+                return e.elem
+            return e
+
+        proxy_args = pytree.tree_map(unwrap_proxy, args)
+        proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
+
+        proxy_res = func_overload(*proxy_args, **proxy_kwargs)
+        # Kind of a hacky way to test if an op is in-place or not
+        if func.__name__[-1] == "_" and func.__name__[0] != "_":
+            args[0].proxy = proxy_res
+            proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+        inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
+
+        # Needed to sync up metadata for in-place operators that modify metadata
+        # TODO: instead forward the metadata to the inner tensor so updating
+        # is not necessary
+        if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
+            with no_dispatch():
+                func_overload(*args, **kwargs)
+
+        # In some circumstances, we will be tracing in a situation where a tensor
+        # is *statically* known to be a constant (currently, this only happens if
+        # you run torch.tensor; deterministic factory functions like torch.arange
+        # don't get this treatment).  When the tensor in question is small, it's
+        # helpful to due constant propagation in case we call item() (in which
+        # case we can return the constant value that is known, rather than give
+        # an error.)  The logic here tests if constant propagation is possible
+        # (because all of the inputs are constant).  If so, we disable fake tensor
+        # mode (if it is on) and do true compute on the constant.
+        #
+        # It's worth highlighting that we're making a policy decision here.
+        # There is a potential that the tensor is actually quite large, and we
+        # don't actually want to run the compute.  The tensor being quite large
+        # is one of the reasons why factory functions don't get this treatment
+        # (since they can be quite large; if a parameter is initialized to a
+        # constant value it will be!)  Similarly, there is also a potential
+        # to run an operator that blows up the size of a small tensor; we don't
+        # protect against this case, but we could force, e.g., only single
+        # element constant computation by testing the numel of the result before
+        # propagating const-ness.  Similarly, we don't require the constant to
+        # live on CPU, but we could.
+        all_constant = True
+        any_constant = False
+
+        def check_constant(e):
+            nonlocal all_constant, any_constant
+            if isinstance(e, ProxyTensor):
+                if e.constant is None:
+                    all_constant = False
+                else:
+                    any_constant = True
+
+        pytree.tree_map(check_constant, args)
+        pytree.tree_map(check_constant, kwargs)
+
+        def unwrap_constant(e):
+            if isinstance(e, ProxyTensor):
+                return e.constant
+            return e
+
+        constant = None
+        # NB: do NOT include factories as constants
+        if all_constant and any_constant:
+            with maybe_disable_fake_tensor_mode():
+                constant = func_overload(
+                    *pytree.tree_map(unwrap_constant, args),
+                    **pytree.tree_map(unwrap_constant, kwargs)
+                )
+
+        # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
+        # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
+        return wrap_output(inner_res, proxy_res, constant=constant)
 
 
 class DecompositionInterpreter(torch.fx.Interpreter):
