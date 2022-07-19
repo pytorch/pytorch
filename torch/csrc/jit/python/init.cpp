@@ -1906,19 +1906,9 @@ void initJITBindings(PyObject* module) {
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
     return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
   });
-  m.def(
-      "_contains_alias_of",
-      [](const py::object& self, const py::object& other) {
-        // the overlaps() functions errors out on certain IValue types.
-        // Thus, this function will return false when it errors out because
-        // only cases where tensors are contained are actually meaningful.
-        try {
-          return toTypeInferredIValue(self).overlaps(
-              toTypeInferredIValue(other));
-        } catch (const c10::Error& e) {
-          return false;
-        }
-      });
+  m.def("_overlaps", [](const py::object& self, const py::object& other) {
+    return toTypeInferredIValue(self).overlaps(toTypeInferredIValue(other));
+  });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 
