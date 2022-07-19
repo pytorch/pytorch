@@ -613,6 +613,10 @@ Utilities
     vmap
     _assert
 
+Operator Tags
+------------------------------------
+.. autoclass:: Tag
+    :members:
 
 .. Empty submodules added only for tracking.
 .. py:module:: torch.contrib

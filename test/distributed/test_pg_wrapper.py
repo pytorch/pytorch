@@ -265,6 +265,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_collectives_op_mismatch_debug_mode(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collectives_op_mismatch(pg, use_cuda=True)
+            self._test_nccl_only_op_mismatch(pg)
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
@@ -272,6 +273,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_collectives_op_mismatch(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collectives_op_mismatch(pg, use_cuda=True)
+            self._test_nccl_only_op_mismatch(pg)
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
@@ -279,6 +281,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_collective_shape_mismatch_debug_mode(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
+            self._test_nccl_only_shape_mismatch(pg)
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
@@ -286,6 +289,48 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_collective_shape_mismatch(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
+            self._test_nccl_only_shape_mismatch(pg)
+
+        def _test_nccl_only_op_mismatch(self, wrapper_pg):
+            device = f"cuda:{self.rank}"
+            with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+                output = torch.zeros(4 + self.rank, device=device)
+                input = torch.ones(4 * self.world_size, device=device)
+                if self.rank == 0:
+                    wrapper_pg._allgather_base(output, input).wait()
+                else:
+                    wrapper_pg._reduce_scatter_base(output, input).wait()
+            self._validate_error(
+                exception=cm.exception,
+                op_type="ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE",
+                rank=self.rank,
+                tensor=input,
+            )
+
+        def _test_nccl_only_shape_mismatch(self, wrapper_pg):
+            device = f"cuda:{self.rank}"
+            with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+                output = torch.zeros(4 + self.rank, device=device)
+                input = torch.ones(4 * self.world_size, device=device)
+
+                wrapper_pg._reduce_scatter_base(output, input).wait()
+            self._validate_error(
+                exception=cm.exception,
+                op_type="REDUCE_SCATTER_BASE",
+                rank=self.rank,
+                tensor=input,
+            )
+            with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+                output = torch.zeros(4, device=device)
+                input = torch.ones((4 + self.rank) * self.world_size, device=device)
+
+                wrapper_pg._reduce_scatter_base(output, input).wait()
+            self._validate_error(
+                exception=cm.exception,
+                op_type="REDUCE_SCATTER_BASE",
+                rank=self.rank,
+                tensor=input,
+            )
 
 
 @requires_gloo()

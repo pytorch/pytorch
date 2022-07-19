@@ -1,9 +1,9 @@
 #include <algorithm>
 
-#include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/permutation_util.h>
-#include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/core/permutation_util.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch {
 namespace lazy {
@@ -14,8 +14,7 @@ bool StrideIsSupported(c10::ArrayRef<int64_t> stride) {
   return stride.empty() || sorted_stride.front() == 1;
 }
 
-std::vector<int64_t> GetArrayStridePermutation(
-    c10::ArrayRef<int64_t> stride) {
+std::vector<int64_t> GetArrayStridePermutation(c10::ArrayRef<int64_t> stride) {
   std::vector<int64_t> permutation = Iota<int64_t>(stride.size());
   std::sort(permutation.begin(), permutation.end(), [&](int64_t a, int64_t b) {
     return stride[a] > stride[b];
@@ -54,7 +53,6 @@ Shape MakePermuteShape(
       PermuteDimensions(permutation, source_shape.sizes()));
 }
 
-
 Shape MakeSelectShape(
     const Shape& shape,
     int64_t dim,
@@ -76,10 +74,11 @@ int64_t GetStride(int64_t start, int64_t end, int64_t stride) {
   return stride;
 }
 
-// This is almost like at::inferSqueezeGeometry, but that requires a Tensor input
-// and also computes new strides.  This logic seems correct.
-std::vector<int64_t> BuildSqueezedDimensions(c10::ArrayRef<int64_t> dimensions,
-                                             int64_t squeeze_dim) {
+// This is almost like at::inferSqueezeGeometry, but that requires a Tensor
+// input and also computes new strides.  This logic seems correct.
+std::vector<int64_t> BuildSqueezedDimensions(
+    c10::ArrayRef<int64_t> dimensions,
+    int64_t squeeze_dim) {
   std::vector<int64_t> output_dimensions;
   for (const auto i : c10::irange(dimensions.size())) {
     int64_t dim = dimensions[i];

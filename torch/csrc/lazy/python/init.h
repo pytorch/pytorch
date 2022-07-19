@@ -7,5 +7,5 @@ namespace lazy {
 
 TORCH_API void initLazyBindings(PyObject* module);
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

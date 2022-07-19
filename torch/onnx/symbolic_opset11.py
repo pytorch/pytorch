@@ -1,7 +1,11 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
+from typing import Tuple, Union
 
 import torch
+from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
@@ -11,7 +15,76 @@ from torch.onnx._globals import GLOBALS
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# This file exports ONNX ops for opset 11
+__all__ = [
+    "add",
+    "append",
+    "arange",
+    "argsort",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "cat",
+    "chunk",
+    "clamp_max",
+    "clamp_min",
+    "clamp",
+    "constant_pad_nd",
+    "cumsum",
+    "Delete",
+    "embedding_bag",
+    "embedding_renorm",
+    "flatten",
+    "gather",
+    "hardtanh",
+    "im2col",
+    "index_fill",
+    "index",
+    "index_copy",
+    "index_put",
+    "insert",
+    "linalg_det",
+    "linalg_vector_norm",
+    "logdet",
+    "masked_scatter",
+    "masked_select",
+    "mm",
+    "narrow",
+    "normal",
+    "pad",
+    "pixel_shuffle",
+    "pop",
+    "Prim",
+    "reflection_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "relu6",
+    "remainder",
+    "replication_pad",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "round",
+    "scatter",
+    "select",
+    "size",
+    "sort",
+    "split_with_sizes",
+    "split",
+    "squeeze",
+    "stack",
+    "topk",
+    "unbind",
+    "unique_dim",
+    "unsqueeze",
+    "upsample_bicubic2d",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 @symbolic_helper.parse_args("v", "f", "f")
@@ -143,7 +216,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":
+            if indices_list[idx_].type().scalarType() == "Bool":  # type: ignore[attr-defined]
+                # TODO(justinchuby): Remove type ignore after #81112 is checked in.
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -198,7 +272,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":  # type: ignore[attr-defined]
+            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -257,7 +332,16 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
+upsample_nearest1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_linear1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bilinear2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_trilinear3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bicubic2d.__module__ = "torch.onnx.symbolic_opset11"
 
+
+@symbolic_helper.quantized_args(True, False, False, False, False, False, False)
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -415,15 +499,16 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(
@@ -475,6 +560,14 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 @symbolic_helper.parse_args("v", "i", "i", "none")
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+
+
+@symbolic_helper.parse_args("v", "i", "i", "none")
+def argsort(g, self, dim, decending, out=None):
+    _, indices = symbolic_helper._sort_helper(
+        g, self, dim, decending=decending, out=out
+    )
+    return indices
 
 
 def round(g, self):
@@ -1052,12 +1145,15 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = 0
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim
@@ -1079,7 +1175,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

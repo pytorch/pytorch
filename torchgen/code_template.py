@@ -1,5 +1,5 @@
 import re
-from typing import Match, Optional, Sequence, Mapping
+from typing import Mapping, Match, Optional, Sequence
 
 # match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
@@ -12,17 +12,7 @@ from typing import Match, Optional, Sequence, Mapping
 
 
 class CodeTemplate:
-    # Python 2.7.5 has a bug where the leading (^[^\n\S]*)? does not work,
-    # workaround via appending another [^\n\S]? inside
-
-    substitution_str = r"(^[^\n\S]*[^\n\S]?)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})"
-
-    # older versions of Python have a bug where \w* does not work,
-    # so we need to replace with the non-shortened version [a-zA-Z0-9_]*
-    # https://bugs.python.org/issue18647
-
-    substitution_str = substitution_str.replace(r"\w", r"[a-zA-Z0-9_]")
-
+    substitution_str = r"(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})"
     substitution = re.compile(substitution_str, re.MULTILINE)
 
     pattern: str

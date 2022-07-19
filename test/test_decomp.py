@@ -274,6 +274,10 @@ CROSS_REF_EXCLUDE_SET = {
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
+    # CompositeAutogradImplicit
+    # See https://github.com/pytorch/pytorch/issues/81669
+    (None, None, "nn.functional.relu6"),
+
 }
 
 all_decomposed = set()
@@ -352,7 +356,7 @@ class TestDecomp(TestCase):
             None,
             dtype,
             op.name,
-        ) in CROSS_REF_EXCLUDE_SET:
+        ) in CROSS_REF_EXCLUDE_SET or (None, None, op.name) in CROSS_REF_EXCLUDE_SET:
             self.skipTest(f"{op.name} in {dtype} not supported")
 
         test_dtype = dtype
@@ -441,8 +445,10 @@ class TestDecomp(TestCase):
         def check_decomposed(aten_name):
             self.assertTrue(
                 any(overload_to_aten_name(c) == aten_name for c in decomposed),
-                msg=f"aten.{aten_name} was not decomposed, saw calls for: "
-                + ", ".join(map(str, list(called))),
+                msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
+                     f"{', '.join(map(str, list(called)))}. If your op is  "
+                     f"CompositeImplicitAutograd you should skip this test "
+                     "by updating CROSS_REF_EXCLUDE_SET.")
             )
 
         aten_name = op.decomp_aten_name or op.aten_name
@@ -450,6 +456,9 @@ class TestDecomp(TestCase):
         func = op.get_op()
         for sample_input in samples:
             if requires_grad:
+                if None in sample_input.args:
+                    continue
+
                 fn, primals = normalize_op_input_output(func, sample_input)
                 primals = tree_map(
                     lambda x: x if isinstance(x, torch.Tensor) else x, primals

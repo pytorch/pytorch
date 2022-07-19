@@ -28,4 +28,4 @@ inline std::ostream& operator<<(
   return stream << LinalgBackendToString(backend);
 }
 
-} // namespace c10
+} // namespace at

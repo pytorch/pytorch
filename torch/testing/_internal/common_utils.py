@@ -75,12 +75,13 @@ from torch.onnx import (register_custom_op_symbolic,
                         unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
+PYTEST_FILES = ["test_ops", "test_ops_gradients", "test_ops_jit"]
+
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
-# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
-IS_IN_CI = os.getenv('IN_CI') == '1'
+IS_CI = bool(os.getenv('CI'))
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
@@ -92,10 +93,8 @@ MAX_NUM_RETRIES = 3
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
-slow_tests_dict: Optional[Dict[str, Any]] = None
-disabled_tests_dict: Optional[Dict[str, Any]] = None
-
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
 
 class _TestParametrizer(object):
     """
@@ -463,7 +462,7 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_IN_CI else None)
+                    default=_get_test_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -590,20 +589,33 @@ def lint_test_case_extension(suite):
                 succeed = False
     return succeed
 
+def sanitize_pytest_xml(xml_file: str):
+    # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
+    # consider somehow modifying the XML logger in conftest to do this instead
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(xml_file)
+    for testcase in tree.iter('testcase'):
+        full_classname = testcase.attrib['classname']
+        regex_result = re.search(r"^test\.(.*)\.([^\.]*)$", full_classname)
+        classname = regex_result.group(2)
+        file = regex_result.group(1).replace('.', "/")
+        testcase.set('classname', classname)
+        testcase.set('file', f"{file}.py")
+    tree.write(xml_file)
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
-            global slow_tests_dict
             with open(IMPORT_SLOW_TESTS, 'r') as fp:
-                slow_tests_dict = json.load(fp)
+                # use env vars so pytest-xdist subprocesses can still access them
+                os.environ['SLOW_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
         if os.path.exists(IMPORT_DISABLED_TESTS):
-            global disabled_tests_dict
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                disabled_tests_dict = json.load(fp)
+                os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
@@ -682,14 +694,36 @@ def run_tests(argv=UNITTEST_ARGS):
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
-        os.makedirs(test_report_path, exist_ok=True)
-        verbose = '--verbose' in argv or '-v' in argv
-        if verbose:
-            print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
-            verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
+            "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
+        ):
+            # exclude linux cuda tests because we run into memory issues when running in parallel
+            import pytest
+            os.environ["NO_COLOR"] = "1"
+            os.environ["USING_PYTEST"] = "1"
+            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+            os.makedirs(pytest_report_path, exist_ok=True)
+            # part of our xml parsing looks for grandparent folder names
+            pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
+            print(f'Test results will be stored in {pytest_report_path}')
+            # mac slower on 4 proc than 3
+            num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
+                                    '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
+            del os.environ["USING_PYTEST"]
+            sanitize_pytest_xml(f'{pytest_report_path}')
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            os.makedirs(test_report_path, exist_ok=True)
+            verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print(f'Test results will be stored in {test_report_path}')
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -701,6 +735,7 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+IS_X86 = platform.machine() in ('x86_64', 'i386')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -767,6 +802,7 @@ def _check_module_exists(name: str) -> bool:
         return False
 
 TEST_NUMPY = _check_module_exists('numpy')
+TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_CUDA = torch.cuda.is_available()
@@ -822,6 +858,30 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         r = func(*args, **kwargs)
         return r
 
+# Run PyTorch tests with TorchDynamo
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+if TEST_WITH_TORCHDYNAMO:
+    import torchdynamo
+    # torchdynamo.config.trace = True
+    # torchdynamo.config.debug = True
+    torchdynamo.config.print_internal_exceptions = False
+    # TODO - Collect errors with fake tensors
+    torchdynamo.config.fake_tensor_propagation = False
+    # Do not spend time on helper functions that are called with different inputs
+    torchdynamo.config.cache_size_limit = 8
+
+
+def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_TORCHDYNAMO:
+                raise unittest.SkipTest(msg)
+            else:
+                fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
@@ -829,9 +889,6 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
-
-# Disables tests for when on Github Actions
-ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
 # True if CI is running TBB-enabled Pytorch
 IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
@@ -1108,16 +1165,6 @@ def skipIfNoSciPy(fn):
     return wrapper
 
 
-def skipIfOnGHA(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if ON_GHA:
-            raise unittest.SkipTest("Test disabled for GHA")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
 def skipIfTBB(message="This test makes TBB sad"):
     def dec_fn(fn):
         @wraps(fn)
@@ -1200,20 +1247,35 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
+@contextmanager
+def disable_functorch():
+    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch():
+    with no_dispatch(), disable_functorch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
     try:
         yield
     finally:
-        with no_dispatch():
+        # Modes are not happy with torch.cuda.set_rng_state
+        # because it clones the state (which could produce a Tensor Subclass)
+        # and then grabs the new tensor's data pointer in generator.set_state.
+        #
+        # In the long run torch.cuda.set_rng_state should probably be
+        # an operator.
+        with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.set_rng_state(rng_state)
@@ -1451,7 +1513,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
+        "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -1476,13 +1538,16 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
+    if "USING_PYTEST" in os.environ:
+        test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
+    if raw_test_name in json.loads(os.environ.get("SLOW_TESTS_DICT", "{}")):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
+        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1505,7 +1570,7 @@ def check_if_enable(test: unittest.TestCase):
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
-                            "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests."
+                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
                         raise unittest.SkipTest(skip_msg)
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
@@ -1838,7 +1903,16 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        super().run(result=result)
+
+        if TEST_WITH_TORCHDYNAMO:
+            with torchdynamo.optimize("eager"):
+                super().run(result=result)
+
+            # TODO - Reset for each test slows down testing significantly.
+            # torchdynamo.reset()
+        else:
+            super().run(result=result)
+
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():
@@ -2208,6 +2282,17 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
+        r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
+        """
+        if not isinstance(y, Iterable):
+            # int, float, etc. or different shape tensors
+            y = torch.ones_like(x) * y
+        if not isinstance(y, torch.Tensor):
+            # iterable, but not a tensor
+            y = torch.ones_like(x) * torch.tensor(y)
+        return self.assertEqual(x, y, *args, **kwargs)
+
     def assertEqual(
             self,
             x,
@@ -2530,10 +2615,10 @@ class TestCase(expecttest.TestCase):
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
-        # remove IN_CI flag since this is a wrapped test process.
-        # IN_CI flag should be set in the parent process only.
-        if "IN_CI" in env.keys():
-            del env["IN_CI"]
+        # remove CI flag since this is a wrapped test process.
+        # CI flag should be set in the parent process only.
+        if "CI" in env.keys():
+            del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 

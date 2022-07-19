@@ -1,10 +1,10 @@
 #include <torch/csrc/autograd/functions/comm.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/cuda/comm.h>
-#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -23,7 +23,8 @@ Scatter::Scatter(
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
     // NOLINTNEXTLINE(modernize-pass-by-value)
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams,
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+        streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(chunk_sizes),
@@ -49,7 +50,11 @@ variable_list Scatter::apply(variable_list&& inputs) {
   });
   auto tensors = torch::cuda::scatter(
       // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(input), device_indices, chunk_sizes_, dim_, streams_);
+      std::move(input),
+      device_indices,
+      chunk_sizes_,
+      dim_,
+      streams_);
 
   std::vector<Variable> variables;
   variables.reserve(tensors.size());

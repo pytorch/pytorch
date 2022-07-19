@@ -137,7 +137,7 @@ def reshuffle_local_shard(
     local_shard = local_shard.transpose(0, reshard_dim).contiguous()
     gathered_input_size = list(local_shard.size())
     gathered_input_size[0] = sharded_dim_size
-    gathered_input = torch.empty(gathered_input_size, device=local_shard.device)
+    gathered_input = torch.empty(gathered_input_size, device=local_shard.device, dtype=local_shard.dtype)
     # all2all.
     local_shard = all_to_all_single(
         gathered_input,
@@ -225,7 +225,7 @@ def reshard_local_shard(
         output_tensor_list[
             placement.rank()
         ] = torch.empty(  # type: ignore[union-attr, index]
-            output_tensor_size, device=local_tensor.device
+            output_tensor_size, device=local_tensor.device, dtype=local_tensor.dtype
         )
         indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]
         if idx != placement.rank():  # type: ignore[union-attr]

@@ -15,7 +15,7 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 
 namespace at {
 namespace native {

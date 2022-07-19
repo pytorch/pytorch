@@ -8,7 +8,7 @@ and /cudnn/linear_unpack_impl.cpp, for cudnn.
 */
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>

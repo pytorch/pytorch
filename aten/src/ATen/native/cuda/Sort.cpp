@@ -23,20 +23,6 @@
 
 namespace at { namespace native {
 
-// We perform a segmented sort in cub with inputs that have
-// more than 1024/2048 elements along the selected dimension.
-// Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
-bool should_use_small_sort(const TensorBase &self, int64_t dim) {
-  int64_t nsort = self.sizes()[dim];
-  int64_t threshold;
-  if (self.scalar_type() == kLong || self.scalar_type() == kDouble) {
-    threshold = 1024;
-  } else {
-    threshold = 2048;
-  }
-  return nsort <= threshold;
-}
-
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
 void fillSliceWithIndex(const Tensor& t, int dim) {
@@ -84,7 +70,7 @@ void sort_cuda_kernel(
     "Sort currently does not support complex dtypes on CUDA.");
 
   // use inplace algorithm for smaller input sizes without stable=True
-  if (should_use_small_sort(self, dim) && !stable) {
+  if (should_use_small_sort(self, dim)) {
     // from thc: sorted->values, indices->indices, input->self
     fillSliceWithIndex(indices, dim);
 
@@ -93,7 +79,7 @@ void sort_cuda_kernel(
 
     // Sort using our in-place k/v kernel that supports arbitrary
     // layout
-    sortKeyValueInplace(values, indices, dim, descending);
+    sortKeyValueInplace(values, indices, dim, descending, stable);
     return;
   }
 
@@ -109,7 +95,7 @@ void sort_cuda_kernel(
   }
 
   c10::MaybeOwned<Tensor> values_tmp, indices_tmp;
-  if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::NO)) {
+  if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::No)) {
     values_tmp = c10::MaybeOwned<Tensor>::borrowed(values);
   } else {
     values_tmp = c10::MaybeOwned<Tensor>::owned(

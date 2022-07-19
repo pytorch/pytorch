@@ -4,9 +4,8 @@
 namespace torch {
 namespace optim {
 
-LRScheduler::LRScheduler(torch::optim::Optimizer& optimizer) :
-  step_count_(0),
-  optimizer_(optimizer) {}
+LRScheduler::LRScheduler(torch::optim::Optimizer& optimizer)
+    : step_count_(0), optimizer_(optimizer) {}
 
 void LRScheduler::step() {
   std::vector<double> learning_rates = get_lrs();
@@ -15,12 +14,15 @@ void LRScheduler::step() {
 }
 
 void LRScheduler::set_optimizer_lrs(const std::vector<double>& learning_rates) {
-  //Check the number of learning rates is equal to the number of parameters groups in the
-  //optimizer
-  TORCH_CHECK(learning_rates.size() == optimizer_.param_groups().size(),
-              "Number of learning rates not equal to the number of param groups\n",
-              "Number of learning rates given: ", learning_rates.size(),
-              "\nNumber of param groups: ", optimizer_.param_groups().size());
+  // Check the number of learning rates is equal to the number of parameters
+  // groups in the optimizer
+  TORCH_CHECK(
+      learning_rates.size() == optimizer_.param_groups().size(),
+      "Number of learning rates not equal to the number of param groups\n",
+      "Number of learning rates given: ",
+      learning_rates.size(),
+      "\nNumber of param groups: ",
+      optimizer_.param_groups().size());
 
   for (const auto i : c10::irange(optimizer_.param_groups().size())) {
     optimizer_.param_groups()[i].options().set_lr(learning_rates[i]);
@@ -29,7 +31,7 @@ void LRScheduler::set_optimizer_lrs(const std::vector<double>& learning_rates) {
 
 std::vector<double> LRScheduler::get_current_lrs() const {
   std::vector<double> learnings_rates(optimizer_.param_groups().size());
-  if(learnings_rates.size() > 0) {
+  if (learnings_rates.size() > 0) {
     for (const auto i : c10::irange(optimizer_.param_groups().size())) {
       learnings_rates[i] = optimizer_.param_groups()[i].options().get_lr();
     }

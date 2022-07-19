@@ -1,12 +1,13 @@
 import sys
 import warnings
+from typing import Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
@@ -18,6 +19,39 @@ from torch.onnx._globals import GLOBALS
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
 # release on 04/24/19
+
+
+__all__ = [
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "dequantize",
+    "div",
+    "embedding_bag",
+    "fake_quantize_per_tensor_affine",
+    "flip",
+    "fmod",
+    "isfinite",
+    "isinf",
+    "max_pool1d_with_indices",
+    "max_pool1d",
+    "max_pool2d_with_indices",
+    "max_pool2d",
+    "max_pool3d_with_indices",
+    "max_pool3d",
+    "nan_to_num",
+    "quantize_per_tensor",
+    "Quantized",
+    "slice",
+    "sort",
+    "topk",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 def div(g, self, other, *args):
@@ -141,15 +175,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Sequence[int],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -187,6 +222,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -258,11 +294,11 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = (
-        start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+        start.type(), _C.NoneType
     )
-    is_end_none = (
-        end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+        end.type(), _C.NoneType
     )
     is_start_onnx_const = start.node().kind() == "onnx::Constant"
     is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -324,7 +360,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
@@ -544,6 +580,16 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -612,3 +658,19 @@ class Quantized:
         )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    @symbolic_helper.parse_args("v", "i", "v", "v")
+    def cat(
+        g,
+        q_inputs: _C.Value,
+        dim: int,
+        op_scale: _C.Value,
+        op_zero_point: _C.Value,
+    ) -> _C.Value:
+        unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
+        dequantized = [
+            symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
+        ]
+        concatenated = g.op("Concat", *dequantized, axis_i=dim)
+        return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)

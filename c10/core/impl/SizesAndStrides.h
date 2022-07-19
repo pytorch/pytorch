@@ -170,6 +170,11 @@ class C10_API SizesAndStrides {
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
+  void set_strides(SymIntArrayRef strides) {
+    TORCH_INTERNAL_ASSERT(strides.size() == size());
+    std::copy(strides.begin(), strides.end(), strides_begin());
+  }
+
   void set_sizes(IntArrayRef newSizes) {
     set_sizes(SymIntArrayRef::fromIntArrayRef(newSizes));
   }

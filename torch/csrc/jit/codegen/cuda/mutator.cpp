@@ -63,20 +63,13 @@ void OptOutMutator::mutate(IterDomain* id) {
       stop_offset->sameAs(id->stopOffset())) {
     return;
   }
-
-  Val* mutated_val = IrBuilder::create<IterDomain>(
-      id->container(),
-      start,
-      extent,
-      stop_offset,
-      id->getParallelType(),
-      id->getIterType(),
-      id->isRFactorProduct());
-  if (id->hasPaddingToMultipleOfWarp()) {
-    mutated_val->as<IterDomain>()->padToMultipleOfWarp(
-        id->getMaybeSizeAfterPadding());
-  }
-  registerMutation(id, mutated_val);
+  registerMutation(
+      id,
+      IterDomainBuilder(id)
+          .start(start)
+          .extent(extent)
+          .stop_offset(stop_offset)
+          .build());
 }
 
 void OptOutMutator::mutate(TensorDomain* td) {
@@ -290,6 +283,20 @@ void OptOutMutator::mutate(MmaOp* mma) {
       IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
 }
 
+void OptOutMutator::mutate(LoadStoreOp* ldst) {
+  Val* out = maybeMutated(ldst->out());
+  Val* in = maybeMutated(ldst->in());
+  auto op_type = ldst->opType();
+
+  if (out->sameAs(ldst->out()) && in->sameAs(ldst->in())) {
+    return;
+  }
+
+  auto container = ldst->container();
+  container->removeExpr(ldst);
+  IrBuilder::create<LoadStoreOp>(container, op_type, out, in);
+}
+
 void OptOutMutator::mutate(BroadcastOp* bop) {
   Val* out = maybeMutated(bop->out());
   Val* in = maybeMutated(bop->in());
@@ -316,6 +323,32 @@ void OptOutMutator::mutate(TransposeOp* top) {
   auto new2old = top->new2old();
   container->removeExpr(top);
   IrBuilder::create<TransposeOp>(container, out, in, new2old);
+}
+
+void OptOutMutator::mutate(ExpandOp* eop) {
+  bool is_same = true;
+
+  TensorView* out = maybeMutated(eop->out())->as<TensorView>();
+  is_same = is_same && out->sameAs(eop->out());
+  TensorView* in = maybeMutated(eop->in())->as<TensorView>();
+  is_same = is_same && in->sameAs(eop->in());
+
+  std::vector<Val*> expanded_extents;
+  expanded_extents.reserve(eop->expanded_extents().size());
+  for (auto expanded_extent : eop->expanded_extents()) {
+    expanded_extents.push_back(maybeMutated(expanded_extent));
+    if (!expanded_extents.back()->sameAs(expanded_extent)) {
+      is_same = false;
+    }
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = eop->container();
+  container->removeExpr(eop);
+  IrBuilder::create<ExpandOp>(container, out, in, expanded_extents);
 }
 
 void OptOutMutator::mutate(ShiftOp* sop) {
@@ -419,6 +452,9 @@ void OptOutMutator::mutate(kir::BlockSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridSync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::CpAsyncWait*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {

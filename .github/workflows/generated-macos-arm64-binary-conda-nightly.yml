@@ -25,21 +25,18 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: macos-arm64-binary-conda
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
   CROSS_COMPILE_ARM64: 1
 
 concurrency:
-  group: macos-arm64-binary-conda-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-arm64-binary-conda-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -214,7 +211,7 @@ jobs:
           docker system prune -af
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -389,7 +386,7 @@ jobs:
           docker system prune -af
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

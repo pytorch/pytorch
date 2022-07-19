@@ -28,15 +28,18 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
     init_from_local_shards,
 )
+from torch.distributed.algorithms._comm_hooks import allreduce_hook
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -68,8 +71,14 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+    ParamInfo,
 )
-from .wrap import _or_policy, _recursive_wrap, _wrap_batchnorm_individually
+from .wrap import (
+    _or_policy,
+    _recursive_wrap,
+    _wrap_batchnorm_individually,
+    ParamExecOrderWrapPolicy
+)
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -77,12 +86,25 @@ try:
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
+_TORCH_FX_AVAIL = True
+if not hasattr(torch, "fx"):
+    _TORCH_FX_AVAIL = False
+if _TORCH_FX_AVAIL:
+    from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
+
+
+__all__ = [
+    "FullyShardedDataParallel", "ShardingStrategy", "MixedPrecision",
+    "CPUOffload", "BackwardPrefetch", "StateDictType", "StateDictConfig",
+    "FullStateDictConfig", "LocalStateDictConfig", "ShardedStateDictConfig",
+    "OptimStateKeyType", "TrainingState_", "p_assert", "clean_tensor_name",
+]
+
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
-
 
 def _default_meta_device_init_fn(module):
     """
@@ -368,14 +390,18 @@ class _ExecOrderData():
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
-        # Save `root_modules.parameters()` to `_all_flat_params` instead of
-        # re-materializing each time to avoid the result depending on the
-        # calling context (e.g. when some parameters have been rebuilt)
-        self._all_flat_params = list(root_module.parameters())
+        # Save all `FlatParameter`s in `root_module`'s hierarchy to
+        # `_all_flat_params` instead of re-materializing each time to avoid the
+        # result depending on the calling context (e.g. when some parameters
+        # have been rebuilt)
+        self._all_flat_params = [
+            param for param in root_module.parameters()
+            if isinstance(param, FlatParameter)
+        ]
         self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
             _get_param_to_unflat_param_names(root_module)
-        )  # `root_module.parameters()` should only contain `FlatParameter`s
+        )
 
     def get_param_index(self, param: FlatParameter) -> int:
         """Returns a unique non-negative parameter index for ``param`` if it is
@@ -610,7 +636,6 @@ class FullyShardedDataParallel(nn.Module):
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
 
     """
-
     def __init__(
         self,
         module: nn.Module,
@@ -624,7 +649,24 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
+        forward_prefetch: bool = False,
     ):
+        if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
+            self._init_param_exec_order_wrap_policy(
+                module=module,
+                process_group=process_group,
+                sharding_strategy=sharding_strategy,
+                cpu_offload=cpu_offload,
+                auto_wrap_policy=auto_wrap_policy,
+                backward_prefetch=backward_prefetch,
+                mixed_precision=mixed_precision,
+                ignored_modules=ignored_modules,
+                param_init_fn=param_init_fn,
+                device_id=device_id,
+                sync_module_states=sync_module_states,
+            )
+            return
+
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         # Validate the ignored modules and derive the ignored parameters/buffers
@@ -685,6 +727,7 @@ class FullyShardedDataParallel(nn.Module):
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch,
                 mixed_precision=mixed_precision,
                 param_init_fn=param_init_fn,
                 device_id=device_id,
@@ -780,6 +823,7 @@ class FullyShardedDataParallel(nn.Module):
         self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
+        self.forward_prefetch = forward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision
         # Original buffer type (mapping since all buffers may not be of same type). In
@@ -890,6 +934,81 @@ class FullyShardedDataParallel(nn.Module):
 
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
+
+        # setting communication hook to a default
+        self.communication_hook = self._get_default_comm_hook()
+        self.communication_hook_state = self._get_default_comm_hook_state()
+        self._hook_registered = False
+
+    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
+        auto_wrap_policy = kwargs["auto_wrap_policy"]
+        module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            tracer = auto_wrap_policy.tracing_config.tracer
+            execution_info = _init_execution_info(module)
+
+            for m in module.modules():
+                assert not isinstance(
+                    m, FullyShardedDataParallel
+                ), "The input module of _patch_tracer should not contain FSDP modules"
+
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
+        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
+        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
+        self.__init__(*args, **kwargs)
+        self._param_exec_order_policy: bool = True
+        # self._param_exec_order_prep_stage is set to True before we get the execution order
+        self._param_exec_order_prep_stage: bool = True
+        # A list that stores the flatten parameters and its name based on the parameter execution order
+        self._fsdp_params_exec_order: List[FlatParameter] = []
+        if _TORCH_FX_AVAIL and isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            for wrap in self.fsdp_modules(self):
+                module_to_fsdp[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
+            for m in execution_info.module_forward_order:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
+                        self._fsdp_params_exec_order.append(flat_param)
+            self._param_exec_order_prep_stage = False
+
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                # Assignment by reference, so each children FSDP wrap has access to
+                # the _fsdp_params_exec_order of the root module
+                m._fsdp_params_exec_order = self._fsdp_params_exec_order
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
 
     def _move_module_if_needed(self, module) -> None:
         """
@@ -1091,6 +1210,24 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         assert self._is_root is not None
         return self._is_root
+
+    def _use_param_exec_order_policy(self) -> bool:
+        return (
+            hasattr(self, "_param_exec_order_policy")
+            and self._param_exec_order_policy
+        )
+
+    def _is_param_exec_order_prep_stage(self) -> bool:
+        is_prep_stage = (
+            hasattr(self, "_param_exec_order_prep_stage")
+            and self._param_exec_order_prep_stage
+        )
+        if not is_prep_stage:
+            for p in self.parameters():
+                assert (
+                    not hasattr(p, "_params_exec_order_hook_handle")
+                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
+        return is_prep_stage
 
     @staticmethod
     def fsdp_modules(
@@ -1455,6 +1592,9 @@ class FullyShardedDataParallel(nn.Module):
         self._streams: Dict[str, torch.cuda.Stream] = {}
         self._fsdp_graph_order: List[nn.Module] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
+        self._pre_backward_hook_full_params_prefetched: bool = False
+        self._forward_full_params_prefetched: bool = False
+
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -1496,6 +1636,14 @@ class FullyShardedDataParallel(nn.Module):
             # Due to the use of streams, we need to make sure the previous
             # ``optim.step()`` is done before we all-gather parameters.
             self._wait_for_previous_optim_step()
+
+            # Set a flag on every FlatParameter to track whether its post
+            # backward hook has been called, mainly for validation purpose
+            # in wait_for_post_backward.
+            if self._exec_order_data.is_first_iter:
+                for m in self.fsdp_modules(self):
+                    for p in m.params:
+                        p._post_backward_called = False
 
     @torch.no_grad()
     def _init_param_attributes(self, p: Parameter) -> None:
@@ -1670,34 +1818,42 @@ class FullyShardedDataParallel(nn.Module):
 
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
-    def _need_prefetch_pre_backward_hook(self) -> bool:
-        if (
-            self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
-            and self._fsdp_graph_order is not None
+    def _need_prefetch_full_params(self, state: TrainingState_) -> bool:
+        allowed_states = (
+            TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST
+        )
+        assert state in allowed_states, f"state needs to be in the set of {allowed_states}"
+        valid_fsdp_graph_and_index = (
+            self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None
-            and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
-            != TrainingState_.BACKWARD_POST
-        ):
-            return True
+        )
+        if state == TrainingState_.FORWARD:
+            return (
+                self.forward_prefetch
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
+                != TrainingState_.FORWARD
+            )
+        elif state == TrainingState_.BACKWARD_PRE:
+            return (
+                self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph > 0
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+                != TrainingState_.BACKWARD_POST
+            )
         else:
-            return False
-
-    def _need_prefetch_post_backward_hook(self) -> bool:
-        if (
-            self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
-            and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None
-            and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
-            != TrainingState_.BACKWARD_POST
-            and self._fsdp_graph_order[
-                self._my_fsdp_idx_in_graph - 1
-            ]._need_rebuild_full_params
-        ):
-            return True
-        else:
-            return False
+            return (
+                self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
+                and valid_fsdp_graph_and_index
+                and self._my_fsdp_idx_in_graph > 0
+                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+                != TrainingState_.BACKWARD_POST
+                and self._fsdp_graph_order[
+                    self._my_fsdp_idx_in_graph - 1
+                ]._need_rebuild_full_params
+            )
 
     @staticmethod
     @contextlib.contextmanager
@@ -1776,48 +1932,90 @@ class FullyShardedDataParallel(nn.Module):
         back to sharded version after _summon_full_params ends, and also remove
         "_fsdp_wrapped_module" prefix.
         """
+        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
         # state_dict is empty for nonzero ranks if `rank0_only` was enabled.
         if not state_dict:
             return state_dict
 
+        if self._fsdp_wrapped_module.no_params:
+            return state_dict
+
+        # This can happen when rank0_only is enabled and self.rank != 0.
+        if self._fsdp_wrapped_module.orig_flat_param[0] is None:
+            assert self._fsdp_wrapped_module.flat_param is not None, (
+                "When no_params is False, one of flat_param and orig_flat_param "
+                "should have value."
+            )
+            return state_dict
+
         offload_to_cpu = self._state_dict_config.offload_to_cpu
         cpu_device = torch.device("cpu")
-        for key in state_dict:
-            clean_key = clean_tensor_name(key)
+
+        # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
+        # processing buffers.
+        sharded_param_info = [
+            ParamInfo(info[0], info[2], info[3])
+            for info in self._fsdp_wrapped_module.orig_flat_param[0]._shared_param_infos
+        ]
+        for module_name, _, param_name in (
+            self._fsdp_wrapped_module.orig_flat_param[0].param_info + sharded_param_info
+        ):
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            # Activation checkpoint adds a prefix that has to be
+            # removed as well.
+            module_name = module_name.replace(
+                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+            )
+            fqn = f"{prefix}{module_name}{param_name}"
+
+            clean_key = fqn
             clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
             # do not have prefix considered as they are not computed in `state_dict`
             # call.
             if clean_key.startswith(clean_prefix):
                 clean_key = clean_key[len(clean_prefix):]
-            # Do not need to clone buffers since they are not sharded
-            if clean_key in self._buffer_names:
-                # Offload the buffer to CPU if needed -- we do not do this in
-                # `_summon_full_params()` since without care, that would free
-                # the original buffer's GPU memory and require reallocating
-                # that memory later; this only affects the state dict's buffer
-                # variable and leaves the original buffer's GPU memory intact
-                if offload_to_cpu and state_dict[key].device != cpu_device:
-                    state_dict[key] = state_dict[key].to(cpu_device)
-                continue
+
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
+            assert fqn in state_dict, (
+                f"FSDP assumes {fqn} is in the state_dict but the state_dict "
+                f"only has {state_dict.keys()}. prefix={prefix}, "
+                f"module_name={module_name} param_name={param_name}."
+            )
             if clean_key not in self._ignored_param_names and \
-                    not getattr(state_dict[key], "_has_been_cloned", False):
+                    not getattr(state_dict[fqn], "_has_been_cloned", False):
                 try:
-                    state_dict[key] = state_dict[key].clone().detach()
-                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                    state_dict[fqn] = state_dict[fqn].clone().detach()
+                    state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
                     warnings.warn(
-                        f"Failed to clone() tensor with name {key}. This may mean "
+                        f"Failed to clone() tensor with name {fqn}. This may mean "
                         "that this state_dict entry could point to invalid memory "
                         "regions after returning from state_dict() call if this "
                         "parameter is managed by FSDP. Please check clone "
-                        f"implementation of {key}. Error: {str(e)}"
+                        f"implementation of {fqn}. Error: {str(e)}"
                     )
 
-        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+        # Offload the buffer to CPU if needed -- we do not do this in
+        # `_summon_full_params()` since without care, that would free
+        # the original buffer's GPU memory and require reallocating
+        # that memory later; this only affects the state dict's buffer
+        # variable and leaves the original buffer's GPU memory intact
+        if offload_to_cpu:
+            for clean_key in self._buffer_names:
+                # This is a hack to support activation checkpoint.
+                clean_key = clean_key.replace(
+                    f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+                )
+                fqn = f"{prefix}{clean_key}"
+                if state_dict[fqn].device != cpu_device:
+                    state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
 
     def _local_post_state_dict_hook(
@@ -2290,11 +2488,23 @@ class FullyShardedDataParallel(nn.Module):
                     input_dtype, *args, **kwargs
                 )
 
-            # All-gather full parameters, moving them to compute_device if
-            # necessary.
-            self._rebuild_full_params()
+            # Only rebuilding full params when the params are not prefetched in previous layers
+            if not self._forward_full_params_prefetched:
+                self._rebuild_full_params()
+            self._forward_full_params_prefetched = False
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            # Prefetch next layer's full params in forward pass
+            if self._need_prefetch_full_params(self.training_state):
+                # This guarantees that pre-fetching is initialized only after all
+                # previous computations are finished. Therefore, all gather next layer's
+                # parameters will only overlap with this layer's computation. This
+                # prevents over-prefetching, where multiple layer's parameters are prefetched
+                # before the computation.
+                self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._rebuild_full_params()
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._forward_full_params_prefetched = True
 
             # Register backward hooks to reshard params and reduce-scatter grads.
             # These need to be re-registered every forward pass in some cases where grad_fn
@@ -2449,7 +2659,7 @@ class FullyShardedDataParallel(nn.Module):
                     try:
                         yield
                     finally:
-                        if offload_to_cpu:
+                        if offload_to_cpu and (not rank0_only or my_rank == 0):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
@@ -2619,37 +2829,41 @@ class FullyShardedDataParallel(nn.Module):
             # Run ``_pre_backward_hook`` only once per backward pass
             if self._pre_backward_hook_has_run:
                 return
-            # try to queue final backward callback only once for root, so
-            # that final backward callback is attached to the outer most
-            # backward graph task and called after all the backward
-            # calls are completed.
-            if self._is_root:
-                self._queue_wait_for_post_backward()
 
-            if self._need_prefetch_pre_backward_hook():
-                # Always wait for all_gather before rebuilding full params, just
-                # in case full params have already been prefetched in previous layer's
-                # pre-backward hook.
+            with torch.autograd.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
+                # try to queue final backward callback only once for root, so
+                # that final backward callback is attached to the outer most
+                # backward graph task and called after all the backward
+                # calls are completed.
+                if self._is_root:
+                    self._queue_wait_for_post_backward()
+
+                if self._pre_backward_hook_full_params_prefetched:
+                    # Always wait for all_gather before rebuilding full params, just
+                    # in case full params have already been prefetched in previous layer's
+                    # pre-backward hook.
+                    torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+                # Start of a backward pass for the first time in an backward pass.
+                self._assert_state([TrainingState_.IDLE])
+                self.training_state = TrainingState_.BACKWARD_PRE
+
+                # All-gather full parameters, moving them to compute device if
+                # necessary.
+                self._rebuild_full_params()
+                self._pre_backward_hook_full_params_prefetched = False
+                # Wait for all_gather to finish before computation
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            # Start of a backward pass for the first time in an backward pass.
-            self._assert_state([TrainingState_.IDLE])
-            self.training_state = TrainingState_.BACKWARD_PRE
+                # Prefetch next layer's full params in backward pass,
+                # since it is prefetching, no need to wait for all_gather stream.
+                if self._need_prefetch_full_params(self.training_state):
+                    self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                    self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._pre_backward_hook_full_params_prefetched = True
 
-            # All-gather full parameters, moving them to compute device if
-            # necessary.
-            self._rebuild_full_params()
-            # Wait for all_gather to finish before computation
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Prefetch next layer's full params in backward pass,
-            # since it is prefetching, no need to wait for all_gather stream.
-            if self._need_prefetch_pre_backward_hook():
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
-
-            self._pre_backward_hook_has_run = True
-            # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
-            self._prep_grads_for_backward()
+                self._pre_backward_hook_has_run = True
+                # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
+                self._prep_grads_for_backward()
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
@@ -2731,181 +2945,197 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
-        # First hook callback will see PRE state. If we have multiple params,
-        # then subsequent hook callbacks will see POST state.
-        self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
-        self.training_state = TrainingState_.BACKWARD_POST
-        if param.grad is None:
-            return
+        p_assert(
+            hasattr(param, '_post_backward_called'),
+            "Expected flag _post_backward_called to exist on param."
+        )
+        param._post_backward_called = True
+        with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
+            # First hook callback will see PRE state. If we have multiple params,
+            # then subsequent hook callbacks will see POST state.
+            self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
+            self.training_state = TrainingState_.BACKWARD_POST
 
-        if param.grad.requires_grad:
-            raise RuntimeError(
-                "FSDP only works with gradients that don't require gradients"
-            )
+            if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
+                # In self._fsdp_params_exec_order, the parameters are ordered based on
+                # the execution order in the backward pass in the first iteration.
+                self._fsdp_params_exec_order.append(param)
 
-        if self._require_backward_grad_sync or \
-                self.sharding_strategy == ShardingStrategy.FULL_SHARD:
-            # We free full parameters unless we are in `no_sync()` (i.e. when
-            # `_require_backward_grad_sync=False`) and not using the
-            # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
-            # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
-            # full parameters in memory and save network overhead.
-            self._free_full_params(cast(List[FlatParameter], [param]))
+            if param.grad is None:
+                return
 
-        if self._mixed_precision_enabled_for_params():
-            # Noop if reshard_after_forward=True because we'd free the param
-            # shard when rebuilding the full params in the pre_beckward_hook.
-            self._free_mp_shard(cast(List[FlatParameter], [param]))
-
-        # Switch to local shard after backward. Note that
-        # when CPU offload is enabled, _use_param_local_shard implicitly
-        # offloads the local shard to CPU by making p.data point to
-        # p._local_shard, which would reside on CPU.
-        self._use_param_local_shard(cast(List[FlatParameter], [param]))
-
-        # Prefetch previous layer's full params in backward pass post backward hook,
-        # If next layer's backward computation is done and full params are freed,
-        # no need to prefetch the full params again.
-        # Only prefetch full params if any of the next layer's outputs requires grad
-        if self._need_prefetch_post_backward_hook():
-            self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
-            # Next layer's computation will start right after this all_gather,
-            # Wait for all_gather to finish before computation.
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-        if not self._require_backward_grad_sync:
-            return
-
-        # Wait for all work in the current stream to finish, then start the
-        # reductions in post_backward stream.
-        self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
-
-        with torch.cuda.stream(self._streams["post_backward"]):
-            orig_grad_data = param.grad.data
-            if (
-                self._mixed_precision_enabled_for_reduce()
-            ):
-                # Cast gradient to precision in which it should be communicated.
-                # TODO: Make this a communication hook when communication hooks
-                # are implemented for FSDP. Note that this is a noop if the
-                # reduce_dtype matches the param dtype.
-                param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
-
-            if self.gradient_predivide_factor > 1:
-                # Average grad by world_size for consistency with PyTorch DDP.
-                param.grad.div_(self.gradient_predivide_factor)
-
-            grad = param.grad.data
-            if param._is_sharded:  # type: ignore[attr-defined]
-                # We clear `param.grad` to permit repeated gradient
-                # computations when this FSDP module is called multiple times.
-                # This is to avoid a race among multiple re-entrant backward
-                # passes. For example, the second backward pass computation
-                # precedes ahead of the first backward pass reduction, which is
-                # possible since the reduction is in a different stream and is
-                # async. Then, the first backward pass may be incorrectly
-                # reducing the second backward pass's `param.grad`.
-                # The reduced gradients are accumulated in
-                # `param._saved_grad_shard`, and the gradient reductions can
-                # happen in arbitrary order, though we tolerate this due to the
-                # (approximate) commutativity of floating-point addition.
-                param.grad = None
-                grad_flatten = torch.flatten(grad)
-                chunks = list(grad_flatten.chunk(self.world_size))
-                num_pad = self.world_size * chunks[0].numel() - grad.numel()
-                input_flattened = F.pad(grad_flatten, [0, num_pad])
-                output = torch.zeros_like(chunks[0])
-                dist._reduce_scatter_base(
-                    output, input_flattened, group=self.process_group
+            if param.grad.requires_grad:
+                raise RuntimeError(
+                    "FSDP only works with gradients that don't require gradients"
                 )
-                if self.gradient_postdivide_factor > 1:
-                    # Average grad by world_size for consistency with PyTorch DDP.
-                    output.div_(self.gradient_postdivide_factor)
 
-                # Note that we need to cast grads back to the full precision if
-                # 1) parameters were in reduced precision during fwd, as grads
-                # would thus be in this reduced precision, or
-                # 2) parameters did not have precision reduced, but grads
-                # had reduced precision for communication.
+            if self._require_backward_grad_sync or \
+                    self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+                # We free full parameters unless we are in `no_sync()` (i.e. when
+                # `_require_backward_grad_sync=False`) and not using the
+                # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
+                # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
+                # full parameters in memory and save network overhead.
+                self._free_full_params(cast(List[FlatParameter], [param]))
+
+            if self._mixed_precision_enabled_for_params():
+                # Noop if reshard_after_forward=True because we'd free the param
+                # shard when rebuilding the full params in the pre_beckward_hook.
+                self._free_mp_shard(cast(List[FlatParameter], [param]))
+
+            # Switch to local shard after backward. Note that
+            # when CPU offload is enabled, _use_param_local_shard implicitly
+            # offloads the local shard to CPU by making p.data point to
+            # p._local_shard, which would reside on CPU.
+            self._use_param_local_shard(cast(List[FlatParameter], [param]))
+
+            # Prefetch previous layer's full params in backward pass post backward hook,
+            # If next layer's backward computation is done and full params are freed,
+            # no need to prefetch the full params again.
+            # Only prefetch full params if any of the next layer's outputs requires grad
+            if self._need_prefetch_full_params(self.training_state):
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                # Next layer's computation will start right after this all_gather,
+                # Wait for all_gather to finish before computation.
+                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            if not self._require_backward_grad_sync:
+                return
+
+            # Wait for all work in the current stream to finish, then start the
+            # reductions in post_backward stream.
+            self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+
+            with torch.cuda.stream(self._streams["post_backward"]):
+                orig_grad_data = param.grad.data
                 if (
-                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    self._mixed_precision_enabled_for_reduce()
                 ):
-                    # Cast gradients back to the full parameter precision so that
-                    # optimizer.step() happens in full precision.
-                    orig_param_grad_data = output
-                    output.data = output.data.to(dtype=param.data.dtype)
-                    # Don't let this memory get reused until after the transfer.
-                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    # Cast gradient to precision in which it should be communicated.
+                    # TODO: Make this a communication hook when communication hooks
+                    # are implemented for FSDP. Note that this is a noop if the
+                    # reduce_dtype matches the param dtype.
+                    param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
-                # To support gradient accumulation outside `no_sync()`, we save
-                # the gradient data to `param._saved_grad_shard` before the
-                # backward pass, accumulate gradients into it here, and set
-                # `param.grad` with the accumulated value at the end of the
-                # backward pass in preparation for the optimizer step.
-                accumulate_grad = hasattr(param, "_saved_grad_shard")
-                if accumulate_grad:
-                    p_assert(
-                        param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
-                        "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
-                        f"existing grad shape={param._saved_grad_shard.shape} "
-                        f"new grad shape={output.shape}"  # type: ignore[attr-defined]
+                if self.gradient_predivide_factor > 1 and self.communication_hook is None:
+                    # Average grad by pre-division factor. Together pre- and post-division factors
+                    # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+                    # This is a two-step process to avoid potential underflow and overflow.
+                    param.grad.div_(self.gradient_predivide_factor)
+
+                grad = param.grad.data
+                if param._is_sharded:  # type: ignore[attr-defined]
+                    # We clear `param.grad` to permit repeated gradient
+                    # computations when this FSDP module is called multiple times.
+                    # This is to avoid a race among multiple re-entrant backward
+                    # passes. For example, the second backward pass computation
+                    # precedes ahead of the first backward pass reduction, which is
+                    # possible since the reduction is in a different stream and is
+                    # async. Then, the first backward pass may be incorrectly
+                    # reducing the second backward pass's `param.grad`.
+                    # The reduced gradients are accumulated in
+                    # `param._saved_grad_shard`, and the gradient reductions can
+                    # happen in arbitrary order, though we tolerate this due to the
+                    # (approximate) commutativity of floating-point addition.
+                    param.grad = None
+                    grad_flatten = torch.flatten(grad)
+                    chunks = list(grad_flatten.chunk(self.world_size))
+                    num_pad = self.world_size * chunks[0].numel() - grad.numel()
+                    input_flattened = F.pad(grad_flatten, [0, num_pad])
+                    output = torch.zeros_like(chunks[0])
+                    dist._reduce_scatter_base(
+                        output, input_flattened, group=self.process_group
                     )
-                    p_assert(
-                        param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
-                        "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
-                        f"existing grad device={param._saved_grad_shard.device} "
-                        f"new grad device={output.device}"  # type: ignore[attr-defined]
-                    )
-                    param._saved_grad_shard += output  # type: ignore[attr-defined]
-                else:
-                    param._saved_grad_shard = output  # type: ignore[attr-defined]
-                grad = param._saved_grad_shard  # type: ignore[attr-defined]
-            else:
-                # Currently the way for _is_sharded to be False is if
-                # world_size == 1 or sharding_strategy is NO_SHARD.
-                assert (
-                    self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
-                ), "Currently the way for _is_sharded to be False is \
-                    world_size == 1 or sharding_stratagy is set to be NO_SHARD"
-                if self.sharding_strategy == ShardingStrategy.NO_SHARD:
-                    dist.all_reduce(param.grad, group=self.process_group)
                     if self.gradient_postdivide_factor > 1:
-                        # Average grad by world_size for consistency with PyTorch DDP.
-                        param.grad.div_(self.gradient_postdivide_factor)
-                # Note that we need to cast grads back to the full precision if
-                # 1) parameters were in reduced precision during fwd, as grads
-                # would thus be in this reduced precision, or
-                # 2) parameters did not have precision reduced, but grads
-                # had reduced precision for communication.
-                if (
-                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
-                ):
-                    # Cast gradients back to the full parameter precision so that
-                    # optimizer.step() happens in full precision.
-                    orig_param_grad_data = param.grad.data
-                    param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                        # Average grad by pre-division factor. Together pre- and post-division factors
+                        # lead to an overall averaging by world_size, required for consistency with PyTorch DDP.
+                        # This is a two-step process to avoid potential underflow and overflow.
+                        output.div_(self.gradient_postdivide_factor)
+
+                    # Note that we need to cast grads back to the full precision if
+                    # 1) parameters were in reduced precision during fwd, as grads
+                    # would thus be in this reduced precision, or
+                    # 2) parameters did not have precision reduced, but grads
+                    # had reduced precision for communication.
+                    if (
+                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    ):
+                        # Cast gradients back to the full parameter precision so that
+                        # optimizer.step() happens in full precision.
+                        orig_param_grad_data = output
+                        output.data = output.data.to(dtype=param.data.dtype)
+                        # Don't let this memory get reused until after the transfer.
+                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+
+                    # To support gradient accumulation outside `no_sync()`, we save
+                    # the gradient data to `param._saved_grad_shard` before the
+                    # backward pass, accumulate gradients into it here, and set
+                    # `param.grad` with the accumulated value at the end of the
+                    # backward pass in preparation for the optimizer step.
+                    accumulate_grad = hasattr(param, "_saved_grad_shard")
+                    if accumulate_grad:
+                        p_assert(
+                            param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
+                            "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
+                            f"existing grad shape={param._saved_grad_shard.shape} "
+                            f"new grad shape={output.shape}"  # type: ignore[attr-defined]
+                        )
+                        p_assert(
+                            param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
+                            "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
+                            f"existing grad device={param._saved_grad_shard.device} "
+                            f"new grad device={output.device}"  # type: ignore[attr-defined]
+                        )
+                        param._saved_grad_shard += output  # type: ignore[attr-defined]
+                    else:
+                        param._saved_grad_shard = output  # type: ignore[attr-defined]
+                    grad = param._saved_grad_shard  # type: ignore[attr-defined]
+                else:
+                    # Currently the way for _is_sharded to be False is if
+                    # world_size == 1 or sharding_strategy is NO_SHARD.
+                    assert (
+                        self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
+                    ), "Currently the way for _is_sharded to be False is \
+                        world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                    if self.sharding_strategy == ShardingStrategy.NO_SHARD:
+                        # if a communication hook was not registered,
+                        # then a default hook (`all_reduce`) will be used
+                        self.communication_hook(self.communication_hook_state, param.grad)
+
+                    # Note that we need to cast grads back to the full precision if
+                    # 1) parameters were in reduced precision during fwd, as grads
+                    # would thus be in this reduced precision, or
+                    # 2) parameters did not have precision reduced, but grads
+                    # had reduced precision for communication.
+                    if (
+                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                    ):
+                        # Cast gradients back to the full parameter precision so that
+                        # optimizer.step() happens in full precision.
+                        orig_param_grad_data = param.grad.data
+                        param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                        # Don't let this memory get reused until after the transfer.
+                        orig_param_grad_data.record_stream(torch.cuda.current_stream())
+
+                # Regardless of sharding or not, offload the grad to CPU if we are
+                # offloading params. This is so param and grad reside on same device
+                # which is needed for the optimizer step.
+                if self.cpu_offload.offload_params:
+                    # We specify non_blocking=True
+                    # and ensure the appropriate synchronization is done by waiting
+                    # streams in _wait_for_post_backward.
+                    param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                        grad.detach(), non_blocking=True
+                    )
                     # Don't let this memory get reused until after the transfer.
-                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
+                    grad.data.record_stream(torch.cuda.current_stream())
 
-            # Regardless of sharding or not, offload the grad to CPU if we are
-            # offloading params. This is so param and grad reside on same device
-            # which is needed for the optimizer step.
-            if self.cpu_offload.offload_params:
-                # We specify non_blocking=True
-                # and ensure the appropriate synchronization is done by waiting
-                # streams in _wait_for_post_backward.
-                param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    grad.detach(), non_blocking=True
-                )
-                # Don't let this memory get reused until after the transfer.
-                grad.data.record_stream(torch.cuda.current_stream())
-
-            # After _post_backward_hook returns, orig_grad_data will eventually
-            # go out of scope, at which point it could otherwise be freed for
-            # further reuse by the main stream while the div/reduce_scatter/copy
-            # are underway in the post_backward stream. See:
-            # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
-            orig_grad_data.record_stream(self._streams["post_backward"])
+                # After _post_backward_hook returns, orig_grad_data will eventually
+                # go out of scope, at which point it could otherwise be freed for
+                # further reuse by the main stream while the div/reduce_scatter/copy
+                # are underway in the post_backward stream. See:
+                # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
+                orig_grad_data.record_stream(self._streams["post_backward"])
 
     def _queue_wait_for_post_backward(self) -> None:
         """Try to queue a `wait_for_post_backward` callback.
@@ -2983,24 +3213,43 @@ class FullyShardedDataParallel(nn.Module):
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
                         p_assert(
-                            not p._is_sharded, "All sharded parameters should "
+                            not p._is_sharded or not p._post_backward_called,
+                            "All sharded parameters that received gradient should "
                             "use `_saved_grad_shard`"
                         )
                     if hasattr(p, "_saved_grad_shard"):
                         delattr(p, "_saved_grad_shard")
 
+                    p_assert(
+                        hasattr(p, '_post_backward_called'),
+                        "Expected flag _post_backward_called to be set on param."
+                    )
+                    # Reset _post_backward_called in preparation for the next iteration.
+                    p._post_backward_called = False
+
         # Update root and nested FSDP's hooks and flags.
         for m in self.modules():  # includes self
             if isinstance(m, FullyShardedDataParallel):
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
                 if any(p.requires_grad for p in m.parameters()):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
                     # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    if any([p.requires_grad for p in m.params]):
-                        m._assert_state(TrainingState_.BACKWARD_POST)
+                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
+                    if managed_param_requires_grad:
+                        p_assert(
+                            all(hasattr(p, '_post_backward_called') for p in m.params),
+                            "Expected all params to have flag _post_backward_called set!"
+                        )
+                        post_backward_hook_called = any(p._post_backward_called for p in m.params)
+                        if post_backward_hook_called:
+                            m._assert_state(TrainingState_.BACKWARD_POST)
+                        else:
+                            # post backward hook was not called, meaning param
+                            # did not have a gradient computed. It was either unused
+                            # in forward, or unused in loss computation so it did
+                            # not get gradient
+                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
                     else:
                         m._assert_state(TrainingState_.BACKWARD_PRE)
                 else:
@@ -3012,11 +3261,45 @@ class FullyShardedDataParallel(nn.Module):
                     # 2. output tensors are `requires_grad==False`. In this case,
                     # pre-backward hook is not registered, so it is in IDLE state.
                     m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+
+                _finalize_params(m)
+                m._pre_backward_hook_has_run = False
                 m.training_state = TrainingState_.IDLE
 
                 if m._is_root:
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
+
+        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
+            self._param_exec_order_policy_second_iter_init()
+
+    def _param_exec_order_policy_second_iter_init(self) -> None:
+        self._param_exec_order_prep_stage = False
+        # Let the parameters in self._fsdp_params_exec_order ordered based on
+        # the execution order in the forward pass.
+        self._fsdp_params_exec_order.reverse()
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                assert hasattr(
+                    m, "_param_exec_order_policy"
+                ), "Non-root FSDP modules should also have _param_exec_order_policy attribute"
+                assert hasattr(
+                    m, "_param_exec_order_prep_stage"
+                ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
+                m._param_exec_order_prep_stage = False
+        # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
+        # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
+        # and will be used to schedule the parameters (rebuild_full_params and reshard).
+        # TODO (linjianma): Remove all internal FSDP wraps from the root FSDP module.
+        # TODO (linjianma): Based on self._fsdp_params_exec_order, get the information
+        # needed to patch the forward() function of each key in the fsdp_wrap_map. The rules are as follows:
+        # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
+        # will be used in the forward, and reshard all parameters that are currently full and will not be
+        # used in the next forward()
+        # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
+        # all parameters that will be used next.
+        # TODO (linjianma): Patch the forward of each model in the keys
+        # of fsdp_wrap_map based on the information above.
 
     def _update_p_data(self, p, output_tensor: torch.Tensor) -> None:
         """
@@ -3767,7 +4050,7 @@ class FullyShardedDataParallel(nn.Module):
         # Broadcast the optim state dict without positive-dimension tensor
         # state and the FSDP parameter IDs from rank 0 to all ranks
         processed_osd = _broadcast_processed_optim_state_dict(
-            processed_osd if rank == 0 else None, rank, group, broadcast_device,
+            processed_osd if rank == 0 else None, rank, group,
         )
         # Broadcast positive-dimension tensor state (both sharded tensors for
         # FSDP parameters and unsharded tensors for non-FSDP parameters)
@@ -3881,6 +4164,72 @@ class FullyShardedDataParallel(nn.Module):
             return new_osd
         return new_osd  # should never reach here
 
+    def _get_default_comm_hook(self) -> Any:
+        r"""
+        Returns a default communication hook based on a sharding strategy.
+        """
+        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
+            return None
+        else:
+            return allreduce_hook.allreduce_hook
+
+    def _get_default_comm_hook_state(self) -> Any:
+        r"""
+        Returns a default communication hook state based on a sharding strategy.
+        """
+        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
+            return None
+        else:
+            return allreduce_hook.AllReduceState(process_group=self.process_group)
+
+    def register_comm_hook(self, state: object, hook: callable):
+        """
+        Registers a communication hook which is an enhancement that provides a
+        flexible hook to users where they can specify how FSDP aggregates gradients
+        across multiple workers.
+        This hook can be used to implement several algorithms like
+        `GossipGrad <https://arxiv.org/abs/1803.05880>`_ and gradient compression
+        which involve different communication strategies for
+        parameter syncs while training with :class:`FullyShardedDataParallel`.
+
+        .. warning::
+            FSDP only support communication hooks for a ``NO_SHARD`` strategy at this time.
+            If other strategies are used, an error will be raised.
+
+        .. warning ::
+            FSDP communication hook should be registered before running an initial forward pass
+            and only once.
+
+        Args:
+            state (object): Passed to the hook to maintain any state information during the training process.
+                            Examples include error feedback in gradient compression,
+                            peers to communicate with next in `GossipGrad <https://arxiv.org/abs/1803.05880>`_, etc.
+                            It is locally stored by each worker
+                            and shared by all the gradient tensors on the worker.
+            hook (callable): Callable with the following signature:
+                            ``hook: Callable[torch.Tensor] -> None``:
+                            This function takes in a Python tensor, which represents
+                            the full, flattened, unsharded gradient with respect to all variables
+                            corresponding to the model this FSDP unit is wrapping
+                            (that are not wrapped by other FSDP sub-units).
+                            It then performs all necessary processing and returns ``None``.
+
+        """
+        if not self.check_is_root():
+            raise AssertionError("register_comm_hook can only be called on a root instance.")
+        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
+            raise NotImplementedError(
+                "Communication hooks are currently only available for a NO_SHARD strategy."
+            )
+        else:
+            # register same hook for root and all submodules
+            for submodule in self.fsdp_modules(self):
+                assert not submodule._hook_registered, "communication hook can be only registered once"
+                submodule._hook_registered = True
+                assert submodule.communication_hook == self._get_default_comm_hook(),\
+                    f"communication hook should be default, but it is {submodule.communication_hook.__name__} instead"
+                submodule.communication_hook_state = state
+                submodule.communication_hook = hook
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""
@@ -3922,6 +4271,7 @@ def p_assert(cond: Any, s: Any) -> None:
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
+        traceback.print_stack()
         raise AssertionError
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
@@ -3971,30 +4321,26 @@ def _get_param_to_unflat_param_names(
             in the module walk order; if ``False``, then includes all of the
             unflattened parameter names.
     """
-    def _clean_param_name(prefix, param_info):
-        """This replicates the parameter name cleaning logic in model state
-        dict but avoids gathering any parameters."""
-        name = clean_tensor_name(
-            prefix + param_info.module_name + "." + param_info.param_name
-        )
-        return name
-
     def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                prefixed_param_names = [
-                    _clean_param_name(prefix, param_info)
-                    for param_info in param._param_infos
-                ] if isinstance(param, FlatParameter) else [prefix + param_name]
+                module_prefixed_param_names = (
+                    param._param_names if isinstance(param, FlatParameter)
+                    else [param_name]
+                )  # prefixed from `module`
+                fully_prefixed_param_names = [
+                    clean_tensor_name(prefix + name)
+                    for name in module_prefixed_param_names
+                ]  # fully prefixed from the top level including `prefix`
                 # If this parameter has already been visited, then it is a
                 # shared parameter; then, only take the first parameter name
                 is_shared_param = param in param_to_unflat_param_names
                 if not is_shared_param:
-                    param_to_unflat_param_names[param] = prefixed_param_names
+                    param_to_unflat_param_names[param] = fully_prefixed_param_names
                 elif not dedup_shared_params:
-                    param_to_unflat_param_names[param].extend(prefixed_param_names)
+                    param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names
@@ -4051,4 +4397,9 @@ def clean_tensor_name(tensor_name: str) -> str:
     # call `replace()` twice separately
     tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
     tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    # TODO: Explicitly replacing checkpoint_wrapper prefix is not ideal,
+    # as it increases coupling between CheckpointWrapper and FSDP. This is also not
+    # scalable for additional wrapped modules, we should come up with a general solution
+    # for this issue.
+    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX + ".", "")
     return tensor_name

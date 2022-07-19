@@ -39,8 +39,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
-from jit.test_onnx_export import TestONNXExport  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -56,6 +55,7 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
+from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -77,6 +77,7 @@ from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
+from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -100,7 +101,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef, IS_MACOS
+    skipIfCrossRef, IS_MACOS, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -603,6 +604,19 @@ class TestJit(JitTestCase):
         # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_close(orig_res, a_copy)
+
+    def test_repeat_interleave_script(self):
+        def fn(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+            output = input.repeat_interleave(repeats)
+            return output
+        fn_scripted = torch.jit.script(fn)
+
+        input = torch.tensor([5, 7], dtype=torch.int64)
+        repeats = torch.tensor([3, 6], dtype=torch.int64)
+
+        output = fn(input, repeats)
+        output_scripted = fn_scripted(input, repeats)
+        self.assertEqual(output_scripted, output)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -1989,6 +2003,7 @@ graph(%Ra, %Rb):
             check(fn, torch.jit.script(fn), x, y)
             check(fn, torch.jit.trace(fn, (x, y)), x, y)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
         # between IValue and PyObject are correct
@@ -2759,6 +2774,7 @@ graph(%Ra, %Rb):
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
             torch.jit.script(Test())
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_warnings(self):
         import warnings
 
@@ -3960,6 +3976,7 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_cpp_module_iterator(self):
         a = nn.Module()
         a.name = 'a'
@@ -5351,7 +5368,7 @@ a")
         def func2(x):
             return x.sum(dim=4)
 
-        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
+        # test that shape analysis is written correctly for sum with OptionalIntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
@@ -6432,6 +6449,7 @@ a")
         inputs = self._make_scalar_vars([42, 1337], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_while_nest_if(self):
         def func(a, b):
             # type: (int, int) -> int
@@ -6588,6 +6606,7 @@ a")
         checkMathWrap("remainder", 2)
         checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_if_nest_while(self):
         def func(a, b):
             # type: (int, int) -> int
@@ -9148,20 +9167,8 @@ dedent """
         inps2 = (stft(*inps), inps[1])
         self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
-        def lu(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.lu(x)
-
-        self.checkScript(lu, (torch.randn(2, 3, 3),))
-
-        def lu_infos(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
-            return torch.lu(x, get_infos=True)
-
-        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
-
         def lu_unpack(x):
-            A_LU, pivots = torch.lu(x)
+            A_LU, pivots = torch.linalg.lu_factor(x)
             return torch.lu_unpack(A_LU, pivots)
 
         for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
@@ -10191,6 +10198,7 @@ dedent """
         cm_load = torch.jit.load(buffer)
         FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
@@ -11653,6 +11661,7 @@ dedent """
         python_type = eval(none_type.annotation_str, g)
         assert python_type is type(None)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
             def __init__(self):
@@ -11763,7 +11772,17 @@ dedent """
 
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
-        def fn_enumerate_start_index(x):
+        def fn_enumerate_start_arg(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, v) in enumerate(x, 1):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn_enumerate_start_arg, ([1, 2, 3, 4, 5],))
+
+        def fn_enumerate_start_kwarg(x):
             # type: (List[int]) -> int
             sum = 0
             for (i, v) in enumerate(x, start=1):
@@ -11771,7 +11790,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_enumerate_start_kwarg, ([1, 2, 3, 4, 5],))
 
         def fn_nested_enumerate(x):
             # type: (List[int]) -> int
@@ -11781,7 +11800,7 @@ dedent """
 
             return sum
 
-        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+        self.checkScript(fn_nested_enumerate, ([1, 2, 3, 4, 5],))
 
         with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
             @torch.jit.script
@@ -16106,6 +16125,16 @@ dedent """
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
 
+    def test_index_with_tuple(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return x[(1,)]
+
+        self.checkModule(MyModule(), (torch.ones(2, 3),))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
@@ -16393,9 +16422,6 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    import test_jit_py3
     import jit.test_module_interface
-    suite = unittest.findTestCases(test_jit_py3)
-    unittest.TextTestRunner().run(suite)
     suite = unittest.findTestCases(jit.test_module_interface)
     unittest.TextTestRunner().run(suite)

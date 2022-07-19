@@ -15,12 +15,13 @@ class TestRebase(TestCase):
         "Tests rebase successfully"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo)
+        rebase_onto(pr, repo, 'master')
         calls = [mock.call('fetch', 'origin', 'pull/31093/head:pull/31093/head'),
-                 mock.call('rebase', 'master', 'pull/31093/head'),
+                 mock.call('rebase', 'refs/remotes/origin/master', 'pull/31093/head'),
                  mock.call('push', '-f', 'https://github.com/mingxiaoh/pytorch.git', 'pull/31093/head:master')]
         mocked_run_git.assert_has_calls(calls)
-        self.assertTrue("Successfully rebased `master` onto `master`" in mocked_post_comment.call_args[0][3])
+        self.assertTrue(
+            "Successfully rebased `master` onto `refs/remotes/origin/master`" in mocked_post_comment.call_args[0][3])
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('gitutils.GitRepo._run_git')
@@ -29,7 +30,7 @@ class TestRebase(TestCase):
         "Tests rebase to viable/strict successfully"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo, False, True)
+        rebase_onto(pr, repo, 'viable/strict', False)
         calls = [mock.call('fetch', 'origin', 'pull/31093/head:pull/31093/head'),
                  mock.call('rebase', 'refs/remotes/origin/viable/strict', 'pull/31093/head'),
                  mock.call('push', '-f', 'https://github.com/mingxiaoh/pytorch.git', 'pull/31093/head:master')]
@@ -44,9 +45,9 @@ class TestRebase(TestCase):
         "Tests branch already up to date"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo)
+        rebase_onto(pr, repo, 'master')
         calls = [mock.call('fetch', 'origin', 'pull/31093/head:pull/31093/head'),
-                 mock.call('rebase', 'master', 'pull/31093/head'),
+                 mock.call('rebase', 'refs/remotes/origin/master', 'pull/31093/head'),
                  mock.call('push', '-f', 'https://github.com/mingxiaoh/pytorch.git', 'pull/31093/head:master')]
         mocked_run_git.assert_has_calls(calls)
         self.assertTrue(
