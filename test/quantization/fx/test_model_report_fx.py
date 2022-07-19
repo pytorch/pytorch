@@ -1712,11 +1712,11 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
                 if type(b_1_linear_features[feature_name]) == torch.Tensor:
                     plottable_set.add(feature_name)
 
-            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names(True)
+            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()
             self.assertEqual(returned_plottable_feats, plottable_set)
 
     @skipIfNoFBGEMM
-    def test_generate_table(self):
+    def test_generate_tables(self):
         """
         Tests the generate_table_view()
         ModelReportVisualizer
@@ -1743,16 +1743,47 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
                 model, prepared_for_callibrate_model, mod_report
             )
 
-            table_str, table_dict = mod_rep_visualizer.generate_table_view()
+            table_dict = mod_rep_visualizer.generate_filtered_tables()
 
             # test primarily the dict since it has same info as str
-            tensor_info_dict = table_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
-            channel_info_dict = table_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+            tensor_table = table_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_table = table_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
 
             # these two together should be the same as the generated report info in terms of keys
-            # tensor_info_modules = set(tensor_info_dict.keys())
-            # channel_info_modules = set(channel_info_dict.keys())
+            tensor_info_modules = set(row[1] for row in tensor_table[1:])
+            channel_info_modules = set(row[1] for row in channel_table[1:])
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
 
+            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())
+            self.assertEqual(combined_modules, generated_report_keys)
+
+            # try a random filter and make sure that there are no rows for either table
+            empty_tables_dict = mod_rep_visualizer.generate_filtered_tables(module_fqn_filter="random not there module")
+
+            # test primarily the dict since it has same info as str
+            tensor_table = empty_tables_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_table = empty_tables_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            tensor_info_modules = set(row[1] for row in tensor_table[1:])
+            channel_info_modules = set(row[1] for row in channel_table[1:])
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            self.assertEqual(len(combined_modules), 0)  # should be no matching modules
+
+            # try a matching filter for feature and make sure only those features show up
+            # if we filter to a very specific feature name, should only have 1 additional column in each table row
+            single_feat_dict = mod_rep_visualizer.generate_filtered_tables(feature_filter=OutlierDetector.MAX_VALS_KEY)
+
+            # test primarily the dict since it has same info as str
+            tensor_table = single_feat_dict[ModelReportVisualizer.TABLE_TENSOR_KEY]
+            channel_table = single_feat_dict[ModelReportVisualizer.TABLE_CHANNEL_KEY]
+
+            # get the number of features in each of these
+            tensor_info_features = len(tensor_table[0])
+            channel_info_features = len(channel_table[0]) - ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS
+
+            # make sure that there are no tensor features, and that there is one channel level feature
+            self.assertEqual(tensor_info_features, 0)
+            self.assertEqual(channel_info_features, 1)
 
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):

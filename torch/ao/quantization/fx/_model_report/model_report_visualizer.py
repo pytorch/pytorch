@@ -1,7 +1,6 @@
 import torch
-from typing import Any, Set, Dict, List, Tuple, Callable
+from typing import Any, Set, Dict, List
 from collections import OrderedDict
-from tabulate import tabulate
 
 class ModelReportVisualizer:
     r"""
@@ -49,12 +48,17 @@ class ModelReportVisualizer:
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
     7.) Use instance to view different views of data as desired, applying filters as needed
+        8.) Either see the super detailed information or just the actual printed or shown table / plot / histogram
 
     """
 
     # keys for table dict
     TABLE_TENSOR_KEY = "tensor_level_info"
     TABLE_CHANNEL_KEY = "channel_level_info"
+
+    # Constants for header vals
+    DEFAULT_NON_FEATURE_TENSOR_HEADERS = 2
+    DEFAULT_NON_FEATURE_CHANNEL_HEADERS = 3
 
     def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
@@ -78,7 +82,7 @@ class ModelReportVisualizer:
         # returns the keys of the ordered dict
         return set(self.generated_reports.keys())
 
-    def get_all_unique_feature_names(self, plottable: bool) -> Set[str]:
+    def get_all_unique_feature_names(self, plottable_features_only: bool = True) -> Set[str]:
         r"""
         The purpose of this method is to provide a user the set of all feature names so that if
         they wish to use the filtering capabilities of the generate_table_view(), or use either of
@@ -86,8 +90,10 @@ class ModelReportVisualizer:
         the generated_reports dictionary to get this information.
 
         Args:
-            plottable (bool): True if the user is only looking for plottable features, False otherwise
+            plottable_features_only (bool): True if the user is only looking for plottable features,
+                False otherwise
                 plottable features are those that are tensor values
+                Default: True (only return those feature names that are plottable)
 
         Returns all the unique module fqns present in the reports the ModelReportVisualizer
         instance was initialized with.
@@ -100,11 +106,7 @@ class ModelReportVisualizer:
             # loop through features
             for feature_name in feature_dict:
                 # if we need plottable, ensure type of val is tensor
-                if plottable:
-                    if type(feature_dict[feature_name]) == torch.Tensor:
-                        unique_feature_names.add(feature_name)
-                else:
-                    # any and all features
+                if not plottable_features_only or type(feature_dict[feature_name]) == torch.Tensor:
                     unique_feature_names.add(feature_name)
 
         # return our compiled set of unique feature names
@@ -144,12 +146,11 @@ class ModelReportVisualizer:
 
         return filtered_dict
 
-    def generate_table_view(self, feature_filter: str = "", module_fqn_filter: str = "") -> Tuple[str, Dict[str, List[List[Any]]]]:
+    def generate_filtered_tables(self, feature_filter: str = "", module_fqn_filter: str = "") -> Dict[str, List[List[Any]]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
-        The generated tables are presented in both a list-of-lists format for further manipulation and filtering
-        as well as a formatted string that is ready to print
+        The generated tables are presented in both a list-of-lists format
 
         The reason for the two tables are that they handle different things:
         1.) the first table handles all tensor level information
@@ -160,13 +161,12 @@ class ModelReportVisualizer:
             tables. This also makes the information much easier to digest given the plethora of statistics collected
 
         Tensor table columns:
-         idx  layer_fqn  feature_1   feature_2   feature_3   .... feature_n
-        ----  ---------  ---------   ---------   ---------        ---------
+            idx  layer_fqn  feature_1   feature_2   feature_3   .... feature_n
+            ----  ---------  ---------   ---------   ---------        ---------
 
         Per-Channel table columns:
-
-         idx  layer_fqn  channel  feature_1   feature_2   feature_3   .... feature_n
-        ----  ---------  -------  ---------   ---------   ---------        ---------
+            idx  layer_fqn  channel  feature_1   feature_2   feature_3   .... feature_n
+            ----  ---------  -------  ---------   ---------   ---------        ---------
 
         Args:
             feature_filter (str, optional): Filters the features presented to only those that
@@ -175,17 +175,13 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules with this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Returns a tuple with two objects:
-            (str) The formatted string that contains the table information to be printed
+        Returns a dictionary with two keys:
             (Dict[strList[List[Any]]]) A dict containing two keys:
             "tensor_level_info", "channel_level_info"
                 Each key maps to:
                     A list of lists containing the table information row by row
                     The 0th index row will contain the headers of the columns
                     The rest of the rows will contain data
-        Expected Use:
-            >>> tabluated_str, info = model_report_visualizer.generate_table_view(*filters)
-            >>> print(tabulated_str) # outputs neatly formatted table
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
@@ -220,54 +216,18 @@ class ModelReportVisualizer:
         # now we compose the tensor information table
         tensor_table: List[List[Any]] = []
 
-        # first add a row of headers to the table
-        tensor_headers: List[str] = ["idx", "layer_fqn"] + tensor_features_list
-        tensor_table.append(tensor_headers)
+        # append the table row to the table only if we have features
+        if len(tensor_features_list) > 0:
+            # now we add all the data
+            for index, module_fqn in enumerate(filtered_data):
+                # we make a new row for the tensor table
+                tensor_table_row = [index + 1, module_fqn]
+                for feature in tensor_features_list:
+                    # we iterate in same order of added features
 
-        # now we add all the data
-        for index, module_fqn in enumerate(filtered_data):
-            # we make a new row for the tensor table
-            tensor_table_row = [index + 1, module_fqn]
-            for feature in tensor_features_list:
-                # we iterate in same order of added features
-
-                if feature in filtered_data[module_fqn]:
-                    # add value if applicable to module
-                    feature_val = filtered_data[module_fqn][feature]
-                else:
-                    # add that it is not applicable
-                    feature_val = "Not Applicable"
-
-                # if it's a tensor we want to extract val
-                if type(feature_val) is torch.Tensor:
-                    feature_val = feature_val.item()
-
-                # we add to our list of values
-                tensor_table_row.append(feature_val)
-
-            # append the table row to the table
-            tensor_table.append(tensor_table_row)
-
-        # now we compose the table for the channel information table
-        channel_table: List[List[Any]] = []
-
-        # first add a row of headers to the table
-        channel_headers: List[str] = ["idx", "layer_fqn", "channel"] + channel_features_list
-        channel_table.append(channel_headers)
-
-        # counter to keep track of number of entries in
-        channel_table_entry_counter: int = 1
-
-        # now we add all channel data
-        for index, module_fqn in enumerate(filtered_data):
-            # we iterate over all channels
-            for channel in range(num_channels):
-                # we make a new row for the channel
-                new_channel_row = [channel_table_entry_counter, module_fqn, channel]
-                for feature in channel_features_list:
                     if feature in filtered_data[module_fqn]:
                         # add value if applicable to module
-                        feature_val = filtered_data[module_fqn][feature][channel]
+                        feature_val = filtered_data[module_fqn][feature]
                     else:
                         # add that it is not applicable
                         feature_val = "Not Applicable"
@@ -276,26 +236,56 @@ class ModelReportVisualizer:
                     if type(feature_val) is torch.Tensor:
                         feature_val = feature_val.item()
 
-                    # add value to channel specific row
-                    new_channel_row.append(feature_val)
+                    # we add to our list of values
+                    tensor_table_row.append(feature_val)
 
-                # add to table and increment row index counter
-                channel_table.append(new_channel_row)
-                channel_table_entry_counter += 1
+                tensor_table.append(tensor_table_row)
 
-        # now we have populated the tables for each one
-        # let's create the strings to be returned
-        table_str = ""
-        if len(tensor_features_list) > 0:
-            table_str += "Tensor Level Information \n"
-            table_str += tabulate(tensor_table, headers="firstrow")
+        # add row of headers of we actually have something, otherwise just empty
+        if len(tensor_table) == 0:
+            tensor_table.append([])  # just an empty list to signify no data
+        else:
+            tensor_headers: List[str] = ["idx", "layer_fqn"] + tensor_features_list
+            tensor_table.insert(0, tensor_headers)
+
+        # now we compose the table for the channel information table
+        channel_table: List[List[Any]] = []
+
+        # counter to keep track of number of entries in
+        channel_table_entry_counter: int = 1
+
         if len(channel_features_list) > 0:
-            table_str += "\n\n Channel Level Information \n"
-            table_str += tabulate(channel_table, headers="firstrow")
+            # now we add all channel data
+            for index, module_fqn in enumerate(filtered_data):
+                # we iterate over all channels
+                for channel in range(num_channels):
+                    # we make a new row for the channel
+                    new_channel_row = [channel_table_entry_counter, module_fqn, channel]
+                    for feature in channel_features_list:
+                        if feature in filtered_data[module_fqn]:
+                            # add value if applicable to module
+                            feature_val = filtered_data[module_fqn][feature][channel]
+                        else:
+                            # add that it is not applicable
+                            feature_val = "Not Applicable"
 
-        # if no features at all, let user know
-        if table_str == "":
-            table_str = "No data points to generate table with."
+                        # if it's a tensor we want to extract val
+                        if type(feature_val) is torch.Tensor:
+                            feature_val = feature_val.item()
+
+                        # add value to channel specific row
+                        new_channel_row.append(feature_val)
+
+                    # add to table and increment row index counter
+                    channel_table.append(new_channel_row)
+                    channel_table_entry_counter += 1
+
+        # add row of headers of we actually have something, otherwise just empty
+        if len(channel_table) == 0:
+            channel_table.append([])  # just an empty list to signify no data
+        else:
+            channel_headers: List[str] = ["idx", "layer_fqn", "channel"] + channel_features_list
+            channel_table.insert(0, channel_headers)
 
         # let's now create the dictionary to return
         table_dict = {
@@ -303,53 +293,78 @@ class ModelReportVisualizer:
             self.TABLE_CHANNEL_KEY : channel_table
         }
 
-        return (table_str, table_dict)
+        # return the two tables
+        return table_dict
 
-
-    def generate_plot_view(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
+    def generate_table_visualization(self, feature_filter: str = "", module_fqn_filter: str = ""):
         r"""
-        Takes in a feature and optional module_filter and generates a line plot of the desired data.
+        Takes in optional filter values and prints out formatted tables of the information.
+
+        The reason for the two tables printed out instead of one large one are that they handle different things:
+        1.) the first table handles all tensor level information
+        2.) the second table handles and displays all channel based information
+
+        The reasoning for this is that having all the info in one table can make it ambiguous which collected
+            statistics are global, and which are actually per-channel, so it's better to split it up into two
+            tables. This also makes the information much easier to digest given the plethora of statistics collected
+
+        Tensor table columns:
+         idx  layer_fqn  feature_1   feature_2   feature_3   .... feature_n
+        ----  ---------  ---------   ---------   ---------        ---------
+
+        Per-Channel table columns:
+
+         idx  layer_fqn  channel  feature_1   feature_2   feature_3   .... feature_n
+        ----  ---------  -------  ---------   ---------   ---------        ---------
+
+        Args:
+            feature_filter (str, optional): Filters the features presented to only those that
+                contain this filter substring
+                Default = "", results in all the features being printed
+            module_fqn_filter (str, optional): Only includes modules with this string
+                Default = "", results in all the modules in the reports to be visible in the table
+
+        Expected Use:
+            >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
+        """
+        pass
+
+    def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
+        r"""
+        Takes in a feature and optional module_filter and plots of the desired data.
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
 
         Args:
-            feature (str): The specific feature we wish to generate the plot for
-            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
-                Default = "", results in all the modules in the reports to be visible in the plot
+            feature_filter (str, optional): Filters the features presented to only those that
+                contain this filter substring
+                Default = "", results in all the features being printed
+            module_fqn_filter (str, optional): Only includes modules with this string
+                Default = "", results in all the modules in the reports to be visible in the table
 
-        Returns a tuple with two objects:
-            (Callable) A function the user can call to generate the plot view
-            (List[List[Any]]) A list of lists containing the plot information row by row
-                The 0th index row will contain the headers of the columns
-                The rest of the rows will contain data
         Expected Use:
             >>> # the code below both returns the info and diplays the plot
-            >>> plot_func, info = model_report_visualizer.generate_plot_view(*filters)
-            >>> plot_func() # plots the data
+            >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
         """
         pass
 
-    def generate_histogram_view(self, feature: str, module_fqn_prefix_filter: str = "") -> Tuple[Callable, List[List[Any]]]:
+    def generate_histogram_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
-        Takes in a feature and optional module_filter and generates a histogram of the desired data.
+        Takes in a feature and optional module_filter and plots the histogram of desired data.
 
         Note:
             Only features in the report that have tensor value data can be viewed as a histogram
 
         Args:
-            feature (str): The specific feature we wish to generate the plot for
-            module_fqn_prefix_filter (str, optional): Only includes modules with this string prefix
-                Default = "", results in all the modules in the reports to be visible in the histogram
+            feature_filter (str, optional): Filters the features presented to only those that
+                contain this filter substring
+                Default = "", results in all the features being printed
+            module_fqn_filter (str, optional): Only includes modules with this string
+                Default = "", results in all the modules in the reports to be visible in the table
 
-        Returns a tuple with two objects:
-            (Callable) A function the user can call to generate the histogram view
-            (List[List[Any]]) A list of lists containing the histogram information row by row
-                The 0th index row will contain the headers of the columns
-                The rest of the rows will contain data
         Expected Use:
-            >>> # the code below both returns the info and displays the histogram
-            >>> histogram_func, info = model_report_visualizer.generate_plot_view(*filters)
-            >>> histogram_func() # displays the histogram
+            >>> # displays the histogram
+            >>> model_report_visualizer.generate_histogram_visualization(*filters) # displays the histogram
         """
         pass
