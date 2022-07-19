@@ -16,12 +16,10 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-
-# NB: C++ API doc generation using doxygen / breathe / exhale is currently disabled
-# due to OOM errors in CI. See https://github.com/pytorch/pytorch/issues/79992
-
 import os
 # sys.path.insert(0, os.path.abspath('.'))
+
+import textwrap
 
 # -- General configuration ------------------------------------------------
 
@@ -34,6 +32,8 @@ needs_sphinx = '3.1.2'
 # ones.
 extensions = [
     'sphinx.ext.intersphinx',
+    'breathe',
+    'exhale'
 ]
 
 intersphinx_mapping = {
@@ -44,6 +44,11 @@ intersphinx_mapping = {
 # items are expected / should be trimmed by.
 # This file is {repo_root}/docs/cpp/source/conf.py
 this_file_dir = os.path.abspath(os.path.dirname(__file__))
+doxygen_xml_dir = os.path.join(
+    os.path.dirname(this_file_dir),  # {repo_root}/docs/cpp
+    'build',                         # {repo_root}/docs/cpp/build
+    'xml'                            # {repo_root}/docs/cpp/build/xml
+)
 repo_root = os.path.dirname(  # {repo_root}
     os.path.dirname(          # {repo_root}/docs
         os.path.dirname(      # {repo_root}/docs/cpp
@@ -51,6 +56,48 @@ repo_root = os.path.dirname(  # {repo_root}
         )
     )
 )
+
+breathe_projects = {"PyTorch": doxygen_xml_dir}
+breathe_default_project = "PyTorch"
+
+# Setup the exhale extension
+exhale_args = {
+    ############################################################################
+    # These arguments are required.                                            #
+    ############################################################################
+    "containmentFolder": "./api",
+    "rootFileName": "library_root.rst",
+    "rootFileTitle": "Library API",
+    "doxygenStripFromPath": repo_root,
+    ############################################################################
+    # Suggested optional arguments.                                            #
+    ############################################################################
+    "createTreeView": True,
+    "exhaleExecutesDoxygen": True,
+    "exhaleUseDoxyfile": True,
+    "verboseBuild": True,
+    ############################################################################
+    # HTML Theme specific configurations.                                      #
+    ############################################################################
+    # Fix broken Sphinx RTD Theme 'Edit on GitHub' links
+    # Search for 'Edit on GitHub' on the FAQ:
+    #     http://exhale.readthedocs.io/en/latest/faq.html
+    "pageLevelConfigMeta": ":github_url: https://github.com/pytorch/pytorch",
+    ############################################################################
+    # Individual page layout example configuration.                            #
+    ############################################################################
+    # Example of adding contents directives on custom kinds with custom title
+    "contentsTitle": "Page Contents",
+    "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
+    # Exclude PIMPL files from class hierarchy tree and namespace pages.
+    "listingExclude": [r".*Impl$"],
+    ############################################################################
+    # Main library page layout example configuration.                          #
+    ############################################################################
+    "afterTitleDescription": textwrap.dedent(u'''
+        Welcome to the developer reference for the PyTorch C++ API.
+    '''),
+}
 
 # Tell sphinx what the primary language being documented is.
 primary_domain = 'cpp'
