@@ -1646,8 +1646,74 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
 class TestFxModelReportVisualizer(QuantizationTestCase):
 
-    def test_simple_pass(self):
-        pass
+    def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
+        r"""
+        Callibrates the passed in model, generates report, and returns the visualizer
+        """
+        # now we actually callibrate the model
+        example_input = model.get_example_inputs()[0]
+        example_input = example_input.to(torch.float)
+
+        prepared_for_callibrate_model(example_input)
+
+        # now get the report by running it through ModelReport instance
+        generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+        # now we get the visualizer should not error
+        mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
+
+        return mod_rep_visualizer
+
+    @skipIfNoFBGEMM
+    def test_get_modules_and_features(self):
+        """
+        Tests the get_all_unique_module_fqns and get_all_unique_feature_names methods of
+        ModelReportVisualizer
+
+        Checks whether returned sets are of proper size and filtered properly
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(InputWeightEqualizationDetector(0.5))
+
+            model = TestFxModelReportClass.TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            mod_rep_visualizer: ModelReportVisualizer = self._callibrate_and_generate_visualizer(
+                model, prepared_for_callibrate_model, mod_report
+            )
+
+            # ensure the module fqns match the ones given by the get_all_unique_feature_names method
+            actual_model_fqns = set(mod_rep_visualizer.generated_reports.keys())
+            returned_model_fqns = mod_rep_visualizer.get_all_unique_module_fqns()
+            self.assertEqual(returned_model_fqns, actual_model_fqns)
+
+            # now ensure that features are all properly returned
+            # all the linears have all the features for two detectors
+            # can use those as check that method is working reliably
+            b_1_linear_features = mod_rep_visualizer.generated_reports["block1.linear"]
+
+            # first test all features
+            returned_all_feats = mod_rep_visualizer.get_all_unique_feature_names(False)
+            self.assertEqual(returned_all_feats, set(b_1_linear_features.keys()))
+
+            # now test plottable features
+            plottable_set = set()
+
+            for feature_name in b_1_linear_features:
+                if type(b_1_linear_features[feature_name]) == torch.Tensor:
+                    plottable_set.add(feature_name)
+
+            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()
+            self.assertEqual(returned_plottable_feats, plottable_set)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
     r"""Returns a model that has been prepared for callibration and corresponding model_report"""

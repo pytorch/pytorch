@@ -1,4 +1,5 @@
-from typing import Any, Set, List, Tuple, OrderedDict, Callable
+import torch
+from typing import Any, Set, Dict, List, Tuple, OrderedDict, Callable
 
 class ModelReportVisualizer:
     r"""
@@ -68,9 +69,10 @@ class ModelReportVisualizer:
         Returns all the unique module fqns present in the reports the ModelReportVisualizer
         instance was initialized with.
         """
-        pass
+        # returns the keys of the ordered dict
+        return set(self.generated_reports.keys())
 
-    def get_all_unique_feature_names(self, plottable: bool) -> Set[str]:
+    def get_all_unique_feature_names(self, plottable_features_only: bool = True) -> Set[str]:
         r"""
         The purpose of this method is to provide a user the set of all feature names so that if
         they wish to use the filtering capabilities of the generate_table_view(), or use either of
@@ -78,13 +80,27 @@ class ModelReportVisualizer:
         the generated_reports dictionary to get this information.
 
         Args:
-            plottable (bool): True if the user is only looking for plottable features, False otherwise
+            plottable_features_only (bool): True if the user is only looking for plottable features,
+                False otherwise
                 plottable features are those that are tensor values
+                Default: True (only return those feature names that are plottable)
 
         Returns all the unique module fqns present in the reports the ModelReportVisualizer
         instance was initialized with.
         """
-        pass
+        unique_feature_names = set()
+        for module_fqn in self.generated_reports:
+            # get dict of the features
+            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
+
+            # loop through features
+            for feature_name in feature_dict:
+                # if we need plottable, ensure type of val is tensor
+                if not plottable_features_only or type(feature_dict[feature_name]) == torch.Tensor:
+                    unique_feature_names.add(feature_name)
+
+        # return our compiled set of unique feature names
+        return unique_feature_names
 
     def generate_table_info(self, feature: str = "", module_fqn_prefix_filter: str = "") -> Tuple[str, List[List[Any]]]:
         r"""
