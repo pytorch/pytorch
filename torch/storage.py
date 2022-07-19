@@ -350,7 +350,7 @@ class _TypedStorage:
                 return _TypedStorage(
                     *args,
                     dtype=cls.dtype,
-                    device='cuda' if eval(cls.__module__) is torch.cuda else 'cpu')
+                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu')
 
             else:
                 if len(args) != 0:

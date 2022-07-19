@@ -67,6 +67,32 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
     }
   }
 }
+
+template <class... Inputs>
+inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+  return {std::forward<Inputs>(inputs)...};
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByHandle(
+    const c10::OperatorHandle& op,
+    Args... args) {
+  auto stack = makeStack(std::forward<Args>(args)...);
+  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  return stack;
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByName(
+    const char* func_name,
+    const char* overload_name,
+    Args... args) {
+  const c10::optional<c10::OperatorHandle> op_handle =
+      c10::Dispatcher::singleton().findSchema({func_name, overload_name});
+  assert(op_handle.has_value());
+  return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
+
 } // namespace
 
 namespace {
@@ -266,10 +292,13 @@ TEST_F(VulkanAPITest, quantized_add) {
   const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
-  const auto reg_added_tensors = at::add(in_cpu, in_cpu2);
 
   const double scale3 = 0.15;
   const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
   const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
       out_vulkan, out_vulkan2, scale3, zero_point3);
 
@@ -280,7 +309,7 @@ TEST_F(VulkanAPITest, quantized_add) {
   float rtol = 0;
   float atol = 0.5;
   const auto check = at::allclose(
-      reg_added_tensors, output_for_dequantized_vulkan, rtol, atol);
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
 
   if (!check) {
     std::cout << "Max Diff allowed: " << rtol << std::endl;
@@ -313,10 +342,12 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
   const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
-  const auto reg_added_tensors = at::add(in_cpu, in_cpu2);
-
   const double scale3 = 0.15;
   const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
   const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
       out_vulkan, out_vulkan2, scale3, zero_point3);
 
@@ -327,7 +358,7 @@ TEST_F(VulkanAPITest, quantized_add_broadcast) {
   float rtol = 0;
   float atol = 0.5;
   const auto check = at::allclose(
-      reg_added_tensors, output_for_dequantized_vulkan, rtol, atol);
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
 
   if (!check) {
     std::cout << "Max Diff allowed: " << rtol << std::endl;
@@ -361,10 +392,12 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
   const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
       in_vulkan2, scale2, zero_point2, c10::ScalarType::QUInt8);
 
-  const auto reg_added_tensors = at::add(in_cpu, in_cpu2);
-
   const double scale3 = 0.15;
   const int zero_point3 = 15;
+  const auto reg_added_tensors = callOpByName(
+      "quantized::add",
+      "",
+      out_cpu, out_cpu2, scale3, zero_point3);
   const auto vulk_added_tensors = at::native::vulkan::ops::quantized_add(
       out_vulkan, out_vulkan2, scale3, zero_point3);
 
@@ -375,7 +408,7 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
   float rtol = 0;
   float atol = 0.5;
   const auto check = at::allclose(
-      reg_added_tensors, output_for_dequantized_vulkan, rtol, atol);
+      at::dequantize(reg_added_tensors[0].toTensor()), output_for_dequantized_vulkan, rtol, atol);
 
   if (!check) {
     std::cout << "Max Diff allowed: " << rtol << std::endl;
