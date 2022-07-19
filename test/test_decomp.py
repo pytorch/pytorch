@@ -274,9 +274,9 @@ CROSS_REF_EXCLUDE_SET = {
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
-    # CompositeAutogradImplicit
-    # See https://github.com/pytorch/pytorch/issues/81669
-    (None, None, "nn.functional.prelu"),
+    # # CompositeAutogradImplicit
+    # # See https://github.com/pytorch/pytorch/issues/81669
+    (None, None, "nn.functional.relu6"),
 
 }
 
@@ -356,7 +356,7 @@ class TestDecomp(TestCase):
             None,
             dtype,
             op.name,
-        ) in CROSS_REF_EXCLUDE_SET or (None, None, op.name):
+        ) in CROSS_REF_EXCLUDE_SET or (None, None, op.name) in CROSS_REF_EXCLUDE_SET:
             self.skipTest(f"{op.name} in {dtype} not supported")
 
         test_dtype = dtype
