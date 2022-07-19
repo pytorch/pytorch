@@ -69,6 +69,7 @@ from statistics import mean
 import functools
 from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 from torch.onnx import (register_custom_op_symbolic,
@@ -818,8 +819,14 @@ def skipIfCrossRef(fn):
             fn(*args, **kwargs)
     return wrapper
 
-class CrossRefMode(torch.overrides.TorchFunctionMode):
+class CrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        r = func(*args, **kwargs)
+        return r
+
+class CrossRefDispatchMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         r = func(*args, **kwargs)
         return r
@@ -1930,7 +1937,8 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+                stack.enter_context(CrossRefFunctionMode())
+                stack.enter_context(CrossRefDispatchMode())
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
