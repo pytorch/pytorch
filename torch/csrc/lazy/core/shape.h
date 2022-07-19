@@ -18,8 +18,10 @@ class TORCH_API Shape {
 
   Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes);
 
-  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes,
-		  c10::optional<std::vector<bool>>& is_symbolic);
+  Shape(
+      at::ScalarType scalar_type,
+      c10::ArrayRef<int64_t> sizes,
+      c10::optional<std::vector<bool>>& is_symbolic);
 
   std::string to_string() const;
 
