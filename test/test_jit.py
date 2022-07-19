@@ -16135,6 +16135,22 @@ dedent """
 
         self.checkModule(MyModule(), (torch.ones(2, 3),))
 
+    def test_context_manager(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                p = x + y
+                q = p + 2.0
+                return q
+
+        x = torch.randn(3, 2, dtype=torch.float)
+        y = torch.randn(3, 2, dtype=torch.float)
+        for fuser_name in ['fuser0', 'fuser1', 'none']:
+            with torch.jit.fuser(fuser_name):
+                self.checkModule(MyModule(), (x, y))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
