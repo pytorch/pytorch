@@ -362,6 +362,22 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)  # type: ignore[name-defined]
 
+
+
+def GetAllocFreeEvents():
+    r"""Gets allocation/free events sequence
+    Returns:
+        List of AllocFreeEvent
+    """
+    _lazy_init()
+    return _get_alloc_free_events()
+
+def pybind11_test_expose():
+    r"""Print Hello World
+    """
+    _lazy_init()
+    return test_exp()
+
 def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     r"""Checks if peer access between two devices is possible.
     """

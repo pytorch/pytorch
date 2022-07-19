@@ -724,7 +724,6 @@ class DeviceCachingAllocator {
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, device));
-
     return block;
   }
 
@@ -1563,6 +1562,10 @@ class THCCachingAllocator {
  private:
   std::mutex mutex;
 
+  // record allocate/free events
+  std::vector<AllocFreeEvent> alloc_free_events{2};
+  unsigned int num_alloc_events = 0;
+
   // allocated blocks by device pointer
   ska::flat_hash_map<void*, Block*> allocated_blocks;
 
@@ -1579,6 +1582,22 @@ class THCCachingAllocator {
 
   std::mutex* getCudaFreeMutex() const {
     return &cuda_free_mutex;
+  }
+
+  void append_alloc_free_event(AllocFreeEvent E)
+  {
+      if (num_alloc_events >= alloc_free_events.size()){
+          // alloc_free_events.resize(std::max(alloc_free_events.size(),size_t(1))*2);
+          alloc_free_events.resize(alloc_free_events.size()*2);
+      }
+      alloc_free_events[num_alloc_events] = E;
+      num_alloc_events += 1;
+  }
+  std::vector<AllocFreeEvent> get_alloc_free_events(){
+      return alloc_free_events;
+  }
+  unsigned int get_num_alloc_events(){
+      return num_alloc_events;
   }
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
@@ -1606,12 +1625,17 @@ class THCCachingAllocator {
 
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
+    
+    AllocFreeEvent E = {nullptr, size, 1, device};
+    append_alloc_free_event(E);
+    
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
+    alloc_free_events[num_alloc_events-1].ptr = block->ptr;
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
   }
@@ -1625,6 +1649,9 @@ class THCCachingAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     device_allocator[block->device]->free(block);
+    
+    AllocFreeEvent E = {block->ptr, block->size, 0, block->device};
+    append_alloc_free_event(E);
   }
 
   void setMemoryFraction(double fraction, int device) {
@@ -1903,6 +1930,24 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 
 void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
+}
+
+std::vector<AllocFreeEvent> GetAllocFreeEvents(){
+    return caching_allocator.get_alloc_free_events();
+}
+int GetNumAllocEvents(){
+    return caching_allocator.get_num_alloc_events();
+}
+
+std::vector<AllocFreeEvent> test_expose(){
+  std::vector<AllocFreeEvent> vec_allc(2);
+  AllocFreeEvent E;
+  E.size = 5;
+  E.type = 1;
+  vec_allc[0] = E;
+  vec_allc[1] = E;
+  vec_allc.resize(4);
+  return vec_allc;
 }
 
 } // namespace CUDACachingAllocator
