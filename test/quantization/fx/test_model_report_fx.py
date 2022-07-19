@@ -1712,7 +1712,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
                 if type(b_1_linear_features[feature_name]) == torch.Tensor:
                     plottable_set.add(feature_name)
 
-            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names(True)
+            returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()
             self.assertEqual(returned_plottable_feats, plottable_set)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
