@@ -1931,7 +1931,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(SchemaCheckMode))
+                stack.enter_context(torch.overrides.push_torch_dispatch_mode(SchemaCheckMode))
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
