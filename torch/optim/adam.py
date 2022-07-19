@@ -4,17 +4,37 @@ from typing import cast, List, Optional, Dict, Tuple
 
 import torch
 from torch import Tensor
-from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator
 from .optimizer import Optimizer, _use_grad_for_differentiable
 
 __all__ = ['Adam', 'adam']
 
+
+# TODO(crcrpar): Move this to another place when adding another fused optimizer.
+# NOTE(crcrpar): Almost the same as `MultiDeviceReplicator` defined in
+# torch/cuda/amp/grad_scaler.py except for the key being str only for torch script.
+class MultiDeviceReplicator:
+    main_tensor: Tensor
+    _per_device_tensors: Dict[str, Tensor]
+
+    def __init__(self, main_tensor: Tensor) -> None:
+        self.main_tensor = main_tensor
+        self._per_device_tensors = {str(main_tensor.device): main_tensor}
+
+    def get(self, device: str):
+        if device in self._per_device_tensors:
+            return self._per_device_tensors[device]
+        tensor = self.main_tensor.to(device=device, non_blocking=True, copy=True)
+        self._per_device_tensors[device] = tensor
+        return tensor
+
+
+# todo(crcrpar): Move this to another place when adding another fused optimizer.
 def _get_fp16AMP_params(
     *,
     optimizer: Optimizer,
     grad_scaler: Optional[torch.cuda.amp.GradScaler] = None,
     device: torch.device,
-) -> Optional[_MultiDeviceReplicator]:
+) -> Optional[MultiDeviceReplicator]:
     if grad_scaler is None:
         return None
     found_inf_dict = grad_scaler._check_inf_per_device(optimizer)
@@ -25,7 +45,7 @@ def _get_fp16AMP_params(
     assert len(found_infs) > 0, "No inf checks were recorded in _check_inf_per_device."
     with torch.no_grad():
         found_inf_combined = cast(torch.Tensor, sum(found_infs))
-    return _MultiDeviceReplicator(found_inf_combined)
+    return MultiDeviceReplicator(found_inf_combined)
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm.
@@ -168,7 +188,7 @@ class Adam(Optimizer):
             if group['fused'] and grad_scaler is not None:
                 grad_scale = grad_scaler._get_scale_async()
                 device = grad_scale.device
-                grad_scale = _MultiDeviceReplicator(grad_scale)
+                grad_scale = MultiDeviceReplicator(grad_scale)
                 found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
 
             for p in group['params']:
@@ -238,6 +258,8 @@ def adam(params: List[Tensor],
          capturable: bool = False,
          differentiable: bool = False,
          fused: bool = False,
+         grad_scale: Optional[MultiDeviceReplicator] = None,
+         found_inf: Optional[MultiDeviceReplicator] = None,
          *,
          amsgrad: bool,
          beta1: float,
@@ -245,9 +267,7 @@ def adam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float,
-         maximize: bool,
-         grad_scale: Optional[_MultiDeviceReplicator] = None,
-         found_inf: Optional[_MultiDeviceReplicator] = None):
+         maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
@@ -294,6 +314,8 @@ def _single_tensor_adam(params: List[Tensor],
                         exp_avg_sqs: List[Tensor],
                         max_exp_avg_sqs: List[Tensor],
                         state_steps: List[Tensor],
+                        grad_scale: Optional[MultiDeviceReplicator],
+                        found_inf: Optional[MultiDeviceReplicator],
                         *,
                         amsgrad: bool,
                         beta1: float,
@@ -306,6 +328,7 @@ def _single_tensor_adam(params: List[Tensor],
                         differentiable: bool,
                         grad_scale: Optional[_MultiDeviceReplicator],
                         found_inf: Optional[_MultiDeviceReplicator]):
+                        capturable: bool):
 
     assert grad_scale is None and found_inf is None
 
@@ -390,6 +413,8 @@ def _multi_tensor_adam(params: List[Tensor],
                        exp_avg_sqs: List[Tensor],
                        max_exp_avg_sqs: List[Tensor],
                        state_steps: List[Tensor],
+                       grad_scale: Optional[MultiDeviceReplicator],
+                       found_inf: Optional[MultiDeviceReplicator],
                        *,
                        amsgrad: bool,
                        beta1: float,
@@ -402,6 +427,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        differentiable: bool,
                        grad_scale: Optional[_MultiDeviceReplicator],
                        found_inf: Optional[_MultiDeviceReplicator]):
+                       capturable: bool):
     if len(params) == 0:
         return
 
@@ -495,6 +521,7 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
 
 
+# TODO(crcrpar): Move this to another place when adding another fused optimizer.
 # TODO(crcrpar): Make this generic when there's more fused optimizers.
 # TODO(crcrpar): Think of rewriting this in C++.
 @torch.no_grad()
@@ -505,10 +532,10 @@ def _group_params_by_device_and_dtype(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
-) -> Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]]:
+) -> Dict[Tuple[str, torch.dtype], List[List[Tensor]]]:
     per_device_and_dtype_tensors = defaultdict(lambda: [[] for _ in range(6)])
     for i, (p, step) in enumerate(zip(params, state_steps)):
-        key = (p.device, p.dtype)
+        key = (str(p.device), p.dtype)
         per_device_and_dtype_tensors[key][0].append(p)
         per_device_and_dtype_tensors[key][1].append(grads[i])
         per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
@@ -526,6 +553,8 @@ def _fused_adam(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[MultiDeviceReplicator],
+    found_inf: Optional[MultiDeviceReplicator],
     *,
     amsgrad: bool,
     beta1: float,
@@ -534,9 +563,7 @@ def _fused_adam(
     weight_decay: float,
     eps: float,
     maximize: bool,
-    capturable: bool,
-    grad_scale: Optional[_MultiDeviceReplicator],
-    found_inf: Optional[_MultiDeviceReplicator],
+    capturable: bool,  # Needed for consistency.
 ) -> None:
     grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
     for (device, dtype) in grouped_tensors:
