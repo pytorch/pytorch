@@ -207,10 +207,16 @@ class ProxyTensor(torch.Tensor):
             if isinstance(t, ProxyTensor):
                 return t.proxy.tracer
 
-        arg_tracers = tuple(y for t in pytree.tree_flatten(args)[0] + pytree.tree_flatten(kwargs)[0] if (y := find_tracer(t)))
-        assert len(arg_tracers) > 0
+        tracer = None
+        for arg in pytree.tree_flatten(args)[0] + pytree.tree_flatten(kwargs)[0]:
+            maybe_tracer = find_tracer(arg)
+            if maybe_tracer:
+                tracer = maybe_tracer
+                break
 
-        with ProxyTorchDispatchMode(arg_tracers[0]):  # if there's multiple tracers, proxy will error down the line
+        assert tracer is not None  # to have called this function, at least one arg or kwarg must be a proxy tensor
+
+        with ProxyTorchDispatchMode(tracer):  # if there's multiple tracers, proxy will error down the line
             return func_overload(*args, **kwargs)
 
 
