@@ -6,15 +6,6 @@ namespace torch {
 namespace utils {
 using c10::SchemaArgType;
 
-TEST(SchemaInfoHasSideEffectsTest, Basic) {
-  SchemaInfo no_side_effects_schema_info(
-      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
-  SchemaInfo side_effects_schema_info(
-      "aten::warn(str message, int stacklevel=2) -> ()");
-  ASSERT_TRUE(side_effects_schema_info.has_side_effects());
-  ASSERT_FALSE(no_side_effects_schema_info.has_side_effects());
-}
-
 TEST(FunctionSchemaIsMutableTest, Basic) {
   c10::FunctionSchema schema = torch::jit::parseSchema(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
