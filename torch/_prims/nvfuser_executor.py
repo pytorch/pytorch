@@ -4,7 +4,7 @@ from functools import lru_cache
 import torch
 
 from torch.fx import GraphModule
-from torch._prims.utils import getnvFuserDtype, Number
+from torch._prims_common import getnvFuserDtype, Number
 import torch.overrides
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 
@@ -45,7 +45,7 @@ def to_nvfuser_template_args(args):
 
 
 # MyPy bug: https://github.com/python/mypy/issues/5107
-@lru_cache()  # type: ignore[arg-type]
+@lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
