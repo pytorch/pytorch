@@ -164,12 +164,13 @@ def _matches_machine_hostname(host: str) -> bool:
     if host == this_host:
         return True
 
+    host_fqdn = socket.getfqdn(host)
     addr_list = socket.getaddrinfo(
         this_host, None, proto=socket.IPPROTO_TCP, flags=socket.AI_CANONNAME
     )
     for addr_info in addr_list:
         # If we have an FQDN in the addr_info, compare it to `host`.
-        if addr_info[3] and addr_info[3] == host:
+        if addr_info[3] and (addr_info[3] == host or addr_info[3] == host_fqdn):
             return True
         # Otherwise if `host` represents an IP address, compare it to our IP
         # address.
@@ -177,7 +178,10 @@ def _matches_machine_hostname(host: str) -> bool:
             return True
 
     for (nic_host, nic_addr) in nic_info():
-        if nic_host == host or addr and nic_addr == str(addr):
+        if (
+                nic_host == host or nic_host == host_fqdn
+                or addr and nic_addr == str(addr)
+        ):
             return True
 
     return False
