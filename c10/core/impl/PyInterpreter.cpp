@@ -24,8 +24,7 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<SafePyObject>& type) {
+    torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -71,6 +70,12 @@ static c10::SymIntArrayRef noop_sym_sizes_fn(
       "attempted to call `sym_sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::Layout noop_layout_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `layout` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 static c10::SymIntArrayRef noop_sym_strides_fn(
     const PyInterpreter*,
     const TensorImpl*) {
@@ -90,6 +95,7 @@ void PyInterpreter::disarm() noexcept {
   strides_fn_ = &noop_strides_fn;
   sizes_fn_ = &noop_sizes_fn;
   sym_sizes_fn_ = &noop_sym_sizes_fn;
+  layout_fn_ = &noop_layout_fn;
   sym_strides_fn_ = &noop_sym_strides_fn;
 }
 
