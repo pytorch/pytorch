@@ -1,45 +1,22 @@
-import os
-from typing import List, Dict, Optional, Tuple, Set, Any, Union, Sequence, TypeVar
-from typing_extensions import Literal
-import yaml
-from collections import OrderedDict, defaultdict, namedtuple
 import argparse
-import pathlib
-import json
-from dataclasses import dataclass
 import functools
+import json
+import os
+import pathlib
+from collections import defaultdict, namedtuple, OrderedDict
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
-from torchgen.model import (
-    STRUCTURED_DISPATCH_KEYS,
-    Argument,
-    DispatchKey,
-    FunctionSchema,
-    Location,
-    NativeFunction,
-    NativeFunctionsGroup,
-    OperatorName,
-    BackendIndex,
-    BackendMetadata,
-    OptionalType,
-    SchemaKind,
-    SelfArgument,
-    TensorOptionsArguments,
-    Type,
-    Variant,
-    is_cuda_dispatch_key,
-    is_generic_dispatch_key,
-    is_ufunc_dispatch_key,
-    NativeFunctionsViewGroup,
-    ViewSchemaKind,
-    BaseOperatorName,
-    DEFAULT_KERNEL_NAMESPACE,
-)
-from torchgen.native_function_generation import (
-    pre_group_native_functions,
-    add_generated_native_functions,
-    gen_composite_functional_kernel,
-    gen_composite_out_kernel,
-)
+import yaml
+from typing_extensions import Literal
+
+import torchgen.api.dispatcher as dispatcher
+import torchgen.api.meta as meta
+import torchgen.api.native as native
+import torchgen.api.structured as structured
+import torchgen.dest as dest
+from torchgen.api import cpp
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,
     CppSignatureGroup,
@@ -48,38 +25,63 @@ from torchgen.api.types import (
     NativeSignature,
     SpecialArgName,
 )
-from torchgen.api import cpp
-import torchgen.api.dispatcher as dispatcher
-import torchgen.api.native as native
-import torchgen.api.meta as meta
-import torchgen.api.structured as structured
-from torchgen.api.translate import translate
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import (
-    Target,
-    concatMap,
-    context,
-    mapMaybe,
-    YamlDumper,
-    YamlLoader,
-    FileManager,
-    assert_never,
-    make_file_manager,
-    NamespaceHelper,
-)
 from torchgen.context import (
     method_with_native_function,
     native_function_manager,
-    with_native_function_and_indices,
     with_native_function,
+    with_native_function_and_indices,
 )
-import torchgen.dest as dest
 from torchgen.gen_functionalization_type import (
+    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
-    gen_composite_view_copy_kernel,
     gen_symint_view_copy_kernel,
+)
+
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    BackendMetadata,
+    BaseOperatorName,
+    DEFAULT_KERNEL_NAMESPACE,
+    DispatchKey,
+    FunctionSchema,
+    is_cuda_dispatch_key,
+    is_generic_dispatch_key,
+    is_ufunc_dispatch_key,
+    Location,
+    NativeFunction,
+    NativeFunctionsGroup,
+    NativeFunctionsViewGroup,
+    OperatorName,
+    OptionalType,
+    SchemaKind,
+    SelfArgument,
+    STRUCTURED_DISPATCH_KEYS,
+    TensorOptionsArguments,
+    Type,
+    Variant,
+    ViewSchemaKind,
+)
+from torchgen.native_function_generation import (
+    add_generated_native_functions,
+    gen_composite_functional_kernel,
+    gen_composite_out_kernel,
+    pre_group_native_functions,
+)
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import (
+    assert_never,
+    concatMap,
+    context,
+    FileManager,
+    make_file_manager,
+    mapMaybe,
+    NamespaceHelper,
+    Target,
+    YamlDumper,
+    YamlLoader,
 )
 
 T = TypeVar("T")
@@ -103,7 +105,7 @@ T = TypeVar("T")
 #   - 'api' has conversions for how to translate JIT schema into
 #     the various C++ APIs that the codegen interacts with.  There
 #     are in fact THREE different C++ APIs: the public C++ API,
-#     the dispatcher API, and the legacy disaptcher API.  See each
+#     the dispatcher API, and the legacy dispatcher API.  See each
 #     of these respective files for more information
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -379,20 +381,26 @@ def translate_args_dispatcher_to_cpp(
 def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
-    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
+    backend_metadata = backend_index.get_kernel(f)
+    kernel_ns = (
+        backend_metadata.cpp_namespace
+        if backend_metadata and backend_metadata.cpp_namespace
+        else DEFAULT_KERNEL_NAMESPACE
+    )
+    ns = kernel_ns.replace("::native", "")
     return f"return {ns}::{backend_index.dispatch_key.lower()}::{name}({exprs});"
 
 
 def generate_static_dispatch_fallback_call(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
-    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
+    ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
     elif f.has_composite_explicit_autograd_non_functional_kernel:
@@ -407,7 +415,6 @@ def generate_static_dispatch_fallback_call(
 def static_dispatch(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
-    namespace: str = "at",
 ) -> str:
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return ""
@@ -422,9 +429,9 @@ def static_dispatch(
         )
     ]
     if len(keys) == 1:
-        return generate_static_dispatch_backend_call(f, keys[0], namespace)
+        return generate_static_dispatch_backend_call(f, keys[0])
     elif len(keys) == 0:
-        return generate_static_dispatch_fallback_call(f, backend_indices, namespace)
+        return generate_static_dispatch_fallback_call(f, backend_indices)
 
     sig = DispatcherSignature.from_schema(f.func)
     native_tensor_args = [
@@ -452,10 +459,10 @@ def static_dispatch(
     for index in keys:
         dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
         dispatch_code.append(
-            f"""\t{generate_static_dispatch_backend_call(f, index, namespace)};"""
+            f"""\t{generate_static_dispatch_backend_call(f, index)};"""
         )
 
-    fallback = generate_static_dispatch_fallback_call(f, backend_indices, namespace)
+    fallback = generate_static_dispatch_fallback_call(f, backend_indices)
     connector = "\n\t\t"
 
     return f"""
@@ -2512,8 +2519,6 @@ def main() -> None:
         if isinstance(g, NativeFunctionsViewGroup)
     ]
 
-    template_dir = os.path.join(options.source_path, "templates")
-
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
     # will eventually be ingested by cmake, which does not respect Windows style
     # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -2534,18 +2539,6 @@ def main() -> None:
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-
-    extra_cuda_headers = """\
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/cuda/CUDADevice.h>
-#include <ATen/cuda/CUDAContext.h>"""
-    if options.rocm:
-        extra_cuda_headers = """\
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
-#include <ATen/hip/ATenHIPGeneral.h>
-#include <ATen/hip/HIPDevice.h>
-#include <ATen/hip/HIPContext.h>"""
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set

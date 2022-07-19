@@ -5,7 +5,7 @@ from typing import Callable, Dict, Iterable
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
-    TVar, DVar, GetItemTensor
+    TVar, DVar, GetItemTensor, IndexSelect
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add
 from torch.fx.node import Target, Node
@@ -15,6 +15,7 @@ from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, ge
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.fx.experimental.graph_gradual_typechecker import get_parameter
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
@@ -39,34 +40,55 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
     return Conj([c1, c2, *nat_constraints]), counter
 
 
-# TODO
-@register_inference_rule("long")
-def long_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-# TODO
-@register_inference_rule("type_as")
-def type_as_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-# TODO
-@register_inference_rule("int")
-def int_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    """
-    raise NotImplementedError('Not yet implemented')
-
-
-# TODO
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
+    If the attribute is "device" then the tensor shape is preserved
     """
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], str)
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+
+    input = symbols[n.args[0]]
+    attr = n.args[1]
+
+    if attr == 'device':
+        return [BinConstraintT(input, output, op_eq)], counter
+    else:
+        raise NotImplementedError('Not yet implemented')
+
+
+@register_inference_rule("index_select")
+def index_select_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    We constrain the second argument to a vector or Dyn.
+    The output replaces the input with the shape of the vector
+    at the position given by the index (first argument)
+    """
+    # print(n.args)
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], int)
+    assert isinstance(n.args[2], Node)
+
+
+
+    index_select, counter = gen_tvar(counter)
+    symbols[n] = index_select
+
+    dims, counter = gen_tensor_dims(1, counter)
+
+    # matching constraint
+    is_size_1 = BinConstraintT(symbols[n.args[2]], TensorType(dims), op_eq)
+    is_dyn = BinConstraintT(symbols[n.args[2]], Dyn, op_eq)
+
+    c2 = Conj([is_size_1, Disj([IndexSelect(i + 1, symbols[n.args[0]], dims[0], n.args[1], index_select)
+                                for i in range(MAX_TENSOR_RANK)])])
+    c3 = Conj([is_dyn, Disj([IndexSelect(i + 1, symbols[n.args[0]], Dyn, n.args[1], index_select)
+                             for i in range(MAX_TENSOR_RANK)])])
+
+    return [Disj([c2, c3])], counter
+
 
 @register_inference_rule("expand")
 def expand_inference_rule(n: Node, symbols, constraints, counter):
@@ -105,9 +127,12 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     return constraints, counter
 
-
+@register_inference_rule(torch.nn.functional.dropout)
+@register_inference_rule("detach")
 @register_inference_rule("to")
-def to_inference_rule(n: Node, symbols, constraints, counter):
+@register_inference_rule("int")
+@register_inference_rule("long")
+def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
@@ -115,7 +140,29 @@ def to_inference_rule(n: Node, symbols, constraints, counter):
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
+    assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
+
+
+@register_inference_rule("type_as")
+def type_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    We generate the constraint: input = output
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+
+    from_arg = symbols[n.args[0]]
+    to_arg = symbols[n.args[1]]
+
+    assert isinstance(from_arg, TVar)
+    assert isinstance(to_arg, TVar)
+
+    return [BinConstraintT(from_arg, to_arg, op_consistency),
+            BinConstraintT(output, to_arg, op_eq)], counter
 
 @register_inference_rule("masked_fill_")
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
@@ -345,21 +392,6 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     else:
         raise RuntimeError('Method not yet implemented')
 
-@register_inference_rule(operator.mul)
-def mul_inference_rule(n: Node, symbols, constraints, counter):
-
-    my_mul, counter = gen_tvar(counter)
-    symbols[n] = my_mul
-
-    # since in this case, we have scalar multiplication
-    # the input shape should be the same as the output shape
-    if isinstance(n.args[0], Node) and isinstance(n.args[1], float):
-        # retrieve arg variables
-        e1 = symbols[n.args[0]]
-        return [BinConstraintT(my_mul, e1, op_eq)], counter
-    else:
-        raise NotImplementedError('Case not yet implemented')
-
 
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
@@ -402,6 +434,7 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
 
     else:
         raise NotImplementedError('Method not yet implemented')
+
 
 
 @register_inference_rule(operator.lt)
@@ -504,53 +537,55 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
     return [c1, c2, c3], counter
 
 
+@register_inference_rule(operator.mul)
 @register_inference_rule(torch.ne)
 @register_inference_rule("ne")
-def ne_inference_rule(n: Node, symbols, constraints, counter):
-    """
-    We generate the same constraints as we do for addition. We assume the arguments can only
-    be tensors here, unlike addition where we have scalar addition.
-    """
-
-    # create and store the new variable
-    my_add, counter = gen_tvar(counter)
-    symbols[n] = my_add
-
-    assert isinstance(n.args[0], Node)
-    assert isinstance(n.args[1], Node)
-    return gen_broadcasting_constraints(symbols[n.args[0]], symbols[n.args[1]], symbols, counter, my_add)
-
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         if isinstance(symbols[n.args[0]], TVar) and isinstance(symbols[n.args[1]], TVar):
-            my_add, counter = gen_tvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
             e2 = symbols[n.args[1]]
 
-            return gen_broadcasting_constraints(e1, e2, symbols, counter, my_add)
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, my_output)
         else:
             raise NotImplementedError('Method not yet implemented')
 
-    elif isinstance(n.args[0], Node) and isinstance(n.args[1], int):
+    elif isinstance(n.args[0], Node) and (isinstance(n.args[1], int) or isinstance(n.args[1], float)):
         if isinstance(symbols[n.args[0]], TVar):
-            my_add, counter = gen_tvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
-            return [BinConstraintT(my_add, e1, op_eq)], counter
+            return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_add, counter = gen_dvar(counter)
-            symbols[n] = my_add
+            my_output, counter = gen_dvar(counter)
+            symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
             # we will propagate the runtime value here since this is regular addition
-            c = Conj([BinConstraintD(my_add, BinConstraintD(e1, n.args[1], op_add), op_eq),
-                      BinConstraintD(0, my_add, op_leq)])
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e1, n.args[1], op_add), op_eq),
+                      BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
+    elif isinstance(n.args[1], Node) and (isinstance(n.args[0], int) or isinstance(n.args[1], float)):
+        if isinstance(symbols[n.args[1]], TVar):
+            my_output, counter = gen_tvar(counter)
+            symbols[n] = my_output
+            e2 = symbols[n.args[1]]
+            return [BinConstraintT(my_output, e2, op_eq)], counter
+        elif isinstance(symbols[n.args[1]], DVar):
+            my_output, counter = gen_dvar(counter)
+            symbols[n] = my_output
+            e2 = symbols[n.args[1]]
+
+            # we will propagate the runtime value here since this is regular addition
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e2, n.args[0], op_add), op_eq),
+                      BinConstraintD(0, my_output, op_leq)])
+            return [c], counter
 
         else:
             raise NotImplementedError('Method not yet implemented')
@@ -637,6 +672,7 @@ def relu_inference_rule(n: Node, module_instance, symbols, constraints, counter)
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
+    assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
 
 @register_inference_rule(torch.nn.Linear)
@@ -859,14 +895,9 @@ class ConstraintGenerator:
             return [c1, c2], counter
 
         elif n.op == 'call_function':
-            if n.target == getattr:
-                assert getattr in _INFERENCE_RULES
-                return _INFERENCE_RULES[n.target](n, self.traced, self.symbol_dict, self.constraints)
-
-            elif n.target in _INFERENCE_RULES:
+            if n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n, self.symbol_dict, self.constraints, counter)
             else:
-                # print(n)
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'call_module':
@@ -886,9 +917,22 @@ class ConstraintGenerator:
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
-        # TODO: verify that no constraint should be generated here
         elif n.op == 'get_attr':
-            return [], counter
+            t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
+            if isinstance(t.data, torch.Tensor):
+                if len(t.data.shape) > 0:
+                    res = []
+                    for t in t.data.shape:
+                        res.append(t)
+                    attr_type = TensorType(res)
+                    output, counter = gen_tvar(counter)
+                    self.symbol_dict[n] = output
+                    return [BinConstraintT(output, attr_type, op_eq)], counter
+                else:
+                    # scalar?
+                    return [], counter
+            else:
+                return [], counter
 
         elif n.op == 'output':
             return [], counter
