@@ -14716,7 +14716,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
-        assert_autodiffed=False,
+        assert_autodiffed=True,
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
