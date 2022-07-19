@@ -1156,9 +1156,11 @@ endif()
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include)
+
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
-      ${TORCH_ROOT}/third_party/kineto/libkineto/include
       ${TORCH_ROOT}/third_party/kineto/libkineto/src)
   endif()
 
@@ -2052,7 +2054,7 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
-  if(CAFFE2_USE_MKLDNN)
+  if(USE_MKLDNN)
       target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
   endif()
   if(WIN32)
