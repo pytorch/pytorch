@@ -1,11 +1,11 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 #include <cmath>
 #include <complex>
 #include <istream>
 #include <type_traits>
-
-#include <c10/macros/Macros.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/complex.h>
@@ -613,4 +613,5 @@ C10_CLANG_DIAGNOSTIC_POP()
 #include <c10/util/complex_math.h> // IWYU pragma: keep
 // utilities for complex types
 #include <c10/util/complex_utils.h> // IWYU pragma: keep
+
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H

@@ -1,5 +1,9 @@
 #include <c10/util/Backtrace.h>
 
+#include <c10/util/Optional.h>
+#include <c10/util/Type.h>
+#include <c10/util/irange.h>
+
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -7,14 +11,10 @@
 #include <string>
 #include <vector>
 
-#include <c10/util/Optional.h>
-#include <c10/util/Type.h>
-#include <c10/util/irange.h>
-
 #ifdef _MSC_VER
-#include <iomanip>
-
 #include <c10/util/win32-headers.h>
+
+#include <iomanip>
 
 #pragma comment(lib, "Dbghelp.lib")
 #endif

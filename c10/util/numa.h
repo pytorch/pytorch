@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cstddef>
-
 #include <c10/macros/Export.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+
+#include <cstddef>
 
 C10_DECLARE_bool(caffe2_cpu_numa_enabled);
 

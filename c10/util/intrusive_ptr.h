@@ -1,5 +1,11 @@
 #pragma once
 
+#include <c10/macros/Export.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
+#include <c10/util/MaybeOwned.h>
+
 #include <atomic>
 #include <climits>
 #include <cstddef>
@@ -8,12 +14,6 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
-
-#include <c10/macros/Export.h>
-#include <c10/util/C++17.h>
-#include <c10/util/Exception.h>
-#include <c10/util/ExclusivelyOwned.h>
-#include <c10/util/MaybeOwned.h>
 
 namespace pybind11 {
 template <typename, typename...>

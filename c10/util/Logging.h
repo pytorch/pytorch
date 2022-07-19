@@ -1,15 +1,6 @@
 #ifndef C10_UTIL_LOGGING_H_
 #define C10_UTIL_LOGGING_H_
 
-#include <climits>
-#include <cstdint>
-#include <exception>
-#include <functional>
-#include <limits>
-#include <map>
-#include <sstream>
-#include <string>
-
 // include-what-you-use want to put these includes in the wrong place
 // IWYU pragma: no_include "c10/util/Logging.h"
 // IWYU pragma: no_include "c10/util/logging_is_not_google_glog.h"
@@ -18,6 +9,15 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/StringUtil.h>
+
+#include <climits>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <limits>
+#include <map>
+#include <sstream>
+#include <string>
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced

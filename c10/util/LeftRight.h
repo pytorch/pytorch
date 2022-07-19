@@ -1,3 +1,6 @@
+#include <c10/macros/Macros.h>
+#include <c10/util/Synchronized.h>
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -6,9 +9,6 @@
 #include <shared_mutex>
 #include <thread>
 #include <type_traits>
-
-#include <c10/macros/Macros.h>
-#include <c10/util/Synchronized.h>
 
 namespace c10 {
 

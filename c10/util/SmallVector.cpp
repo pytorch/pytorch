@@ -16,11 +16,11 @@
 
 #include <c10/util/SmallVector.h>
 
+#include <c10/macros/Macros.h>
+
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-
-#include <c10/macros/Macros.h>
 
 using namespace c10;
 

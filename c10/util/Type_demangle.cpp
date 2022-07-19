@@ -1,10 +1,10 @@
 #include <c10/util/Type.h> // IWYU pragma: associated
 
+#include <c10/macros/Macros.h>
+
 #include <cstdlib>
 #include <functional>
 #include <memory>
-
-#include <c10/macros/Macros.h>
 
 #if HAS_DEMANGLE
 

@@ -27,6 +27,12 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
+#include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/in_place.h>
+
 #include <cassert>
 #include <cstring>
 #include <functional>
@@ -36,12 +42,6 @@
 #include <string>
 #include <type_traits>
 #include <utility>
-
-#include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Metaprogramming.h>
-#include <c10/util/SmallVector.h>
-#include <c10/util/in_place.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wstring-conversion")

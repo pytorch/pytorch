@@ -17,8 +17,6 @@
 #include <typeinfo>
 #endif
 
-#include <exception>
-
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
@@ -31,6 +29,8 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_view.h>
+
+#include <exception>
 
 /*
  * TypeIdentifier is a small type containing an id.

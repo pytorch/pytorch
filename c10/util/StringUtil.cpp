@@ -1,11 +1,11 @@
 #include <c10/util/StringUtil.h>
 
+#include <c10/util/string_view.h>
+
 #include <algorithm>
 #include <ostream>
 #include <string>
 #include <utility>
-
-#include <c10/util/string_view.h>
 
 namespace c10 {
 

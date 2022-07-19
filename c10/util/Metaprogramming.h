@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/util/Array.h>
+#include <c10/util/TypeList.h>
+#include <c10/util/TypeTraits.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,10 +11,6 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-
-#include <c10/util/Array.h>
-#include <c10/util/TypeList.h>
-#include <c10/util/TypeTraits.h>
 
 namespace c10 {
 namespace guts {

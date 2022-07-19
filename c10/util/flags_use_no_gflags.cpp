@@ -2,6 +2,9 @@
 
 #ifndef C10_USE_GFLAGS
 
+#include <c10/macros/Export.h>
+#include <c10/util/Registry.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -9,9 +12,6 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-
-#include <c10/macros/Export.h>
-#include <c10/util/Registry.h>
 
 namespace c10 {
 
