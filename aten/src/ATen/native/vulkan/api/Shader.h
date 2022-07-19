@@ -65,7 +65,6 @@ struct ShaderSource final {
       const std::vector<VkDescriptorType>&);
 };
 
-
 class ShaderModule final {
  public:
   explicit ShaderModule(const VkDevice device, const ShaderSource& source);
