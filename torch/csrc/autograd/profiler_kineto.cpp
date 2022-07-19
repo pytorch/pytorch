@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
@@ -184,6 +185,7 @@ struct EventFieldsVisitor {
   }
 
   void operator()(const ExtraFields<EventType::Kineto>& e) {
+    TORCH_INTERNAL_ASSERT(kineto_activity_ == nullptr);
     const auto linked = e.linked_activity_.lock();
     if (linked) {
       kineto_event_.get().linkedCorrelationId(linked->correlationID());
