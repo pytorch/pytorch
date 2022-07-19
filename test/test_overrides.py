@@ -19,7 +19,6 @@ from torch.overrides import (
     TorchFunctionMode
 )
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
-from functools import partial
 
 Tensor = torch.Tensor
 
