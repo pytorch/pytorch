@@ -17,6 +17,7 @@ meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 meta_table = {}
 
+
 def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(op):
@@ -94,18 +95,8 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta(aten.sum.default)
+@register_meta([aten.max.default, aten.min.default])
 def meta_max(self):
-    return self.new_empty(())
-
-
-@register_meta(aten.max.default)
-def meta_max(self):
-    return self.new_empty(())
-
-
-@register_meta(aten.min.default)
-def meta_min(self):
     return self.new_empty(())
 
 
