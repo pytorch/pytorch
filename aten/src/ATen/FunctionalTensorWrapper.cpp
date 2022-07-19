@@ -29,7 +29,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // All of the keys corresponding to functorch transforms should not be copied over.
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
-  key_set_ = key_set_ - c10::functorch_transforms_ks;
+  key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
   // For better error handling,
   // we also don't want our wrapper tensor to be able to dispatch directly
   // to a backend kernel.
@@ -43,9 +43,6 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
   keyset_ = key_set_.remove(c10::DispatchKey::Dense);
-  // Python is also a "backend", so remove that (we don't want FunctionalTensorWrappers
-  // to ever go directly into a `__torch_dispatch__`).
-  key_set_ = key_set_ - c10::python_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)

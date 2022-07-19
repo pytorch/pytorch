@@ -362,7 +362,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -512,7 +512,7 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten', 'nvfuser'])
     def test_python_ref_executor(self, device, dtype, op, executor):
         # TODO: Not all dtypes are supported with nvfuser
-        from torch._prims.utils import _torch_dtype_to_nvfuser_dtype_map
+        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
         if executor == "nvfuser" and dtype not in _torch_dtype_to_nvfuser_dtype_map:
             raise unittest.SkipTest(f"nvfuser doesn't support dtype {dtype}")
 
@@ -560,7 +560,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1497,7 +1497,7 @@ class TestTags(TestCase):
 
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
@@ -1581,6 +1581,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
     }
 
     @parametrize("op", ref_ops_names)

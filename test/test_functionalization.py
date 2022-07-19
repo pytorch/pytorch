@@ -1,10 +1,12 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
+
+import unittest
 
 def are_aliased(x, y):
     if x._base is None and y._base is None:
@@ -16,6 +18,7 @@ def are_aliased(x, y):
     return x._base is y._base
 
 
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
     # We can unify testing and use functionalize() here instead
     # if/when functorch moves into core.
@@ -67,6 +70,10 @@ class TestFunctionalization(TestCase):
             torch._sync(out_functional_)
             out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
             self.assertEqual(out_ref_, out_functional_unwrapped)
+
+    def test_save_for_backwards_segfault(self):
+        inp = torch._to_functional_tensor(LoggingTensor(torch.randn(2, 2))).requires_grad_(True)
+        inp.exp()
 
     def test_multiple_views_of_same_base(self):
         def f(x):
