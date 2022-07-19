@@ -63,6 +63,8 @@ struct TORCH_API SchemaInfo {
   void addArgumentValues(
       const std::unordered_map<std::string, at::IValue>& values);
 
+  bool hasInputArgumentNamed(const std::string& name) const;
+
  private:
   // This function enforces more conservative results when the TORCH_WARN is
   // triggered from above due to duplicates in an argument list
