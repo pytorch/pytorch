@@ -1704,12 +1704,8 @@ void initJITBindings(PyObject* module) {
             // For normalization purposes there is an inconsistency within
             // torch.fx that turns all arguments named "self" into "input". Thus
             // this check ensures that those arguments are checked correctly.
-            if (name == "input") {
-              try {
-                self.addArgumentValue("self", toTypeInferredIValue(value));
-              } catch (const c10::Error& e) {
-                self.addArgumentValue("input", toTypeInferredIValue(value));
-              }
+            if (name == "input" && !self.hasInputArgumentNamed("input")) {
+              self.addArgumentValue("self", toTypeInferredIValue(value));
             } else {
               self.addArgumentValue(name, toTypeInferredIValue(value));
             }
@@ -1726,13 +1722,9 @@ void initJITBindings(PyObject* module) {
           // torch.fx that
           // turns all arguments named "self" into "input". Thus this check
           // ensures that those arguments are checked correctly.
-
-          if (key.toStringRef() == "input") {
-            try {
-              self.addArgumentValue("self", value);
-            } catch (const c10::Error& e) {
-              self.addArgumentValue("input", value);
-            }
+          if (key.toStringRef() == "input" &&
+              !self.hasInputArgumentNamed("input")) {
+            self.addArgumentValue("self", value);
           } else {
             value_map[key.toStringRef()] = value;
           }
