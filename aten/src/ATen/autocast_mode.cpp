@@ -455,7 +455,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // KERNEL(ADD_NS(norm), "norm.ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
   // KERNEL(ADD_NS(norm), "norm.names_ScalarOpt_dim_dtype", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
   KERNEL(ADD_NS(sum), "sum", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL(ADD_NS(sum), "sum.dim_IntList", Tensor (const Tensor &, OptionalIntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(sum), "sum.dim_DimnameList", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
@@ -567,7 +567,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(linalg_matrix_rank), "linalg_matrix_rank.tol_tensor", Tensor(const Tensor &, const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(linalg_matrix_rank), "linalg_matrix_rank.atol_rtol_tensor", Tensor(const Tensor &, const c10::optional<at::Tensor> &, const c10::optional<at::Tensor> &, bool), fp32)
   KERNEL_CPU(ADD_NS(linalg_matrix_rank), "linalg_matrix_rank.atol_rtol_float", Tensor(const Tensor &, c10::optional<double>, c10::optional<double>, bool), fp32)
-  KERNEL_CPU(ADD_NS(linalg_solve), "linalg_solve", Tensor(const Tensor &, const Tensor &), fp32)
+  KERNEL_CPU(ADD_NS(linalg_solve), "linalg_solve", Tensor(const Tensor &, const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(linalg_cholesky), "linalg_cholesky", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(linalg_svdvals), "linalg_svdvals", Tensor(const Tensor &, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(linalg_eigvals), "linalg_eigvals", Tensor(const Tensor &), fp32)

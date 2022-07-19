@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/layer_norm.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/accumulate.h>

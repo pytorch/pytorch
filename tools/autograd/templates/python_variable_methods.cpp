@@ -110,17 +110,15 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-
   if (r.idx == 0) {
     if (jit::tracer::isTracing()) {
+      // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
-      return wrap(self_.size(r.toInt64(0)));
+      return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python.
-    return THPSize_New(self_);
+    return THPSize_NewFromSymSizes(self_);
   }
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
@@ -791,15 +789,22 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 
 // implemented on the python object bc PyObjects not declarable in native_functions.yaml
 // See: ATen/native/README.md for more context
-static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
+static PyObject * THPVariable_numpy(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "numpy");
-  }
-  jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
+  static PythonArgParser parser({
+    "numpy(*, bool force=False)"
+  });
   auto& self_ = THPVariable_Unpack(self);
-  return torch::utils::tensor_to_numpy(self_);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
+  return torch::utils::tensor_to_numpy(self_, r.toBool(0));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1271,7 +1276,7 @@ PyMethodDef variable_methods[] = {
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", THPVariable_numel, METH_NOARGS, NULL},
-  {"numpy", THPVariable_numpy, METH_NOARGS, NULL},
+  {"numpy", castPyCFunctionWithKeywords(THPVariable_numpy), METH_VARARGS | METH_KEYWORDS, NULL},
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},

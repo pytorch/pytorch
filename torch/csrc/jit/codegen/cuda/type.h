@@ -111,15 +111,18 @@ enum class ExprType {
   WelfordOp,
   MmaOp,
   TransposeOp,
+  ExpandOp,
   ShiftOp,
   GatherOp,
   ViewOp,
+  LoadStoreOp,
   Split,
   ViewAsScalar,
   Merge,
   Allocate,
   BlockSync,
   GridSync,
+  CpAsyncWait,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -149,6 +152,7 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
+  Imag,
   Silu,
   Lgamma,
   Log,
@@ -158,6 +162,7 @@ enum class UnaryOpType {
   BitCast,
   Neg,
   RandLike,
+  Real,
   Reciprocal,
   Relu,
   Rsqrt,
@@ -284,8 +289,7 @@ enum class MemoryType { Local, Shared, Global };
 enum class IterType {
   Iteration,
   Reduction,
-  BroadcastWithStride,
-  BroadcastWithoutStride,
+  Broadcast,
   Gather,
   Stride,
   VectorComponent
@@ -300,6 +304,14 @@ static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
     IdMappingMode::PERMISSIVE,
     IdMappingMode::EXACT,
     IdMappingMode::LOOP};
+
+// Used to annotate the special memory intrinsics that a loadstore
+//  op will be lowered to.
+enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose, CpAsync };
+
+// Used to label what part of the double buffered iterdomain
+//  a for loop is materializing.
+enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
 
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
@@ -325,6 +337,12 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IdMappingMode);
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream&,
+    const LoadStoreOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream&,
+    const DoubleBufferLoopStage);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);

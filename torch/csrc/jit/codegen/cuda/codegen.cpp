@@ -27,12 +27,6 @@ std::string ptrType(DataType dt) {
   return ss.str();
 }
 
-std::string refType(DataType dt) {
-  std::stringstream ss;
-  ss << dt << "&";
-  return ss.str();
-}
-
 //! Utility class to build an argument list
 class ArgumentBuilder {
  public:
@@ -207,10 +201,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const auto nDims = std::count_if(
           maybe_rfactor_domain.begin(),
           maybe_rfactor_domain.end(),
-          [](const IterDomain* id) {
-            return !id->isReduction() &&
-                id->getIterType() != IterType::BroadcastWithoutStride;
-          });
+          [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
             << varName(tv);
     }
@@ -475,6 +466,42 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const TensorView*) final {
     TORCH_INTERNAL_ASSERT(false, "Unreachable");
+  }
+
+  //! Utility for generating vectorized pointer access in ldsm and
+  //!  cpasync.
+  //! TODO: this access pattern as is could be merged with exisiting
+  //!  vectorization handling logic but this path will be updated in
+  //!  follow ups to optimize the generated assembly so keeping them
+  //!  separate path for now.
+  std::string genVectorPointer(Val* val, DataType dtype, int vec_size) {
+    std::stringstream ss;
+
+    ss << "reinterpret_cast<Array<" << dtype << "," << vec_size << ","
+       << vec_size << ">*>(&" << gen(val) << ")";
+
+    return ss.str();
+  }
+
+  // Utility function to emit a cp.async intrinsic
+  void genCpAsync(const LoadStoreOp* ldst, int vec_size) {
+    auto dtype = ldst->in()->getDataType().value();
+
+    indent() << "Ampere::cpAsync("
+             << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+             << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+  }
+
+  void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {
+    auto dtype = ldst->in()->getDataType().value();
+    indent() << "Turing::ldMatrix";
+    if (ldst->opType() == LoadStoreOpType::LdMatrixTranspose) {
+      code_ << "T";
+    }
+    code_ << " (";
+    code_ << "*" << genVectorPointer(ldst->out(), dtype, vector_word_size)
+          << ","
+          << "&" << gen(ldst->in()) << ");\n";
   }
 
   void handle(const UnaryOp* uop) final {
@@ -918,7 +945,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (init) {
       ss << "init";
     }
-    ss << toString(options.macro) << toString(options.operand_layout);
+    ss << toString(options.macro);
+
+    if (isVolta(options.macro)) {
+      ss << toString(options.operand_layout);
+    } else if (isTuring(options.macro) || isAmpere(options.macro)) {
+      // mma's in turing and ampere TN only, transpose is handled either
+      //  via ldmatrix for fp16 or explicitly for other types.
+      ss << "TN";
+    }
     // TODO: additional parameter could be removed by swizzling iterdomain
     auto acc_stride = mma->accStride();
     TORCH_INTERNAL_ASSERT(acc_stride > 0);
@@ -1123,6 +1158,52 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const LoadStoreOp* ldst) {
+    // TODO:
+    //  Need to gradually merge the code path of this
+    //   with UnaryOp::Set for vectorization.
+    //  There is quite a bit of possible clean up.
+    bool vectorize_op = false;
+    size_t vector_word_size = 1;
+    auto ti = ldst->out()->as<kir::TensorIndex>();
+
+    // Check vectorization and set vector word size
+    for (auto id : ti->view()->domain()->domain()) {
+      if (!isParallelTypeVectorize(id->getParallelType())) {
+        continue;
+      }
+
+      ExpressionEvaluator expr_eval(id->fusion());
+      auto vector_size_optional = expr_eval.evaluate(id->extent());
+
+      TORCH_INTERNAL_ASSERT(
+          vector_size_optional.has_value(),
+          "Could not evaluate constant value bound to vectorized dim.");
+
+      TORCH_INTERNAL_ASSERT(
+          id->getParallelType() != ParallelType::MisalignedVectorize,
+          "LoadStoreOp: no support yet for mis-aligned vectorization");
+      vector_word_size = vector_size_optional.value();
+      vectorize_op = true;
+      break;
+    }
+
+    // Dispatch instruction generation:
+    switch (ldst->opType()) {
+      case LoadStoreOpType::LdMatrix:
+      case LoadStoreOpType::LdMatrixTranspose:
+        TORCH_INTERNAL_ASSERT(
+            vectorize_op, "LdMatrix: Vectorization required: ", ldst);
+        genLdMatrix(ldst, vector_word_size);
+        break;
+      case LoadStoreOpType::CpAsync:
+        genCpAsync(ldst, vector_word_size);
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "LoadStoreOp: Unknown op type");
+    }
+  }
+
   void handle(const WelfordOp* wop) final {
     TORCH_INTERNAL_ASSERT(wop->out()->isA<kir::TensorIndex>());
 
@@ -1288,6 +1369,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return flags.str();
   }
 
+  void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
+    if (isEnabled(EnableOption::KernelProfile) &&
+        kernel_->profile().isProfiled(expr)) {
+      const auto& buffer_indices =
+          kernel_->profile().getIndicesInProfileBuffer(expr);
+      auto buffer = kernel_->profile().getBuffer();
+      TORCH_INTERNAL_ASSERT(buffer != nullptr);
+      for (const auto& index : buffer_indices) {
+        func_args.arg(varName(buffer)).append("[").append(index).append("]");
+      }
+    }
+  }
+
   void handle(const kir::GridReduction* grop) final {
     TORCH_INTERNAL_ASSERT(grop->out()->isA<kir::TensorIndex>());
 
@@ -1344,6 +1438,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(genCall(data_type, genInline(grop->init())));
     func_args.arg(genInline(grop->entrance_index()));
     func_args.arg(genInline(grop->entrances()));
+
+    addProfileArguments(func_args, grop);
 
     indent() << "reduction::gridReduce<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
@@ -1412,6 +1508,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // reduction_op
     func_args.arg(genReductionOp(op_type, out->dtype()));
 
+    addProfileArguments(func_args, grop);
+
     indent() << kTab << func_args << ");\n";
   }
 
@@ -1425,15 +1523,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto sync_buffer =
         grouped_grop->sync_buffer()->buffer()->as<TensorView>();
 
+    if (grouped_grop->isAllreduce()) {
+      generateGroupedGridAllreduce(grouped_grop);
+      return;
+    }
+
     TORCH_INTERNAL_ASSERT(
         grouped_grop->numReductions() == 2,
         "Only grouping of 2 reductions is supported. ",
         grouped_grop->toString());
-
-    if (grouped_grop->isAllreduce()) {
-      generateGridAllreduce(grouped_grop);
-      return;
-    }
 
     const std::string flags_str = generateGridReduceTemplateFlags2(
         grouped_grop, grouped_grop->threadPredicate());
@@ -1449,7 +1547,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
 
-    // Apped arguments for each reduction
+    // Append arguments for each reduction
     for (const auto i : c10::irange(grouped_grop->numReductions())) {
       TORCH_INTERNAL_ASSERT(
           grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
@@ -1483,44 +1581,85 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(read_pred);
     }
 
+    func_args.arg(genInline(grouped_grop->entrance_index()));
+    func_args.arg(genInline(grouped_grop->entrances()));
+
+    addProfileArguments(func_args, grouped_grop);
+
     indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
   }
 
-  void generateGridAllreduce(const kir::GroupedGridReduction* grouped_grop) {
+  void generateGroupedGridAllreduce(
+      const kir::GroupedGridReduction* grouped_grop) {
     TORCH_INTERNAL_ASSERT(grouped_grop->isAllreduce());
 
-    // First, build a list of function arguments
-    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    constexpr int max_num_reductions = 8;
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->numReductions() <= max_num_reductions,
+        "Too many grouped reductions: ",
+        grouped_grop->toString(),
+        ". Up to ",
+        max_num_reductions,
+        " reductions are allowed.");
+
+    ArgumentBuilder types;
+    ArgumentBuilder outputs;
+    ArgumentBuilder inputs;
+    ArgumentBuilder work_bufs;
+    ArgumentBuilder init_vals;
+    ArgumentBuilder reduction_ops;
+
+    ArgumentBuilder bool_types;
+    ArgumentBuilder read_preds;
+    ArgumentBuilder write_preds;
 
     for (const auto i : c10::irange(grouped_grop->numReductions())) {
       const auto data_type = grouped_grop->outputs().at(i)->dtype();
       TORCH_INTERNAL_ASSERT(
           grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
 
+      types.arg(data_type);
+
       // out
-      func_args.arg(
-          genCall("RefTuple", data_type, gen(grouped_grop->outputs().at(i))));
+      outputs.arg(gen(grouped_grop->outputs().at(i)));
 
       // inp
-      func_args.arg(genCall(
-          "ConstRefTuple", data_type, gen(grouped_grop->inputs().at(i))));
+      inputs.arg(gen(grouped_grop->inputs().at(i)));
 
       // global_work_buffer
       const auto work_buffer =
           grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
-      func_args.arg(genCall(
-          "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+      work_bufs.arg("&").append(varName(work_buffer)).append("[0]");
 
-      // init
-      func_args.arg(genCall(
-          "LocalTuple", data_type, genInline(grouped_grop->initVal(i))));
+      init_vals.arg(genInline(grouped_grop->initVal(i)));
 
-      // reduction op
-      func_args.arg(genReductionOp(
+      reduction_ops.arg(genReductionOp(
           grouped_grop->getReductionOpType(i),
           grouped_grop->output(i)->dtype()));
+
+      // read and write predicates
+      bool_types.arg("bool");
+      // Same argument for all inputs. Different predicates would be
+      // used when grouping is done across iterations
+      TORCH_INTERNAL_ASSERT(
+          grouped_grop->predicate() != nullptr &&
+          grouped_grop->predicate()->hasValue());
+      const auto read_pred = genInline(grouped_grop->predicate());
+      read_preds.arg(read_pred);
+      if (grouped_grop->writePredicate() != nullptr) {
+        TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+        write_preds.arg(genInline(grouped_grop->writePredicate()));
+      } else {
+        write_preds.arg(read_pred);
+      }
     }
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    func_args.arg(genCall("RefTuple", types, outputs));
+    func_args.arg(genCall("ConstRefTuple", types, inputs));
+    func_args.arg(genCall("VolatilePtrTuple", types, work_bufs));
+    func_args.arg(genCall("LocalTuple", types, init_vals));
 
     // global_sync_buffer
     const auto sync_buffer =
@@ -1530,18 +1669,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // shared_buf
     func_args.arg("shared_mem");
 
-    // read and write predicates
-    TORCH_INTERNAL_ASSERT(
-        grouped_grop->predicate() != nullptr &&
-        grouped_grop->predicate()->hasValue());
-    const auto read_pred = genInline(grouped_grop->predicate());
-    func_args.arg(read_pred);
-    if (grouped_grop->writePredicate() != nullptr) {
-      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
-      func_args.arg(genInline(grouped_grop->writePredicate()));
-    } else {
-      func_args.arg(read_pred);
-    }
+    func_args.arg(genCall("LocalTuple", bool_types, read_preds));
+    func_args.arg(genCall("LocalTuple", bool_types, write_preds));
+
+    addProfileArguments(func_args, grouped_grop);
+
+    func_args.arg(reduction_ops);
 
     indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
              << ".reduceGroup(\n";
@@ -2012,13 +2145,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::BlockSync*) final {
+  void handle(const kir::BlockSync* sync) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
     } else {
       indent() << "__barrier_sync(0);\n";
     }
+  }
+
+  void handle(const kir::CpAsyncWait* cpasync_wait) final {
+    indent() << "Ampere::cpAsyncBarrier();\n";
   }
 
   void handle(const kir::GridSync* sync) final {

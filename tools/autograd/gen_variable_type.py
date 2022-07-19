@@ -25,71 +25,73 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .context import with_native_function_with_differentiability_info
-from .gen_trace_type import (
-    MANUAL_BACKEND,
-    MANUAL_AUTOGRAD_AND_TRACER,
-    declare_returned_variables,
-    tie_return_values,
-    get_return_value,
-    type_wrapper_name,
-)
-from .gen_inplace_or_view_type import (
-    get_view_info,
-    is_tensor_type,
-    is_tensor_list_type,
-    unpack_args,
-    get_base_name,
-    use_derived,
-    modifies_arguments,
-    WRAPPER_REGISTRATION,
-    TMP_VAR,
-    METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE,
-    gen_formals,
-    ALL_VIEW_FUNCTIONS,
-    unpacked_name,
-    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
-)
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from torchgen.api.types import (
-    Binding,
-    DispatcherSignature,
-    BaseCType,
-    intArrayRefT,
-    tensorT,
-    tensorListT,
-    MutRefCType,
-    OptionalCType,
-    ListCType,
-    SpecialArgName,
-    scalarT,
-    stringT,
-    TupleCType,
-    VectorCType,
-)
+from torchgen.api import cpp
 from torchgen.api.autograd import (
     DifferentiableInput,
-    NativeFunctionWithDifferentiabilityInfo,
-    SavedAttribute,
     dispatch_strategy,
     gen_differentiable_outputs,
     is_differentiable,
+    NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute,
 )
-from torchgen.api import cpp
+
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    DispatcherSignature,
+    intArrayRefT,
+    ListCType,
+    MutRefCType,
+    OptionalCType,
+    scalarT,
+    SpecialArgName,
+    stringT,
+    tensorListT,
+    tensorT,
+    TupleCType,
+    VectorCType,
+)
 from torchgen.code_template import CodeTemplate
 from torchgen.context import native_function_manager, with_native_function
-from torchgen.utils import mapMaybe, FileManager
 from torchgen.model import (
     Argument,
+    BaseType,
+    ListType,
     NativeFunction,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    ListType,
 )
-from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
+from torchgen.utils import FileManager, mapMaybe
+
+from .context import with_native_function_with_differentiability_info
+from .gen_inplace_or_view_type import (
+    ALL_VIEW_FUNCTIONS,
+    ASSIGN_RETURN_VALUE,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
+    gen_formals,
+    get_base_name,
+    get_view_info,
+    is_tensor_list_type,
+    is_tensor_type,
+    METHOD_DEFINITION,
+    modifies_arguments,
+    TMP_VAR,
+    unpack_args,
+    unpacked_name,
+    use_derived,
+    WRAPPER_REGISTRATION,
+)
+from .gen_trace_type import (
+    declare_returned_variables,
+    get_return_value,
+    MANUAL_AUTOGRAD_AND_TRACER,
+    MANUAL_BACKEND,
+    tie_return_values,
+    type_wrapper_name,
+)
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -141,12 +143,15 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
+    # This function returns nested_tensor shape as a tensor that is non-differentiable
+    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    "fill",
     "t",
     "view",
     "reshape",
@@ -236,6 +241,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
+    "std_mean",
+    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
@@ -243,7 +250,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
-    "linalg_eigh",
+    "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
     "_linalg_svd",
@@ -257,7 +264,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "index_add_",
     "linalg_inv",
     "linalg_inv_ex",
-    "l1_loss_backward",
     "baddbmm",
     "addbmm",
     "addmm",
@@ -321,7 +327,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_det_lu_based_helper",
+    "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -336,6 +342,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu",
     "pixel_shuffle",
     "pixel_unshuffle",
+    "linalg_lu_solve",
+    "_linalg_slogdet",
+    "_linalg_solve_ex",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -373,10 +382,13 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 """
 )
 
+
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
-if (${tensor_name}_storage_saved.has_value())
+if (${tensor_name}_storage_saved.has_value() &&
+    !at::impl::dispatch_mode_enabled() &&
+    !at::impl::tensor_has_dispatch(${tensor_name}))
   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
@@ -392,8 +404,8 @@ for (const Tensor& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
@@ -410,8 +422,8 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
 }
@@ -427,19 +439,23 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
-if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
-AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+if (${tensor_name}.has_storage() && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name})) {
+  AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+}
 """
 )
 
@@ -453,8 +469,8 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_impl_saved[i])
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_impl_saved[i] && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
 """
@@ -472,7 +488,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
@@ -501,6 +517,9 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -508,8 +527,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
-    # lift() should never actually be called with a requires_grad=True tensor,
-    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
@@ -625,7 +642,7 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate(
     """\
-if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined() && ${out_arg}.defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
   ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
@@ -634,7 +651,8 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate(
     """\
-if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()) {
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()
+    && ${out_arg}.defined()) {
   ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
 }
 """
@@ -646,7 +664,7 @@ if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
-    if (${out_arg}_new_fw_grad[i].defined()) {
+    if (${out_arg}_new_fw_grad[i].defined() && ${out_arg}[i].defined()) {
       // The hardcoded 0 here will need to be updated once we support multiple levels.
       ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
     }
@@ -1393,6 +1411,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 is_inplace_str = "false"
 
+            requires_fw_grad = get_any_has_forward_grad_name(derivative.var_names)
+
             if all(
                 (isinstance(var_type, BaseType) and var_type.is_tensor_like())
                 for var_type in derivative.var_types
@@ -1405,6 +1425,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                             out_arg=res[0], is_inplace=is_inplace_str
                         )
                     )
+                    requires_fw_grad += f" && ({derivative.var_names[0]}.defined())"
                 else:
                     tuple_type = TupleCType(
                         [BaseCType(tensorT)] * len(derivative.var_types)
@@ -1442,9 +1463,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             content.append(
                 FW_DERIVATIVE_TEMPLATE.substitute(
                     fw_grad_opt_definition=fw_grad_opt_definition,
-                    requires_fw_grad=get_any_has_forward_grad_name(
-                        derivative.var_names
-                    ),
+                    requires_fw_grad=requires_fw_grad,
                     formula=derivative.formula,
                     out_arg="_".join(res),
                     unpacked_arguments=unpacked_arguments,

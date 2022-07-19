@@ -2841,11 +2841,26 @@ See :func:`torch.numel`
 
 add_docstr_all('numpy',
                r"""
-numpy() -> numpy.ndarray
+numpy(*, force=False) -> numpy.ndarray
 
-Returns :attr:`self` tensor as a NumPy :class:`ndarray`. This tensor and the
-returned :class:`ndarray` share the same underlying storage. Changes to
-:attr:`self` tensor will be reflected in the :class:`ndarray` and vice versa.
+Returns the tensor as a NumPy :class:`ndarray`.
+
+If :attr:`force` is ``False`` (the default), the conversion
+is performed only if the tensor is on the CPU, does not require grad,
+does not have its conjugate bit set, and is a dtype and layout that
+NumPy supports. The returned ndarray and the tensor will share their
+storage, so changes to the tensor will be reflected in the ndarray
+and vice versa.
+
+If :attr:`force` is ``True`` this is equivalent to
+calling ``t.detach().cpu().resolve_conj().resolve_neg().numpy()``.
+If the tensor isn't on the CPU or the conjugate or negative bit is set,
+the tensor won't share its storage with the returned ndarray.
+Setting :attr:`force` to ``True`` can be a useful shorthand.
+
+Args:
+    force (bool): if ``True``, the ndarray may be a copy of the tensor
+               instead of always sharing memory, defaults to ``False``.
 """)
 
 add_docstr_all('orgqr',
@@ -3424,7 +3439,7 @@ add_docstr_all('scatter_add_',
                r"""
 scatter_add_(dim, index, src) -> Tensor
 
-Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
+Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
 :meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
 an index in :attr:`self` which is specified by its index in :attr:`src`
@@ -4974,6 +4989,14 @@ masked_fill(mask, value) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
+add_docstr_all('grad',
+               r"""
+This attribute is ``None`` by default and becomes a Tensor the first time a call to
+:func:`backward` computes gradients for ``self``.
+The attribute will then contain the gradients computed and future calls to
+:func:`backward` will accumulate (add) gradients into it.
+""")
+
 add_docstr_all('retain_grad',
                r"""
 retain_grad() -> None
@@ -5060,6 +5083,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_cpu',
+               r"""
+Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
 """)
 
 add_docstr_all('is_ipu',
@@ -5228,5 +5256,55 @@ Example::
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
+""")
+
+add_docstr_all('to_padded_tensor',
+               r"""
+to_padded_tensor(padding, output_size=None) -> Tensor
+
+Returns a new (non-nested) Tensor by padding the nested tensor.
+The leading entries will be filled with the nested data,
+while the trailing entries will be padded.
+
+.. warning::
+
+    :func:`to_padded_tensor` always copies the underlying data,
+    since the nested and the non-nested tensors differ in memory layout.
+
+Args:
+    padding (float): The padding value for the trailing entries.
+    output_size (Tuple[int]): The size of the output tensor.
+                              If given, it must be large enough to contain all nested data;
+                              else, will infer by taking the max size of each nested sub-tensor along each dimension.
+
+Example::
+
+    >>> nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))])
+    nested_tensor([
+      tensor([[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
+              [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995]]),
+      tensor([[-1.8546, -0.7194, -0.2918, -0.1846],
+              [ 0.2773,  0.8793, -0.5183, -0.6447],
+              [ 1.8009,  1.8468, -0.9832, -1.5272]])
+    ])
+    >>> pt_infer = nt.to_padded_tensor(0.0)
+    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
+             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995],
+             [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000]],
+            [[-1.8546, -0.7194, -0.2918, -0.1846,  0.0000],
+             [ 0.2773,  0.8793, -0.5183, -0.6447,  0.0000],
+             [ 1.8009,  1.8468, -0.9832, -1.5272,  0.0000]]])
+    >>> pt_large = nt.to_padded_tensor(1.0, (2, 4, 6))
+    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276,  1.0000],
+             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]],
+            [[-1.8546, -0.7194, -0.2918, -0.1846,  1.0000,  1.0000],
+             [ 0.2773,  0.8793, -0.5183, -0.6447,  1.0000,  1.0000],
+             [ 1.8009,  1.8468, -0.9832, -1.5272,  1.0000,  1.0000],
+             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]]])
+    >>> pt_small = nt.to_padded_tensor(2.0, (2, 2, 2))
+    RuntimeError: Value in output_size is less than NestedTensor padded size. Truncation is not supported.
 
 """)

@@ -7,6 +7,7 @@ from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['HalfCauchy']
 
 class HalfCauchy(TransformedDistribution):
     r"""

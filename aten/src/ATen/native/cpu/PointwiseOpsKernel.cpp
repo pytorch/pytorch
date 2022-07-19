@@ -11,8 +11,8 @@ namespace native {
 namespace {
 
 static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  ScalarType dtype = iter.dtype(0);
-  if (iter.dtype() == kBFloat16) {
+  ScalarType dtype = iter.common_dtype();
+  if (dtype == kBFloat16) {
     float float_val = value.to<float>();
     auto float_vec = Vectorized<float>(float_val);
     cpu_kernel_vec(
@@ -51,7 +51,7 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 static void addcdiv_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  ScalarType dtype = iter.dtype(0);
+  ScalarType dtype = iter.common_dtype();
   if (dtype == kBFloat16) {
     float float_val = value.to<float>();
     auto float_vec = Vectorized<float>(float_val);

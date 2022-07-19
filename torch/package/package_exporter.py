@@ -5,7 +5,7 @@ import linecache
 import pickletools
 import platform
 import types
-from collections import OrderedDict, defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -13,14 +13,14 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
+    cast,
+    DefaultDict,
     Dict,
     List,
     Optional,
     Sequence,
     Set,
     Union,
-    cast,
-    DefaultDict,
 )
 
 import torch
@@ -36,6 +36,13 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
+
+__all__ = [
+    "PackagingErrorReason",
+    "EmptyMatchError",
+    "PackagingError",
+    "PackageExporter",
+]
 
 _gate_torchscript_serialization = True
 
@@ -883,13 +890,11 @@ class PackageExporter:
                 untyped_storage = obj._storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
-                dtype = obj.dtype
                 storage_numel = obj.size()
 
             elif isinstance(obj, torch._UntypedStorage):
                 untyped_storage = obj
                 storage_type = normalize_storage_type(type(storage))
-                dtype = torch.uint8
                 storage_numel = storage.nbytes()
             else:
                 raise RuntimeError(f"storage type not recognized: {type(obj)}")

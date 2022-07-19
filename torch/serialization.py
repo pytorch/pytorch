@@ -56,7 +56,7 @@ def _is_zipfile(f) -> bool:
     start = f.tell()
 
     byte = f.read(1)
-    while byte != "":
+    while byte != b"":
         read_bytes.append(byte)
         if len(read_bytes) == 4:
             break
@@ -124,6 +124,11 @@ def _cuda_tag(obj):
         return 'cuda:' + str(obj.device.index)
 
 
+def _mps_tag(obj):
+    if obj.device.type == 'mps':
+        return 'mps'
+
+
 def _cpu_deserialize(obj, location):
     if location == 'cpu':
         return obj
@@ -156,9 +161,14 @@ def _cuda_deserialize(obj, location):
         else:
             return obj.cuda(device)
 
+def _mps_deserialize(obj, location):
+    if location == 'mps':
+        return obj.mps()
+
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(20, _cuda_tag, _cuda_deserialize)
+register_package(21, _mps_tag, _mps_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage._TypedStorage, torch._UntypedStorage]):
@@ -373,12 +383,13 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
     """
     _check_dill_version(pickle_module)
 
-    with _open_file_like(f, 'wb') as opened_file:
-        if _use_new_zipfile_serialization:
-            with _open_zipfile_writer(opened_file) as opened_zipfile:
-                _save(obj, opened_zipfile, pickle_module, pickle_protocol)
-                return
-        _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(f) as opened_zipfile:
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+            return
+    else:
+        with _open_file_like(f, 'wb') as opened_file:
+            _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
@@ -708,7 +719,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
-                    return torch.jit.load(opened_file)
+                    return torch.jit.load(opened_file, map_location=map_location)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 

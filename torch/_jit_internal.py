@@ -47,6 +47,24 @@ except ImportError:
 boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
 
 
+FAKE_FILENAME_PREFIX = '__torch_jit_dataclass'
+
+
+class SourceLoader:
+
+    def __init__(self):
+        self.content = {}
+
+    def cache(self, fn, source):
+        self.content[fn] = source
+
+    def get_source(self, fn):
+        return self.content.get(fn)
+
+
+loader = SourceLoader()
+
+
 def createResolutionCallbackFromEnv(lookup_base):
     """
     Creates a resolution callback that will look up qualified names in an
@@ -323,6 +341,14 @@ def get_type_hint_captures(fn):
         A Dict[str, Any] containing a mapping from the literal annotations used on
         fn to the Python objects they refer to.
     """
+    # First, try to get the source of the function. We'll need to parse it to find the actual string names
+    # that were used to annotate the types, since inspect.signature() will only return the class object that
+    # the annotation refers to, not the string name. If we can't get the source, simply return an empty dict.
+    # This may happen in cases where the function is synthesized dynamically at runtime.
+    src = loader.get_source(fn)
+    if src is None:
+        src = inspect.getsource(fn)
+
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
     # that refers to a class in its own definition, but trying to include a mapping for this in the result
@@ -338,8 +364,6 @@ def get_type_hint_captures(fn):
     # Then, get the literal type annotations from the function declaration
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
-    src = inspect.getsource(fn)
-
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
     a = ast.parse(dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
@@ -905,7 +929,7 @@ def is_optional(ann):
 
     def is_union_as_optional(ann):
         ann_args = ann.__args__
-        return len(ann_args) == 2 and None in ann_args
+        return len(ann_args) == 2 and (None in ann_args or type(None) in ann_args)
 
     return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
@@ -1059,11 +1083,19 @@ def _get_named_tuple_properties(obj):
                     if field in obj._field_defaults]
     else:
         defaults = []
+    # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
+    # Also, annotations from base class are not inherited so they need to be queried explicitly
+    if sys.version_info[:2] < (3, 10):
+        obj_annotations = getattr(obj, '__annotations__', {})
+    else:
+        obj_annotations = inspect.get_annotations(obj)
+        if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
+            obj_annotations = inspect.get_annotations(obj.__base__)
+
     annotations = []
-    has_annotations = hasattr(obj, '__annotations__')
     for field in obj._fields:
-        if has_annotations and field in obj.__annotations__:
-            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
+        if field in obj_annotations:
+            the_type = torch.jit.annotations.ann_to_type(obj_annotations[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
