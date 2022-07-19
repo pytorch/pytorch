@@ -316,6 +316,16 @@ class FP32MatMulPattern(Pattern):
 class OptimizerSingleTensorPattern(Pattern):
     '''
     This pattern identifies if we are using the single-tensor version of an optimizer.
+    example:
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    By adding foreach=True to enable multi-tensor optimizer, we can gain speedup when
+    the kernels are relatively small.
+
+    Pattern:
+    XXXXX: _single_tenser_<OPTIMIZER_NAME>
+
+    Algorithm:
+    String match
     '''
 
     def __init__(self, prof: profile):
