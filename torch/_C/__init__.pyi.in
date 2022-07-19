@@ -1295,7 +1295,7 @@ def _gather_out(tensors: List[Tensor], out_tensor: Tensor, dim: _int) -> Tensor:
 class _CudaStreamBase:
     stream_id: _int
     device_index: _int
-    device_type: _int 
+    device_type: _int
 
     device: _device
     cuda_stream: _int
