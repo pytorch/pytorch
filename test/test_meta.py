@@ -462,7 +462,6 @@ meta_function_expected_failures = {
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
     torch.cholesky_inverse: {f32, f64},  # aten::cholesky_inverse, aten::cholesky_inverse.out
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
-    torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
     torch.linalg.eigvals: {f32, f64},
@@ -692,7 +691,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_inverse.out: {f32, f64},  # aten::cholesky_inverse.out
     aten.cholesky_solve.default: {f32, f64},  # aten::_cholesky_solve_helper
     aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
-    aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
