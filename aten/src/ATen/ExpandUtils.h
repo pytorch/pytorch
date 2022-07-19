@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/SymIntArrayRef.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -438,11 +437,30 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-static inline Tensor functionalize_sum(
-    int64_t leading_dims,
-    const Tensor& tensor,
-    c10::SymIntArrayRef shape,
-    bool always_return_non_view) {
+static inline Tensor sum_to(
+    Tensor tensor,
+    const c10::SymIntArrayRef shape,
+    bool always_return_non_view = false) {
+  if (shape.size() == 0) {
+    return tensor.sum();
+  }
+
+  auto sizes = tensor.sym_sizes();
+  c10::SmallVector<c10::SymInt, 8> reduce_dims;
+  const int64_t leading_dims = sizes.size() - shape.size();
+  for (const auto i : c10::irange(leading_dims)) {
+    reduce_dims.push_back(i);
+  }
+  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
+      reduce_dims.push_back(i);
+    }
+  }
+
+  if (!reduce_dims.empty()) {
+    tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
+  }
+
   if (always_return_non_view) {
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
@@ -460,56 +478,14 @@ static inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  if (shape.size() == 0) {
-    return tensor.sum();
-  }
-  c10::SmallVector<int64_t, 8> reduce_dims;
-  const at::IntArrayRef sizes = tensor.sizes();
-  const int64_t leading_dims = sizes.size() - shape.size();
-  for (const auto i : c10::irange(leading_dims)) {
-    reduce_dims.push_back(i);
-  }
-  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
-      reduce_dims.push_back(i);
-    }
-  }
-  if (!reduce_dims.empty()) {
-    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
-  }
-
-  auto sym_shape = c10::SymIntArrayRef(
+  auto sym_size = c10::SymIntArrayRef(
       reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
-  return functionalize_sum(
-      leading_dims, tensor, sym_shape, always_return_non_view);
+  return sum_to(tensor, sym_size, always_return_non_view);
 }
 
-static inline Tensor sum_to(
-    Tensor tensor,
-    const c10::SymIntArrayRef shape,
-    bool always_return_non_view = false) {
-  if (shape.size() == 0) {
-    return tensor.sum();
-  }
-  c10::SmallVector<c10::SymInt, 8> reduce_dims;
-  auto sizes = tensor.sym_sizes();
-  const int64_t leading_dims = sizes.size() - shape.size();
-  for (const auto i : c10::irange(leading_dims)) {
-    reduce_dims.push_back(i);
-  }
-  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
-      reduce_dims.push_back(i);
-    }
-  }
-  if (!reduce_dims.empty()) {
-    tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
-  }
-
-  return functionalize_sum(leading_dims, tensor, shape, always_return_non_view);
-}
-template <typename T>
-static bool is_expandable_to_(T shape, T desired) {
+static inline bool is_expandable_to(
+    SymIntArrayRef shape,
+    c10::SymIntArrayRef desired) {
   size_t ndim = shape.size();
   size_t target_dim = desired.size();
   if (ndim > target_dim) {
@@ -525,15 +501,12 @@ static bool is_expandable_to_(T shape, T desired) {
   return true;
 }
 
-static inline bool is_expandable_to(
-    SymIntArrayRef shape,
-    c10::SymIntArrayRef desired) {
-  return is_expandable_to_(shape, desired);
-}
-
-// TODO: maybe it's better to templatize the int and symint versions
 static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
-  return is_expandable_to_(shape, desired);
+  auto sym_shape = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
+  auto sym_desired = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(desired.data()), desired.size());
+  return is_expandable_to(sym_shape, sym_desired);
 }
 
 } // namespace at
