@@ -42,6 +42,7 @@ from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+from fx.test_pass_infra import TestPassManager  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -52,7 +53,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
-    TEST_WITH_ROCM,
     find_library_location,
     run_tests,
 )
@@ -149,7 +149,7 @@ class TestFX(JitTestCase):
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
-        if not (TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS):
+        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
             lib_file_path = find_library_location('libtorchbind_test.so')
             torch.ops.load_library(str(lib_file_path))
 
@@ -577,7 +577,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, (a, b))
 
     def test_native_callable(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
@@ -1551,7 +1551,7 @@ class TestFX(JitTestCase):
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
-        # Test shape propogation and make sure results match actual
+        # Test shape propagation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
 
@@ -2362,7 +2362,7 @@ class TestFX(JitTestCase):
             node.__update_args_kwargs((), {})
 
     def test_torchbind_class_attribute_in_fx(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
 
         class FooBar1234(torch.nn.Module):
@@ -2377,7 +2377,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, ())
 
     def test_torchbind_class_attribute_in_fx_tensor_arg(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._ReLUClass is registered, skipping")
 
         class FooBar2341(torch.nn.Module):
@@ -3500,6 +3500,44 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         gm.recompile()
         self.assertEqual(gm(2, 3), 6)
         self.assertIn("a *= b", gm.code)
+
+    def test_map_aggregate_doesnt_traverse_size(self):
+        def dont_traverse_size(a):
+            return type(a) != torch.Size
+
+        size = torch.Size([1, 2, 3])
+
+        res = torch.fx.node.map_aggregate(size, lambda a: a)
+        self.assertEqual(type(res), tuple)
+        self.assertEqual(res, (1, 2, 3))
+
+        res = torch.fx.node.map_aggregate(size, lambda a: a, dont_traverse_size)
+        self.assertEqual(type(res), torch.Size)
+        self.assertEqual(res, size)
+
+        data = (torch.empty(3, 4), size,
+                {'tensor': torch.empty(4, 5), 'size': size, 'list': [size, (size,), torch.empty(5, 6)]})
+
+        res = torch.fx.node.map_aggregate(data, lambda a: a)
+        self.assertEqual(type(res[1]), tuple)
+        self.assertEqual(res[1], (1, 2, 3))
+        self.assertEqual(type(res[2]['size']), tuple)
+        self.assertEqual(res[2]['size'], (1, 2, 3))
+        self.assertEqual(type(res[2]['list'][0]), tuple)
+        self.assertEqual(res[2]['list'][0], (1, 2, 3))
+        self.assertEqual(type(res[2]['list'][1][0]), tuple)
+        self.assertEqual(res[2]['list'][1][0], (1, 2, 3))
+
+        res = torch.fx.node.map_aggregate(data, lambda a: a, dont_traverse_size)
+        self.assertEqual(type(res[1]), torch.Size)
+        self.assertEqual(res[1], size)
+        self.assertEqual(type(res[2]['size']), torch.Size)
+        self.assertEqual(res[2]['size'], size)
+        self.assertEqual(type(res[2]['list'][0]), torch.Size)
+        self.assertEqual(res[2]['list'][0], size)
+        self.assertEqual(type(res[2]['list'][1][0]), torch.Size)
+        self.assertEqual(res[2]['list'][1][0], size)
+
 
 
 def run_getitem_target():
