@@ -28,7 +28,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: macos-binary-wheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-binary-wheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
