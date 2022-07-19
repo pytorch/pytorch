@@ -1,7 +1,6 @@
 import torch
 from torch.utils._pytree import tree_flatten, tree_map
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
 from itertools import combinations
 from collections import namedtuple
@@ -48,6 +47,15 @@ class SchemaCheckMode(TorchDispatchMode):
                     md[1] == after.storage()._cdata
                 )
             return False
+
+        def has_aliased(lhs, rhs):
+            try:
+                return torch._C._overlaps(lhs, rhs)
+            except Exception as exception:
+                if str(exception).startswith("Cannot inspect value of type "):
+                    return False
+                else:
+                    raise exception
 
         def standardize_name(name):
             return name if name != "self" else "input"
@@ -103,7 +111,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 md = cloned_metadata.get(name)
                 after = arguments.get(name)
                 for j in range(len(tuple_out)):
-                    if torch._C._contains_alias_of(tuple_out[j], after):
+                    if has_aliased(tuple_out[j], after):
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
                                 SchemaArgument(SchemaArgType.input, i)):
@@ -118,10 +126,47 @@ class SchemaCheckMode(TorchDispatchMode):
 
         # Aliasing between outputs
         for i, j in combinations(range(len(func._schema.returns)), 2):
-            if torch._C._contains_alias_of(tuple_out[i], tuple_out[j]):
+            if has_aliased(tuple_out[i], tuple_out[j]):
                 if not schema_info.may_contain_alias(
                     SchemaArgument(SchemaArgType.output, i),
                         SchemaArgument(SchemaArgType.output, j)):
                     raise RuntimeError(f'Outputs {i} and {j} alias unexpectedly')
 
         return out
+
+
+def clone_inputs(args):
+    inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
+
+
+def is_iterable_of_tensors(iterable, include_empty=False):
+    """ Returns True if iterable is an iterable of tensors and False o.w.
+
+        If the iterable is empty, the return value is :attr:`include_empty`
+    """
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+
+    try:
+        if len(iterable) == 0:
+            return include_empty
+
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+
+    except TypeError as te:
+        return False
+
+    return True
