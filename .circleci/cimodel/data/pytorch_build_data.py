@@ -75,6 +75,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "crossref": CrossRefConfigNode,
+            "dynamo": DynamoConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -174,6 +175,14 @@ class ParallelTBBConfigNode(TreeConfigNode):
 class CrossRefConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_crossref"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class DynamoConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_dynamo"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

@@ -26,17 +26,13 @@ env:
   BUILD_ENVIRONMENT: linux-binary-manywheel
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
-  PYTORCH_RETRY_TEST_CASES: 1
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: linux-binary-manywheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -115,9 +111,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -245,9 +241,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -451,9 +447,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -593,9 +589,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -803,9 +799,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -945,9 +941,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1155,9 +1151,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1297,9 +1293,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1428,6 +1424,358 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
+  manywheel-py3_7-cuda11_7-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.7"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Set BUILD_SPLIT_CUDA
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: manywheel-py3_7-cuda11_7
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_7-cuda11_7-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_7-cuda11_7-build
+    runs-on: linux.4xlarge.nvidia.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.7"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_7-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_7-cuda11_7-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_7-cuda11_7-test
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.7"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_7-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
   manywheel-py3_7-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -1504,9 +1852,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1603,7 +1951,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -1654,9 +2003,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1851,9 +2200,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -1950,7 +2299,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -2001,9 +2351,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2197,9 +2547,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2327,9 +2677,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2533,9 +2883,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2675,9 +3025,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -2885,9 +3235,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3027,9 +3377,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3237,9 +3587,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3379,9 +3729,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3510,6 +3860,358 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
+  manywheel-py3_8-cuda11_7-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.8"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Set BUILD_SPLIT_CUDA
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: manywheel-py3_8-cuda11_7
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_8-cuda11_7-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_8-cuda11_7-build
+    runs-on: linux.4xlarge.nvidia.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.8"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_8-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_8-cuda11_7-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_8-cuda11_7-test
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.8"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_8-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
   manywheel-py3_8-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -3586,9 +4288,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3685,7 +4387,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3736,9 +4439,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -3933,9 +4636,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4032,7 +4735,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4083,9 +4787,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4279,9 +4983,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4409,9 +5113,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4615,9 +5319,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4757,9 +5461,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -4967,9 +5671,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5109,9 +5813,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5319,9 +6023,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5461,9 +6165,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5592,6 +6296,358 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
+  manywheel-py3_9-cuda11_7-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.9"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Set BUILD_SPLIT_CUDA
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: manywheel-py3_9-cuda11_7
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_9-cuda11_7-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_9-cuda11_7-build
+    runs-on: linux.4xlarge.nvidia.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.9"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_9-cuda11_7-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_9-cuda11_7-test
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.9"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
   manywheel-py3_9-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -5668,9 +6724,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -5767,7 +6823,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -5818,9 +6875,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6015,9 +7072,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6114,7 +7171,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -6165,9 +7223,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6361,9 +7419,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6491,9 +7549,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6697,9 +7755,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -6839,9 +7897,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7049,9 +8107,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7191,9 +8249,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7401,9 +8459,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7543,9 +8601,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7674,6 +8732,358 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
+  manywheel-py3_10-cuda11_7-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.10"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Set BUILD_SPLIT_CUDA
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
+      - name: Chown artifacts
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: manywheel-py3_10-cuda11_7
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_10-cuda11_7-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_10-cuda11_7-build
+    runs-on: linux.4xlarge.nvidia.gpu
+    timeout-minutes: 240
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.10"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+  manywheel-py3_10-cuda11_7-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_10-cuda11_7-test
+    env:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.10"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-cuda11_7
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        run: |
+          # reference ends with an RC suffix
+          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+        run: |
+          docker run --rm -i \
+            -e ANACONDA_API_TOKEN \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e DRY_RUN \
+            -e PACKAGE_TYPE \
+            -e PKG_DIR=/artifacts \
+            -e UPLOAD_CHANNEL \
+            -e UPLOAD_SUBFOLDER \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${GITHUB_WORKSPACE}:/v" \
+            -w /v \
+            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
+            bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
   manywheel-py3_10-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -7750,9 +9160,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -7849,7 +9259,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -7900,9 +9311,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -8097,9 +9508,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \
@@ -8196,7 +9607,8 @@ jobs:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -8247,9 +9659,9 @@ jobs:
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
             -e GPU_ARCH_VERSION \
-            -e IS_GHA \
             -e LIBTORCH_VARIANT \
             -e PACKAGE_TYPE \
             -e PYTORCH_FINAL_PACKAGE_DIR \

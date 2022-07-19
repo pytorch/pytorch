@@ -82,9 +82,9 @@ TEST(TensorTest, ToTensorAndTensorAttributes_MultiCUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 }
 
-
 TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame_CUDA) {
-  auto tensor = at::empty({3, 4}, at::TensorOptions(at::kFloat).device(at::Device("cuda")));
+  auto tensor = at::empty(
+      {3, 4}, at::TensorOptions(at::kFloat).device(at::Device("cuda")));
   auto hopefully_not_copy = tensor.to(tensor.options());
   ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   hopefully_not_copy = tensor.to(at::kFloat);
@@ -117,11 +117,9 @@ TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
 TEST(TensorTest, MagmaInitializesCorrectly_CUDA) {
   // Any tensor will work here as long as it's invertible
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  float data[] = { 1, 1, 1, 0,
-                   0, 3, 1, 2,
-                   2, 3, 1, 0,
-                   1, 0, 2, 1 };
-  auto tensor = at::from_blob(data, {4, 4}, at::TensorOptions(at::kFloat)).cuda();
+  float data[] = {1, 1, 1, 0, 0, 3, 1, 2, 2, 3, 1, 0, 1, 0, 2, 1};
+  auto tensor =
+      at::from_blob(data, {4, 4}, at::TensorOptions(at::kFloat)).cuda();
   if (at::hasMAGMA()) {
     at::inverse(tensor);
   }

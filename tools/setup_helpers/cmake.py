@@ -4,16 +4,16 @@
 import multiprocessing
 import os
 import platform
-import re
-from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
 from distutils.version import LooseVersion
-from typing import IO, Any, Dict, List, Optional, Union, cast
+from subprocess import CalledProcessError, check_call, check_output
+from typing import Any, cast, Dict, List, Optional
 
 from . import which
-from .env import BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag
-from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
+from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
+from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
 
 
 def _mkdir_p(d: str) -> None:
@@ -29,84 +29,6 @@ def _mkdir_p(d: str) -> None:
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
-
-
-CMakeValue = Optional[Union[bool, str]]
-
-
-def convert_cmake_value_to_python_value(
-    cmake_value: str, cmake_type: str
-) -> CMakeValue:
-    r"""Convert a CMake value in a string form to a Python value.
-
-    Args:
-      cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
-      cmake_type (string): The CMake type of :attr:`cmake_value`.
-
-    Returns:
-      A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
-    """
-
-    cmake_type = cmake_type.upper()
-    up_val = cmake_value.upper()
-    if cmake_type == "BOOL":
-        # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
-        return not (
-            up_val in ("FALSE", "OFF", "N", "NO", "0", "", "NOTFOUND")
-            or up_val.endswith("-NOTFOUND")
-        )
-    elif cmake_type == "FILEPATH":
-        if up_val.endswith("-NOTFOUND"):
-            return None
-        else:
-            return cmake_value
-    else:  # Directly return the cmake_value.
-        return cmake_value
-
-
-def get_cmake_cache_variables_from_file(
-    cmake_cache_file: IO[str],
-) -> Dict[str, CMakeValue]:
-    r"""Gets values in CMakeCache.txt into a dictionary.
-
-    Args:
-      cmake_cache_file: A CMakeCache.txt file object.
-    Returns:
-      dict: A ``dict`` containing the value of cached CMake variables.
-    """
-
-    results = dict()
-    for i, line in enumerate(cmake_cache_file, 1):
-        line = line.strip()
-        if not line or line.startswith(("#", "//")):
-            # Blank or comment line, skip
-            continue
-
-        # Almost any character can be part of variable name and value. As a practical matter, we assume the type must be
-        # valid if it were a C variable name. It should match the following kinds of strings:
-        #
-        #   USE_CUDA:BOOL=ON
-        #   "USE_CUDA":BOOL=ON
-        #   USE_CUDA=ON
-        #   USE_CUDA:=ON
-        #   Intel(R) MKL-DNN_SOURCE_DIR:STATIC=/path/to/pytorch/third_party/ideep/mkl-dnn
-        #   "OpenMP_COMPILE_RESULT_CXX_openmp:experimental":INTERNAL=FALSE
-        matched = re.match(
-            r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line
-        )
-        if matched is None:  # Illegal line
-            raise ValueError(
-                "Unexpected line {} in {}: {}".format(i, repr(cmake_cache_file), line)
-            )
-        _, variable, type_, value = matched.groups()
-        if type_ is None:
-            type_ = ""
-        if type_.upper() in ("INTERNAL", "STATIC"):
-            # CMake internal variable, do not touch
-            continue
-        results[variable] = convert_cmake_value_to_python_value(value, type_)
-
-    return results
 
 
 class CMake:
@@ -307,6 +229,7 @@ class CMake:
                     "WERROR",
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
+                    "SELECTED_OP_LIST",
                 )
             }
         )

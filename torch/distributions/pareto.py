@@ -4,6 +4,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Pareto']
 
 class Pareto(TransformedDistribution):
     r"""

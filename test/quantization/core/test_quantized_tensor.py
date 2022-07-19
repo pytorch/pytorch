@@ -346,7 +346,7 @@ class TestQuantizedTensor(TestCase):
                 qt1[:] = t2[:]
                 self.assertEqual(qt1[:], qt2[:])
                 # non-contiguous case **this should raise an exception**
-                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous Tensors"):
+                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous and NHWC Tensors"):
                     qt1[:, 0] = t2[:, 0]
 
     def test_qtensor_float_assignment(self):
@@ -927,7 +927,91 @@ class TestQuantizedTensor(TestCase):
                 # Check to make sure the scale and zero_point has been copied.
                 self.assertEqual(q, q2)
 
-    def test_qtensor_fill(self):
+    def test_qtensor_fill_per_tensor(self):
+        numel = 10
+        scale = 0.5
+        zero_point = 10
+
+        ones = torch.ones(numel).to(torch.float)
+
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
+
+        devices = get_supported_device_types()
+        for qtype, val2fill, device in itertools.product(qtypes, vals2fill, devices):
+            ones = ones.to(device)
+            q_filled = torch._empty_affine_quantized(
+                [numel], scale=scale, zero_point=zero_point, device=device,
+                dtype=qtype)
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_tensor(ones * val2fill, scale,
+                                              zero_point, qtype)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_filled.q_scale(), scale)
+            self.assertEqual(q_filled.q_zero_point(), zero_point)
+
+    # Adapted from test_qtensor_fill_per_tensor but for a NHWC tensor (requires 4D)
+    def test_qtensor_fill_per_tensor_nhwc(self):
+        dims = torch.randint(low=1, high=10, size=(4, )).tolist()
+        scale = 0.5
+        zero_point = 10
+
+        ones = torch.ones(dims).to(torch.float)
+
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
+        memory_formats = [torch.contiguous_format, torch.channels_last]
+        devices = get_supported_device_types()
+        for qtype, val2fill, memory_format, device in itertools.product(qtypes, vals2fill, memory_formats, devices):
+            q_filled = torch._empty_affine_quantized(
+                dims, scale=scale, zero_point=zero_point, device=device,
+                dtype=qtype, memory_format=memory_format)
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_tensor(ones * val2fill, scale,
+                                              zero_point, qtype)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_filled.q_scale(), scale)
+            self.assertEqual(q_filled.q_zero_point(), zero_point)
+
+    # adapted from test_qtensor_fill_per_tensor
+    def test_qtensor_fill_per_channel(self):
+        dims = [4, 5]
+        axis = 0
+        # adding a constant to avoid too small of a scale
+        scales = torch.rand(dims[axis], dtype=torch.float64) + 0.1
+        zero_points = torch.randint(low=0, high=10, size=(dims[axis], ))
+
+        ones = torch.ones(dims).to(torch.float)
+
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
+
+        devices = get_supported_device_types()
+        for qtype, val2fill, device in itertools.product(qtypes, vals2fill, devices):
+            scales = scales.to(device)
+            zero_points = zero_points.to(device)
+            ones = ones.to(device)
+            q_filled = torch._empty_per_channel_affine_quantized(
+                dims, scales=scales, zero_points=zero_points, device=device,
+                axis=axis, dtype=qtype)
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_channel(ones * val2fill, scales=scales,
+                                               zero_points=zero_points, axis=axis, dtype=qtype)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_filled.q_per_channel_scales(), scales)
+            self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
+
+    # adapted from test_qtensor_fill_per_tensor
+    def test_qtensor_masked_fill(self):
         numel = 10
         scale = 0.5
         zero_point = 10
@@ -937,7 +1021,6 @@ class TestQuantizedTensor(TestCase):
         types = [torch.qint8, torch.quint8, torch.qint32]
         fills = [-1, 1, 2**32]  # positive, negative, overflow
 
-        # `fill_` uses `copy_(float)`, which doesn't support CUDA
         device = 'cpu'
         ones = ones.to(device)
         for qtype, fill_with in itertools.product(types, fills):
@@ -945,16 +1028,96 @@ class TestQuantizedTensor(TestCase):
                 [numel], scale=scale, zero_point=zero_point, device=device,
                 dtype=qtype)
             q_filled.fill_(fill_with)
+            q_masked_fill = torch._empty_affine_quantized(
+                [numel], scale=scale, zero_point=zero_point, device=device,
+                dtype=qtype)
+            # mask fill the whole tensor, equivalent to calling plain vanilla fill
+            mask = torch.tensor(True)
+            torch.tensor(fill_with)
+            q_masked_fill.masked_fill_(mask, fill_with)
             int_repr = torch.quantize_per_tensor(ones * fill_with, scale,
                                                  zero_point, qtype)
             fill_with = int_repr.dequantize()
             int_repr = int_repr.int_repr()
 
-            self.assertEqual(q_filled.int_repr(), int_repr)
-            self.assertEqual(q_filled.dequantize(), fill_with)
+            self.assertEqual(q_filled, q_masked_fill)
+            self.assertEqual(q_masked_fill.int_repr(), int_repr)
+            self.assertEqual(q_masked_fill.dequantize(), fill_with)
             # Make sure the scale and zero_point don't change
-            self.assertEqual(q_filled.q_scale(), scale)
-            self.assertEqual(q_filled.q_zero_point(), zero_point)
+            self.assertEqual(q_masked_fill.q_scale(), scale)
+            self.assertEqual(q_masked_fill.q_zero_point(), zero_point)
+
+        # the above loop does the same test as test_qtensor_fill
+        # now we will check masked_fill for subset of indices
+        mask = torch.randint(0, 2, (numel, ))
+        mask = mask.bool()
+        x = torch.rand(numel)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
+        for qtype, fill_with in itertools.product(types, fills):
+            q_masked_fill = qx.clone()
+            q_masked_fill.masked_fill_(mask, fill_with)
+            ref = qx.clone()
+            for i in range(numel):
+                if mask[i]:
+                    # this assignment doesn't end up calling masked_fill, allowing us to compare the different implementations
+                    ref[i] = fill_with
+
+            self.assertEqual(q_masked_fill, ref)
+            self.assertEqual(q_masked_fill.int_repr(), ref.int_repr())
+            self.assertEqual(q_masked_fill.dequantize(), ref.dequantize())
+
+    def test_qtensor_index_put(self):
+        n = 10
+        m = 10
+        x_orig = torch.rand(n, m)
+        indices = tuple(torch.tensor([[0, 0], [1, 1], [5, 5], [7, 3], [0, 5], [6, 9], [-1, -1]]).t())
+        # for the scalar tensor case, index_put routes to masked_fill
+        values_list = [torch.tensor(2.5), torch.rand(len(indices[0])) * 1000]
+        scale = 0.5
+        zero_point = 10
+        types = [torch.qint8, torch.quint8, torch.qint32]
+        fills = [-1, 1, 2**32]  # positive, negative, overflow
+        for qtype, values in itertools.product(types, values_list):
+            x_ref = x_orig.clone()
+            x_ref[indices] = values.to(dtype=x_ref.dtype)
+            qx_ref = torch.quantize_per_tensor(x_ref, scale=scale, zero_point=zero_point, dtype=qtype)
+
+            x = x_orig.clone()
+            qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
+            qx[indices] = values
+
+            self.assertEqual(qx_ref, qx)
+
+    # adapted from test_qtensor_fill_per_channel and test_qtensor_fill_per_tensor_nhwc
+    def test_qtensor_fill_per_channel_nhwc(self):
+        dims = torch.randint(low=1, high=10, size=(4, )).tolist()
+        axis = 0
+        # adding a constant to avoid too small of a scale
+        scales = torch.rand(dims[axis], dtype=torch.float64) + 0.1
+        zero_points = torch.randint(low=0, high=10, size=(dims[axis], ))
+
+        ones = torch.ones(dims).to(torch.float)
+
+        qtypes = [torch.qint8, torch.quint8, torch.qint32]
+        vals2fill = [-1, 1, 2**32]  # positive, negative, overflow
+        memory_formats = [torch.contiguous_format, torch.channels_last]
+        devices = get_supported_device_types()
+        for qtype, val2fill, memory_format, device in itertools.product(qtypes, vals2fill, memory_formats, devices):
+            scales = scales.to(device)
+            zero_points = zero_points.to(device)
+            ones = ones.to(device)
+            q_filled = torch._empty_per_channel_affine_quantized(
+                dims, scales=scales, zero_points=zero_points, device=device,
+                axis=axis, dtype=qtype, memory_format=memory_format)
+            q_filled.fill_(val2fill)
+            # reference tensor for comparing q_filled
+            q_ref = torch.quantize_per_channel(ones * val2fill, scales=scales,
+                                               zero_points=zero_points, axis=axis, dtype=qtype)
+            self.assertEqual(q_filled.int_repr(), q_ref.int_repr())
+            self.assertEqual(q_filled.dequantize(), q_ref.dequantize())
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(q_filled.q_per_channel_scales(), scales)
+            self.assertEqual(q_filled.q_per_channel_zero_points(), zero_points)
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_index_select_cuda(self):

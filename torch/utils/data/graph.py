@@ -4,11 +4,13 @@ import pickle
 from torch.utils.data import IterDataPipe, MapDataPipe
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
-from typing import Any, Dict, Set, Tuple, Type, Union
+from typing import Dict, List, Set, Tuple, Type, Union
 
-__all__ = ["traverse", ]
+__all__ = ["traverse"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
+DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]  # type: ignore[misc]
+
 reduce_ex_hook = None
 
 
@@ -17,7 +19,7 @@ def _stub_unpickler():
 
 
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
-def _list_connected_datapipes(scan_obj, only_datapipe, cache):
+def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Set[int]) -> List[DataPipe]:
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
     if DILL_AVAILABLE:
@@ -39,10 +41,11 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
         return state
 
     def reduce_hook(obj):
-        if obj == scan_obj or obj in cache:
+        if obj == scan_obj or id(obj) in cache:
             raise NotImplementedError
         else:
             captured_connections.append(obj)
+            cache.add(id(obj))
             return _stub_unpickler, ()
 
     datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
@@ -70,21 +73,24 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
     return captured_connections
 
 
-def traverse(datapipe, only_datapipe=False):
-    cache: Set[DataPipe] = set()
+def traverse(datapipe: DataPipe, only_datapipe: bool = False) -> DataPipeGraph:
+    cache: Set[int] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
 
 # Add cache here to prevent infinite recursion on DataPipe
-def _traverse_helper(datapipe, only_datapipe, cache):
+def _traverse_helper(datapipe: DataPipe, only_datapipe: bool, cache: Set[int]) -> DataPipeGraph:
     if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
         raise RuntimeError("Expected `IterDataPipe` or `MapDataPipe`, but {} is found".format(type(datapipe)))
 
-    cache.add(datapipe)
-    items = _list_connected_datapipes(datapipe, only_datapipe, cache)
-    d: Dict[DataPipe, Any] = {datapipe: {}}
+    dp_id = id(datapipe)
+    if dp_id in cache:
+        return {}
+    cache.add(dp_id)
+    items = _list_connected_datapipes(datapipe, only_datapipe, cache.copy())
+    d: DataPipeGraph = {dp_id: (datapipe, {})}
     for item in items:
         # Using cache.copy() here is to prevent recursion on a single path rather than global graph
         # Single DataPipe can present multiple times in different paths in graph
-        d[datapipe].update(_traverse_helper(item, only_datapipe, cache.copy()))
+        d[dp_id][1].update(_traverse_helper(item, only_datapipe, cache.copy()))
     return d

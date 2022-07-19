@@ -1,0 +1,25 @@
+[build-system]
+requires = [
+    "setuptools",
+    "wheel",
+    "astunparse",
+    "numpy",
+    "ninja",
+    "pyyaml",
+    "setuptools",
+    "cmake",
+    "cffi",
+    "typing_extensions",
+    "future",
+    "six",
+    "requests",
+    "dataclasses",
+]
+# Use legacy backend to import local packages in setup.py
+build-backend = "setuptools.build_meta:__legacy__"
+
+
+[tool.black]
+# Uncomment if pyproject.toml worked fine to ensure consistency with flake8
+# line-length = 120
+target-version = ["py37", "py38", "py39", "py310"]
