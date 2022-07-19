@@ -143,34 +143,35 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
     }
     return c10::nullopt;
   };
-  auto emplace_type_from_scalar = [&typesFromTensors, &typesFromScalars](at::ScalarType scalar_type) {
-    // Mimic PyTorch scalar type promotion logic
-    // from https://github.com/pytorch/pytorch/issues/9515
-    // Quoting:
-    //    A Tensor is a considered a "wrapped number" if it is
-    //    auto-wrapped from a C++ or Python number type. Integer types are
-    //    wrapped as 0-dim int64 tensors and floating-point types are
-    //    wrapped as 0-dim double tensors.
-    auto default_scalar_type =
-        at::typeMetaToScalarType(at::get_default_dtype());
-    switch (scalar_type) {
-      case at::kDouble:
-        // floating-point numbers wrapped as double tensors are
-        // considered to have default type, instead of double.
-        typesFromScalars.emplace_back(default_scalar_type);
-        break;
-      case at::kLong:
-      case at::kBool:
-        // bool and integer numbers remain the same type.
-        typesFromScalars.emplace_back(scalar_type);
-        break;
-      default:
-        // other types are not from wrapped numbers,
-        // track them as types from tensors.
-        typesFromTensors.emplace_back(scalar_type);
-        break;
-    }
-  };
+  auto emplace_type_from_scalar =
+      [&typesFromTensors, &typesFromScalars](at::ScalarType scalar_type) {
+        // Mimic PyTorch scalar type promotion logic
+        // from https://github.com/pytorch/pytorch/issues/9515
+        // Quoting:
+        //    A Tensor is a considered a "wrapped number" if it is
+        //    auto-wrapped from a C++ or Python number type. Integer types are
+        //    wrapped as 0-dim int64 tensors and floating-point types are
+        //    wrapped as 0-dim double tensors.
+        auto default_scalar_type =
+            at::typeMetaToScalarType(at::get_default_dtype());
+        switch (scalar_type) {
+          case at::kDouble:
+            // floating-point numbers wrapped as double tensors are
+            // considered to have default type, instead of double.
+            typesFromScalars.emplace_back(default_scalar_type);
+            break;
+          case at::kLong:
+          case at::kBool:
+            // bool and integer numbers remain the same type.
+            typesFromScalars.emplace_back(scalar_type);
+            break;
+          default:
+            // other types are not from wrapped numbers,
+            // track them as types from tensors.
+            typesFromTensors.emplace_back(scalar_type);
+            break;
+        }
+      };
 
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {

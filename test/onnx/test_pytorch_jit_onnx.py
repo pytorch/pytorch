@@ -79,7 +79,7 @@ class _TestJITIRToONNX:
         self.run_test(graph_ir, (a, b))
 
     def test_add_sub_with_graph_inputs(self):
-        for op in ['add', 'sub', 'rsub']:
+        for op in ["add", "sub", "rsub"]:
             graph_ir = f"""
             graph(%1 : Float(2, 3),
                   %2 : Float(2, 3),
