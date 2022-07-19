@@ -203,7 +203,15 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, args, kwargs)
+        def find_tracer(t):
+            if isinstance(t, ProxyTensor):
+                return t.proxy.tracer
+
+        arg_tracers = tuple(y for t in pytree.tree_flatten(args)[0] + pytree.tree_flatten(kwargs)[0] if (y := find_tracer(t)))
+        assert len(arg_tracers) > 0
+
+        with ProxyTorchDispatchMode(arg_tracers[0]):  # if there's multiple tracers, proxy will error down the line
+            return func_overload(*args, **kwargs)
 
 
 class PythonKeyTracer(Tracer):
