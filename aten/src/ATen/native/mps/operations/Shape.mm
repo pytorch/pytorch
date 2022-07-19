@@ -639,11 +639,19 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
           // Create placeholders
           MPSGraphTensor* inputMPSGraphTensors[inputs.size()];
+          MPSGraphTensor* castInputMPSGraphTensors[inputs.size()];
 
-          for(int i = 0; i < inputs.size(); i++)
+          for(int i = 0; i < inputs.size(); i++) {
             inputMPSGraphTensors[i] = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(result_type(inputs)));
+            if(getMPSDataType(result_type(inputs)) == MPSDataTypeBool)
+              castInputMPSGraphTensors[i] = [mpsGraph castTensor:inputMPSGraphTensors[i]
+                                                      toType:MPSDataTypeInt32
+                                                        name:[NSString stringWithFormat:@"inputTensor_%@", [NSNumber numberWithInt:i]]];
+            else
+              castInputMPSGraphTensors[i] = inputMPSGraphTensors[i];
+          }
 
-          auto inputTensorsArray = [NSArray arrayWithObjects:inputMPSGraphTensors
+          auto inputTensorsArray = [NSArray arrayWithObjects:castInputMPSGraphTensors
                                                        count:inputs.size()];
           // Use concatTensors to concatenate
           MPSGraphTensor* outputTensor = [mpsGraph concatTensors:inputTensorsArray
@@ -654,6 +662,10 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
           for(int i = 0; i < inputs.size(); i++)
             newCachedGraph->inputMPSGraphTensors_[i] = inputMPSGraphTensors[i];
+          if(getMPSDataType(result_type(inputs)) == MPSDataTypeBool)
+            outputTensor = [mpsGraph castTensor:outputTensor
+                                         toType:MPSDataTypeBool
+                                           name:@"outputTensor"];
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
