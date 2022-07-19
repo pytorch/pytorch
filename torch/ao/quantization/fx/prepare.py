@@ -18,7 +18,7 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
-    _partial_wrapper_equals,
+    obs_or_fq_ctr_equals,
     float16_dynamic_qconfig,
     float16_static_qconfig,
     is_reuse_input_qconfig,
@@ -45,6 +45,8 @@ from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern,
 )
+
+from torch.ao.quantization import FixedQParamsFakeQuantize
 
 from ._equalize import (
     is_equalization_observer,
@@ -1334,17 +1336,32 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
         float16_dynamic_qconfig.activation,
         float16_static_qconfig.activation,
     ]
+    named_modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
-        if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
+        if node.op == "call_function":
+            module_type_or_function_or_method = node.target
+        elif node.op == "call_module":
+            module_type_or_function_or_method = type(named_modules[node.target])
+        else:
+            module_type_or_function_or_method = None
+
+        if module_type_or_function_or_method in _FIXED_QPARAMS_OP_TO_OBSERVER:
             bad_observer = True
             qconfig = qconfig_map.get(node.name, None)
-            for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[node.target]]:
-                if qconfig is None or _partial_wrapper_equals(qconfig.activation, observer_ctr):
-                    bad_observer = False
+            if qconfig is None:
+                bad_observer = False
+            else:
+                for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
+                    if obs_or_fq_ctr_equals(
+                            qconfig.activation,
+                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
+                            obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
+                        bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
-                                 "'%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
-                                 "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % node.target)
+                                 "'%s' type: '%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
+                                 "torch.ao.quantization.get_default_qat_qconfig_mapping"
+                                 " instead." % (node.format_node(), module_type_or_function_or_method))
 
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,

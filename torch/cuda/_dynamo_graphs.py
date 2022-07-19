@@ -14,6 +14,7 @@ from torch.fx.experimental.proxy_tensor import (
 import torchdynamo
 from torchdynamo.optimizations.training import AOTAutogradStrategy
 
+import operator
 from collections import defaultdict
 from typing import Set
 
@@ -98,6 +99,8 @@ def find_input_mutations(g):
             inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
             input_idx += 1
         elif n.op == 'call_function':
+            if n.target is operator.getitem:
+                continue
             schema = n.target._schema
             for i, arg in enumerate(schema.arguments):
                 if i < len(n.args):

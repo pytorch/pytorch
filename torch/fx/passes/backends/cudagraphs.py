@@ -5,11 +5,19 @@ from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils._pytree import tree_map
 
+import operator
+
 class CudaGraphsSupport(OperatorSupport):
     # TODO: why is submodules passed here
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
         if node.op not in CALLABLE_NODE_OPS:
             return False
+
+        if node.target in [torch.ops.aten.embedding_dense_backward.default]:
+            return False
+
+        if node.target in [operator.getitem]:
+            return True
 
         found_not_cuda = False
 
