@@ -6,8 +6,8 @@ from typing import Tuple, Optional, List, Callable
 import torch.nn.functional as F
 import functools
 from torch.utils._pytree import tree_map, tree_flatten
-import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper
+import torch._prims_common as utils
+from torch._prims_common.wrappers import out_wrapper
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1014,16 +1014,6 @@ def native_batch_norm(
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
-
-
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
 
 
 @register_decomposition(aten._fused_dropout)
