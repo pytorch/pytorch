@@ -902,13 +902,6 @@ Tensor& intersection_binary_op_sparse_dense_out(
   return res._coalesced_(true);
 }
 
-Tensor _mul_dense_sparse(const Tensor& d, const Tensor& s) {
-  auto commonDtype = at::result_type(d, s);
-  auto result_options = s.options().dtype(commonDtype);
-  Tensor result = at::empty_like(s, result_options);
-  return at::native::_mul_dense_sparse_out(d, s, result);
-}
-
 Tensor& _mul_dense_sparse_out(const Tensor& d, const Tensor& s, Tensor& res) {
   return intersection_binary_op_sparse_dense_out(d, s, res, "mul", [](const Tensor& a, const Tensor& b) -> Tensor {
       return at::mul(a, b);
@@ -922,11 +915,11 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
 
   // case mul(sparse, dense)
   if (!src_.is_sparse()) {
-    return at::native::_mul_dense_sparse_out(src_, t_, r);
+    return _mul_dense_sparse_out(src_, t_, r);
   }
   // case mul(dense, sparse)
   if (!t_.is_sparse()) {
-    return at::native::_mul_dense_sparse_out(t_, src_, r);
+    return _mul_dense_sparse_out(t_, src_, r);
   }
 
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"

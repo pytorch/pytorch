@@ -471,11 +471,11 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
 
   // case mul(sparse, dense)
   if (!src_.is_sparse()) {
-    return at::native::_mul_dense_sparse_out(src_, t_, r_);
+    return _mul_dense_sparse_out(src_, t_, r_);
   }
   // case mul(dense, sparse)
   if (!t_.is_sparse()) {
-    return at::native::_mul_dense_sparse_out(t_, src_, r_);
+    return _mul_dense_sparse_out(t_, src_, r_);
   }
 
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
