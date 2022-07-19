@@ -1044,6 +1044,47 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_valid_node_after_custome_node(self):
+        from apex.normalization.fused_layer_norm import FusedLayerNorm
+        self.addCleanup(unregister_custom_op_symbolic, "::PythonOp", 1)
+
+        def PythonOp(g, self, *args):
+            return g.op("com.microsoft::PythonOp", self).setType(self.type())
+
+        register_custom_op_symbolic("aten::embedding", PythonOp, 1)
+
+        class CustomPythonOp(torch.nn.Module):
+            def __init__(self):
+                super(CustomPythonOp, self).__init__()
+                self.embedding = torch.nn.Embedding(10, 3)
+                self.layernorm = FusedLayerNorm
+
+            def forward(self, x):
+                x = self.embedding(x)
+                y = x.transpose(0, 1)
+                return y
+
+        model = CustomPythonOp()
+        model = torch.jit.script(model)
+        x = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+        print("script graph: ", model.graph)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        print(graph)
+        self.assertEqual(graph.graph.node[0].op_type, "PythonOp")
+        self.assertEqual(graph.opset_import[0].version, self.opset_version)
+        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
+        self.assertEqual(graph.opset_import[1].version, 1)
+
     def test_custom_opsets_gelu(self):
         self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
 

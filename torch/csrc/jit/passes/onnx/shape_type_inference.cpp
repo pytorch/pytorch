@@ -1521,6 +1521,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
+  //UpdateReliable(n);
   for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
