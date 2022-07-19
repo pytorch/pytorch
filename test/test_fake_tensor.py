@@ -161,6 +161,100 @@ class FakeTensorTest(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cudnn_rnn(self):
+        def fn(
+            a0,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+            a3,
+            a4,
+            a5,
+        ):
+            a1 = [
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15,
+            ]
+            return torch.ops.aten._cudnn_rnn(
+                a0,
+                a1,
+                4,
+                a3,
+                a4,
+                a5,
+                2,
+                2048,
+                0,
+                2,
+                False,
+                0.0,
+                False,
+                True,
+                [],
+                None,
+            )
+
+        mode = FakeTensorMode(inner=None)
+        for i, context in enumerate([contextlib.nullcontext, lambda: enable_torch_dispatch_mode(mode)]):
+            with context():
+                inps = (
+                    torch.randn([92, 8, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192, 4096]).cuda(),
+                    torch.randn([8192, 2048]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([8192]).cuda(),
+                    torch.randn([167837696]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                    torch.randn([4, 8, 2048]).cuda(),
+                )
+                out = fn(*inps)
+                self.assertIs(out[4], inps[-3])
+                for ten in out:
+                    if i == 1:
+                        self.assertTrue(isinstance(ten, FakeTensor))
+                    self.assertTrue(ten.device.type == 'cuda')
+
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fallback_memory_prop(self):
         m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
         m = m.to(memory_format=torch.channels_last)
