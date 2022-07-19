@@ -1,6 +1,7 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
+from warnings import catch_warnings
 
 import torch
 from torch.testing import make_tensor
@@ -198,8 +199,12 @@ class TestPrims(TestCase):
         with TorchRefsMode.push():
             gm = make_fx(func)(a)
 
-        with self.assertRaisesRegex(RuntimeError, "is not supported by nvFuser"):
+        with catch_warnings(record=True) as w:
+            # Trigger warning
             execute(gm, a, executor="nvfuser")
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("is not supported by nvFuser" in str(w[-1].message))
 
     @onlyCUDA
     @skipCUDAIfRocm

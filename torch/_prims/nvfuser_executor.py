@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
+from warnings import warn
 
 import torch
 
@@ -160,10 +161,11 @@ def maybe_partition_graph(gm: GraphModule):
         )
         partitions = partitioner.propose_partitions()
         if len(partitions) == 0:
-            raise RuntimeError(
+            warn(
                 "No partition found for the graph. "
-                "This is likely because the graph is not supported by nvFuser. "
-                "Please use the eager ATen mode to execute the graph."
+                + "This is likely because the graph is not supported by nvFuser. "
+                + "Please use the eager ATen mode to execute the graph.",
+                category=RuntimeWarning,
             )
         partitioned_graph = partitioner.fuse_partitions(partitions)
         return partitioned_graph, any_unsupported
