@@ -133,9 +133,24 @@ bool SchemaInfo::may_alias(
   if (basic_check) {
     return true;
   }
+  bool types_can_alias = schema_.canAliasTypeSetsAlias(
+      schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(lhs.type)[lhs.index].type()),
+      schema_.mapTypeToAliasTypeSet(
+          schema_.getCorrectList(rhs.type)[rhs.index].type()));
+  if (!types_can_alias) {
+    return false;
+  }
+
   if (!alias_maps_current_) {
     generateAliasMaps();
   }
+  bool wildcard_alias_check =
+      wildcard_set_.count(lhs) && wildcard_set_.count(rhs);
+  if (wildcard_alias_check) {
+    return true;
+  }
+
   if (lhs.type == c10::SchemaArgType::input &&
       rhs.type == c10::SchemaArgType::input) {
     return input_alias_map_[lhs.index].count(rhs.index);
@@ -191,12 +206,68 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
   return nondeterministic_ops;
 }
 
+void SchemaInfo::ensureConservativity(
+    const std::unordered_set<at::Symbol>& duplicates,
+    const std::vector<c10::Argument>& arguments_list,
+    c10::SchemaArgType type) {
+  for (size_t i = 0; i < arguments_list.size(); i++) {
+    if (arguments_list[i].alias_info()) {
+      for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+        if (duplicates.count(set)) {
+          wildcard_set_.insert({type, i});
+        }
+      }
+    }
+  }
+}
+
+void SchemaInfo::initSchemaInfo() {
+  std::unordered_set<at::Symbol> duplicates;
+  auto init_schema_arguments = [this, &duplicates](
+                                   const std::vector<c10::Argument>&
+                                       arguments_list,
+                                   c10::SchemaArgType type) {
+    std::unordered_set<at::Symbol> seen;
+    for (size_t i = 0; i < arguments_list.size(); i++) {
+      if (arguments_list[i].alias_info()) {
+        if (arguments_list[i].alias_info()->isWildcardAfter()) {
+          wildcard_set_.insert({type, i});
+        } else {
+          // This check is to ensure that the FunctionSchema will accurately
+          // be represented when calling may_alias and may_contain_alias
+          // on schemas with more than one argument within arguments_list that
+          // shares an alias set.
+          for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
+            if (seen.count(set)) {
+              TORCH_WARN(
+                  set.toQualString(),
+                  " appears twice in same argument list which will make aliasing checks more conservative.");
+              duplicates.insert(set);
+            } else {
+              seen.insert(set);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  init_schema_arguments(schema_.arguments(), c10::SchemaArgType::input);
+  init_schema_arguments(schema_.returns(), c10::SchemaArgType::output);
+  ensureConservativity(
+      duplicates, schema_.arguments(), c10::SchemaArgType::input);
+  ensureConservativity(
+      duplicates, schema_.returns(), c10::SchemaArgType::output);
+}
+
 void SchemaInfo::generateAliasMaps() {
   alias_maps_current_ = true;
   input_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.arguments().size(), std::unordered_set<size_t>());
   output_alias_map_ = std::vector<std::unordered_set<size_t>>(
       schema_.returns().size(), std::unordered_set<size_t>());
+
+  // Fills input_alias_map_
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = i; j < schema_.arguments().size(); j++) {
       if (i == j) {
@@ -208,15 +279,25 @@ void SchemaInfo::generateAliasMaps() {
                 value_map_[schema_.arguments()[j].name()])) {
           input_alias_map_[i].insert(j);
           input_alias_map_[j].insert(i);
+          if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+            wildcard_set_.insert({c10::SchemaArgType::input, j});
+          } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
+            wildcard_set_.insert({c10::SchemaArgType::input, i});
+          }
         }
       }
     }
   }
+
+  // Fills output_alias_map_
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = 0; j < schema_.returns().size(); j++) {
       if (schema_.may_alias(
               {c10::SchemaArgType::input, i},
               {c10::SchemaArgType::output, j})) {
+        if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+          wildcard_set_.insert({c10::SchemaArgType::output, j});
+        }
         output_alias_map_[j].insert(
             input_alias_map_[i].begin(), input_alias_map_[i].end());
       }
