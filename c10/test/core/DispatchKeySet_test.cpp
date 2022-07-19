@@ -386,6 +386,17 @@ TEST(DispatchKeySet, FailAtEndIterator) {
       c10::Error);
 }
 
+TEST(DispatchKeySet, TestBackendComponentToString) {
+  std::unordered_set<std::string> seen_strings;
+  for (int i = 0; i < num_backends; i++) {
+    auto k = static_cast<BackendComponent>(i);
+    auto res = std::string(toString(k));
+    ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
+    ASSERT_FALSE(seen_strings.count(res) > 0);
+    seen_strings.insert(res);
+  }
+}
+
 TEST(DispatchKeySet, TestKeyOrderingInvariants) {
   for (uint8_t i = static_cast<uint8_t>(DispatchKey::StartOfDenseBackends);
        i <= static_cast<uint8_t>(DispatchKey::EndOfRuntimeBackendKeys);
