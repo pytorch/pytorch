@@ -4457,6 +4457,35 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+#    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpointing_non_reentrant_autocast(self):
+        """
+        Test that autocast args such as the dtype are preserved during non-reentrant
+        checkpoint recomputation.
+        """
+        for enabled in [True, False]:
+            def foo(x, y, z):
+                #torch.mm is on autocast's list of ops that should run in
+                # the autocast precision
+                x = torch.mm(x, y)
+                y = torch.mm(x, z)
+                z = torch.mm(z, z)
+                expected_dtype = (
+                    torch.float32 if not enabled else torch.bfloat16
+                )
+                self.assertEqual(expected_dtype, z.dtype)
+                return z
+
+            x = torch.randn(3, 3, requires_grad=True)
+            y = torch.randn(3, 3, requires_grad=True)
+            z = torch.randn(3, 3, requires_grad=True)
+            with torch.autocast(enabled=enabled, device_type='cpu', dtype=torch.bfloat16):
+                loss = checkpoint(foo, x, y, z, use_reentrant=False)
+                loss = loss.sum()
+
+            # Without fix, would raise error in autograd about mismatched dtypes.
+            loss.backward() # triggers recomputation to check it runs in bfloat
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     @slowTest
     def test_checkpointing_without_reentrant_memory_savings(self):

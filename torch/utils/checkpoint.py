@@ -323,7 +323,17 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             the RNG state during each checkpoint.
         *args: Arguments to pass in to the given ``function``.
     """
-    had_autocast_in_fwd = torch.is_autocast_enabled()
+    # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
+    gpu_autocast_kwargs = {
+        "enabled": torch.is_autocast_enabled(),
+        "dtype": torch.get_autocast_gpu_dtype(),
+        "cache_enabled": torch.is_autocast_cache_enabled()
+    }
+    cpu_autocast_kwargs = {
+        "enabled": torch.is_autocast_cpu_enabled(),
+        "dtype": torch.get_autocast_cpu_dtype(),
+        "cache_enabled": torch.is_autocast_cache_enabled()
+    }
 
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
@@ -371,7 +381,12 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                     torch.set_rng_state(fwd_cpu_state)
                     if had_cuda_in_fwd:
                         set_device_states(fwd_gpu_devices, fwd_gpu_states)
-                with torch.enable_grad(), torch.cuda.amp.autocast(had_autocast_in_fwd):
+
+                with (
+                    torch.enable_grad(),
+                    torch.cuda.amp.autocast(**gpu_autocast_kwargs),
+                    torch.cpu.amp.autocast(**cpu_autocast_kwargs),
+                ):
                     with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
                         _unused = function(*args)
 
