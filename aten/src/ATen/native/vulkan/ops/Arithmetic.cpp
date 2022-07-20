@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -67,9 +66,8 @@ Tensor arithmetic_scalar(
       v_self.options(),
   };
 
-  const float other_val = alpha_arg
-      ? other.to<float>() * alpha_arg->to<float>()
-      : other.to<float>();
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
   const struct Block final {
     uvec3 extents;
     float other;
@@ -82,12 +80,6 @@ Tensor arithmetic_scalar(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -101,11 +93,9 @@ Tensor arithmetic_scalar(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -125,9 +115,8 @@ Tensor& arithmetic_scalar_(
 
   vTensor& v_self = convert(self_arg);
 
-  const float other_val = alpha_arg
-      ? other.to<float>() * alpha_arg->to<float>()
-      : other.to<float>();
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
   const struct Block final {
     uvec3 extents;
     float other;
@@ -140,11 +129,6 @@ Tensor& arithmetic_scalar_(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -158,7 +142,7 @@ Tensor& arithmetic_scalar_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
       // params buffer
       params.buffer());
@@ -207,13 +191,6 @@ Tensor arithmetic_tensor(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -227,14 +204,10 @@ Tensor arithmetic_tensor(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
-      v_other.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -276,12 +249,6 @@ Tensor& arithmetic_tensor_(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -295,11 +262,9 @@ Tensor& arithmetic_tensor_(
       // shader arguments
       v_self.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
-      v_other.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -334,7 +299,10 @@ Tensor add_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& add_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
@@ -373,7 +341,10 @@ Tensor sub_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& sub_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }

@@ -358,23 +358,20 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.ones(1))
-            y = LoggingTensor(torch.ones(1))
             log_input("x", x)
-            log_input("y", y)
-            torch.ops.aten.kl_div(x, y)
-            torch.ops.aten.kl_div(x, y, 2)
-            torch.ops.aten.kl_div(x, y, log_target=True)
-            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+            torch.ops.aten._foobar(x)
+            torch.ops.aten._foobar(x, False)
+            torch.ops.aten._foobar(x, arg3=False)
+            torch.ops.aten._foobar(x, False, arg3=False)
 
-        # What we are testing here is that we omit reduction
+        # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = input('y')
-$2 = torch._ops.aten.kl_div.default($0, $1)
-$3 = torch._ops.aten.kl_div.default($0, $1, 2)
-$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
+$1 = torch._ops.aten._foobar.default($0)
+$2 = torch._ops.aten._foobar.default($0, False)
+$3 = torch._ops.aten._foobar.default($0, arg3=False)
+$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -762,6 +759,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
 
+    def test_nested_push_regular(self):
+        with LoggingTensorMode.push() as mode:
+            # This previously errored
+            with LoggingTensorMode():
+                pass
+
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
         y = torch.randn([])
@@ -1137,8 +1140,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             __torch_function__ = torch._C._disabled_torch_function_impl
 
         a = SubTensor(torch.randn(2))
-        mode = PoliteMode()
-        with mode:
+        with PoliteMode() as mode:
             a.abs()
 
         self.assertEqual(mode.pre_count, 2)
@@ -1149,6 +1151,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with PoliteMode():
             with PoliteMode():
                 a.abs()
+
+    def test_disable_mode(self):
+        class FailEverythingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise RuntimeError("arf")
+
+        with FailEverythingMode() as m:
+            self.assertRaises(RuntimeError, lambda: torch.ones([2, 3]))
+            with enable_torch_dispatch_mode(None, replace=m):
+                torch.ones([2, 3])
 
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
@@ -1788,7 +1800,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return (5, 3)
                     return NotImplemented
 
@@ -1801,13 +1813,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.dim:
                         return data.dim()
-                    if func.overloadpacket == torch.ops.aten.size:
+                    if func.overloadpacket == torch.ops.aten.sym_size:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.size()
 
             e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)

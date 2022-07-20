@@ -1,7 +1,11 @@
-from typing import Callable, Iterator, Sized, TypeVar
+import functools
+from collections import namedtuple
+
+from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict, List
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
@@ -123,6 +127,44 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         )
 
 
+def _collate_helper(conversion, item):
+    # TODO(VitalyFedyunin): Verify that item is any sort of batch
+    if len(item.items) > 1:
+        # TODO(VitalyFedyunin): Compact all batch dataframes into one
+        raise Exception("Only supports one DataFrame per batch")
+    df = item[0]
+    columns_name = df_wrapper.get_columns(df)
+    tuple_names: List = []
+    tuple_values: List = []
+
+    for name in conversion.keys():
+        if name not in columns_name:
+            raise Exception("Conversion keys missmatch")
+
+    for name in columns_name:
+        if name in conversion:
+            if not callable(conversion[name]):
+                raise Exception('Collate (DF)DataPipe requires callable as dict values')
+            collation_fn = conversion[name]
+        else:
+            # TODO(VitalyFedyunin): Add default collation into df_wrapper
+            try:
+                import torcharrow.pytorch as tap  # type: ignore[import]
+                collation_fn = tap.rec.Default()
+            except Exception:
+                raise Exception("unable to import default collation function from the TorchArrrow")
+
+        tuple_names.append(str(name))
+        value = collation_fn(df[name])
+        tuple_values.append(value)
+
+    # TODO(VitalyFedyunin): We can dynamically extract types from the tuple_values here
+    # TODO(VitalyFedyunin): Instead of ignoring mypy error, make sure tuple_names is not empty
+    tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore[misc]
+    tuple = tpl_cls(*tuple_values)
+    return tuple
+
+
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):
     r"""
@@ -166,6 +208,22 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = default_collate,
+        conversion: Optional[
+            Union[
+            Callable[..., Any],
+            Dict[Union[str, Any], Union[Callable, Any]],
+            ]
+        ] = default_collate,
+        collate_fn: Optional[Callable] = None,
     ) -> None:
-        super().__init__(datapipe, fn=collate_fn)
+        # TODO(VitalyFedyunin): Replace `Callable[..., Any]` with `Callable[[IColumn], Any]`
+        # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
+        if collate_fn is not None:
+            super().__init__(datapipe, fn=collate_fn)
+        else:
+            if callable(conversion):
+                super().__init__(datapipe, fn=conversion)
+            else:
+                # TODO(VitalyFedyunin): Validate passed dictionary
+                collate_fn = functools.partial(_collate_helper, conversion)
+                super().__init__(datapipe, fn=collate_fn)

@@ -1,7 +1,6 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -13,8 +12,7 @@ namespace {
 using namespace api::utils;
 using namespace at::native::vulkan::ops;
 
-vTensor pack_weights(
-    const Tensor& weight_arg) {
+vTensor pack_weights(const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
@@ -37,9 +35,9 @@ vTensor pack_weights(
   vTensor v_weight{
       context,
       {
-        4,
-        dst_kh_sz,
-        dst_kw_sz,
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
       },
       weight.options(),
   };
@@ -54,8 +52,8 @@ vTensor pack_weights(
 
     for (const auto src_h : c10::irange(src_kh_sz)) {
       for (const auto src_w : c10::irange(src_kw_sz)) {
-        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+        int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+        int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
         memcpy(
             dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
             src_weight_ptr + src_h * src_kw_sz + src_w,
@@ -87,8 +85,7 @@ vTensor pack_biases(
     if (bias.sizes().size() == 2) {
       src_kw_sz = b_sizes[Layout::Parameter::width];
       src_kh_sz = b_sizes[Layout::Parameter::height];
-    }
-    else {
+    } else {
       src_kw_sz = b_sizes[Layout::Parameter::height];
       src_kh_sz = 1;
     }
@@ -101,9 +98,9 @@ vTensor pack_biases(
     vTensor v_bias{
         context,
         {
-          4,
-          dst_kh_sz,
-          dst_kw_sz,
+            4,
+            dst_kh_sz,
+            dst_kw_sz,
         },
         bias_arg->options(),
     };
@@ -118,8 +115,8 @@ vTensor pack_biases(
 
       for (const auto src_h : c10::irange(src_kh_sz)) {
         for (const auto src_w : c10::irange(src_kw_sz)) {
-          int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-          int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+          int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+          int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
           memcpy(
               dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
               src_bias_ptr + src_h * src_kw_sz + src_w,
@@ -130,8 +127,7 @@ vTensor pack_biases(
     utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
 
     return v_bias;
-  }
-  else {
+  } else {
     vTensor v_bias{
         api::context(),
         {1},
@@ -158,30 +154,28 @@ vTensor pack_biases(
   }
 }
 
-bool available(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
+bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
   return api::available() &&
-         // Weight
-         (2 == weight.ndimension()) &&
-         (weight.size(Layout::Parameter::height) > 0) &&
-         (weight.size(Layout::Parameter::width) > 0) &&
-         ((weight.device().is_cpu()) ||
-          (c10::DeviceType::Vulkan == weight.device().type())) &&
-         (kFloat == weight.scalar_type()) &&
-         !weight.requires_grad() &&
-         // Bias
-         ((bias && bias->defined()) ? ((bias->ndimension() > 0) &&
-                                       ((bias->device().is_cpu()) ||
-                                        (c10::DeviceType::Vulkan == bias->device().type())) &&
-                                       (kFloat == bias->scalar_type()) &&
-                                       ((bias->ndimension() > 1) ?
-                                            (bias->size(Layout::Parameter::width) ==
-                                                weight.size(Layout::Parameter::width))
-                                            : true) &&
-                                       !bias->requires_grad())
-                                    : true) &&
-         true;
+      // Weight
+      (2 == weight.ndimension()) &&
+      (weight.size(Layout::Parameter::height) > 0) &&
+      (weight.size(Layout::Parameter::width) > 0) &&
+      ((weight.device().is_cpu()) ||
+       (c10::DeviceType::Vulkan == weight.device().type())) &&
+      (kFloat == weight.scalar_type()) && !weight.requires_grad() &&
+      // Bias
+      ((bias && bias->defined())
+           ? ((bias->ndimension() > 0) &&
+              ((bias->device().is_cpu()) ||
+               (c10::DeviceType::Vulkan == bias->device().type())) &&
+              (kFloat == bias->scalar_type()) &&
+              ((bias->ndimension() > 1)
+                   ? (bias->size(Layout::Parameter::width) ==
+                      weight.size(Layout::Parameter::width))
+                   : true) &&
+              !bias->requires_grad())
+           : true) &&
+      true;
 }
 
 bool usable(
@@ -189,12 +183,11 @@ bool usable(
     const Tensor& weight,
     const c10::optional<Tensor>& /* bias */) {
   return (2 == input.ndimension()) &&
-         (c10::DeviceType::Vulkan == input.device().type()) &&
-         (kFloat == input.scalar_type()) &&
-         (input.size(Layout::Parameter::width) ==
-              weight.size(Layout::Parameter::height)) &&
-         !input.requires_grad() &&
-         true;
+      (c10::DeviceType::Vulkan == input.device().type()) &&
+      (kFloat == input.scalar_type()) &&
+      (input.size(Layout::Parameter::width) ==
+       weight.size(Layout::Parameter::height)) &&
+      !input.requires_grad() && true;
 }
 
 VulkanOpContext context_create(
@@ -233,8 +226,9 @@ Tensor context_run(
   const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
   const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
   const Tensor& unpacked_weight = unpacked_context.get(0).toTensor();
-  const c10::optional<Tensor>& unpacked_bias
-   = unpacked_context.get(1).isTensor() ? unpacked_context.get(1).toTensor() : c10::optional<Tensor>();
+  const c10::optional<Tensor>& unpacked_bias =
+      unpacked_context.get(1).isTensor() ? unpacked_context.get(1).toTensor()
+                                         : c10::optional<Tensor>();
 
   TORCH_CHECK(
       usable(input, unpacked_weight, unpacked_bias),
@@ -243,11 +237,11 @@ Tensor context_run(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
-  vTensor v_output {
+  vTensor v_output{
       context,
       {
-        v_input.sizes()[Layout::Parameter::height],
-        unpacked_weight.sizes()[Layout::Parameter::width],
+          v_input.sizes()[Layout::Parameter::height],
+          unpacked_weight.sizes()[Layout::Parameter::width],
       },
       input.options(),
   };
@@ -257,12 +251,13 @@ Tensor context_run(
       uvec3 size;
       int32_t K;
       vec2 multiplier;
-    } block {
+    } block{
         v_output.extents(),
-        safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+        safe_downcast<int32_t>(
+            div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
         {
-          alpha,
-          beta,
+            alpha,
+            beta,
         },
     };
 
@@ -270,23 +265,17 @@ Tensor context_run(
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
-        // shader layout signature
-        {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
         // shader descriptor
         VK_KERNEL(addmm),
         // pipeline barrier
         pipeline_barrier,
         // global work group size
         {
-          safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-          safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-          1,
+            safe_downcast<uint32_t>(div_up(
+                unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+            safe_downcast<uint32_t>(
+                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+            1,
         },
         // local work group size
         {8, 8, 1},
@@ -295,49 +284,38 @@ Tensor context_run(
         // shader arguments
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::Compute,
+            api::PipelineStage::COMPUTE,
             api::MemoryAccessType::WRITE),
-        v_input.image(
-            pipeline_barrier,
-            api::PipelineStage::Compute),
-        packed_v_weight.image(
-            pipeline_barrier,
-            api::PipelineStage::Compute),
-        packed_v_bias.image(
-            pipeline_barrier,
-            api::PipelineStage::Compute),
+        v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
         // params buffer
         params.buffer());
-  }
-  else {
+  } else {
     const struct {
       uvec3 size;
       int32_t K;
-    } block_no_bias {
+    } block_no_bias{
         v_output.extents(),
-        safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+        safe_downcast<int32_t>(
+            div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
     };
 
     api::UniformParamsBuffer params(context, block_no_bias);
     api::PipelineBarrier pipeline_barrier{};
 
     context->submit_compute_job(
-        // shader layout signature
-        {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
         // shader descriptor
         VK_KERNEL(mm),
         // pipeline barrier
         pipeline_barrier,
         // global work group size
         {
-          safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-          safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-          1,
+            safe_downcast<uint32_t>(div_up(
+                unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+            safe_downcast<uint32_t>(
+                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+            1,
         },
         // local work group size
         {8, 8, 1},
@@ -346,14 +324,10 @@ Tensor context_run(
         // shader arguments
         v_output.image(
             pipeline_barrier,
-            api::PipelineStage::Compute,
+            api::PipelineStage::COMPUTE,
             api::MemoryAccessType::WRITE),
-        v_input.image(
-            pipeline_barrier,
-            api::PipelineStage::Compute),
-        packed_v_weight.image(
-            pipeline_barrier,
-            api::PipelineStage::Compute),
+        v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
         // params buffer
         params.buffer());
   }
@@ -367,31 +341,26 @@ Tensor addmm(
     const Tensor& weight,
     const Scalar& beta,
     const Scalar& alpha) {
-
   VulkanOpContext vulkan_context = context_create(weight, bias);
 
   return context_run(
-    input,
-    vulkan_context.get_packed(),
-    vulkan_context.get_unpacked(),
-    alpha.to<float>(),
-    beta.to<float>());
+      input,
+      vulkan_context.get_packed(),
+      vulkan_context.get_unpacked(),
+      alpha.to<float>(),
+      beta.to<float>());
 }
 
-Tensor mm(
-    const Tensor& mat1_arg,
-    const Tensor& mat2_arg) {
-
-  VulkanOpContext vulkan_context = context_create(
-    mat2_arg,
-    c10::optional<Tensor>());
+Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
+  VulkanOpContext vulkan_context =
+      context_create(mat2_arg, c10::optional<Tensor>());
 
   return context_run(
-    mat1_arg,
-    vulkan_context.get_packed(),
-    vulkan_context.get_unpacked(),
-    1.0f,
-    1.0f);
+      mat1_arg,
+      vulkan_context.get_packed(),
+      vulkan_context.get_unpacked(),
+      1.0f,
+      1.0f);
 }
 
 #ifdef USE_VULKAN_API
@@ -424,35 +393,28 @@ c10::intrusive_ptr<VulkanOpContext> create_linear_context(
     Tensor&& weight,
     c10::optional<Tensor>&& bias) {
   return c10::make_intrusive<VulkanOpContext>(
-      linear_context_create(
-          weight,
-          bias));
+      linear_context_create(weight, bias));
 }
 
 Tensor run_linear_context(
     const Tensor& input,
     const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
   return linear_context_run(
-    input,
-    vulkan_context->get_packed(),
-    vulkan_context->get_unpacked(),
-    1.0,
-    1.0);
+      input,
+      vulkan_context->get_packed(),
+      vulkan_context->get_unpacked(),
+      1.0,
+      1.0);
 }
 
 /* Backwards compatibility */
 LinearOpContext::LinearOpContext(VulkanOpContext vulkan_context)
-  : vulkan_context_{std::move(vulkan_context)} {
-}
+    : vulkan_context_{std::move(vulkan_context)} {}
 
 LinearOpContext LinearOpContext::create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
-  return LinearOpContext {
-      linear_context_create(
-        weight,
-        bias)
-  };
+  return LinearOpContext{linear_context_create(weight, bias)};
 }
 
 Tensor LinearOpContext::run(
@@ -460,31 +422,28 @@ Tensor LinearOpContext::run(
     const float alpha,
     const float beta) const {
   return linear_context_run(
-    input_arg,
-    vulkan_context_.get_packed(),
-    vulkan_context_.get_unpacked(),
-    alpha,
-    beta);
+      input_arg,
+      vulkan_context_.get_packed(),
+      vulkan_context_.get_unpacked(),
+      alpha,
+      beta);
 }
 
 LinearOpContext::State LinearOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ = std::get<1>(vulkan_context_.get_state());
+  const c10::impl::GenericList unpacked_ =
+      std::get<1>(vulkan_context_.get_state());
   const Tensor unpacked_weight = unpacked_.get(0).toTensor();
-  const c10::optional<Tensor> unpacked_bias
-   = unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor() : c10::optional<Tensor>();
-  return LinearOpContext::State{
-    unpacked_weight,
-    unpacked_bias
-  };
+  const c10::optional<Tensor> unpacked_bias = unpacked_.get(1).isTensor()
+      ? unpacked_.get(1).toTensor()
+      : c10::optional<Tensor>();
+  return LinearOpContext::State{unpacked_weight, unpacked_bias};
 }
 
 c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias) {
   return c10::make_intrusive<LinearOpContext>(
-      LinearOpContext::create(
-          std::move(weight),
-          std::move(bias)));
+      LinearOpContext::create(std::move(weight), std::move(bias)));
 }
 
 Tensor linear_run(

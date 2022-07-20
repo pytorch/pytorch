@@ -37,13 +37,17 @@ if(env_cxx_standard GREATER -1)
       WARNING "C++ standard version definition detected in environment variable."
       "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
 endif()
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+  else()
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
+    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 endif()
 
@@ -291,6 +295,10 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an ITT build is the default for x86 CPUs
+cmake_dependent_option(
+  USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
+  "CPU_INTEL" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
@@ -308,6 +316,14 @@ option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_UCC "Use UCC. Only available if USE_DISTRIBUTED is on." OFF
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_UCC "Use system-wide UCC" OFF
+    "USE_UCC" OFF)
+cmake_dependent_option(
+    USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
@@ -784,6 +800,11 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
+  if(NOT USE_CUDNN)
+    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
+    # separate PR to cudnn_frontend is needed to address this later on
+    string(APPEND CMAKE_CXX_FLAGS " -Werror=non-virtual-dtor")
+  endif()
   string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")

@@ -571,7 +571,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
     # See https://github.com/pytorch/pytorch/issues/38856
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -606,6 +606,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+    )
+  endif()
+
+  if(${USE_ITT})
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
     )
   endif()
 
@@ -911,6 +918,11 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 
+if(USE_UCC)
+  target_link_libraries(torch_cpu PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_cpu PRIVATE USE_UCC)
+endif()
+
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
@@ -971,6 +983,13 @@ elseif(USE_CUDA)
   elseif(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+  if(USE_UCC AND BUILD_SPLIT_CUDA)
+    target_link_libraries(torch_cuda_cpp PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_cuda_cpp PRIVATE USE_UCC)
+  elseif(USE_UCC)
+    target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
@@ -1137,9 +1156,11 @@ endif()
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include)
+
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
-      ${TORCH_ROOT}/third_party/kineto/libkineto/include
       ${TORCH_ROOT}/third_party/kineto/libkineto/src)
   endif()
 
@@ -1346,6 +1367,16 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PUBLIC USE_DISTRIBUTED)
   if(USE_GLOO AND USE_C10D_GLOO)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
+  endif()
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_UCC)
+    if(USE_CUDA)
+      if(BUILD_SPLIT_CUDA)
+        target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_UCC)
+      else()
+        target_compile_definitions(torch_cuda PUBLIC USE_C10D_UCC)
+      endif()
+    endif()
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
     if(USE_ROCM)
@@ -2023,7 +2054,7 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
-  if(CAFFE2_USE_MKLDNN)
+  if(USE_MKLDNN)
       target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
   endif()
   if(WIN32)

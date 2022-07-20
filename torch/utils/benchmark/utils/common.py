@@ -14,7 +14,7 @@ import uuid
 import torch
 
 
-__all__ = ["TaskSpec", "Measurement", "_make_temp_dir"]
+__all__ = ["TaskSpec", "Measurement", "select_unit", "unit_to_english", "trim_sigfig", "ordered_unique", "set_torch_threads"]
 
 
 _MAX_SIGNIFICANT_FIGURES = 4
