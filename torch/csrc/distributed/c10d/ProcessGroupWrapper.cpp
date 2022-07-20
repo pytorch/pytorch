@@ -163,12 +163,6 @@ struct CollectiveFingerPrint {
              << pg->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
-          // Attach sequence number in log output / collective mismatch error
-          try {
-            int SequenceNumberForGroup = pg->getSequenceNumberForGroup();
-            ss << " The sequence number is: " << SequenceNumberForGroup;
-          } catch (c10::Error) {
-          }
           TORCH_CHECK(false, ss.str());
         }
       }
