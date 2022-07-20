@@ -73,7 +73,8 @@ Devices = ["cpu"]
 if torch.cuda.is_available():
     Devices.append("cuda")
 
-class TestCommanPass(TestCase):
+@instantiate_parametrized_tests
+class TestCommonPass(TestCase):
 
     @parametrize("common_pass,f,device", itertools.product(Passes, Test_Cases, Devices))
     def test_correctness(self, common_pass, f, device):
@@ -109,8 +110,6 @@ class TestCommanPass(TestCase):
 
         self.assertEqual(result, expected)
 
-
-instantiate_parametrized_tests(TestCommanPass)
 
 if __name__ == '__main__':
     run_tests()
