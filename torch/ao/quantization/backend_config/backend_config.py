@@ -1,9 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from torch.ao.quantization.backend_config.observation_type import ObservationType
+from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
 
 
@@ -126,7 +127,13 @@ class BackendConfig:
             if dict_key not in backend_config_dict:
                 raise ValueError("backend_config_dict must contain '%s'" % dict_key)
         conf = cls(backend_config_dict[NAME_DICT_KEY])
-        conf.configs = [BackendOpConfig.from_dict(d) for d in backend_config_dict[CONFIGS_DICT_KEY]]
+        for d in backend_config_dict[CONFIGS_DICT_KEY]:
+            if isinstance(d, BackendOpConfig):
+                conf.set_config(d)
+            elif isinstance(d, Dict):
+                conf.set_config(BackendOpConfig.from_dict(d))
+            else:
+                raise ValueError("Expected backend_config_dict['%s'] to be a dictionary" % CONFIGS_DICT_KEY)
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -136,7 +143,7 @@ class BackendConfig:
         """
         return {
             NAME_DICT_KEY: self.name,
-            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs],
+            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs.values()],
         }
 
 
@@ -170,7 +177,7 @@ class BackendOpConfig:
         self.pattern = pattern
         return self
 
-    def set_observation_type(self, observeration_type: ObservationType) -> BackendOpConfig:
+    def set_observation_type(self, observation_type: ObservationType) -> BackendOpConfig:
         """
         Set how observers should be inserted for this op.
         """
@@ -265,7 +272,7 @@ class BackendOpConfig:
             "fuser_module": a :class:`torch.nn.Module` that represents the fused implementation for this op
             "fuser_method": a function that specifies how to fuse the pattern for this op
         """
-        def _get_dtype_config(obj: Any) -> Optional[DtypeConfig]:
+        def _get_dtype_config(obj: Any) -> DtypeConfig:
             """ 
             Convert the given object into a `DtypeConfig` if possible, else throw an exception.
             """
@@ -294,8 +301,8 @@ class BackendOpConfig:
         conf._set_num_tensor_args_to_observation_type(backend_op_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_op_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_op_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_overwrite_output_fake_quantize(backend_op_config_dict.get(OVERWRITE_OUTPUT_FAKE_QUANTIZE, None))
-        conf._set_overwrite_output_observer(backend_op_config_dict.get(OVERWRITE_OUTPUT_FAKE_OBSERVER, None))
+        conf._set_overwrite_output_fake_quantize(backend_op_config_dict.get(OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY, None))
+        conf._set_overwrite_output_observer(backend_op_config_dict.get(OVERWRITE_OUTPUT_OBSERVER_DICT_KEY, None))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -327,9 +334,9 @@ class BackendOpConfig:
         if len(self._input_type_to_index) > 0:
             backend_op_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
-            backend_op_config_dict[INPUT_OUTPUT_OBSERVED] = self._input_output_observed
+            backend_op_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
         if self._overwrite_output_fake_quantize is not None:
-            backend_op_config_dict[OVERWRITE_OUTPUT_FAKE_QUANTIZE] = self._overwrite_output_fake_quantize
+            backend_op_config_dict[OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY] = self._overwrite_output_fake_quantize
         if self._overwrite_output_observer is not None:
-            backend_op_config_dict[OVERWRITE_OUTPUT_OBSERVER] = self._overwrite_output_observer
+            backend_op_config_dict[OVERWRITE_OUTPUT_OBSERVER_DICT_KEY] = self._overwrite_output_observer
         return backend_op_config_dict
