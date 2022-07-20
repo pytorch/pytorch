@@ -13,7 +13,11 @@ import torch
 import torch.ao.quantization as tq
 
 from torch import nn
+import torch.nn.intrinsic as nni
 from torch.ao.nn.sparse import quantized as ao_nn_sq
+from torch.ao.nn.sparse import qat as ao_nn_sqat
+import torch.ao.nn.sparse.intrinsic.quantized as ao_nn_siq
+
 from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 from torch.ao.sparsity.sparsifier.utils import fqn_to_module
 
@@ -29,6 +33,24 @@ from torch.testing._internal.common_quantized import (
 # TODO: Once more test files are created, move the contents to a ao folder.
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+class LinearModel(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.linear = nn.Linear(in_channels, out_channels)
+
+    def forward(self, x):
+        return self.linear(x)
+
+class LinearReLUModel(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.linear = nn.Linear(in_channels, out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.linear(x))
+
 
 class TestQuantizedSparseKernels(TestCase):
     @override_qengines
@@ -119,6 +141,8 @@ def _sparse_layer_test_helper(
     fqn_to_check,
     test_class,
     test_scripting,
+    to_fuse = None,
+    is_qat = False,
 ):
     ## SET UP TEST PARAMETERS, INPUTS AND WEIGHTS
     batch_size = 12
@@ -151,20 +175,28 @@ def _sparse_layer_test_helper(
         model.linear.weight = nn.Parameter(W_q.dequantize())
         model.eval()
 
-        # Add `sparse_params` to the model. The test for correct
+        # Needed for convert to sparse kernels, The test for correct
         # sparse_param addition is in the sparsifier tests
         model.linear.sparse_params = {"sparse_block_shape": (1, 4)}
 
-        # generate model versions
+        # generate model versions, fuse, apply qconfig and prepare
         qmodel = copy.deepcopy(model)
         sqmodel = copy.deepcopy(model)
 
-        # generate model versions and apply qconfigs
+        if to_fuse is not None:
+            tq.fuse_modules(qmodel, to_fuse, inplace=True)
+            tq.fuse_modules(sqmodel, to_fuse, inplace=True)
+
+
         tq.propagate_qconfig_(qmodel, qconfig_dict)
         tq.propagate_qconfig_(sqmodel, qconfig_dict)
 
-        tq.prepare(qmodel, inplace=True)
-        tq.prepare(sqmodel, inplace=True)
+        if is_qat:
+            tq.prepare_qat(qmodel.train(), inplace=True)
+            tq.prepare_qat(sqmodel.train(), inplace=True)
+        else:
+            tq.prepare(qmodel, inplace=True)
+            tq.prepare(sqmodel, inplace=True)
 
         # calibrate
         with torch.no_grad():
@@ -173,11 +205,8 @@ def _sparse_layer_test_helper(
 
         ## ACTUAL TESTING BEGINS HERE
 
-        # Make sure the quantization parameters are computed the same way
-        qparams = qmodel.linear.qconfig.weight().calculate_qparams()
-        sqparams = sqmodel.linear.qconfig.weight().calculate_qparams()
-        test_class.assertEqual(qparams, sqparams)
-
+        # identify modules by fqn that need to be checked
+        # and determine expected post-convert module type
         sqmodule_to_check = fqn_to_module(sqmodel, fqn_to_check)
         sqmodule_start_class = sqmodule_to_check.__class__
         sqmodule_expected_converted_class = sparse_mapping[sqmodule_start_class]
@@ -186,8 +215,13 @@ def _sparse_layer_test_helper(
         qmodule_start_class = qmodule_to_check.__class__
         qmodule_expected_converted_class = ref_mapping[qmodule_start_class]
 
+        # Make sure the quantization parameters are computed the same way
+        qparams = sqmodule_to_check.qconfig.weight().calculate_qparams()
+        sqparams = qmodule_to_check.qconfig.weight().calculate_qparams()
+        test_class.assertEqual(qparams, sqparams)
+
         # need to determine whether dynamic quantization is being performed since
-        # input dtype will be different at the end
+        # input dtype will be different at the end if dynamic
         is_dynamic = isinstance(
             qmodule_to_check.activation_post_process, tq.PlaceholderObserver
         )
@@ -195,8 +229,8 @@ def _sparse_layer_test_helper(
         tq.convert(sqmodel, inplace=True, mapping=sparse_mapping)
         tq.convert(qmodel, inplace=True, mapping=ref_mapping)
 
-        # this code is a duplicate of above since the references do not
-        # update to the post-convert modules
+        # this code is a duplicate of above since the references are for
+        # the pre-convert modules
         sqmodule_to_check = fqn_to_module(sqmodel, fqn_to_check)
         qmodule_to_check = fqn_to_module(qmodel, fqn_to_check)
 
@@ -208,7 +242,12 @@ def _sparse_layer_test_helper(
             qmodule_to_check, qmodule_expected_converted_class
         ), "Mapping failed"
 
-        row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[
+        # the linear gets hidden within the fused module so to check its packed_params
+        # need to use the correct target
+        if to_fuse is not None:
+            sqmodule_to_check = getattr(sqmodule_to_check, "sparse_qlinear")
+
+        row_block_size, col_block_size = sqmodule_to_check._packed_params._weight_bias()[
             2:
         ]
         assert row_block_size == 1 and col_block_size == 4
@@ -223,7 +262,7 @@ def _sparse_layer_test_helper(
             buffer.seek(0)
             sqmodel = torch.jit.load(buffer)
 
-        # use correct input dtype
+        # use correct input dtype for final check
         if is_dynamic:
             Y_ref = qmodel(X_fp32)
             Y_hat = sqmodel(X_fp32)
@@ -244,14 +283,14 @@ class SparseQuantizedModel(nn.Module):
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines
     def test_sparse_qlinear(self):
-        # Note: At the moment, for sparse kernels
+        # Note: T126598291 At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear
         # qnnpack supports only dynamically quantized sparse linear
         # Hence we have two different tests.
         # fbgemm tests static flow, qnnpack tests dynamic.
         # Should be unified later on and tests should be fixed
         # appropriately.
-        model_class = SparseQuantizedModel
+        model_class = LinearModel
         fqn_to_check = "linear"
         if qengine_is_fbgemm():
             sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
@@ -275,6 +314,29 @@ class TestQuantizedSparseLayers(TestCase):
         )
 
     @override_qengines
+    def test_sparse_qatlinear(self):
+        model_class = LinearModel
+        fqn_to_check = "linear"
+        if qengine_is_fbgemm():
+            sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
+            # sparse_mapping[nn.qat.Linear] = ao_nn_sqat.SparseQATLinear
+            ref_mapping = tq.get_default_static_quant_module_mappings()
+            qconfig_dict = {nn.Linear: tq.get_default_qat_qconfig("fbgemm")}
+        else:
+            return
+
+        _sparse_layer_test_helper(
+            model_class=model_class,
+            sparse_mapping=sparse_mapping,
+            ref_mapping=ref_mapping,
+            qconfig_dict=qconfig_dict,
+            fqn_to_check=fqn_to_check,
+            test_class=self,
+            test_scripting=False,
+            is_qat=True
+        )
+
+    @override_qengines
     def test_sparse_qlinear_serdes(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear
@@ -283,7 +345,7 @@ class TestQuantizedSparseLayers(TestCase):
         # fbgemm tests static flow, qnnpack tests dynamic.
         # Should be unified later on and tests should be fixed
         # appropriately.
-        model_class = SparseQuantizedModel
+        model_class = LinearModel
         fqn_to_check = "linear"
         if qengine_is_fbgemm():
             sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
@@ -306,6 +368,59 @@ class TestQuantizedSparseLayers(TestCase):
             test_scripting=True,
         )
 
+class TestQuantizedSparseIntrinsicLayers(TestCase):
+    @override_qengines
+    def test_sparse_intrincsic_qlinear_relu(self):
+        # Note: At the moment, for sparse kernels
+        # fbgemm supports only static quantized sparse linear
+        # while qnnpack and onednn are unsupported
+        model_class = LinearReLUModel
+        fqn_to_check = "linear"
+        to_fuse = [["linear", "relu"]]
+        if qengine_is_fbgemm():
+            sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
+            ref_mapping = tq.get_default_static_quant_module_mappings()
+            qconfig_dict = {nni.LinearReLU: tq.get_default_qconfig("fbgemm")}
+        else:
+            return
 
-if __name__ == "__main__":
+        _sparse_layer_test_helper(
+            model_class=model_class,
+            sparse_mapping=sparse_mapping,
+            ref_mapping=ref_mapping,
+            qconfig_dict=qconfig_dict,
+            fqn_to_check=fqn_to_check,
+            test_class=self,
+            test_scripting=False,
+            to_fuse = to_fuse,
+        )
+
+    @override_qengines
+    def test_sparse_intrincsic_qatlinear_relu(self):
+        # Note: At the moment, for sparse kernels
+        # fbgemm supports only static quantized sparse linear
+        # while qnnpack and onednn are unsupported
+        model_class = LinearReLUModel
+        fqn_to_check = "linear"
+        to_fuse = [["linear", "relu"]]
+        if qengine_is_fbgemm():
+            sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
+            ref_mapping = tq.get_default_static_quant_module_mappings()
+            qconfig_dict = {nni.LinearReLU: tq.get_default_qat_qconfig("fbgemm")}
+        else:
+            return
+
+        _sparse_layer_test_helper(
+            model_class=model_class,
+            sparse_mapping=sparse_mapping,
+            ref_mapping=ref_mapping,
+            qconfig_dict=qconfig_dict,
+            fqn_to_check=fqn_to_check,
+            test_class=self,
+            test_scripting=False,
+            to_fuse = to_fuse,
+            is_qat=True
+        )
+
+if __name__ == '__main__':
     run_tests()

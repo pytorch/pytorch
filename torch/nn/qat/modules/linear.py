@@ -56,6 +56,11 @@ class Linear(nn.Linear):
         qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
 
+        # if you do post training sparsity and then QAT, the sparse_params
+        # need to be preserved during the QAT convert
+        if hasattr(mod, "sparse_params"):
+            qat_linear.sparse_params = mod.sparse_params
+
         if is_parametrized(mod, "weight"):
             transfer_parametrizations_and_params(mod, qat_linear, "weight")
         else:

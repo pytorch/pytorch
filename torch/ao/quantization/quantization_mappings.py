@@ -17,6 +17,10 @@ import torch.nn.qat.dynamic as nnqatd
 from typing import Optional, Union, Dict, Set, Callable, Any
 
 import torch.ao.nn as ao_nn
+import torch.ao.nn.sparse.intrinsic.quantized as ao_nn_siq
+import torch.ao.nn.sparse.intrinsic.qat as ao_nn_siqat
+import  torch.ao.nn.sparse.qat as ao_nn_sqat
+
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
@@ -165,7 +169,10 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
 
 # Default map for swapping float module to static sparse quantized ones
 DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
-    nn.Linear: ao_nn.sparse.quantized.Linear
+    nn.Linear: ao_nn.sparse.quantized.Linear,
+    nni.LinearReLU: ao_nn_siq.SparseQuantizedLinearReLU,
+    nn.qat.Linear: ao_nn_sqat.SparseQATLinear,
+    nni.qat.LinearReLU: ao_nn_siqat.SparseQATLinearReLU
 }
 
 # Default map for swapping float module to dynamic sparse quantized ones

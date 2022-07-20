@@ -7,6 +7,10 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
+import torch.ao.nn.sparse.intrinsic.qat as ao_iqatsparsenn
+import torch.ao.nn.sparse.qat as ao_qatsparsenn
+import torch.ao.nn.sparse.intrinsic.quantized as ao_iqsparsenn
+
 from .utils import (
     FakeSparsity,
     get_arg_info_from_tensor_fqn,
@@ -16,7 +20,10 @@ from .utils import (
 __all__ = ["BaseSparsifier"]
 
 SUPPORTED_MODULES = {
-    nn.Linear
+    nn.Linear,
+    ao_qatsparsenn.SparseQATLinear,
+    ao_iqatsparsenn.SparseQATLinearReLU,
+    ao_iqsparsenn.SparseQuantizedLinearReLU
 }
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
