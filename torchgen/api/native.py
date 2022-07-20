@@ -1,4 +1,4 @@
-from typing import List, Optional, Sequence, Union, Set
+from typing import List, Optional, Sequence, Set, Union
 
 from torchgen import local
 from torchgen.api import cpp
