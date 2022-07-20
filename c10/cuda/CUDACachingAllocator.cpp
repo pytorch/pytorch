@@ -1636,7 +1636,9 @@ class THCCachingAllocator {
         1, // type: 1 = allocation; 0 = free
         device // allocation device
     };
-    append_alloc_free_event(E);
+    append_alloc_free_event(
+        E); // if allocation fails we still record the event with a nullptr
+            // ptr is modified if allocation succeeds
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
