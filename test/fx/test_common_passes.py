@@ -66,7 +66,8 @@ Test_Cases = [TakeList,
               ReturnList,
               Mutation,
               MutationInput,
-              MutationMetadata]
+              MutationMetadata,
+              MutationTorchTensorCall]
 Factory_Test_Cases = [FactoryFunctionCall, MutationFactory]
 Devices = ["cpu"]
 if torch.cuda.is_available():
@@ -108,22 +109,6 @@ class TestCommanPass(TestCase):
 
         self.assertEqual(result, expected)
 
-
-    @parametrize("common_pass,device", itertools.product(Passes, Devices))
-    def test_correctness_mutation_tensor_call(self, common_pass, device):
-        inp = torch.randn(10, device=device)
-        traced_m = make_fx(MutationTorchTensorCall)(inp)
-        P = common_pass()
-
-        res = P(traced_m)
-        modified_m = res.graph_module
-        assert isinstance(modified_m, fx.GraphModule)
-
-        inp_copy = inp.clone()
-        expected = MutationTorchTensorCall(inp)
-        result = modified_m(inp_copy)
-
-        self.assertEqual(result, expected + 1)
 
 instantiate_parametrized_tests(TestCommanPass)
 
