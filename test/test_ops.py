@@ -536,13 +536,14 @@ class TestCommon(TestCase):
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
         )
 
