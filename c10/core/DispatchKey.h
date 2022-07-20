@@ -22,6 +22,32 @@ namespace c10 {
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 
+#define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
+  _(CPU, extra)                                 \
+  _(CUDA, extra)                                \
+  _(HIP, extra)                                 \
+  _(XLA, extra)                                 \
+  _(MPS, extra)                                 \
+  _(IPU, extra)                                 \
+  _(XPU, extra)                                 \
+  _(HPU, extra)                                 \
+  _(VE, extra)                                  \
+  _(Lazy, extra)                                \
+  _(Meta, extra)                                \
+  _(PrivateUse1, extra)                         \
+  _(PrivateUse2, extra)                         \
+  _(PrivateUse3, extra)
+
+#define C10_FORALL_FUNCTIONALITY_KEYS(_) \
+  _(Dense, )                             \
+  _(Quantized, Quantized)                \
+  _(Sparse, Sparse)                      \
+  _(NestedTensor, NestedTensor)          \
+  _(AutogradFunctionality, Autograd)
+
+// WARNING!  If we add a new per-backend functionality key that has higher
+// priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
+
 enum class BackendComponent : uint8_t {
 
   // A "backend" is colloquially used to refer to handlers for dispatch
@@ -45,27 +71,18 @@ enum class BackendComponent : uint8_t {
   // of
   // [backends in this enum] x [keys below that are explicitly marked as having
   // per-backend functionality]
-
-  InvalidBit = 0,
-  CPUBit,
-  CUDABit,
-  HIPBit,
-  XLABit,
-  MPSBit,
-  IPUBit,
-  XPUBit,
-  HPUBit,
-  VEBit,
-  LazyBit,
+  //
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
   // A meta tensor can be used to dry run operators without actually doing any
   // computation, e.g., add on two meta tensors would give you another meta
   // tensor with the output shape and dtype, but wouldn't actually add anything.
-  MetaBit,
-  PrivateUse1Bit,
-  PrivateUse2Bit,
-  PrivateUse3Bit,
+
+  InvalidBit = 0,
+#define DEFINE_BACKEND_COMPONENT(n, _) n##Bit,
+  C10_FORALL_BACKEND_COMPONENTS(DEFINE_BACKEND_COMPONENT, unused)
+#undef DEFINE_BACKEND_COMPONENT
+
   // Define an alias to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
   // (But you shouldn't: private use keys should have higher precedence than
@@ -188,20 +205,6 @@ enum class DispatchKey : uint16_t {
 
   SparseCsrCPU,
   SparseCsrCUDA,
-
-  // Note [Non-Customizable Backend Keys]
-  // Every key above here is considered a "non-customizable backend".
-  // These are backends that will work correctly with autograd, but
-  // but currently don't require separate implementations
-  // for autograd sparse or quantized kernels.
-  // Any new backends that don't need to be customized should go above here.
-  // If an existing backend needs to e.g. override autograd, then we can
-  // consider promoting it into the "BackendComponent" enum
-  //
-  // For all intents and purposes from the perspective of DispatchKeySet,
-  // "non-customizable backend" keys are treated the same way
-  // as other functionality keys
-  EndOfNonCustomizableBackends = SparseCsrCUDA,
 
   NestedTensor,
 
@@ -390,128 +393,26 @@ enum class DispatchKey : uint16_t {
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
 
-  // ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
-  // Here are backends which you think of as traditionally specifying
-  // how to implement operations on some device.
+// ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
+// Here are backends which you think of as traditionally specifying
+// how to implement operations on some device.
 
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-  StartOfDenseBackends,
-  CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
-  CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
-  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
-  // CUDA]
-  XLA, // lives out of tree at https://github.com/pytorch/xla
-  MPS, // registered at build/aten/src/ATen/RegisterMPS.cpp
-  IPU, // lives out of tree at https://github.com/graphcore/poptorch
-  XPU, // For out of tree Intel's heterogeneous computing plug-in
-  HPU, // For out of tree & closed source integration of HPU / Habana
-  VE, // For out of tree & closed source integration of SX-Aurora / NEC
-  Lazy, // For lazy tensor backends
-  Meta,
-  // Here are reserved backends for user-defined backends, see Note [Private use
-  // DispatchKey]
-  // To see some example about how to use this, check out ORT
-  PrivateUse1,
-  PrivateUse2,
-  PrivateUse3,
-  EndOfDenseBackends = PrivateUse3,
+// See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 
-  // ~~~~~~~~~~~~~~ "Quantized" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~ //
-  // keys starting with an _ are not currently used,
-  // but are needed to ensure that every backend is indexed correctly.
+#define DEFINE_PER_BACKEND_KEYS_FOR_BACKEND(n, prefix) prefix##n,
 
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-  StartOfQuantizedBackends,
-  QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
-  QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
-  _QuantizedHIP,
-  _QuantizedXLA,
-  _QuantizedMPS,
-  _QuantizedIPU,
-  QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  _QuantizedHPU,
-  _QuantizedVE,
-  _QuantizedLazy,
-  _QuantizedMeta,
-  _QuantizedPrivateUse1,
-  _QuantizedPrivateUse2,
-  _QuantizedPrivateUse3,
-  EndOfQuantizedBackends = _QuantizedPrivateUse3,
+#define DEFINE_PER_BACKEND_KEYS(fullname, prefix)      \
+  StartOf##fullname##Backends,                         \
+      C10_FORALL_BACKEND_COMPONENTS(                   \
+          DEFINE_PER_BACKEND_KEYS_FOR_BACKEND, prefix) \
+          EndOf##fullname##Backends = prefix##PrivateUse3,
 
-  // ~~~~~~~~~~~~~~ "Sparse" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~ //
-  // keys starting with an _ are not currently used,
-  // but are needed to ensure that every backend is indexed correctly.
+  C10_FORALL_FUNCTIONALITY_KEYS(DEFINE_PER_BACKEND_KEYS)
 
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-  StartOfSparseBackends,
-  SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
-  SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
-  SparseHIP, // TODO: I think this is not actually used, due to Note
-  // [Masquerading as CUDA]
-  _SparseXLA,
-  _SparseMPS,
-  _SparseIPU,
-  SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
-  _SparseHPU,
-  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
-  _SparseLazy,
-  _SparseMeta,
-  _SparsePrivateUse1,
-  _SparsePrivateUse2,
-  _SparsePrivateUse3,
-  EndOfSparseBackends = _SparsePrivateUse3,
+#undef DEFINE_PER_BACKEND_KEYS
+#undef DEFINE_PER_BACKEND_KEYS_FOR_BACKEND
 
-  // ~~~~~~~~~~~~~~ "NestedTensor" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~
-  // //
-  // keys starting with an _ are not currently used,
-  // but are needed to ensure that every backend is indexed correctly.
-
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-  StartOfNestedTensorBackends,
-  // registered at build/aten/src/ATen/RegisterNestedTensorCPU.cpp
-  NestedTensorCPU,
-  // registered at build/aten/src/ATen/RegisterNestedTensorCUDA.cpp
-  NestedTensorCUDA,
-  _NestedTensorHIP,
-  _NestedTensorXLA,
-  _NestedTensorMPS,
-  _NestedTensorIPU,
-  _NestedTensorXPU,
-  _NestedTensorHPU,
-  _NestedTensorVE,
-  _NestedTensorLazy,
-  _NestedTensorMeta,
-  _NestedTensorPrivateUse1,
-  _NestedTensorPrivateUse2,
-  _NestedTensorPrivateUse3,
-  EndOfNestedTensorBackends = _NestedTensorPrivateUse3,
-
-  // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
-  // keys starting with an _ are not currently used,
-  // but are needed to ensure that every backend is indexed correctly.
-
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-  StartOfAutogradBackends,
-  AutogradCPU,
-  AutogradCUDA,
-  _AutogradHIP,
-  AutogradXLA,
-  AutogradMPS,
-  AutogradIPU,
-  AutogradXPU,
-  AutogradHPU,
-  _AutogradVE,
-  AutogradLazy,
-  AutogradMeta,
-  // Here are some reserved pre-autograd keys for user-defined backends, see
-  // Note [Private use DispatchKey]
-  AutogradPrivateUse1,
-  AutogradPrivateUse2,
-  AutogradPrivateUse3,
-  EndOfAutogradBackends = AutogradPrivateUse3,
-  // If we add a new per-backend functionality key that has higher priority
-  // than Autograd, then this key should be updated.
-  EndOfRuntimeBackendKeys = EndOfAutogradBackends,
+      EndOfRuntimeBackendKeys = EndOfAutogradFunctionalityBackends,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Note [Alias Dispatch Keys]
@@ -696,11 +597,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends));
   } else if (
-      k >= DispatchKey::StartOfAutogradBackends &&
-      k <= DispatchKey::EndOfAutogradBackends) {
+      k >= DispatchKey::StartOfAutogradFunctionalityBackends &&
+      k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
     return static_cast<BackendComponent>(
         static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutogradFunctionalityBackends));
   } else {
     return BackendComponent::InvalidBit;
   }
@@ -717,7 +619,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Sparse;
   } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
     return DispatchKey::NestedTensor;
-  } else if (k <= DispatchKey::EndOfAutogradBackends) {
+  } else if (k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
     return DispatchKey::Undefined;
@@ -755,7 +657,8 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
   }
   if (functionality_k == DispatchKey::AutogradFunctionality) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) +
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutogradFunctionalityBackends) +
         static_cast<uint8_t>(backend_k));
   }
   return DispatchKey::Undefined;
