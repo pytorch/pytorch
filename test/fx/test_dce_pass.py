@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 from typing import Set, Type
 import torch
