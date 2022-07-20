@@ -1461,7 +1461,7 @@ Tensor miopen_convolution_transpose(
   return output_t;
 }
 
-// MIOpen fused convolution bias activation forward
+// MIOpen fused convolution add bias activation forward
 void raw_miopen_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
@@ -1475,6 +1475,71 @@ void raw_miopen_convolution_add_relu_out(
     int64_t groups,
     bool benchmark,
     bool deterministic) {
+
+  // MIOpen does not support fusion of add, the alpha2 * z step of the below cuDNN function:
+  // y = act ( alpha1 * conv(x) + alpha2 * z + bias )
+  raw_miopen_convolution_forward_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  at::Tensor alpha_mul_z_add_bias = at::native::reshape_bias(input.dim(), bias).add(z, alpha);
+  output.add_(alpha_mul_z_add_bias);
+  output.relu_();
+}
+
+// MIOpen fused convolution bias activation forward
+void raw_miopen_convolution_relu_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic) {
+
+  auto dataType = getMiopenDataType(input);
+  miopenConvolutionMode_t c_mode = miopenConvolution;
+
+  ConvolutionArgs args{ input, output, weight };
+  args.handle = getMiopenHandle();
+  setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
+  args.idesc.set(input);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
+  args.odesc.set(output);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+
+  TensorDescriptor bdesc;
+  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
+
+  // Create the fusion plan
+  miopenFusionPlanDescriptor_t fusePlanDesc;
+  miopenFusionOpDescriptor_t convoOp;
+  miopenFusionOpDescriptor_t biasOp;
+  miopenFusionOpDescriptor_t activOp;
+  MIOPEN_CHECK(miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, args.idesc.desc()));
+  MIOPEN_CHECK(miopenCreateOpConvForward(fusePlanDesc, &convoOp, args.cdesc.desc(), args.wdesc.desc()));
+  MIOPEN_CHECK(miopenCreateOpBiasForward(fusePlanDesc, &biasOp, bdesc.desc()));
+  MIOPEN_CHECK(miopenCreateOpActivationForward(fusePlanDesc, &activOp, miopenActivationRELU));
+
+  // compile fusion plan
+  MIOPEN_CHECK(miopenCompileFusionPlan(args.handle, fusePlanDesc));
+
+  // Set the Args
+  float alpha = static_cast<float>(1);
+  float beta = static_cast<float>(0);
+  float activ_alpha = static_cast<float>(0);
+  float activ_beta = static_cast<float>(0);
+  float activ_gamma = static_cast<float>(0);
+  miopenOperatorArgs_t fusionArgs;
+  MIOPEN_CHECK(miopenCreateOperatorArgs(&fusionArgs));
+  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.data_ptr()));
+  MIOPEN_CHECK(miopenSetOpArgsActivForward(fusionArgs, activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma));
+
+  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
+
+  // Cleanup
+  miopenDestroyFusionPlan(fusePlanDesc);
 }
 
 Tensor miopen_convolution_add_relu(
@@ -1488,11 +1553,16 @@ Tensor miopen_convolution_add_relu(
     IntArrayRef dilation,
     int64_t groups) {
 
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (miopen_conv_use_channels_last(input, weight)) {
+    memory_format = (weight.ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  }
+
   // FuseFrozenConvAddRelu performs some tensor shape checking
   Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      input.options().memory_format(input.suggest_memory_format()));
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1536,11 +1606,16 @@ Tensor miopen_convolution_relu(
     IntArrayRef dilation,
     int64_t groups) {
 
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (miopen_conv_use_channels_last(input, weight)) {
+    memory_format = (weight.ndimension() == 5) ? /*at::MemoryFormat::ChannelsLast3d*/at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  }
+
   // FuseFrozenConvAddRelu performs some tensor shape checking
   Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      input.options().memory_format(input.suggest_memory_format()));
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1556,12 +1631,10 @@ Tensor miopen_convolution_relu(
                 output_t.options().device_opt(),
                 output_t.options().pinned_memory_opt());
 
-  raw_miopen_convolution_add_relu_out(
+  raw_miopen_convolution_relu_out(
       output_t,
       input,
       weight,
-      output_t, // use output_t as z to satisfy API
-      0, // alpha
       _bias,
       stride,
       padding,
