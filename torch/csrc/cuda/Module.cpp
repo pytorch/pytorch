@@ -334,14 +334,6 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   END_HANDLE_TH_ERRORS
 }
 
-// PyObject* THCPModule_cudaCachingAllocator_test_expose(
-//     PyObject* _unused,
-//     PyObject* noargs) {
-//   HANDLE_TH_ERRORS
-//   return PyBytes_FromString(c10::cuda::CUDACachingAllocator::test_expose());
-//   END_HANDLE_TH_ERRORS
-// }
-
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* _unused,
     PyObject* obj) {
@@ -672,9 +664,6 @@ static void bindGetAllocFreeEvents(PyObject* module) {
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents,
       "Get allocation/free sequence");
-  // m.def("_get_num_alloc_events",
-  // &c10::cuda::CUDACachingAllocator::GetNumAllocEvents, "Get number of
-  // allocation/free events");
 }
 
 // Callback for python part. Used for additional initialization of python
@@ -861,8 +850,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaCachingAllocator_raw_delete,
      METH_O,
      nullptr},
-    // {"_cuda_cudaCachingAllocator_test_expose",
-    // THCPModule_cudaCachingAllocator_test_expose, METH_NOARGS, nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},

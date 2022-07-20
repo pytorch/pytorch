@@ -724,6 +724,7 @@ class DeviceCachingAllocator {
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, device));
+
     return block;
   }
 
