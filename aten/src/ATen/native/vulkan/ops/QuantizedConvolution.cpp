@@ -370,7 +370,7 @@ void conv2d_sliding_window_q(
     const IntArrayRef unpacked_filter,
     const Conv2dQMethod method_,
     const double scale,
-    const double zero_point) {
+    const int64_t zero_point) {
   api::Context* const context = api::context();
 
   const double scale_out = v_output.get_scale();
@@ -399,7 +399,6 @@ void conv2d_sliding_window_q(
     ivec2 padding;
     ivec2 dilate;
     vec2 clamp;
-    ivec4 src_filter;
   } block{
       v_output.extents(),
       safe_downcast<int32_t>(packed_filter[Layout::Filter::input]),
@@ -445,14 +444,6 @@ void conv2d_sliding_window_q(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader,
       // pipeline barrier
@@ -493,8 +484,10 @@ Tensor conv2d_context_run_q(
   const auto packed_stride = packed_context.get(3).toIntVector();
   const auto packed_padding = packed_context.get(4).toIntVector();
   const auto packed_dilation = packed_context.get(6).toIntVector();
-  const float packed_output_min = packed_context.get(8).toDouble();
-  const float packed_output_max = packed_context.get(9).toDouble();
+  const float packed_output_min =
+      safe_downcast<float>(packed_context.get(8).toDouble());
+  const float packed_output_max =
+      safe_downcast<float>(packed_context.get(9).toDouble());
   const auto unpacked_filter = unpacked_context.get(2).toIntVector();
   const Conv2dQMethod method_ = (Conv2dQMethod)unpacked_context.get(10).toInt();
 
