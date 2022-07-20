@@ -119,7 +119,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_symeig.*",
     "_svd.*",
     "slice",
-    "randint(_out)?",
     "item",
     "_local_scalar_dense",
     "to",
