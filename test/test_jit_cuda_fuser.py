@@ -4937,6 +4937,28 @@ class TestCudaFuser(JitTestCase):
         t2_jit = torch.jit.script(t2)
         self._run_helper(t2_jit, t2, x0, x1, x2, check_stride=True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_type_inference(self):
+        device = "cuda"
+        x0 = torch.randn(10, 128, device=device)
+        x1 = torch.rand_like(x0)
+        x2 = torch.rand_like(x0)
+
+        def t(x0, x1, x2, flag : bool = True):
+            x3 = 2.0 * x0
+            x4 = 2.0 * x1
+            x5 = 2.0 * x2
+            if flag:
+                return torch.stack([x3, x4, x5], dim=-1)
+            # second code path doesn't run through profiling
+            # hence would utilize type inference with profiling information
+            return x0 + x1 + x2
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x0, x1, x2, check_stride=True)
+
 
 class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):
