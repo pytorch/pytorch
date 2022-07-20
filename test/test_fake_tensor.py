@@ -243,7 +243,7 @@ class FakeTensorConverterTest(TestCase):
         converter = mode.fake_tensor_converter
         self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
 
-    def test_separate_tensor_storages(self):
+    def test_separate_tensor_storages_view(self):
         x = torch.rand(2, 2, 2)
         y = x[0]
         mode = FakeTensorMode(inner=None)
@@ -251,6 +251,26 @@ class FakeTensorConverterTest(TestCase):
         x_conv = converter(mode, x)
         y_conv = converter(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+
+    def test_separate_tensor_storages_non_view(self):
+        x = torch.rand(2, 2, 2)
+        y = torch.rand(4, 2)
+        y.set_(x.storage())
+        mode = FakeTensorMode(inner=None)
+        converter = mode.fake_tensor_converter
+        x_conv = converter(mode, x)
+        y_conv = converter(mode, y)
+        stor_id = torch._C._storage_id(x_conv)
+        self.assertEqual(stor_id, torch._C._storage_id(y_conv))
+        del x
+        self.assertEqual(len(converter.tensor_memo), 1)
+        converter.meta_converter.check_for_expired_weak_storages()
+        self.assertEqual(len(converter.meta_converter.storage_memo), 1)
+        del y
+        self.assertEqual(len(converter.tensor_memo), 0)
+        converter.meta_converter.check_for_expired_weak_storages()
+        self.assertEqual(len(converter.meta_converter.storage_memo), 0)
+
 
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)
@@ -263,6 +283,17 @@ class FakeTensorConverterTest(TestCase):
         self.assertFalse(x in converter.tensor_memo)
         y_conv = converter(mode, y)
         self.assertEqual(x_conv_storage, torch._C._storage_id(y_conv))
+
+    def test_dead_key(self):
+        x = torch.rand(2, 2, 2)
+        mode = FakeTensorMode(inner=None)
+        converter = FakeTensorConverter()
+        x_conv = converter(mode, x)
+        self.assertEqual(len(converter.tensor_memo), 1)
+        self.assertEqual(len(converter.meta_converter.tensor_memo), 1)
+        del x
+        self.assertEqual(len(converter.tensor_memo), 0)
+        self.assertEqual(len(converter.meta_converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
         mode = FakeTensorMode(inner=None)

@@ -16,8 +16,6 @@ from pathlib import Path
 import os
 import warnings
 
-__all__ = ['reduce_graph_module', 'reduce_package_graph_module', 'reduce_deploy_graph_module', 'GraphModule']
-
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -421,8 +419,11 @@ class GraphModule(torch.nn.Module):
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
+        custom_builtins = '\n'.join([v.import_str for v in _custom_builtins.values()])
         model_str = f"""
 import torch
+{custom_builtins}
+
 from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):

@@ -3,7 +3,6 @@
 import math
 import sys
 import errno
-import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -1124,6 +1123,8 @@ except RuntimeError as e:
             next(loader2_it)
             next(loader1_it)
             next(loader2_it)
+            del loader1_it
+            del loader2_it
 
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
@@ -1892,7 +1893,10 @@ except RuntimeError as e:
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
+                # TODO: Fix test for 'loader_kill' that would cause running out of shared memory.
+                # Killing loader process would prevent DataLoader iterator clean up all queues
+                # and worker processes
+                exit_methods = [None, 'loader_error', 'worker_error', 'worker_kill']
                 persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
@@ -2723,22 +2727,28 @@ class SetAffinityDataset(IterableDataset):
         after = os.sched_getaffinity(0)
         return iter(after)
 
-
-def worker_set_affinity(_):
-    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
-
-
 @unittest.skipIf(
     not hasattr(os, 'sched_setaffinity'),
     "os.sched_setaffinity is not available")
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
+        # Query the current affinity mask to avoid setting a disallowed one
+        old_affinity = os.sched_getaffinity(0)
+        if not old_affinity:
+            self.skipTest("No affinity information")
+        # Choose any
+        expected_affinity = list(old_affinity)[-1]
+
+        def worker_set_affinity(_):
+            os.sched_setaffinity(0, [expected_affinity])
+
+
         dataset = SetAffinityDataset()
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
+            self.assertEqual(sample, [expected_affinity])
 
 class ConvDataset(Dataset):
     def __init__(self):

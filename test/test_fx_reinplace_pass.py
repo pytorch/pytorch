@@ -4,6 +4,12 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.fx.passes.reinplace import reinplace
 from torch.fx.experimental.proxy_tensor import make_fx
 
+try:
+    from functorch.experimental import functionalize
+    HAS_FUNCTIONALIZATION = True
+except e:
+    HAS_FUNCTIONALIZATION = False
+
 class TestReinplacePass(TestCase):
 
     def test_reinplace_basic(self):
@@ -14,8 +20,11 @@ class TestReinplacePass(TestCase):
             b = a.add(1)
             return b
 
-        inpt = torch.ones(2, device='meta')
+        inpt = torch.ones(2)
         f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
 
@@ -26,26 +35,6 @@ def forward(self, x_1):
     return clone_default
     """)
 
-    def test_reinplace_mutation_on_input(self):
-        # We can't convert the first add() call into an inplace,
-        # because it was performed on an input.
-        # The second add() should be converted into add_() though.
-        def f(x):
-            a = x.add(1)
-            b = a.add(1)
-            return b
-
-        inpt = torch.ones(2, device='meta')
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        self.assertExpectedInline(f2.code, """\
-
-
-
-def forward(self, x_1):
-    add_tensor = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
-    add_tensor_1 = torch.ops.aten.add_.Tensor(add_tensor, 1)
-    return add_tensor
-    """)
 
     def test_reinplace_with_view(self):
         def f(x):
@@ -57,8 +46,11 @@ def forward(self, x_1):
             c = a_view.add(1)
             return c
 
-        inpt = torch.ones(2, device='meta')
+        inpt = torch.ones(2)
         f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
 
@@ -71,57 +63,51 @@ def forward(self, x_1):
     return view_default
     """)
 
-    def test_reinplace_mutation_on_input_alias(self):
-        def f(x):
-            a = x.view(-1)
-            # We can't reinplace the first add, since it was run on an alias
-            # of an input.
-            b = a.add(1)
-            # Second add() is fine to re-inplace though.
-            c = b.add(1)
-            return c
+    # This test won't actually run in CI, because it requires functionalize() from functorch.
+    # I'm planning on testing more comprehensively with torchbench models,
+    # but we can make this testing better once functorch moves into pytorch/pytorch.
+    def test_reinplace_scatter_op(self):
+        def f(a_):
+            # for now, don't test mutations to inputs
+            a = a_.clone()
+            e = a.view(-1)
+            b = a.view(-1)
+            c = b[0]
+            d = c.view(-1)
+            d.add_(1)
+            return a + e
 
-        inpt = torch.ones(2, device='meta')
-        f2 = reinplace(make_fx(f)(inpt), inpt)
+        if not HAS_FUNCTIONALIZATION:
+            return
+        inpt = torch.ones(4)
+        f2 = reinplace(make_fx(functionalize(f))(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        # NOTE: one slight pessimization here is the fact that
+        # there are a bunch of redundant views in the graph.
+        # Technically, half of these views are duplicates that we could de-dup.
+        # This shouldn't really hurt performance though, since creating an extra view
+        # is effectively just moving some metadata around (and allocating a new TensorImpl).
+        # We can/should update the pass in the future to clean this up.
         self.assertExpectedInline(f2.code, """\
 
 
 
-def forward(self, x_1):
-    view_default = torch.ops.aten.view.default(x_1, [-1]);  x_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
-    add_tensor_1 = torch.ops.aten.add_.Tensor(add_tensor, 1)
-    return add_tensor
-    """)
-
-
-    def test_reinplace_mutation_on_input_alias_with_overwritten_data(self):
-        def f(x, y):
-            # The first add() is safe to reinplace even though x is an input, because x is overwritten later.
-            a = x.add(1)
-            # The second add() is NOT safe to reinplace, because a aliases a_view,
-            # and a is used as an input to the copy_() later.
-            a_view = a.view(-1)
-            b = a_view.add(1)
-            x.copy_(a)
-            # The second add() is NOT safe to reinplace, because y is an input that is not overwritten later.
-            c = y.add(1)
-            return c
-
-        x = torch.ones(2, device='meta')
-        y = torch.ones(2, device='meta')
-        f2 = reinplace(make_fx(f)(x, y), x, y)
-        self.assertExpectedInline(f2.code, """\
-
-
-
-def forward(self, x_1, y_1):
-    add_tensor = torch.ops.aten.add_.Tensor(x_1, 1)
-    view_default = torch.ops.aten.view.default(x_1, [-1])
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
-    copy__default = torch.ops.aten.copy_.default(x_1, x_1);  x_1 = None
-    add_tensor_2 = torch.ops.aten.add.Tensor(y_1, 1);  y_1 = None
-    return add_tensor_2
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    view_default = torch.ops.aten.view.default(clone_default, [-1])
+    view_default_1 = torch.ops.aten.view.default(clone_default, [-1])
+    select_int = torch.ops.aten.select.int(view_default_1, 0, 0);  view_default_1 = None
+    view_default_2 = torch.ops.aten.view.default(select_int, [-1]);  select_int = None
+    add_tensor = torch.ops.aten.add_.Tensor(view_default_2, 1)
+    view_default_3 = torch.ops.aten.view.default(clone_default, [-1]);  clone_default = None
+    select_int_1 = torch.ops.aten.select.int(view_default_3, 0, 0)
+    view_default_4 = torch.ops.aten.view.default(view_default_2, []);  view_default_2 = None
+    view_default_5 = torch.ops.aten.view.default(view_default_3, [4]);  view_default_3 = None
+    view_default_6 = torch.ops.aten.view.default(view_default_5, [-1])
+    add_tensor_1 = torch.ops.aten.add_.Tensor(view_default_5, view_default_6);  view_default_6 = None
+    return view_default_5
     """)
 
 if __name__ == '__main__':

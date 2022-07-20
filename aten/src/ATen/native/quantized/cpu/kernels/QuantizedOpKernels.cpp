@@ -652,6 +652,81 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
+static void qprelu_out_kernel(Tensor& out,
+                              const Tensor& qx,
+                              const Tensor& qw) {
+  int32_t i_zp = static_cast<int32_t>(qx.q_zero_point());
+  float i_scale = static_cast<float>(qx.q_scale());
+
+  int32_t w_zp = static_cast<int32_t>(qw.q_zero_point());
+  float w_scale = static_cast<float>(qw.q_scale());
+
+  int32_t o_zp = static_cast<int32_t>(out.q_zero_point());
+  float o_scale = static_cast<float>(out.q_scale());
+  float o_inv_scale = 1.0f / o_scale;
+
+  float multiplier = i_scale * w_scale * o_inv_scale;
+
+  int64_t input_ndim = qx.dim();
+  TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
+
+  // Helper to convert 1d tensors or scalar tensor to an nd tensor that broadcasts with input
+  // All elements go into the channel dimension
+  DimVector sizes(input_ndim, 1), strides(input_ndim, 0);
+  auto as_nd = [&](const Tensor& t) {
+    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
+    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+    return t.as_strided(sizes, strides);
+  };
+
+  auto qw_nd = as_nd(qw);
+
+  auto iter = TensorIteratorConfig()
+    .add_output(out)
+    .add_input(qx)
+    .add_input(qw_nd)
+    .build();
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qprelu", [&] {
+    using qVec = Vectorized<scalar_t>;
+    qVec i_zp_vec = qVec(static_cast<scalar_t>(i_zp));
+    qVec w_zp_vec = qVec(static_cast<scalar_t>(w_zp));
+
+    // Quantized one as weight
+    auto qw_one = at::native::quantize_val<scalar_t>(w_scale, w_zp, 1.0f);
+    qVec vec_qw_one = qVec(qw_one);
+    auto vec_qw_one_sub_zp = vec_qw_one.widening_subtract(w_zp_vec)[0];
+    int32_t qw_one_sub_zp = qw_one.val_ - w_zp;
+
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t val_qx, scalar_t val_qw) -> scalar_t {
+        int32_t qx_pos = std::max(static_cast<int32_t>(val_qx.val_), i_zp);
+        int32_t qx_neg = std::min(static_cast<int32_t>(val_qx.val_), i_zp);
+        int32_t qx_pos_sub_zp = qx_pos - i_zp;
+        int32_t qx_neg_sub_zp = qx_neg - i_zp;
+        int32_t qw_sub_zp = val_qw.val_ - w_zp;
+        auto qy_sub_zp = qx_pos_sub_zp * qw_one_sub_zp + qx_neg_sub_zp * qw_sub_zp;
+        return at::native::requantize_from_int<scalar_t>(
+            multiplier, o_zp, qy_sub_zp);
+      },
+      [=](qVec vec_qx, qVec vec_qw) -> qVec {
+        auto vec_qx_pos = vec_qx.maximum(i_zp_vec);
+        auto vec_qx_neg = vec_qx.minimum(i_zp_vec);
+        qVec::int_vec_return_type qx_pos_sub_zp = vec_qx_pos.widening_subtract(i_zp_vec);
+        qVec::int_vec_return_type qx_neg_sub_zp = vec_qx_neg.widening_subtract(i_zp_vec);
+        qVec::int_vec_return_type qw_sub_zp = vec_qw.widening_subtract(w_zp_vec);
+        qVec::int_vec_return_type qy_sub_zp;
+        for (const auto i : c10::irange(qVec::int_num_vecs())) {
+          qy_sub_zp[i] = qx_pos_sub_zp[i] * vec_qw_one_sub_zp + qx_neg_sub_zp[i] * qw_sub_zp[i];
+        }
+        return qVec::requantize_from_int(qy_sub_zp, multiplier, o_zp);
+      });
+  });
+
+}
+
 void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -2727,6 +2802,123 @@ void quantized_normalize_kernel(
   });
 }
 
+void qmean_inner_dim_kernel(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  // 'opt_dtype' should be none or equal to that of input
+  ScalarType dtype = self.scalar_type();
+  auto in_dims = self.sizes().vec();
+  auto out_dims = in_dims;
+  size_t num_dims_to_squeeze = dim.empty() ? self.dim() : dim.size();
+  int64_t M = 1; // Num of groups
+  int64_t N = 1; // Num of elements to take average of in each group
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+    M *= in_dims[i];
+  }
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+    auto idx = out_dims.size() - 1 - i;
+    N *= out_dims[idx];
+    out_dims[idx] = 1;
+  }
+  if (!keepdim) {
+    out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
+  }
+  result = at::_empty_affine_quantized(
+      out_dims,
+      at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
+      self.q_scale(),
+      self.q_zero_point(),
+      c10::nullopt);
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
+    scalar_t* X_data = self.data_ptr<scalar_t>();
+    scalar_t* Y_data = result.data_ptr<scalar_t>();
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i;
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
+        auto x_sum = hsum(X_ptr_underlying, N);
+        float y_float = static_cast<float>(x_sum) / N;
+        *Y_ptr_underlying = std::nearbyint(y_float);
+      }
+    });
+  });
+}
+
+void qstd_inner_dim_kernel(
+    const Tensor& self,
+    OptionalIntArrayRef dim,
+    optional<int64_t> unbiased,
+    bool keepdim,
+    Tensor& result) {
+  ScalarType dtype = self.scalar_type();
+  auto in_dims = self.sizes().vec();
+  auto out_dims = in_dims;
+  size_t num_dims_to_squeeze = dim.has_value() && !dim.value().empty() ?
+                               dim.value().size() :
+                               self.dim();
+  int64_t M = 1; // Num of groups
+  int64_t N = 1; // Num of elements to take std of in each group
+  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+    M *= in_dims[i];
+  }
+  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+    auto idx = out_dims.size() - 1 - i;
+    N *= out_dims[idx];
+    out_dims[idx] = 1;
+  }
+  if (!keepdim) {
+    out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
+  }
+  int64_t den = N; // Denominator when computing mean and deviation
+  if (unbiased.has_value() && unbiased.value() == 1) {
+    den -= 1;
+  }
+  auto x_scale = self.q_scale();
+  auto x_zp = self.q_zero_point();
+  result = at::_empty_affine_quantized(
+      out_dims,
+      at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
+      x_scale,
+      x_zp,
+      c10::nullopt);
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
+    scalar_t* X_data = self.data_ptr<scalar_t>();
+    scalar_t* Y_data = result.data_ptr<scalar_t>();
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i;
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
+        auto x_sum_shifted = hsum(X_ptr_underlying, N);
+        auto x_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        // Use double for intermediate variables to avoid accuracy issue
+        // Mean with zero point
+        double x_mean_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / N;
+        double x_mean_unbiased_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / den;
+        // variance / x_scale^2
+        double x_var_div_scale_x_sq =
+            std::max(static_cast<double>(x_sum_sq_shifted) / den -
+                2 * x_mean_shifted_div_scale_x * x_mean_unbiased_shifted_div_scale_x +
+                x_mean_shifted_div_scale_x * x_mean_shifted_div_scale_x * N / den, (double)0.0);
+        double y_float = std::sqrt(x_var_div_scale_x_sq) * x_scale;
+        *Y_ptr_underlying = at::native::quantize_val<scalar_t>(
+                            x_scale, x_zp, y_float)
+                            .val_;
+      }
+    });
+  });
+}
+
 #ifdef USE_FBGEMM
 void quantize_tensor_per_tensor_affine_cpu(
     const Tensor& rtensor,
@@ -3694,6 +3886,7 @@ REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qprelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qgelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
 REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
@@ -3709,6 +3902,8 @@ REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
 REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
+REGISTER_NO_AVX512_DISPATCH(qmean_inner_dim_stub);
+REGISTER_NO_AVX512_DISPATCH(qstd_inner_dim_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3748,6 +3943,7 @@ REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qprelu_stub, &qprelu_out_kernel);
 REGISTER_DISPATCH(qgelu_stub, &qgelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
@@ -3779,6 +3975,8 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     index_put_kernel_quantized_stub,
     &index_put_kernel_quantized_cpu);
+REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel);
+REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel);
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 } // namespace native

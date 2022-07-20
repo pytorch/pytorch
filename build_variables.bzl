@@ -132,6 +132,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
+    "torch/csrc/profiler/itt_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -365,6 +366,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
+    "torch/csrc/utils/schema_info.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
@@ -655,6 +657,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/grouped_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
@@ -698,6 +701,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
+    "torch/csrc/jit/codegen/cuda/maxinfo_propagator.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/non_divisible_split.cpp",
     "torch/csrc/jit/codegen/cuda/ops/alias.cpp",
@@ -743,6 +747,9 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
+    "torch/csrc/distributed/c10d/UCCTracing.cpp",
+    "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -1018,6 +1025,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Dict.cpp",
     "aten/src/ATen/core/Dimname.cpp",
     "aten/src/ATen/core/Formatting.cpp",
+    "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
@@ -1078,6 +1086,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+    # This is moved to aten_cpu because some of the custom ops use empty_with_tail_padding
+    # which was available only within aten_native_cpu. Ideally the right fix is to make
+    # empty_with_tail_padding into an op and use dispatcher with it. But exposing it as an op
+    # has limited use and hence does not seem to really make sense.
+    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
@@ -1155,6 +1168,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
+    "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
@@ -1163,8 +1177,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_deserialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_serialize.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",
@@ -1357,9 +1373,10 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseFactories.cpp",
+    "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
-    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
