@@ -2985,6 +2985,7 @@ def empty_like(
         a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
 
+
 @register_decomposition(torch.ops.aten.arange)
 @out_wrapper()
 def arange(
