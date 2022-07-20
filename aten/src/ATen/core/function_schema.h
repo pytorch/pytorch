@@ -202,9 +202,21 @@ inline bool operator!=(const Argument& lhs, const Argument& rhs) {
   return !(lhs == rhs);
 }
 
+enum struct TORCH_API SchemaArgType { input, output };
+
+/**
+ * struct SchemaArgument
+ *
+ * Structure used to represent arguments or returns for a schema.
+ */
+struct TORCH_API SchemaArgument {
+  SchemaArgType type;
+  size_t index;
+};
+
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
-struct FunctionSchema {
+struct TORCH_API FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
@@ -327,6 +339,23 @@ struct FunctionSchema {
     }
   }
 
+  // Returns whether the two AliasTypeSets contain any similarities
+  // ie: whether the two type sets can alias.
+  bool canAliasTypeSetsAlias(const c10::optional<std::vector<TypePtr>> &lhs, const c10::optional<std::vector<TypePtr>> &rhs) const;
+
+  // Recursively Finds all contained types within the AliasTypeSet.
+  c10::optional<std::vector<TypePtr>> getAliasTypeSetContainedTypes(const c10::optional<std::vector<TypePtr>> &aliasTypeSet) const ;
+
+  // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
+  // Used to map types to a type such that all types that can alias will be mapped to the same type.
+  // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
+  // on 'List[int]'.
+  c10::optional<std::vector<TypePtr>> mapTypeToAliasTypeSet(const TypePtr& type) const;
+
+  // Returns either arguments() or returns() depending on the SchemaArgType
+  // output => returns(), input => arguments()
+  std::vector<Argument> getCorrectList(SchemaArgType type) const;
+
  public:
 
   void dump() const;
@@ -359,6 +388,32 @@ struct FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
+  bool is_mutable(size_t index) const {
+    TORCH_INTERNAL_ASSERT(
+        index < arguments().size(),
+        "Invalid index for schema.");
+    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    return aliasInfo && aliasInfo->isWrite();
+  }
+  bool is_mutable(c10::string_view name) const {
+    c10::optional<int> index = argumentIndexWithName(name);
+    TORCH_INTERNAL_ASSERT(
+        index != c10::nullopt, "Schema has no argument named ", name);
+
+    return is_mutable(*index);
+  }
+
+  // Returns whether lhs and rhs may alias directly.
+  // This does not account for cases where lhs or rhs are a container that
+  // may contain elements that alias the other argument.
+  // FunctionSchema::may_contain_alias will include that functionality.
+  bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
+
+  // Returns whether lhs and rhs may alias directly or whether lhs/rhs are a container
+  // that may contain elements that alias the other argument.
+  // bidirectional = false only returns whether lhs may contain an alias of rhs
+  // while bidirectional = true returns both directions.
+  bool may_contain_alias(const SchemaArgument& lhs, const SchemaArgument& rhs, bool bidirectional = true) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {

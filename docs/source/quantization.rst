@@ -852,8 +852,8 @@ based on observed tensor data are provided, developers can provide their own
 quantization functions. Quantization can be applied selectively to different
 parts of the model or configured differently for different parts of the model.
 
-We also provide support for per channel quantization for **conv2d()**,
-**conv3d()** and **linear()**
+We also provide support for per channel quantization for **conv1d()**, **conv2d()**,
+**conv3d()** and **linear()**.
 
 Quantization workflows work by adding (e.g. adding observers as
 ``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to

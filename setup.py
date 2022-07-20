@@ -52,6 +52,8 @@
 #
 #   USE_STATIC_MKL
 #     Prefer to link with MKL statically - Unix only
+#   USE_ITT=0
+#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -540,6 +542,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+
+        if cmake_cache_vars['USE_ITT']:
+            report('-- Using ITT')
+        else:
+            report('-- Not using ITT')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -1061,6 +1068,8 @@ if __name__ == '__main__':
                 'include/torch/csrc/deploy/interpreter/*.h',
                 'include/torch/csrc/deploy/interpreter/*.hpp',
                 'include/torch/csrc/distributed/c10d/exception.h',
+                'include/torch/csrc/distributed/rpc/*.h',
+                'include/torch/csrc/generic/utils.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
@@ -1086,6 +1095,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/tensor/*.h',
                 'include/torch/csrc/lazy/backend/*.h',
                 'include/torch/csrc/lazy/core/*.h',
+                'include/torch/csrc/lazy/core/internal_ops/*.h',
                 'include/torch/csrc/lazy/core/ops/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
