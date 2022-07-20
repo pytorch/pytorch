@@ -5,6 +5,9 @@
 #include <c10d/UCCUtils.hpp>
 #include <list>
 #include <memory>
+#include <unordered_set>
+#include <unordered_map>
+#include <cctype>
 
 namespace c10d {
 
@@ -106,19 +109,17 @@ struct torch_ucc_config_t {
   bool enable_health_check;
 } torch_ucc_config;
 
-// TODO: support UCC_BLOCKING_WAIT that applies to all collectives.
-std::map<std::string, std::string> torch_ucc_envs_map = {
-    {"TORCH_UCC_ALLGATHER_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_ALLGATHER_BASE_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_ALLREDUCE_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_ALLTOALL_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_BCAST_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_GATHER_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_REDUCE_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_REDUCE_SCATTER_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_SCATTER_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_SEND_BLOCKING_WAIT", "0"},
-    {"TORCH_UCC_RECV_BLOCKING_WAIT", "0"},
+std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
+    // TORCH_UCC_BLOCKING_WAIT allowed syntax:
+    // - TORCH_UCC_BLOCKING_WAIT=0 --> blocking wait completely disabled
+    // - TORCH_UCC_BLOCKING_WAIT=1 --> blocking wait completely enabled
+    // - TORCH_UCC_BLOCKING_WAIT=all --> blocking wait completely enabled
+    // - TORCH_UCC_BLOCKING_WAIT=allreduce,send,recv --> blocking wait enabled
+    //                                                   on selected operations
+    // Supported operations:
+    // [allgather,allgather_base,allreduce,alltoall,broadcast,
+    //  gather,reduce,reduce_scatter,scatter,send,recv]
+    {"TORCH_UCC_BLOCKING_WAIT", "0"},
 
     {"TORCH_UCC_USE_FUTURE", "1"},
     {"TORCH_UCC_PROFILING_ENABLE", "0"},
@@ -128,11 +129,58 @@ std::map<std::string, std::string> torch_ucc_envs_map = {
     {"TORCH_UCC_ENABLE_COMMS_LOGGER", "0"},
 };
 
+// trim implementation borrowed from https://stackoverflow.com/a/17976541
+inline c10::string_view trim(c10::string_view s) {
+  auto wsfront = std::find_if_not(
+      s.begin(), s.end(), [](int c) { return std::isspace(c); });
+  auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c) {
+                  return std::isspace(c);
+                }).base();
+  return (wsback <= wsfront ? "" : s.substr(wsfront - s.begin(), wsback - wsfront));
+}
+
+std::unordered_set<OpType> parse_blocking_wait(std::string s) {
+  const static std::unordered_map<std::string, OpType> str2op = {
+      {"allgather", OpType::ALLGATHER},
+      {"allgather_base", OpType::_ALLGATHER_BASE},
+      {"allreduce", OpType::ALLREDUCE},
+      {"alltoall_base", OpType::ALLTOALL_BASE},
+      {"broadcast", OpType::BROADCAST},
+      {"gather", OpType::GATHER},
+      {"reduce", OpType::REDUCE},
+      {"reduce_scatter", OpType::REDUCE_SCATTER},
+      {"scatter", OpType::SCATTER},
+      {"send", OpType::SEND},
+      {"recv", OpType::RECV},
+  };
+  std::unordered_set<OpType> result;
+  c10::string_view sv = trim(s);
+  if (sv == "0") {
+    return result;
+  }
+  if (sv == "1" || sv == "all") {
+    result.reserve(str2op.size());
+    for (auto item : str2op) {
+      result.insert(item.second);
+    }
+    return result;
+  }
+  while (!sv.empty()) {
+    const auto end_pos = sv.find_first_of(',');
+    const auto token = trim(sv.substr(0, end_pos));
+    const auto it = str2op.find(std::string(token));
+    TORCH_CHECK(it != str2op.end(), "Invalid blocking wait option: '", token);
+    result.insert(it->second);
+    sv = (end_pos != c10::string_view::npos) ? sv.substr(end_pos + 1) : "";
+  }
+  return result;
+}
+
 } // namespace
 
 void read_confg() {
   // default configuration
-  torch_ucc_config.blocking_wait.fill(true);
+  torch_ucc_config.blocking_wait.fill(false);
   torch_ucc_config.enable_profiling = false;
   torch_ucc_config.use_future = true;
   torch_ucc_config.shared_comm = false;
@@ -149,24 +197,10 @@ void read_confg() {
     }
   }
 
-#define BUILD_BLOCKING_CFG(op, str)                   \
-  (torch_ucc_config.blocking_wait[(std::uint8_t)op] = \
-       std::stoi(torch_ucc_envs_map.at(str)))
-
-  BUILD_BLOCKING_CFG(OpType::ALLGATHER, "TORCH_UCC_ALLGATHER_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(
-      OpType::_ALLGATHER_BASE, "TORCH_UCC_ALLGATHER_BASE_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::ALLREDUCE, "TORCH_UCC_ALLREDUCE_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::ALLTOALL_BASE, "TORCH_UCC_ALLTOALL_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::BROADCAST, "TORCH_UCC_BCAST_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::GATHER, "TORCH_UCC_GATHER_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::REDUCE, "TORCH_UCC_REDUCE_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(
-      OpType::REDUCE_SCATTER, "TORCH_UCC_REDUCE_SCATTER_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::SCATTER, "TORCH_UCC_SCATTER_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::SEND, "TORCH_UCC_SEND_BLOCKING_WAIT");
-  BUILD_BLOCKING_CFG(OpType::RECV, "TORCH_UCC_RECV_BLOCKING_WAIT");
-#undef BUILD_BLOCKING_CFG
+  auto blocking_wait_str = torch_ucc_envs_map.at("TORCH_UCC_BLOCKING_WAIT");
+  for (auto op : parse_blocking_wait(blocking_wait_str)) {
+    torch_ucc_config.blocking_wait[(std::uint8_t)op] = true;
+  }
 
   torch_ucc_config.use_future =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_USE_FUTURE"));
