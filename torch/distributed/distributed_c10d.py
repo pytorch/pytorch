@@ -764,17 +764,14 @@ def _new_process_group_helper(
 
             backend_creator_fn = Backend._plugins[backend.upper()]
 
+            import inspect
             if pg_options is None:
-                import inspect
                 backend_module = inspect.getmodule(backend_creator_fn)
-                assert 'Options' in dict(inspect.getmembers(backend_module, inspect.isclass)), (
-                    f"Process group Options not defined in {backend.upper()} implementation"
-                )
-
-                pg_options = backend_module.Options.create()
+                if not 'Options' in dict(inspect.getmembers(backend_module, inspect.isclass)):
+                    logger.warn(f"Process group Options not defined in {backend.upper()} implementation")
 
             pg = backend_creator_fn(
-                _group_count, prefix_store, group_rank, group_size, global_ranks_in_group, pg_options, timeout
+                prefix_store, group_rank, group_size, timeout, _group_count, global_ranks_in_group, pg_options
             )
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
