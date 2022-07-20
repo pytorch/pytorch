@@ -2,7 +2,7 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional
+from typing import Optional, Tuple
 
 import unittest
 from test_jit import JitTestCase
@@ -883,22 +883,36 @@ class TestJitTraceAutocast(JitTestCase):
 
 
     def test_script_autocast_enable_and_check(self):
-        def fn():
-            a = torch.is_autocast_cpu_enabled()
+        def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
+            b1 = torch.is_autocast_cpu_enabled()
+            v1 = torch.mm(x, y)
             with torch.cpu.amp.autocast(enabled=True):
-                b = torch.is_autocast_cpu_enabled()
+                b2 = torch.is_autocast_cpu_enabled()
+                v2 = torch.mm(x, y)
                 with torch.cpu.amp.autocast(enabled=False):
-                    c = torch.is_autocast_cpu_enabled()
-            return [a, b, c]
+                    b3 = torch.is_autocast_cpu_enabled()
+                    v3 = torch.mm(x, y)
+            return (v1, b1, v2, b2, v3, b3)
+
+        # bx = is_autocast_cpu_enabled() result should be False iff (vx = mm(x, y)).dtype is float
+        def check_fn_results(arr):
+            [v1, b1, v2, b2, v3, b3] = arr
+            self.assertTrue((v1.dtype == torch.float) != b1)
+            self.assertTrue((v2.dtype == torch.float) != b2)
+            self.assertTrue((v3.dtype == torch.float) != b3)
+
+        x = torch.rand((2, 2), dtype=torch.float)
+        y = torch.rand((2, 2), dtype=torch.float)
+
+        fn_s = torch.jit.script(fn)
 
         with torch.cpu.amp.autocast(enabled=False):
-            fn_s = torch.jit.script(fn)
-            self.assertEqual([False, True, False], fn())
-            self.assertEqual([False, True, False], fn_s())
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
 
         with torch.cpu.amp.autocast(enabled=True):
-            self.assertEqual([True, True, False], fn())
-            self.assertEqual([True, True, False], fn_s())
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
 
 
 if __name__ == "__main__":
