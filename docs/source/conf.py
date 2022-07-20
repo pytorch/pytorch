@@ -18,6 +18,7 @@
 #
 import os
 from os import path
+import re
 # import sys
 import pkgutil
 
@@ -642,12 +643,12 @@ def patched_make_field(self, types, domain, items, **kw):
             # inconsistencies later when references are resolved
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
-                typename = u''.join(n.astext() for n in fieldtype)
-                typename = typename.replace('int', 'python:int')
-                typename = typename.replace('long', 'python:long')
-                typename = typename.replace('float', 'python:float')
-                typename = typename.replace('bool', 'python:bool')
-                typename = typename.replace('type', 'python:type')
+                typename = fieldtype[0].astext()
+                builtin_types = ['int', 'long', 'float', 'bool', 'type']
+                for builtin_type in builtin_types:
+                    pattern = fr'(?<![\w.]){builtin_type}(?![\w.])'
+                    repl = f'python:{builtin_type}'
+                    typename = re.sub(pattern, repl, typename)
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis, **kw))
             else:
