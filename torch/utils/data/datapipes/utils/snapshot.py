@@ -15,6 +15,9 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     (via fast-forward) every DataPipe within the graph. This can also be used on source nodes within DataPipe graph
     with no input DataPipe.
 
+    After you deserialize a DataPipe, you can use its `_number_of_samples_yielded` attribute as the input
+    to this function to forward the DataPipe.
+
     A DataPipe cannot be restored twice in a row unless there is an iteration started between the restoration
     attempts.
 
