@@ -3,16 +3,9 @@ from torch.fx import GraphModule
 from torch.nn import Module
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
-from torch._subclasses import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    ProxyTensor,
-    ProxyTorchDispatchMode,
-    PythonKeyTracer,
-)
-import torchdynamo
-from torchdynamo.optimizations.training import AOTAutogradStrategy
+import torchdynamo  # type: ignore[import]
+from torchdynamo.optimizations.training import AOTAutogradStrategy  # type: ignore[import]
 
 import operator
 from collections import defaultdict
@@ -149,12 +142,12 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return torchdynamo.disable(bw_compiler(*args, **kwargs))
+        return torchdynamo.disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
 
-    from functorch.compile import aot_module_simplified
+    from functorch.compile import aot_module_simplified  # type: ignore[import]
 
     return aot_module_simplified(model, **kwargs)
 

@@ -841,7 +841,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if TEST_WITH_TORCHDYNAMO or hasattr(torch, '_DYNAMO_CTX'):
+            if TEST_WITH_TORCHDYNAMO:
                 raise unittest.SkipTest(msg)
             else:
                 fn(*args, **kwargs)

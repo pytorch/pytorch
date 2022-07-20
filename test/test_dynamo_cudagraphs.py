@@ -1,5 +1,6 @@
 # Owner(s): ["module: cuda graphs"]
 
+import sys
 import torch
 from torch.testing._internal.common_utils import (
     TestCase,
