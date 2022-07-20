@@ -6,12 +6,13 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -41,12 +42,8 @@ class TestApply(FSDPTest):
             m.weight.fill_(1.0)
             m.bias.fill_(1.0)
 
-    @property
-    def process_group(self):
-        return dist.distributed_c10d._get_default_group()
-
     def check_weights(self, fsdp, expected_tensor_fn, check):
-        with fsdp.summon_full_params(fsdp, recurse=True):
+        with FSDP.summon_full_params(fsdp, recurse=True):
             linear_modules = [
                 module for module in fsdp.modules() if type(module) == nn.Linear
             ]
@@ -70,32 +67,36 @@ class TestApply(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_nested_module_apply(self):
-        """
-        Checks apply() modifies weights appropriately on a nested FSDP instance.
-        """
-        nested_module = NestedWrappedModule(
-            self.process_group, wrap_fsdp=True, wrap_everything=True
+        """Tests that ``apply()`` modifies parameter values in-place on a
+        non-FSDP-root nested FSDP-wrapped model."""
+        nested_wrapped_module = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_AFTER,
         )
-        fsdp_module = FSDP(nested_module, self.process_group).cuda(self.rank)
-        self._check_apply(fsdp_module)
+        self._check_apply(nested_wrapped_module)
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_module_apply(self):
-        """
-        Checks apply() modifies weights appropriately on a wrapped Transformer
-        module.
-        """
-        transformer = self._get_wrapped_model(group=self.process_group).cuda(self.rank)
+        """Tests that ``apply()`` modifies parameter values in-place on an
+        FSDP-wrapped transformer model with shared parameters."""
+        transformer = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_AFTER,
+        )
         self._check_apply(transformer)
 
     @skip_if_lt_x_gpu(2)
     def test_apply_in_summon_raises_error(self):
-        """
-        Ensures that if user calls apply() on FSDP instance within full param
-        summon context, appropriate error is raised.
-        """
-        transformer = self._get_wrapped_model(group=self.process_group).cuda(self.rank)
-        with transformer.summon_full_params(transformer, recurse=True):
+        """Tests that calling ``apply()`` on an FSDP instance inside the
+        ``summon_full_params()`` context raises an error."""
+        transformer = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_AFTER,
+        )
+        with transformer.summon_full_params(transformer):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
                 transformer.apply(self._init_linear_weights)
 

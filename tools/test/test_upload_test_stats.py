@@ -1,5 +1,5 @@
-import unittest
 import os
+import unittest
 
 IN_CI = os.environ.get("CI")
 
