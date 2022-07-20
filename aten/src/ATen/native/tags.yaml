@@ -16,3 +16,11 @@
   desc: |
           This tag indicates that the operator doesn't have an explicit entry in
           native_functions.yaml, and instead was generated automatically by the codegen.
+- tag: nondeterministic_seeded
+  desc: |
+          This tag indicates if an operator is nondeterminstically seeded (ie is random)
+          such that the operator intentially produces different results when run twice on the same inputs.
+- tag: nondeterministic_bitwise
+  desc: |
+          This tag indicates if an operator doesn't guarentee bitwise equivalence
+          across different runs of an operator with identical inputs.
