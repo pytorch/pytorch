@@ -654,18 +654,27 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
-static void bindTestExpose(PyObject* module) {
+static void bindGetAllocFreeEvents(PyObject* module) {
   // Add method to torch.cuda
   auto m = py::handle(module).cast<py::module>();
-  pybind11::class_<c10::cuda::CUDACachingAllocator::AllocFreeEvent>(m, "AllocFreeEvent")
-        .def(pybind11::init<>())
-        .def_readonly("ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
-        .def_readonly("size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size)
-        .def_readonly("type", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::type)
-        .def_readonly("device", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::device);
-  m.def("test_exp", &c10::cuda::CUDACachingAllocator::test_expose, "Print Hello World");
-  m.def("_get_alloc_free_events", &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents, "Get allocation/free sequence");
-  // m.def("_get_num_alloc_events", &c10::cuda::CUDACachingAllocator::GetNumAllocEvents, "Get number of allocation/free events");
+  pybind11::class_<c10::cuda::CUDACachingAllocator::AllocFreeEvent>(
+      m, "AllocFreeEvent")
+      .def(pybind11::init<>())
+      .def_readonly(
+          "ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
+      .def_readonly(
+          "size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size)
+      .def_readonly(
+          "type", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::type)
+      .def_readonly(
+          "device", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::device);
+  m.def(
+      "_get_alloc_free_events",
+      &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents,
+      "Get allocation/free sequence");
+  // m.def("_get_num_alloc_events",
+  // &c10::cuda::CUDACachingAllocator::GetNumAllocEvents, "Get number of
+  // allocation/free events");
 }
 
 // Callback for python part. Used for additional initialization of python
@@ -710,7 +719,7 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);
-  bindTestExpose(m);
+  bindGetAllocFreeEvents(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -852,7 +861,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaCachingAllocator_raw_delete,
      METH_O,
      nullptr},
-    // {"_cuda_cudaCachingAllocator_test_expose", 
+    // {"_cuda_cudaCachingAllocator_test_expose",
     // THCPModule_cudaCachingAllocator_test_expose, METH_NOARGS, nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},

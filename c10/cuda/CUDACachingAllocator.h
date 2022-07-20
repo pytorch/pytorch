@@ -118,11 +118,11 @@ struct SegmentInfo {
   std::vector<BlockInfo> blocks;
 };
 
-struct AllocFreeEvent{
-    intptr_t ptr; // start location in memory
-    size_t size; // size in bytes
-    bool type; // 0 for free and 1 for allocate
-    int device;
+struct AllocFreeEvent {
+  intptr_t ptr; // start location in memory
+  size_t size; // size in bytes
+  bool type; // 0 for free and 1 for allocate
+  int device;
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
@@ -130,7 +130,6 @@ C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
 C10_CUDA_API std::vector<std::vector<AllocFreeEvent>> test_expose();
 C10_CUDA_API std::vector<std::vector<AllocFreeEvent>> GetAllocFreeEvents();
-// C10_CUDA_API int GetNumAllocEvents();
 
 C10_CUDA_API Allocator* get();
 C10_CUDA_API void init(int device_count);

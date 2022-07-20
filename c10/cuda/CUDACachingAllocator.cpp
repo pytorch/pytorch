@@ -20,7 +20,6 @@
 #include <regex>
 #include <set>
 #include <vector>
-#include <iostream>
 
 namespace c10 {
 
@@ -1585,25 +1584,21 @@ class THCCachingAllocator {
     return &cuda_free_mutex;
   }
 
-  void append_alloc_free_event(AllocFreeEvent E)
-  {
-    if (num_alloc_events[E.device] >= alloc_free_events[E.device].size()){
-        alloc_free_events[E.device].resize(alloc_free_events[E.device].size()*2);
+  void append_alloc_free_event(AllocFreeEvent E) {
+    if (num_alloc_events[E.device] >= alloc_free_events[E.device].size()) {
+      alloc_free_events[E.device].resize(
+          alloc_free_events[E.device].size() * 2);
     }
     alloc_free_events[E.device][num_alloc_events[E.device]] = E;
     num_alloc_events[E.device] += 1;
   }
-  std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events(){
+  std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
     std::vector<std::vector<AllocFreeEvent>> result = alloc_free_events;
     for (const auto i : c10::irange(0, alloc_free_events.size())) {
       result[i].resize(num_alloc_events[i]);
-      }
-    // std::vector<AllocFreeEvent> result = alloc_free_events;    
+    }
     return result;
   }
-  // unsigned int get_num_alloc_events(){
-  //     return num_alloc_events;
-  // }
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1634,21 +1629,21 @@ class THCCachingAllocator {
 
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
-    AllocFreeEvent E = {reinterpret_cast<intptr_t>(nullptr), // ptr
-                        size, // size: of allocation
-                        1, // type: 1 = allocation; 0 = free
-                        device // device
-                        };
+    AllocFreeEvent E = {
+        reinterpret_cast<intptr_t>(nullptr), // ptr
+        size, // size: of allocation in bytes
+        1, // type: 1 = allocation; 0 = free
+        device // allocation device
+    };
     append_alloc_free_event(E);
-    
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
-    alloc_free_events[device][num_alloc_events[device]-1].ptr = reinterpret_cast<intptr_t>(block->ptr);
-    std::cout<<"     alloc event with ptr      "<< alloc_free_events[device][num_alloc_events[device]-1].ptr;
+    alloc_free_events[device][num_alloc_events[device] - 1].ptr =
+        reinterpret_cast<intptr_t>(block->ptr);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
   }
@@ -1662,10 +1657,13 @@ class THCCachingAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     device_allocator[block->device]->free(block);
-    
-    AllocFreeEvent E = {reinterpret_cast<intptr_t>(block->ptr), block->size, 0, block->device};
+    AllocFreeEvent E = {
+        reinterpret_cast<intptr_t>(block->ptr), // ptr
+        block->size, // size: of allocation in bytes
+        0, // type: 1 = allocation; 0 = free
+        block->device // allocation device
+    };
     append_alloc_free_event(E);
-    std::cout<<"     free event with ptr      "<< alloc_free_events[block->device][num_alloc_events[block->device]-1].ptr;
   }
 
   void setMemoryFraction(double fraction, int device) {
@@ -1946,25 +1944,8 @@ void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
 }
 
-std::vector<std::vector<AllocFreeEvent>> GetAllocFreeEvents(){
+std::vector<std::vector<AllocFreeEvent>> GetAllocFreeEvents() {
   return caching_allocator.get_alloc_free_events();
-}
-// int GetNumAllocEvents(){
-//     return caching_allocator.get_num_alloc_events();
-// }
-
-std::vector<std::vector<AllocFreeEvent>> test_expose(){
-  std::vector<AllocFreeEvent> vec_allc{2};
-  AllocFreeEvent E;
-  E.size = 5;
-  E.type = 1;
-  vec_allc[0] = E;
-  vec_allc[1] = E;
-  vec_allc.resize(4);
-  std::vector<std::vector<AllocFreeEvent>> all{2};
-  all[0] = vec_allc;
-  all[1] = vec_allc;
-  return all;
 }
 
 } // namespace CUDACachingAllocator
