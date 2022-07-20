@@ -1972,7 +1972,7 @@
     MPS: empty_mps
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
-    SparseCPU, SparseCUDA: empty_sparse
+    SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
@@ -1983,7 +1983,7 @@
     MPS: empty_symint_mps
     Meta: empty_symint_meta
     MkldnnCPU: empty_symint_mkldnn
-    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCPU, SparseCUDA, SparseMeta: empty_symint_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
 
@@ -2061,7 +2061,7 @@
   dispatch:
     CompositeExplicitAutograd: empty_like
     QuantizedCPU, QuantizedCUDA: empty_like_quantized
-    SparseCPU, SparseCUDA: empty_like_sparse_coo
+    SparseCPU, SparseCUDA, SparseMeta: empty_like_sparse_coo
     SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -5732,24 +5732,24 @@
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: new_with_dims_sparse
+    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_sparse
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
+    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_and_tensor_sparse
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_resize_
+    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_
   autogen: sparse_resize, sparse_resize.out
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_resize_and_clear_
+    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_and_clear_
   autogen: sparse_resize_and_clear, sparse_resize_and_clear.out
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
@@ -5778,7 +5778,7 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5794,7 +5794,7 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5803,14 +5803,14 @@
 - func: _dimV(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _nnz(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _nnz_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _nnz_sparse
     SparseCsrCPU, SparseCsrCUDA: _nnz_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5831,21 +5831,21 @@
 - func: is_coalesced(Tensor self) -> bool
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: is_coalesced_sparse
+    SparseCPU, SparseCUDA, SparseMeta: is_coalesced_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _indices_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _indices_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _values_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _values_sparse
   device_check: NoCheck
   device_guard: False
 
@@ -5855,7 +5855,7 @@
 - func: _coalesced_(Tensor(a!) self, bool coalesced) -> Tensor(a!)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _coalesced_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: _coalesced_sparse_
   device_check: NoCheck
   device_guard: False
   autogen: _coalesced, _coalesced.out
@@ -5863,14 +5863,14 @@
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: indices_sparse
+    SparseCPU, SparseCUDA, SparseMeta: indices_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: values_sparse
+    SparseCPU, SparseCUDA, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
   device_check: NoCheck
   device_guard: False
