@@ -221,6 +221,7 @@ __all__ = [
     "view",
     "vsplit",
     "vstack",
+    "unbind",
     #
     # Tensor Creation
     #
@@ -2674,6 +2675,11 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = atleast_2d(*tensors)
     return cat(aligned_tensors, 0)
 
+def unbind(t : TensorLikeType, dim : int = 0) -> TensorSequenceType:
+    dim = utils.canonicalize_dim(t.ndim, dim)
+    check(len(t.shape), lambda: "dimension specified as 0 but tensor has no dimensions",
+          IndexError)
+    return tuple(torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim))
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.squeeze)

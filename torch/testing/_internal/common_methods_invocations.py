@@ -4206,6 +4206,33 @@ def error_inputs_hstack_dstack_vstack(op, device):
     # empty tensor list
     yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
 
+def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
+    # Note: we don't do any tests where we unbind along 0-length dims
+    # because in that case unbind returns and empty tuple, and that breaks
+    # some asumptions in some backward tests in test_ops.py
+    shape_dims = (((S,), 0),
+                  ((S, S), 0),
+                  ((S, S), 1),
+                  ((S, S), -1),
+                  ((S, 0, S), 0),
+                  ((S, S, S), 1),
+                 )
+    for shape, dim in shape_dims:
+        yield SampleInput(make_tensor(shape, dtype=dtype, device=device,
+                                      requires_grad=requires_grad),
+                          args=(dim,))
+
+def error_inputs_unbind(op_info, device):
+    make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
+    yield ErrorInput(SampleInput(make_arg(()), args=(0,)), error_type=IndexError,
+                     error_regex="dimension specified as 0 but tensor has no dimensions")
+    yield ErrorInput(SampleInput(make_arg((2,)), args=(2,)), error_type=IndexError,
+                     error_regex="Dimension out of range")
+
+def reference_unbind(t, dim):
+    """A numpy implementation of torch.unbind"""
+    return tuple( s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
+
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
@@ -17472,6 +17499,16 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
+    OpInfo('unbind',
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+           ref=reference_unbind,
+           sample_inputs_func=sample_inputs_unbind,
+           error_inputs_func=error_inputs_unbind,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_gradgrad=True,
+           supports_out=False,
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -21278,6 +21315,11 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/78613
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.unbind",
+        torch_opinfo_name="unbind",
+        supports_nvfuser=False,
     ),
     #
     # Reduction Reference OpInfos
