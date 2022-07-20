@@ -332,7 +332,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || (defined(USE_ROCM)  && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -363,12 +364,11 @@ extern SYCL_EXTERNAL void __assert_fail(
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 __host__ __device__
 #elif defined(__HIP_ARCH__) || defined(__HIP__)
-    __device__ __attribute__((noinline)) __attribute__((weak))
-    void __assert_fail(
-        const char* assertion,
-        const char* file,
-        unsigned int line,
-        const char* function);
+__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
+    const char* assertion,
+    const char* file,
+    unsigned int line,
+    const char* function);
 #endif
     void
     __assert_fail(
