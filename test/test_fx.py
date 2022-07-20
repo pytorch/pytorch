@@ -42,6 +42,7 @@ from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+from fx.test_pass_infra import TestPassManager  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -3499,6 +3500,43 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         gm.recompile()
         self.assertEqual(gm(2, 3), 6)
         self.assertIn("a *= b", gm.code)
+
+    def test_map_aggregate_doesnt_traverse_size(self):
+        def dont_traverse_size(a):
+            return type(a) != torch.Size
+
+        size = torch.Size([1, 2, 3])
+
+        res = torch.fx.node.map_aggregate(size, lambda a: a)
+        self.assertEqual(type(res), tuple)
+        self.assertEqual(res, (1, 2, 3))
+
+        res = torch.fx.node.map_aggregate(size, lambda a: a, dont_traverse_size)
+        self.assertEqual(type(res), torch.Size)
+        self.assertEqual(res, size)
+
+        data = (torch.empty(3, 4), size,
+                {'tensor': torch.empty(4, 5), 'size': size, 'list': [size, (size,), torch.empty(5, 6)]})
+
+        res = torch.fx.node.map_aggregate(data, lambda a: a)
+        self.assertEqual(type(res[1]), tuple)
+        self.assertEqual(res[1], (1, 2, 3))
+        self.assertEqual(type(res[2]['size']), tuple)
+        self.assertEqual(res[2]['size'], (1, 2, 3))
+        self.assertEqual(type(res[2]['list'][0]), tuple)
+        self.assertEqual(res[2]['list'][0], (1, 2, 3))
+        self.assertEqual(type(res[2]['list'][1][0]), tuple)
+        self.assertEqual(res[2]['list'][1][0], (1, 2, 3))
+
+        res = torch.fx.node.map_aggregate(data, lambda a: a, dont_traverse_size)
+        self.assertEqual(type(res[1]), torch.Size)
+        self.assertEqual(res[1], size)
+        self.assertEqual(type(res[2]['size']), torch.Size)
+        self.assertEqual(res[2]['size'], size)
+        self.assertEqual(type(res[2]['list'][0]), torch.Size)
+        self.assertEqual(res[2]['list'][0], size)
+        self.assertEqual(type(res[2]['list'][1][0]), torch.Size)
+        self.assertEqual(res[2]['list'][1][0], size)
 
 
 def run_getitem_target():
