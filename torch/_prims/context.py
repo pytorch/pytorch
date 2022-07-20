@@ -68,10 +68,13 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
     By default, this context manager will fall back on the torch.* if the
     ref does not exist; set strict=True to error if this occurs.
+    If the ref exists we still would like to fall back on the torch.* sometimes,
+    this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False):
+    def __init__(self, strict=False, should_fallback_fn=lambda *_: True):
         self.strict = strict
+        self.should_fallback_fn = should_fallback_fn
 
     def __torch_function__(
         self,
@@ -88,6 +91,9 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
+            # If the ref exists query whether we should use it or not
+            if self.should_fallback_fn(self, orig_func, func, args, kwargs):
+                return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
                 return func(*args, **kwargs)
@@ -97,18 +103,27 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             )
         return orig_func(*args, **kwargs)
 
-def _is_node_supported(node: torch.fx.Node) -> bool:
+
+def _is_node_supported_nvfuser(node):
     return (
         node.op == "call_function"
         and getattr(node.target, "impl_nvfuser", None) is not None
     )
+
 
 def _find_proxy_tensor(*objects_to_search):
     # return first proxy tensor found or None
     proxy_tensors = (o for o in objects_to_search if isinstance(o, ProxyTensor))
     return next(proxy_tensors, None)
 
-def _get_subgraph(func, args, kwargs):
+
+def _get_graphmodule(func, args, kwargs):
+    """A helper function used to get the GraphModule for the given func.
+
+    It's expected to be used in the ProxyTensor tracing context.
+    It detaches the args and kwargs from the current tracer so that the trace of
+    the current graph module can be created without any side-effects.
+    """
     # make_fx doesn't support kwargs, so we need to do this flattening
     # and then unflatten the args before calling func
     nargs = len(args)
@@ -121,8 +136,8 @@ def _get_subgraph(func, args, kwargs):
         fn_kwargs = dict(zip(kwargs_keys, args[nargs:]))
         return func(*fn_args, **fn_kwargs)
 
-    # extract outer tracer object
-    outer_tracer = _find_proxy_tensor(*all_args).proxy.tracer
+    # extract old tracer object
+    old_tracer = _find_proxy_tensor(*all_args).proxy.tracer
 
     # create a new tracer object
     graph = torch.fx.Graph()
@@ -138,62 +153,24 @@ def _get_subgraph(func, args, kwargs):
     finally:
         for arg in all_args:
             if isinstance(arg, torch.fx.experimental.proxy_tensor.ProxyTensor):
-                arg.proxy.tracer = outer_tracer
+                arg.proxy.tracer = old_tracer
 
     return gm
 
-class TorchRefsNvfuserMode(torch.overrides.TorchFunctionMode):
-    """
-    Switches the interpretation of torch.* functions and Tensor methods to
-    use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
-    only if the reference function can be run with nvFuser executor.
 
-    >>> with TorchRefsNvfuserMode.push():
-    ...     torch.add(x, y)  # calls torch._refs.add(x, y)
-
-    By default, this context manager will fall back on the torch.* if the
-    ref does not exist; set strict=True to error if this occurs.
-    """
-
-    def __init__(self, strict=False):
-        self.strict = strict
-
-    def __torch_function__(
-        self,
-        orig_func: Callable,
-        types: Sequence,
-        args: Sequence[Any] = (),
-        kwargs: Dict = None,
+def _is_func_unsupported_nvfuser(torch_function_mode, orig_func, func, args, kwargs):
+    with torch.overrides.enable_torch_function_mode(
+        torch_function_mode, replace=torch_function_mode.inner
     ):
-        if kwargs is None:
-            kwargs = {}
-        # For primitive operations, run them as is without interception
-        if orig_func in torch_function_passthrough or orig_func in all_prims():
-            return orig_func(*args, **kwargs)
-        mapping = torch_to_refs_map()
-        func = mapping.get(orig_func, None)
-        if func is not None:
-            # torch calls inside func should be interpreted as refs calls
-            # try and check the subgraph
+        gm = _get_graphmodule(func, args, kwargs)
 
-            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
-                gm = _get_subgraph(func, args, kwargs)
+    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    any_unsupported = any(
+        not _is_node_supported_nvfuser(node) for node in call_function_nodes
+    )
+    return any_unsupported
 
-            print(f"__torch_function__: orig_func={torch.overrides.resolve_name(orig_func)}")
-            gm.graph.print_tabular()
 
-            call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
-            any_unsupported = any(
-                not _is_node_supported(node) for node in call_function_nodes
-            )
-            print(f"any_unsupported={any_unsupported}")
-            if any_unsupported:
-                return orig_func(*args, **kwargs)
-            else:
-                with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
-                    return func(*args, **kwargs)
-        if self.strict:
-            raise RuntimeError(
-                f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
-            )
-        return orig_func(*args, **kwargs)
+TorchRefsNvfuserCapabilityMode = functools.partial(
+    TorchRefsMode.push, should_fallback_fn=_is_func_unsupported_nvfuser
+)
