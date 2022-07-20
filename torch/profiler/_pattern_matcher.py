@@ -1,4 +1,5 @@
 from collections import deque
+import os
 import re
 from typing import Dict, List, Set
 
@@ -369,26 +370,29 @@ class SynchronizedDataLoaderPattern(Pattern):
             "Detected DataLoader running with synchronized implementation. "
             "Please enable asynchronous dataloading by setting num_workers > 0 when initializing DataLoader."
         )
+        # We precompile the regex to avoid recompiling it every time we match
+        self.iter_regex = re.compile(
+            r"torch/utils/data/dataloader.py\([0-9]+\): __iter__$"
+            .replace("/", os.sep))
+        self.get_iterator_regex = re.compile(
+            r"torch/utils/data/dataloader.py\([0-9]+\): _get_iterator$"
+            .replace("/", os.sep))
+        self.check_worker_regex = re.compile(
+            r"torch/utils/data/dataloader.py\([0-9]+\): check_worker_number_rationality$"
+            .replace("/", os.sep))
 
     def match(self, event: _ProfilerEvent):
-        if not re.search(
-                r"torch/utils/data/dataloader.py\([0-9]+\): __iter__$",
-                event.name()):
+        if not re.search(self.iter_regex, event.name()):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        if not re.search(
-                r"torch/utils/data/dataloader.py\([0-9]+\): _get_iterator$",
-                event.name()):
+        if not re.search(self.get_iterator_regex, event.name()):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        return not bool(
-            re.search(
-                r"torch/utils/data/dataloader.py\([0-9]+\): check_worker_number_rationality$",
-                event.name()))
+        return not bool(re.search(self.check_worker_regex, event.name()))
 
 
 def source_code_location(event: _ProfilerEvent):
