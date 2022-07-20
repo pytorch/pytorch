@@ -298,9 +298,12 @@ ExtraFields<EventType::PyCCall>::args_t ValueCache::load<CallType::PyCCall>(
 
 // TODO: Use re2.
 void ValueCache::trimPrefixes() {
-  static auto prefixes = py::module::import("torch.profiler.python_tracer")
-                             .attr("_prefix_regex")()
-                             .cast<std::vector<std::string>>();
+  static const auto prefixes = []() {
+    pybind11::gil_scoped_acquire gil;
+    return py::module::import("torch.profiler.python_tracer")
+        .attr("_prefix_regex")()
+        .cast<std::vector<std::string>>();
+  }();
 
   for (auto& it : std::get<CallType::PyCall>(state_)) {
     std::string filename = it.second.filename_.str();
