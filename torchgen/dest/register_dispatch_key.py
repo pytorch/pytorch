@@ -1,42 +1,44 @@
-from typing import List, Optional, Tuple, Union
 import itertools
-from typing_extensions import Literal
-from dataclasses import dataclass
 import textwrap
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
-from torchgen.context import method_with_native_function, native_function_manager
-from torchgen.utils import Target, mapMaybe, assert_never
-from torchgen.model import (
-    DispatchKey,
-    NativeFunction,
-    NativeFunctionsGroup,
-    SchemaKind,
-    TensorOptionsArguments,
-    DeviceCheckType,
-    Argument,
-    is_cuda_dispatch_key,
-    BackendIndex,
-    gets_generated_out_inplace_wrapper,
-)
+from typing_extensions import Literal
+
+import torchgen.api.cpp as cpp
+import torchgen.api.meta as meta
+import torchgen.api.structured as structured
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
     ConstRefCType,
     CppSignature,
     CppSignatureGroup,
+    DispatcherSignature,
     Expr,
-    MutRefCType,
     kernel_signature,
+    MutRefCType,
+    NamedCType,
     NativeSignature,
     tensorT,
-    NamedCType,
-    DispatcherSignature,
 )
-import torchgen.api.meta as meta
-import torchgen.api.cpp as cpp
-import torchgen.api.structured as structured
-from torchgen.api.translate import translate
+
+from torchgen.context import method_with_native_function, native_function_manager
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    DeviceCheckType,
+    DispatchKey,
+    gets_generated_out_inplace_wrapper,
+    is_cuda_dispatch_key,
+    NativeFunction,
+    NativeFunctionsGroup,
+    SchemaKind,
+    TensorOptionsArguments,
+)
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import assert_never, mapMaybe, Target
 
 
 def gen_registration_headers(

@@ -1,24 +1,25 @@
+import json
+import logging
+
+import math
+from typing import List, Optional, Sequence, Tuple, Union
+
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
 from torchgen.model import (
     Argument,
     BackendIndex,
     BaseTy,
+    BaseType,
     FunctionSchema,
+    NativeFunctionsGroup,
+    NativeFunctionsViewGroup,
     OptionalType,
     SelfArgument,
-    BaseType,
-    NativeFunctionsGroup,
     TensorOptionsArguments,
     Type,
-    NativeFunctionsViewGroup,
 )
 from torchgen.static_runtime import config
-
-import math
-import logging
-import json
-from typing import List, Optional, Sequence, Tuple, Union
 
 logger: logger = logging.getLogger()
 
@@ -399,7 +400,6 @@ def generate_out_variant_call(
     if not g.structured:
         assert len(schema.arguments.out) == 1
         arg_names.append(schema.arguments.out[0].name)
-    cpp_func_name = cpp.name(schema)
     cpp_arg_names = ",".join(arg_names)
     namespace_name = "cpu" if g.structured else "native"
     return f"at::{namespace_name}::{kernel_name}({cpp_arg_names})"
@@ -490,7 +490,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     ) -> str:
         functional = g.functional
         schema = str(functional.func)
-        op_name = op_name_from_group(g)
         populated_argument = generate_arg_extraction(g.functional.func)
         functional_variant_call = generate_non_out_variant_call(g, backend_index)
         assert len(g.out.func.arguments.out) == 1
@@ -515,7 +514,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         self, g: NativeFunctionsViewGroup, backend_index: BackendIndex
     ) -> str:
         schema = str(g.view.func)
-        op_name = config.func_name_base_str(g)
         populated_argument = generate_arg_extraction(g.view.func)
         functional_variant_call = generate_call_to_view_ops(g, backend_index)
         generated = f"""
