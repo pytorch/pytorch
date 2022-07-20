@@ -1199,13 +1199,16 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._autograd._ExtraFields_TorchOp)
 
-        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
-
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        shape_info = [x.shape if x else None for x in input_info.tensor_metadata]
+        stride_info = [x.stride if x else None for x in input_info.tensor_metadata]
+
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
+        self.assertEqual(shape_info, [[4, 4], [4, 1], None])
+        self.assertEqual(stride_info, [[12, 3], [1, 1], None])
 
 
 @dataclass(frozen=True)

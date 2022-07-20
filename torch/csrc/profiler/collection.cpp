@@ -37,22 +37,12 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined()) {
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
 
     tensor_metadata_.emplace_back(
         /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
         /*dtype_=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim,
-        /*layout_=*/t.layout());
-
-    for (const auto i : sizes) {
-      tensor_sizes_.emplace_back(i);
-    }
+        /*layout_=*/t.layout(),
+        /*sizes_and_strides_*/ t.unsafeGetTensorImpl()->sizes_and_strides());
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
@@ -62,8 +52,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
-          tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin()]() mutable {
+          tensor_metadata_it = tensor_metadata_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
@@ -71,10 +60,6 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
       switch (*tag_it) {
         case Tag::Tensor: {
           const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_it++);
-          }
           out.tensor_metadata_.emplace_back(md);
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
@@ -116,7 +101,6 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
-  tensor_sizes_.clear();
 }
 
 namespace {
