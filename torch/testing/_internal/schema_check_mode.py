@@ -1,7 +1,6 @@
 import torch
 from torch.utils._pytree import tree_flatten, tree_map
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
 from itertools import combinations
 from collections import namedtuple
@@ -134,3 +133,40 @@ class SchemaCheckMode(TorchDispatchMode):
                     raise RuntimeError(f'Outputs {i} and {j} alias unexpectedly')
 
         return out
+
+
+def clone_inputs(args):
+    inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
+
+
+def is_iterable_of_tensors(iterable, include_empty=False):
+    """ Returns True if iterable is an iterable of tensors and False o.w.
+
+        If the iterable is empty, the return value is :attr:`include_empty`
+    """
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+
+    try:
+        if len(iterable) == 0:
+            return include_empty
+
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+
+    except TypeError as te:
+        return False
+
+    return True
