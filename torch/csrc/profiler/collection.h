@@ -25,6 +25,7 @@ enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
   Allocation,
+  OutOfMemory,
   PyCall,
   PyCCall,
   Kineto
@@ -117,6 +118,21 @@ static_assert(
     std::is_pod<ExtraFields<EventType::Allocation>>::value,
     "Non-POD member of ExtraFields<EventType::Allocation>.");
 
+template <>
+struct ExtraFields<EventType::OutOfMemory> {
+  torch::profiler::impl::approx_time_t start_time_;
+  int64_t alloc_size_;
+  int64_t total_allocated_;
+  int64_t total_reserved_;
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+};
+
+// For performance.
+static_assert(
+    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
+
 struct PyFrameState {
   int line_no_;
   at::StringView filename_;
@@ -186,10 +202,21 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::Kineto> {
+  // Mirrors `libkineto::GenericTraceActivity::Flow`. This information is used
+  // during post processing to properly embed Kineto events into the broader
+  // profiler tree structure. End users are not generally expected to use these
+  // fields directly, but they are available for debugging.
+  struct Flow {
+    uint32_t id{0};
+    uint32_t type{0};
+    uint32_t start{0};
+  };
+
   std::string name_;
   int64_t duration_us_;
   uint64_t correlation_id_;
   libkineto::ActivityType activity_type_;
+  Flow flow;
   std::weak_ptr<Result> linked_activity_{};
 };
 
@@ -213,6 +240,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Allocation>,
+      ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
       ExtraFields<EventType::PyCCall>,
       ExtraFields<EventType::Kineto>>
@@ -352,6 +380,11 @@ class TORCH_API ThreadLocalSubqueue {
   }
 
   template <class... Args>
+  void emplace_ooms_event(Args&&... args) {
+    ooms_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
   void emplace_py_call(Args&&... args) {
     py_calls_.emplace_back(std::forward<Args>(args)...);
   }
@@ -422,6 +455,9 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportMemoryUsage
   AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+
+  // reportOOMs
+  AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
 };
 
 class TORCH_API RecordQueue {
