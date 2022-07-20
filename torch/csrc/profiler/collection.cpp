@@ -166,38 +166,43 @@ PythonTracerBase& PythonTracerBase::get() {
 } // namespace python_tracer
 
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(                                                 \
-    method_name,                                                        \
-    torch_op_field,                                                     \
-    backend_field,                                                      \
-    allocation_field,                                                   \
-    py_field,                                                           \
-    py_c_field)                                                         \
-  OUT_T(method_name) Result::method_name() const {                      \
-    using out_t = OUT_T(method_name);                                   \
-    return c10::visit(                                                  \
-        c10::overloaded(                                                \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {    \
-              (void)e;                                                  \
-              return torch_op_field;                                    \
-            },                                                          \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t {    \
-              (void)e;                                                  \
-              return backend_field;                                     \
-            },                                                          \
-            [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
-              (void)e;                                                  \
-              return allocation_field;                                  \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {     \
-              (void)e;                                                  \
-              return py_field;                                          \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {    \
-              (void)e;                                                  \
-              return py_c_field;                                        \
-            }),                                                         \
-        extra_fields_);                                                 \
+#define DEFINE_VISITOR(                                                  \
+    method_name,                                                         \
+    torch_op_field,                                                      \
+    backend_field,                                                       \
+    allocation_field,                                                    \
+    oom_field,                                                           \
+    py_field,                                                            \
+    py_c_field)                                                          \
+  OUT_T(method_name) Result::method_name() const {                       \
+    using out_t = OUT_T(method_name);                                    \
+    return c10::visit(                                                   \
+        c10::overloaded(                                                 \
+            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {     \
+              (void)e;                                                   \
+              return torch_op_field;                                     \
+            },                                                           \
+            [&](const ExtraFields<EventType::Backend>& e) -> out_t {     \
+              (void)e;                                                   \
+              return backend_field;                                      \
+            },                                                           \
+            [&](const ExtraFields<EventType::Allocation>& e) -> out_t {  \
+              (void)e;                                                   \
+              return allocation_field;                                   \
+            },                                                           \
+            [&](const ExtraFields<EventType::OutOfMemory>& e) -> out_t { \
+              (void)e;                                                   \
+              return oom_field;                                          \
+            },                                                           \
+            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {      \
+              (void)e;                                                   \
+              return py_field;                                           \
+            },                                                           \
+            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {     \
+              (void)e;                                                   \
+              return py_c_field;                                         \
+            }),                                                          \
+        extra_fields_);                                                  \
   }
 
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
@@ -238,6 +243,7 @@ DEFINE_VISITOR(
     e.name_,
     e.name_,
     "[memory]",
+    "[OutOfMemory]",
     toString(e),
     e.function_name_.str());
 DEFINE_VISITOR(
@@ -245,13 +251,15 @@ DEFINE_VISITOR(
     scopeToType(e.scope_),
     scopeToType(e.scope_),
     libkineto::ActivityType::CPU_INSTANT_EVENT,
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
     libkineto::ActivityType::PYTHON_FUNCTION,
     libkineto::ActivityType::PYTHON_FUNCTION);
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0, 0);
 DEFINE_VISITOR(
     endTimeNS,
     torchOpEndNS(e, finished_, parent_),
     e.end_time_us_ * 1000,
+    start_time_ns_,
     start_time_ns_,
     e.end_time_ns_,
     e.end_time_ns_);
@@ -261,11 +269,13 @@ DEFINE_VISITOR(
     start_tid_,
     start_tid_,
     start_tid_,
+    start_tid_,
     start_tid_);
 DEFINE_VISITOR(
     deviceType,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU,
+    e.device_type_,
     e.device_type_,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU);
@@ -617,6 +627,15 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/std::move(i)));
     }
     queue.allocations_.clear();
+    for (auto& i : queue.ooms_) {
+      auto start_time = converter(i.start_time_);
+      out.emplace_back(Result::create(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/std::move(i)));
+    }
+    queue.ooms_.clear();
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(
