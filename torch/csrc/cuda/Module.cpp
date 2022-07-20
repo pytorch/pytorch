@@ -28,6 +28,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -152,17 +153,13 @@ PyObject* THCPModule_getCurrentStream_wrap(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getCurrentCUDAStream(device);
-  PyObject* output_tuple = PyTuple_New(3);
+  PyObject* output_tuple = PyTuple_New(2);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
       output_tuple,
       1,
       THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
-  PyTuple_SetItem(
-      output_tuple,
-      2,
-      THPUtils_packInt64(static_cast<int64_t>(c10::DeviceType::CUDA)));
   return output_tuple;
 
   END_HANDLE_TH_ERRORS
@@ -187,23 +184,22 @@ PyObject* THCPModule_getDefaultStream_wrap(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getDefaultCUDAStream(device);
-  PyObject* output_tuple = PyTuple_New(3);
+  PyObject* output_tuple = PyTuple_New(2);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
       output_tuple,
       1,
       THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
-  PyTuple_SetItem(
-      output_tuple,
-      2,
-      THPUtils_packInt64(static_cast<int64_t>(c10::DeviceType::CUDA)));
   return output_tuple;
 
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_setStream_wrap(PyObject* self, PyObject* obj) {
+PyObject* THCPModule_setStream_wrap(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   // THPUtils_assert(PyLong_Check(obj), "invalid stream");
   // uint64_t bits = PyLong_AsUnsignedLongLong(obj);
@@ -217,8 +213,10 @@ PyObject* THCPModule_setStream_wrap(PyObject* self, PyObject* obj) {
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char* kwlist[] = {"stream_id", "device_index", nullptr};
-  if (!PyArg_ParseTuple(obj, "|ii", &stream_id, &device_index)) {
+  if (!PyArg_ParseTupleAndKeywords(
+          args, kwargs, "|KK", kwlist, &stream_id, &device_index)) {
   }
+
   auto stream =
       at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type);
 
@@ -1179,7 +1177,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_isCurrentStreamCapturing_wrap,
      METH_NOARGS,
      nullptr},
-    {"_cuda_setStream", THCPModule_setStream_wrap, METH_O, nullptr},
+    {"_cuda_setStream",
+     castPyCFunctionWithKeywords(THCPModule_setStream_wrap),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_cuda_getCompiledVersion",
      THCPModule_getCompiledVersion,
      METH_NOARGS,
