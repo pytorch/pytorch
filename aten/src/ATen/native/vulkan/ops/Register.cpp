@@ -5,8 +5,6 @@
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/QuantizedConvolution.h>
-#include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/custom_class.h>
@@ -279,104 +277,11 @@ Tensor convolution(
       input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
 }
 
-Tensor quantized_convolution(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool transposed,
-    const IntArrayRef output_padding,
-    const int64_t groups,
-    const double out_scale,
-    const int64_t out_zero_point) {
-  if (transposed) {
-    VulkanOpContext vulkan_context = conv2d_transpose_context_create(
-        weight, bias, stride, padding, output_padding, dilation, groups);
-    return conv2d_transpose_context_run(
-        input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
-  }
-  const vTensor& v_input = convert(input);
-  VulkanOpContext vulkan_context = conv2d_context_create_q(
-      weight,
-      bias,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups,
-      c10::nullopt,
-      c10::nullopt);
-  return conv2d_context_run_q(
-      input,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
-      out_scale,
-      out_zero_point);
-}
-} // namespace
-
-static std::tuple<Tensor, bool> batchify(
-    const Tensor& input,
-    const int64_t num_spatial_dims,
-    const std::string& func_name) {
-  const auto dim_count_no_batch = num_spatial_dims + 1;
-  const auto dim_count_batch = dim_count_no_batch + 1;
-  const auto is_batched = (input.dim() == dim_count_batch);
-  TORCH_CHECK(
-      input.dim() == dim_count_no_batch || is_batched,
-      "Expected ",
-      dim_count_no_batch,
-      "D (unbatched) or ",
-      dim_count_batch,
-      "D (batched) input to ",
-      func_name,
-      ", but got input of size: ",
-      input.sizes());
-  return std::make_tuple(is_batched ? input : input.unsqueeze(0), is_batched);
-}
-
-Tensor conv2d(
-    const Tensor& input_,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    int64_t groups,
-    double out_scale,
-    int64_t out_zero_point) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned =
-      at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  Tensor input;
-  bool is_batched;
-  std::tie(input, is_batched) =
-      batchify(input_, /*num_spatial_dims=*/2, "conv2d");
-  Tensor output;
-  output = quantized_convolution(
-      input,
-      weight,
-      bias,
-      stride,
-      padding,
-      dilation,
-      false,
-      {{0, 0}},
-      groups,
-      out_scale,
-      out_zero_point);
-  return is_batched ? output : output.squeeze(0);
-}
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("convolution_overrideable", convolution);
 }
 
+} // namespace
 } // namespace ops
 } // namespace vulkan
 } // namespace native
