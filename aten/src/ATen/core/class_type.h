@@ -101,7 +101,11 @@ struct TORCH_API ClassType : public NamedType {
   std::string repr_str() const override {
     std::stringstream ss;
     ss << str()
-       << " (of Python compilation unit at: " << compilation_unit().get() << ")";
+       << " (of Python compilation unit at: " <<
+#ifdef _MSC_VER
+       "0x" <<
+#endif
+       compilation_unit().get() << ")";
     return ss.str();
   }
 
