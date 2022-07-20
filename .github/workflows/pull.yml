@@ -29,13 +29,13 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      # add backwards_compat test back when fixed from https://github.com/pytorch/pytorch/pull/81160
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
@@ -53,22 +53,6 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
-
-  # TODO: remove after full migration off Xenial
-  linux-xenial-py3_7-gcc7-build:
-    name: linux-xenial-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
-
-  # TODO: remove after full migration off Xenial
-  linux-xenial-py3_7-clang7-asan-build:
-    name: linux-xenial-py3.7-clang7-asan
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-clang7-asan
-      docker-image-name: pytorch-linux-xenial-py3-clang7-asan
 
   linux-focal-py3_7-clang7-asan-build:
     name: linux-focal-py3.7-clang7-asan
@@ -135,6 +119,7 @@ jobs:
           { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
@@ -211,7 +196,6 @@ jobs:
       build-generates-artifacts: false
 
   linux-bionic-py3_7-clang8-xla-build:
-    if: false
     name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -280,15 +264,13 @@ jobs:
       build-environment: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-  # https://github.com/pytorch/pytorch/issues/78540
-  # linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
-  #   if: false()
-  #   name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
-  #   uses: ./.github/workflows/_linux-build.yml
-  #   with:
-  #     build-environment: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
-  #     docker-image-name: pytorch-linux-focal-py3.7-gcc7
-  #     build-generates-artifacts: false
+  linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
+    name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      build-generates-artifacts: false
 
   linux-xenial-cuda11_3-py3_7-gcc7-deploy-build:
     name: linux-xenial-cuda11_3-py3_7-gcc7-deploy
@@ -309,12 +291,12 @@ jobs:
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-rocm5_1-py3_7-build:
+  linux-focal-rocm5_1-py3_7-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: linux-bionic-rocm5.1-py3.7
+    name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      build-environment: linux-focal-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
       sync-tag: rocm-build

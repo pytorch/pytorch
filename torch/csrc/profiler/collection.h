@@ -25,6 +25,7 @@ enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
   Allocation,
+  OutOfMemory,
   PyCall,
   PyCCall
 };
@@ -54,8 +55,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  ProfilerEventStub cuda_event_start_ = nullptr;
+  ProfilerEventStub cuda_event_end_ = nullptr;
 };
 
 template <>
@@ -113,6 +114,21 @@ struct ExtraFields<EventType::Allocation> {
 static_assert(
     std::is_pod<ExtraFields<EventType::Allocation>>::value,
     "Non-POD member of ExtraFields<EventType::Allocation>.");
+
+template <>
+struct ExtraFields<EventType::OutOfMemory> {
+  torch::profiler::impl::approx_time_t start_time_;
+  int64_t alloc_size_;
+  int64_t total_allocated_;
+  int64_t total_reserved_;
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+};
+
+// For performance.
+static_assert(
+    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
   int line_no_;
@@ -188,7 +204,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
-  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
+  libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
   int64_t endTimeNS() const;
   uint64_t endTID() const;
@@ -201,6 +217,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Allocation>,
+      ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
       ExtraFields<EventType::PyCCall>>
       extra_fields_;
@@ -208,6 +225,8 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
+
+  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
   template <EventType E>
@@ -337,6 +356,11 @@ class TORCH_API ThreadLocalSubqueue {
   }
 
   template <class... Args>
+  void emplace_ooms_event(Args&&... args) {
+    ooms_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
   void emplace_py_call(Args&&... args) {
     py_calls_.emplace_back(std::forward<Args>(args)...);
   }
@@ -407,6 +431,9 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportMemoryUsage
   AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+
+  // reportOOMs
+  AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
 };
 
 class TORCH_API RecordQueue {
@@ -419,7 +446,9 @@ class TORCH_API RecordQueue {
 
   // NB: This is a destructive operation.
   std::vector<std::shared_ptr<Result>> getRecords(
-      std::function<time_t(approx_time_t)> time_converter);
+      std::function<time_t(approx_time_t)> time_converter,
+      uint64_t start_time_us,
+      uint64_t end_time_us);
 
  private:
   uint32_t id_;

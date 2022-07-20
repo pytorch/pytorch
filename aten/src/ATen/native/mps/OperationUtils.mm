@@ -60,30 +60,8 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   return gen;
 }
 
-void runMPSGraph(
-    MPSStream* mpsStream,
-    MPSGraph* mpsGraph,
-    NSDictionary* feeds,
-    NSDictionary* results) {
-  dispatch_sync(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->commit(true);
-      id<MTLCommandQueue> commandQueue = mpsStream->commandQueue();
-      MPSGraphExecutionDescriptor *executionDescriptor = [[MPSGraphExecutionDescriptor new] autorelease];
-
-      executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
-                                                MPSGraphTensorData *> * resultsDictionary,
-                                                NSError * _Nullable error) {
-      };
-
-      [mpsGraph runAsyncWithMTLCommandQueue:commandQueue
-                                feeds:feeds
-                     targetOperations:nil
-                    resultsDictionary:results
-                  executionDescriptor:executionDescriptor];
-
-    }
-  });
+void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {
@@ -142,19 +120,21 @@ std::string getMPSTypeString(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return "MPSDataTypeFloat32";
+      return "Float32";
     case ScalarType::Half:
-      return "MPSDataTypeFloat16";
+      return "Float16";
     case ScalarType::Int:
-      return "MPSDataTypeInt32";
+      return "Int32";
     case ScalarType::Long:
-      return "MPSDataTypeInt64";
+      return "Int64";
     case ScalarType::Short:
-      return "MPSDataTypeInt16";
+      return "Int16";
+    case ScalarType::Char:
+      return "UInt8";
     case ScalarType::Byte:
-      return "MPSDataTypeInt8";
+      return "Int8";
     case ScalarType::Bool:
-      return "MPSDataTypeBool";
+      return "Bool";
     default:
       return "Undefined";
   }
@@ -212,7 +192,7 @@ MPSShape* getMPSShape(const Tensor& t) {
   {
     NSInteger sz_i = (i < sz) ? t.size(i) : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
@@ -233,7 +213,7 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
   {
     NSInteger sz_i = (i < sz) ? sizes[i] : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
@@ -338,6 +318,9 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scal
     case MPSDataTypeInt8:
       v.i = scalar.to<int8_t>();
       break;
+    case MPSDataTypeUInt8:
+      v.i = scalar.to<uint8_t>();
+      break;
     case MPSDataTypeBool:
       v.b = scalar.to<bool>();
       break;
@@ -377,6 +360,12 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataTy
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor) {
     return [mpsGraph placeholderWithShape:getMPSShape(tensor)
                                  dataType:getMPSScalarType(tensor.scalar_type())
+                                     name:nil];
+}
+
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar) {
+    return [mpsGraph placeholderWithShape:@[@1]
+                                 dataType:getMPSScalarType(scalar.type())
                                      name:nil];
 }
 

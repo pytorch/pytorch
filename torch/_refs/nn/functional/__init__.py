@@ -31,9 +31,13 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "l1_loss",
     "margin_ranking_loss",
     "mish",
+    "mse_loss",
+    "prelu",
     "relu",
+    "relu6",
     "selu",
     "softplus",
     "softshrink",
@@ -78,6 +82,7 @@ def celu(
 
 
 # TODO: should we allow the user to set a different dtype for the mask generation?
+@register_decomposition(torch.ops.aten.dropout)
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
 ) -> TensorLikeType:
@@ -204,6 +209,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return a * torch.tanh(torch.nn.functional.softplus(a))
 
 
+@register_decomposition(torch.ops.aten.selu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -261,21 +267,27 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
+@register_decomposition(torch.ops.aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(abs(a) > abs(lambd), a, 0)
+    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
+@register_decomposition(torch.ops.aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
+    check(
+        lambd >= 0,
+        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+    )
     ge_mask = a > lambd
     le_mask = a < -lambd
     zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
@@ -299,6 +311,42 @@ def _check_reduction_value(reduction: str):
         raise ValueError("{} is not a valid value for reduction".format(reduction))
 
 
+# This helper function maps depreciated arguments, "size_average" and "reduce"
+# to their corresponding "reduction" string argument
+def _get_string_reduction_arg(
+    *, size_average: Optional[bool], reduce: Optional[bool]
+) -> str:
+    if size_average is None:
+        size_average = True
+    if reduce is None:
+        reduce = True
+    if size_average and reduce:
+        ret = "mean"
+    elif reduce:
+        ret = "sum"
+    else:
+        ret = "none"
+    return ret
+
+
+@register_decomposition(torch.ops.aten.l1_loss)
+def l1_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    loss = torch.abs(input - target)
+    return _apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(torch.ops.aten.margin_ranking_loss)
 def margin_ranking_loss(
     input1: TensorLikeType,
     input2: TensorLikeType,
@@ -326,6 +374,23 @@ def margin_ranking_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+def mse_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    loss = torch.pow(input - target, 2)
+    return _apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(torch.ops.aten.hinge_embedding_loss)
 def hinge_embedding_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -443,6 +508,7 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+@register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -479,3 +545,17 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
+
+@register_decomposition(torch.ops.aten.relu6)
+def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.relu6
+    """
+    if inplace:
+        raise NotImplementedError
+
+    # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
+    # It may be better to use clamp here, but we use hardtanh to replicate
+    # the behavior of the existing implementation
+    return refs.nn.functional.hardtanh(a, 0, 6)

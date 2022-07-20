@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.4.1)
 set(PROJECT_NAME pytorch_testapp_jni)
 project(${PROJECT_NAME} CXX)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(build_DIR ${CMAKE_SOURCE_DIR}/build)
