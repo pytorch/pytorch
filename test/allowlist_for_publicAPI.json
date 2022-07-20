@@ -1,4 +1,5 @@
 {
+  "being_migrated": {},
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",

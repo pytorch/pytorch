@@ -149,9 +149,13 @@ class NvFuserOperatorSupport(OperatorSupport):
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
             # "torch.ops.aten.threshold_backward": None,
             "torch.ops.aten.clamp": None,
+            # "torch.ops.aten.clone": None,
             # Failing with where(): incompatible function arguments: \
             # [<torch._C._nvfuser.TensorView, tensor, <torch._C._nvfuser.TensorView]
+            # failing with BERT_pytorch_forward_0, which has aten.where.ScalarSelf in the decomps
             # "torch.ops.aten.where": None,
+            # However, aten.where.self overload is fully supported
+            "torch.ops.aten.where.self": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
             # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
@@ -187,31 +191,22 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
+            # "torch.ops.aten.hardtanh": None,        # has functional ref, using unsupported aten.clamp
+            "torch.ops.aten.leaky_relu": None,
+            "torch.ops.aten.square": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
             "torch.ops.aten.tanh_backward": None,
             # "torch.ops.aten.amax": None,      # missing prim decomp
-            "torch.ops.aten.amin": None,
-            "torch.ops.aten.reshape": None,
+            # "torch.ops.aten.amin": None,      # missing prim decomp
+            # "torch.ops.aten.reshape": None,
             # "torch.ops.aten.view": None,      # missing prim decomp
             "torch.ops.aten.flatten.using_ints": None,
-
-            # ===============================================================
-            # call_function aten: inplace variants
-            # ===============================================================
-            # TODO: These nodes shouldn't show up, the functionalization pass should have removed inplace ops
-            # "torch.ops.aten.add_": None,
-            # "torch.ops.aten.relu_": None,
 
             # ===============================================================
             # call_function builtins and operator
             # ===============================================================
             "getattr": None,
-            #     "_operator.add": None,
-            #     "_operator.div": None,
             "_operator.getitem": None,
-            #     "_operator.mul": None,
-            #     "_operator.sub": None,
-            #     "_operator.truediv": None,
         }
 
         super().__init__(support_dict)
