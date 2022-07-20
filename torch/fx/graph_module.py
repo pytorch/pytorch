@@ -706,7 +706,8 @@ class {module_name}(torch.nn.Module):
     def __copy__(self):
         return GraphModule(self, self.graph)
 
-    def nested_code(self) -> str:
+    @compatibility(is_backward_compatible=False)
+    def nested_str(self) -> str:
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
