@@ -1,6 +1,4 @@
-#include <ATen/ArrayRef.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <torch/library.h>
 
 namespace at {
@@ -9,16 +7,7 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-bool broadcast_input(const Tensor& input1, const Tensor& input2) {
-  return (batch_size(input1) == batch_size(input2)) &&
-      (channels_size(input1) == channels_size(input2)) &&
-      ((height_size(input1) > 1 && height_size(input2) == 1) ||
-       (height_size(input2) > 1 && height_size(input1) == 1) ||
-       (height_size(input1) == height_size(input2))) &&
-      ((width_size(input1) > 1 && width_size(input2) == 1) ||
-       (width_size(input2) > 1 && width_size(input1) == 1) ||
-       (width_size(input1) == width_size(input2)));
-}
+using namespace api::utils;
 
 void check_inputs(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(
@@ -30,37 +19,36 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
         "Vulkan binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
   }
 
+  const uint32_t input1_h = height_size(input1);
+  const uint32_t input1_w = width_size(input1);
+  const uint32_t input2_h = height_size(input2);
+  const uint32_t input2_w = width_size(input2);
+
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan binary elementwise op!";
-
-  TORCH_CHECK(broadcast_input(input1, input2), broadcast_error_msg);
+  if (input1_h != input2_h) {
+    if (input1_h > input2_h) {
+      TORCH_CHECK(input2_h == 1, broadcast_error_msg);
+      TORCH_CHECK(input2_w == input1_w || input2_w == 1, broadcast_error_msg);
+    } else if (input2_h > input1_h) {
+      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
+      TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
+    }
+  } else if (input1_w != input2_w) {
+    if (input1_w > input2_w) {
+      TORCH_CHECK(input2_w == 1, broadcast_error_msg);
+    } else if (input2_w > input1_w) {
+      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
+    }
+  }
 }
 
-std::vector<int64_t> broadcast_size(
-    const Tensor& input1,
-    const Tensor& input2) {
-  std::vector<int64_t> out = {
-      batch_size(input1),
-      channels_size(input1),
-      height_size(input1),
-      width_size(input1)};
-  if (width_size(input1) > 1 && width_size(input2) == 1) {
-    out[3] = width_size(input1);
-  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
-    out[3] = width_size(input2);
-  }
-
-  if (height_size(input1) > 1 && height_size(input2) == 1) {
-    out[2] = height_size(input1);
-  } else if (height_size(input2) > 1 && height_size(input1) == 1) {
-    out[2] = height_size(input2);
-  }
-
-  return out;
+bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
+  return (
+      (input2.extents().data[1u] > 1 && input1.extents().data[1u] == 1) ||
+      (input2.extents().data[2u] > 1 && input1.extents().data[2u] == 1) ||
+      input2.extents().data[0u] > input1.extents().data[0u]);
 }
-
-} // namespace
-using namespace api::utils;
 
 Tensor arithmetic_scalar(
     const Tensor& self_arg,
@@ -178,7 +166,7 @@ Tensor arithmetic_tensor(
 
   vTensor v_output{
       context,
-      broadcast_size(self_arg, other_arg),
+      broadcast_first_input(v_self, v_other) ? v_other.sizes() : v_self.sizes(),
       v_self.options(),
   };
 
@@ -224,93 +212,6 @@ Tensor arithmetic_tensor(
       params.buffer());
 
   return convert(v_output);
-}
-
-Tensor quantized_arithmetic_tensor(
-    const Tensor& self_arg,
-    const Tensor& other_arg,
-    const double scale,
-    const int64_t zero_point,
-    const api::ShaderSource& shader_descriptor) {
-  check_inputs(self_arg, other_arg);
-  api::Context* const context = api::context();
-
-  const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
-  const vTensor& v_self = convert(self);
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
-  const vTensor& v_other = convert(other);
-
-  TORCH_CHECK(v_self.is_quantized(), "Input tensor is not quantized");
-  TORCH_CHECK(v_other.is_quantized(), "Input tensor is not quantized");
-
-  vTensor v_output{
-      context,
-      broadcast_size(self_arg, other_arg),
-      self.options().dtype(c10::kQUInt8),
-      scale,
-      zero_point};
-
-  const double scale1 = v_self.get_scale();
-  const double scale2 = v_other.get_scale();
-  const int64_t zero_point1 = v_self.get_zero_point();
-  const int64_t zero_point2 = v_other.get_zero_point();
-  const struct Block final {
-    uvec3 extents;
-    uint32_t fill_0;
-    uvec3 input1_extents;
-    uint32_t fill_1;
-    uvec3 input2_extents;
-    uint32_t fill_2;
-    float scale1;
-    float scale2;
-    int32_t zero_point1;
-    int32_t zero_point2;
-    float scale;
-    float _1;
-    int32_t zero_point;
-    int32_t _2;
-  } block{
-      v_output.extents(),
-      0u,
-      v_self.extents(),
-      0u,
-      v_other.extents(),
-      0u,
-      safe_downcast<float>(scale1),
-      safe_downcast<float>(scale2),
-      safe_downcast<int32_t>(zero_point1),
-      safe_downcast<int32_t>(zero_point2),
-      safe_downcast<float>(scale),
-      0.0f,
-      safe_downcast<int32_t>(zero_point),
-      0u,
-  };
-
-  api::UniformParamsBuffer params(context, block);
-  api::PipelineBarrier pipeline_barrier{};
-
-  context->submit_compute_job(
-      // shader descriptor
-      shader_descriptor,
-      // pipeline barrier
-      pipeline_barrier,
-      // global work group size
-      v_output.extents(),
-      // local work group size
-      adaptive_work_group_size(v_output.extents()),
-      // fence handle
-      VK_NULL_HANDLE,
-      // shader arguments
-      v_output.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE,
-          api::MemoryAccessType::WRITE),
-      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      // params buffer
-      params.buffer());
-
-  return convert_quantized(v_output);
 }
 
 Tensor& arithmetic_tensor_(
@@ -558,6 +459,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 #endif /* USE_VULKAN_API */
 
+} // namespace
 } // namespace ops
 } // namespace vulkan
 } // namespace native
