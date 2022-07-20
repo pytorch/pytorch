@@ -46,6 +46,13 @@ from torch.utils._mode_utils import no_dispatch
 
 import pickle
 
+# bfloat16 is only supported by CUDA 11+
+BFLOAT16_AVAIL = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split('.')[0]) >= 11
+)
+
 
 def graph_desc(fn):
     if fn is None:
@@ -4530,6 +4537,7 @@ for shape in [(1,), ()]:
         self._test_checkpointing_non_reentrant_autocast(device_type='cpu')
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not BFLOAT16_AVAIL, "Test requires CUDA version that supports bfloat16")
     def test_checkpointing_non_reentrant_autocast_gpu(self):
         """
         Test that autocast args/kwargs such as the dtype are preserved during
