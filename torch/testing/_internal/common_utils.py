@@ -70,6 +70,7 @@ import functools
 from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.schema_check_mode import SchemaCheckMode
+from torch.utils._python_dispatch import push_torch_dispatch_mode
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 from torch.onnx import (register_custom_op_symbolic,
@@ -1931,7 +1932,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_dispatch_mode(SchemaCheckMode))
+                stack.enter_context(push_torch_dispatch_mode(SchemaCheckMode))
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
