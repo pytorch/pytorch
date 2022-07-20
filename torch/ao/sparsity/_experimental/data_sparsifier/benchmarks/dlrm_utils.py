@@ -6,13 +6,35 @@ import zipfile
 import os
 
 
+class SparseDLRM(DLRM_Net):
+    """The SparseDLRM model is a wrapper around the DLRM_Net model that tries
+    to use torch.sparse tensors for the features obtained after the ```interact_features()```
+    call. The idea is to do a simple torch.mm() with the weight matrix of the first linear
+    layer of the top layer.
+    """
+    def __init__(self, **args):
+        super().__init__(**args)
+
+    def forward(self, dense_x, lS_o, lS_i):
+        x = self.apply_mlp(dense_x, self.bot_l)  # dense features
+        ly = self.apply_emb(lS_o, lS_i, self.emb_l, self.v_W_l)  # apply embedding bag
+        z = self.interact_features(x, ly)
+
+        z = z.to_sparse_coo()
+        z = torch.mm(z, self.top_l[0].weight.T).add(self.top_l[0].bias)
+        for layer in self.top_l[1:]:
+            z = layer(z)
+
+        return z
+
+
 def get_valid_name(name):
     """Replaces '.' with '_' as names with '.' are invalid in data sparsifier
     """
     return name.replace('.', '_')
 
 
-def get_dlrm_model():
+def get_dlrm_model(sparse_dlrm=False):
     """Obtain dlrm model. The configs specified are based on the script in
     bench/dlrm_s_criteo_kaggle.sh. The same config is used to train the model
     for benchmarking on data sparsifier.
@@ -42,7 +64,10 @@ def get_dlrm_model():
         'weighted_pooling': None,
         'loss_function': 'bce'
     }
-    dlrm_model = DLRM_Net(**dlrm_model_config)
+    if sparse_dlrm:
+        dlrm_model = SparseDLRM(**dlrm_model_config)
+    else:
+        dlrm_model = DLRM_Net(**dlrm_model_config)
     return dlrm_model
 
 
@@ -92,7 +117,7 @@ def make_test_data_loader(raw_data_file_path, processed_data_file):
     return test_loader
 
 
-def fetch_model(model_path, device):
+def fetch_model(model_path, device, sparse_dlrm=False):
     """This function unzips the zipped model checkpoint (if zipped) and returns a
     model object
 
@@ -109,7 +134,7 @@ def fetch_model(model_path, device):
     else:
         unzip_path = model_path
 
-    model = get_dlrm_model()
+    model = get_dlrm_model(sparse_dlrm=sparse_dlrm)
     model.load_state_dict(torch.load(unzip_path, map_location=device))
     model = model.to(device)
     model.eval()
