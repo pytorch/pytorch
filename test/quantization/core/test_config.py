@@ -6,8 +6,12 @@ import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
-from torch.ao.quantization.backend_config.backend_config import *
-from torch.ao.quantization.backend_config.observation_type import ObservationType
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    BackendOpConfig,
+    DtypeConfig,
+    ObservationType,
+)
 from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
 from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
 from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
