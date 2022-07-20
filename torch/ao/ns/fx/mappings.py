@@ -310,6 +310,16 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Softmax,
         ]),
+        # PReLU
+        set([
+            nn.PReLU,
+            nnq.PReLU,
+        ]),
+        # F.prelu
+        set([
+            F.prelu,
+            toq.prelu,
+        ]),
     ]
 
     # for each floating point op, add versions of the op added by
@@ -468,6 +478,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         operator.mul,
         torch.mul,
         torch.sum,
+        F.prelu,
     ])
 
     FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
@@ -488,6 +499,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.layer_norm,
         toq.leaky_relu,
         toq.dropout,
+        toq.prelu,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
@@ -568,6 +580,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.SiLU,
         nn.Mish,
         nn.Softmax,
+        nn.PReLU,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,
@@ -613,6 +626,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.EmbeddingBag,
         nnq.Dropout,
         nnq.Softmax,
+        nnq.PReLU,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,

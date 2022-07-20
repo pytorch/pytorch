@@ -226,6 +226,7 @@ def build_constructor_arg_db():
             'factory_kwargs': {},
         }),
         torch.nn.quantized.MaxPool2d: ((3,), {}),
+        torch.nn.quantized.PReLU: ((0.01, 0), {}),
         torch.nn.quantized.Quantize: ((0.1, 0), {
             'dtype': torch.int16,
             'factory_kwargs': {},
