@@ -8,9 +8,13 @@ from typing import List, Mapping, Tuple
 import onnx_test_common
 import parameterized
 import PIL
+
+import torch
 import torchvision
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from test_models import TestModels
+from torch import nn
+from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -21,10 +25,6 @@ from torchvision.models.detection import (
     rpn,
     transform,
 )
-
-import torch
-from torch import nn
-from torch.testing._internal import common_utils
 
 
 def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):

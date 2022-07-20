@@ -33,7 +33,7 @@ concurrency:
 jobs:
   manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -53,7 +53,7 @@ jobs:
   manywheel-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
