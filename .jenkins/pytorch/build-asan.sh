@@ -37,6 +37,8 @@ popd
 
 print_sccache_stats
 
+cd torch-*
 python test/run_test.py --export-past-test-times
+popd
 
 assert_git_not_dirty
