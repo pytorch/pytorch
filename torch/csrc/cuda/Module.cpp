@@ -220,7 +220,13 @@ PyObject* THCPModule_setStream_wrap(
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "|KKK", kwlist, &stream_id, &device_index, &device_type)) {
+          args,
+          kwargs,
+          "|KKK",
+          kwlist,
+          &stream_id,
+          &device_index,
+          &device_type)) {
   }
 
   auto stream =
