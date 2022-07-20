@@ -371,15 +371,17 @@ class SynchronizedDataLoaderPattern(Pattern):
             "Please enable asynchronous dataloading by setting num_workers > 0 when initializing DataLoader."
         )
         # We precompile the regex to avoid recompiling it every time we match
+        # The four back slashes are to escape windows path separator
+        seperator = "\\\\" if os.sep == "\\" else os.sep
         self.iter_regex = re.compile(
             r"torch/utils/data/dataloader.py\([0-9]+\): __iter__$"
-            .replace("/", os.sep))
+            .replace("/", seperator))
         self.get_iterator_regex = re.compile(
             r"torch/utils/data/dataloader.py\([0-9]+\): _get_iterator$"
-            .replace("/", os.sep))
+            .replace("/", seperator))
         self.check_worker_regex = re.compile(
             r"torch/utils/data/dataloader.py\([0-9]+\): check_worker_number_rationality$"
-            .replace("/", os.sep))
+            .replace("/", seperator))
 
     def match(self, event: _ProfilerEvent):
         if not re.search(self.iter_regex, event.name()):
