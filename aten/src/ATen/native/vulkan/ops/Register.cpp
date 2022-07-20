@@ -204,6 +204,9 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
       TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"),
       TORCH_FN(create_linear_context));
   m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"),
+      TORCH_FN(run_linear_context));
+  m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"),
       TORCH_FN(linear_prepack)); // Backwards compatibility
   m.impl(
