@@ -47,7 +47,7 @@ OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 @dataclass
 class DtypeConfig:
     """
-    TODO: write this.
+    Data type config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
     input_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
@@ -93,8 +93,42 @@ class DtypeConfig:
 
 
 class BackendConfig:
+    # TODO: refer to native fbgemm BackendConfig once that is implemented
     """
-    TODO: write this.
+    Config that defines which ops are supported and how they are quantized on a custom backend.
+
+    This config specifies how reference quantized models are produced (during the prepare phase) and how they
+    are lowered to implementations specific to the target backend (during the convert phase). Each op supported
+    on the target backend can be individually configured through :class:`~torch.ao.quantization.backend_config.BackendOpConfig`.
+
+    Example usage::
+
+        import torch
+        from torch.ao.quantization.backend_config import BackendConfig, BackendOpConfig, DtypeConfig, ObservationType
+        from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+
+        weighted_int8_dtype_config = DtypeConfig(
+            input_dtype=torch.quint8,
+            output_dtype=torch.quint8,
+            weight_dtype=torch.qint8,
+            bias_type=torch.float)
+
+        linear_config = BackendOpConfig(torch.nn.Linear) \
+            .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+            .set_dtype_configs([weighted_int8_dtype_config]) \
+            .set_root_module(torch.nn.Linear) \
+            .set_qat_module(torch.nn.qat.Linear) \
+            .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
+
+        conv_relu_config = BackendOpConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
+            .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+            .set_dtype_configs([weighted_int8_dtype_config]) \
+            .set_fuser_module(torch.nn.intrinsic.ConvReLU2d) \
+            .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
+
+        backend_config = BackendConfig("my_backend") \
+            .set_config(linear_config) \
+            .set_config(conv_relu_config)
     """
     def __init__(self, name: str):
         self.name = name
@@ -149,7 +183,23 @@ class BackendConfig:
 
 class BackendOpConfig:
     """
-    TODO: write this.
+    Config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
+
+    The user can configure how an op is handled on a given backend using the following methods:
+
+        `set_pattern`: sets the pattern that identifies this op. The format is described in
+            https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
+        `set_observation_type`: sets how observers should be inserted for this op.
+            See :class:`~torch.ao.quantization.backend_config.ObservationType`
+        `set_dtype_configs`: sets the supported data types for this op
+        `set_root_module`: sets the module that represents the root for this op
+        `set_qat_module`: sets the module that represents the QAT implementation for this op
+        `set_reference_quantized_module`: sets the module that represents the reference quantized
+            implementation for this op's root module.
+        `set_fuser_module`: sets the module that represents the fused implementation for this op
+        `set_fuser_method`: sets the function that specifies how to fuse the pattern for this op
+
+    For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
     def __init__(self, pattern: Pattern):
         self.pattern = pattern
@@ -273,11 +323,11 @@ class BackendOpConfig:
             "fuser_method": a function that specifies how to fuse the pattern for this op
         """
         def _get_dtype_config(obj: Any) -> DtypeConfig:
-            """ 
+            """
             Convert the given object into a `DtypeConfig` if possible, else throw an exception.
             """
             if isinstance(obj, DtypeConfig):
-                return obj 
+                return obj
             if isinstance(obj, Dict):
                 return DtypeConfig.from_dict(obj)
             raise ValueError("Expected a list of DtypeConfigs in backend_op_config_dict[\"%s\"], got '%s'" %
