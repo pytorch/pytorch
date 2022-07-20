@@ -281,8 +281,8 @@ class TestNestedTensorDeviceType(TestCase):
     # Helper function to generate a pair of random nested tensors
     # one is contiguous, the other is not, but they appear to have same entries
     # an output nested tensor consists of
-    # * `4 * len(ragged_sizes)` matrices
-    # * matrices[i].shape == (ragged_sizes[i], 5)
+    # * `len(ragged_sizes)` matrices
+    # * matrices[i].shape == (20, ragged_sizes[i])
     def random_nt_noncontiguous_pair(self, ragged_sizes, device, dtype):
         xs = []
         for size in ragged_sizes:
@@ -290,11 +290,11 @@ class TestNestedTensorDeviceType(TestCase):
         # contiguous nested tensor
         ys = []
         for x in xs:
-            ys += x.reshape(-1, 4, 5).transpose(0, -2).unbind()
+            ys.append(x.transpose(-1, -2))
         nt_contiguous = torch.nested_tensor(ys)
         # noncontiguous nested tensor
         n = len(ragged_sizes)
-        nt_noncontiguous = torch.nested_tensor(xs).reshape(n, -1, 4, 5).transpose(1, -2).reshape(n * 4, -1, 5)
+        nt_noncontiguous = torch.nested_tensor(xs).transpose(-1, -2)
         return nt_contiguous, nt_noncontiguous
 
     @dtypes(torch.float, torch.float16, torch.double)
@@ -793,8 +793,8 @@ class TestNestedTensorDeviceType(TestCase):
         nt0_contiguous, nt0_noncontiguous = self.random_nt_noncontiguous_pair((2, 3), device, dtype)
         nt1_contiguous, nt1_noncontiguous = self.random_nt_noncontiguous_pair((6, 7), device, dtype)
         self.nt_equal(
-            nt0_contiguous.bmm(nt1_contiguous.transpose(-1, -2)),
-            nt0_noncontiguous.bmm(nt1_noncontiguous.transpose(-1, -2)))
+            nt0_contiguous.transpose(-1, -2).bmm(nt1_contiguous),
+            nt0_noncontiguous.transpose(-1, -2).bmm(nt1_noncontiguous))
 
     @dtypes(torch.float, torch.double)
     def test_linear(self, device, dtype):
@@ -907,81 +907,27 @@ class TestNestedTensorDeviceType(TestCase):
             r"shape '\[.*\]' is invalid for input of size [0-9]+",
             lambda: nt.reshape(4, 2, 3)
         )
-        # error case: no dimension available for collapsing with the implicit batch dimension
-        nt_scalar = torch.nested_tensor([torch.tensor(1.0), torch.tensor(2.0)])
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"shape '\[.*\]' requests collapsing "
-            r"the implicit batch dimension with the next dimension, "
-            r"but there is not another dimension",
-            lambda: nt_scalar.reshape(8, -1)
-        )
-        # error case: cannot collapse a ragged dimension with the implicit batch dimension
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"only a regular dimension can be collapsed with the implicit batch dimension",
-            lambda: nt.reshape(8, -1)
-        )
-        # error case: invalid collapsed size
-        nt_vector = torch.nested_tensor([torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])])
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
-            r"if implicit batch size < proposed_shape\[0\], then "
-            r"implicit batch size \* next size == proposed_shape\[0\] must hold",
-            lambda: nt_vector.reshape(8)
-        )
-        # error case: no proposed dimension for splitting the implicit batch dimension
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
-            r"if implicit batch size > proposed_shape\[0\], then "
-            r"implicit batch size == proposed_shape\[0\] \* proposed_shape\[1\] must hold",
-            lambda: nt.reshape(2)
-        )
-        # error case: proposed splitting does not multiply to the implicit batch size
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"shape '\[.*\]' is invalid for implicit batch size [0-9]+: "
-            r"if implicit batch size > proposed_shape\[0\], then "
-            r"implicit batch size == proposed_shape\[0\] \* proposed_shape\[1\] must hold",
-            lambda: nt.reshape(2, 3, -1)
-        )
-        # error case: cannot split a new dimension from the implicit batch dimension
-        #             because the underlying tensors cannot be stacked
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"cannot stack underlying tensors because they have different sizes",
-            lambda: nt.reshape(2, 2, -1, -1)
-        )
-        # TODO: for now there seems to be no way to trigger
-        #       "cannot stack underlying tensors" error
-        #       from different strides or uneven offsets
-        #       will have to test those error messages later
         # normal case
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
         pt = nt.to_padded_tensor(0.0)
-        # nested tensor reshaping scheme:
-        # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
-        # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
-        #                                      (2, 5)
-        #                                      (2, 5)
-        #                                      (3, 5)
-        #                                      (3, 5)
-        #                                      (3, 5)
-        #                                      (3, 5)
-        # padded tensor reshaping scheme:
-        # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
-        # inherit only jagged dimension
-        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
-        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
-        self.assertEqual(noncontiguous_to_padded_tensor(ntmh), ptmh)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"for now reshape cannot change the implicit batch dimension",
+            lambda: nt.transpose(-1, -2).reshape(40, -1)
+        )
+        # inherit only the ragged dimension
+        # (2, 20) -> (2, 5, 4)
+        # (3, 20) -> (3, 5, 4)
+        nt1 = nt.reshape(2, -1, 5, 4)
+        # (2, 3, 20) -> (2, 3, 5, 4) -> (2, 4, 5, 4)
+        pt1 = pt.reshape(2, -1, 5, 4)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt1), pt1)
         # also inherit regular dimension
-        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, -1)
-        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
-        self.assertEqual(noncontiguous_to_padded_tensor(ntmh), ptmh)
+        nt2 = nt1.reshape(2, -1, -1, 2, 2)
+        pt2 = pt1.reshape(2, -1, 5, 2, 2)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
 
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
