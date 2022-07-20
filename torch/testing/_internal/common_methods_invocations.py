@@ -4216,7 +4216,7 @@ def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
                   ((S, S), -1),
                   ((S, 0, S), 0),
                   ((S, S, S), 1),
-                 )
+                  )
     for shape, dim in shape_dims:
         yield SampleInput(make_tensor(shape, dtype=dtype, device=device,
                                       requires_grad=requires_grad),
@@ -4231,7 +4231,7 @@ def error_inputs_unbind(op_info, device):
 
 def reference_unbind(t, dim):
     """A numpy implementation of torch.unbind"""
-    return tuple( s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
+    return tuple(s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     return (
