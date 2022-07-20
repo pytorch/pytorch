@@ -536,13 +536,14 @@ class TestCommon(TestCase):
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
         )
 
@@ -1217,8 +1218,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_with_mode(op, args, kwargs)
-            composite_compliance.check_all_permutations(op, args, kwargs)
+            composite_compliance.check_with_mode(op, args, kwargs, self.assertEqual)
+            composite_compliance.check_all_permutations(op, args, kwargs, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1230,10 +1231,12 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
             composite_compliance.check_backward_formula(
                 op.get_op(), args, kwargs,
                 sample.output_process_fn_grad,
-                op.gradcheck_wrapper)
+                op.gradcheck_wrapper, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1251,8 +1254,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
             composite_compliance.check_forward_ad_formula(
-                op.get_op(), args, kwargs, op.gradcheck_wrapper)
+                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
 class TestMathBits(TestCase):

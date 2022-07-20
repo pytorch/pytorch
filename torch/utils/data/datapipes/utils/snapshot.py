@@ -14,6 +14,9 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     For instance, applying this function to the final DataPipe of a graph will restore the snapshot
     (via fast-forward) every DataPipe within the graph.
 
+    After you deserialize a DataPipe, you can use its `_number_of_samples_yielded` attribute as the input
+    to this function to forward the DataPipe.
+
     A DataPipe cannot be restored twice in a row unless there is an iteration started between the restoration
     attempts.
 

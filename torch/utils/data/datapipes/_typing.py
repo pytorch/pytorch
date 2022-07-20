@@ -365,31 +365,6 @@ class _IterDataPipeMeta(_DataPipeMeta):
 
             namespace['reset'] = conditional_reset
 
-        if '__setstate__' in namespace:
-            setstate_func = namespace['__setstate__']
-
-            @functools.wraps(setstate_func)
-            def wrap_setstate(*args, **kwargs):
-                r"""
-                Set `_SnapshotState` to `NotStarted` during `__setstate__`, such that the next `reset()` call during
-                iterator creation will not actually reset the state of the DataPipe.
-                """
-                try:
-                    return setstate_func(*args, **kwargs)
-                finally:
-                    # This needs happen after because the state being passed in
-                    # may have `datapipe._SnapshotState = Iterating`.
-                    datapipe = args[0]
-                    # FIXME: Without the `if` condition below, the code snippet below would fail. We have
-                    #   investigated but no clue why. Note that this doesn't cause any functional issue.
-                    #   >>> dp = IterableWrapper(range(10))
-                    #   >>> copied_dp = pickle.loads(pickle.dumps(dp))
-                    #   >>> pickle.dumps(dp) == pickle.dumps(copied_dp)
-                    if datapipe._snapshot_state != _SnapshotState.NotStarted:
-                        datapipe._snapshot_state = _SnapshotState.NotStarted
-
-            namespace['__setstate__'] = wrap_setstate
-
         if '__iter__' in namespace:
             hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
