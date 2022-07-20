@@ -86,7 +86,6 @@ function get_bazel() {
 }
 
 function install_monkeytype {
-  # Install MonkeyType
   pip_install MonkeyType
 }
 

@@ -9,6 +9,12 @@ ARG CUDA_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
+# Some NVidia images have a broken symlink
+# inside /usr/local/cuda, which causes issues in Bazel:
+# ERROR: circular symlinks detected
+# /usr/local/cuda-11.6/cuda-11.6
+RUN rm -f "/usr/local/cuda/cuda-${CUDA_VERSION}"
+
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
 ADD ./common/install_base.sh install_base.sh
