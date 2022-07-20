@@ -39,22 +39,8 @@ try:
                 rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
                 return (lhs == rhs), counter
 
-            # elif constraint.op == op_neq:
-            #     lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
-            #     rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
-            #
-            #
-            #
-            #     print(lhs)
-            #     print(rhs)
-
-
-                raise NotImplementedError('Method not yet implemented')
-
             else:
-                print(constraint)
                 raise NotImplementedError('Method not yet implemented')
-
 
         elif isinstance(constraint, BinConstraintD):
             if constraint.op == op_eq:

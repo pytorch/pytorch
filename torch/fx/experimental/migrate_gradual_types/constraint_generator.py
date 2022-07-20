@@ -546,14 +546,6 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
         b, counter = gen_tensor_dims(4, counter)
         input_is_size3 = BinConstraintT(lhs, TensorType([b[0], b[1], b[2]]), op_eq)
 
-        dims_1, counter = gen_tensor_dims(1, counter)
-        dims_2, counter = gen_tensor_dims(2, counter)
-        dims_4, counter = gen_tensor_dims(4, counter)
-
-        input_is_size1 = BinConstraintT(lhs, TensorType(dims_1), op_eq)
-        input_is_size2 = BinConstraintT(lhs, TensorType(dims_2), op_eq)
-        input_is_size4 = BinConstraintT(lhs, TensorType(dims_4), op_eq)
-
         d1 = n.args[1][0] if isinstance(n.args[1][0], int) else symbols[n.args[1][0]]
         d2 = n.args[1][1] if isinstance(n.args[1][1], int) else symbols[n.args[1][1]]
         d3 = n.args[1][2] if isinstance(n.args[1][2], int) else symbols[n.args[1][2]]
@@ -571,10 +563,8 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
 
         dims_inconsistent = Disj([dims_inconsistent1, dims_inconsistent2, dims_inconsistent3])
 
-        ne_constraint = Disj([Conj([input_is_size3, dims_inconsistent]),
-                              input_is_size1,
-                              input_is_size2,
-                              input_is_size4])
+        # we are covering size 3 and 4 only for now
+        ne_constraint = Conj([input_is_size3, dims_inconsistent])
 
         my_ne, counter = gen_bvar(counter)
         equality_constraint = BinConstraintD(my_ne, ne_constraint, op_eq)
@@ -615,15 +605,7 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
 
         dims_inconsistent = Disj([dims_inconsistent1, dims_inconsistent2, dims_inconsistent3, dims_inconsistent4])
 
-        dims_1, counter = gen_tensor_dims(1, counter)
-        dims_2, counter = gen_tensor_dims(2, counter)
-        dims_3, counter = gen_tensor_dims(3, counter)
-
-        input_is_size1 = BinConstraintT(lhs, TensorType(dims_1), op_eq)
-        input_is_size2 = BinConstraintT(lhs, TensorType(dims_2), op_eq)
-        input_is_size3 = BinConstraintT(lhs, TensorType(dims_3), op_eq)
-
-        ne_constraint = Disj([Conj([input_is_size4, dims_inconsistent]), input_is_size1, input_is_size2, input_is_size3])
+        ne_constraint = Conj([input_is_size4, dims_inconsistent])
 
         my_ne, counter = gen_bvar(counter)
 

@@ -68,47 +68,6 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(positive, z3.unsat)
         self.assertEqual(negative, z3.sat)
 
-    # TODO: figure out the correct constraints for this case as well
-    def test_conditional_ne_2(self):
-        """
-        This test case is for the HFmodels interface.
-        A function takes a node and a graph and considers
-        the conditional the node represents and its negation
-        and solves each formula with the remaining sets of constraints
-        Returns:
-
-        """
-        class BasicBlock(torch.nn.Module):
-            def __init__(self):
-                super(BasicBlock, self).__init__()
-
-            def forward(self, x: TensorType([33, 4, 4]), y: TensorType([33, 4])):
-                size_5 = x.size()
-                getitem_7 = size_5[0]
-                getitem_8 = size_5[1]
-                getitem_9 = size_5[2]
-                ne_1 = y != (getitem_7, getitem_8, getitem_9)
-                return ne_1
-
-        ast_rewriter = RewritingTracer()
-        graph = ast_rewriter.trace(BasicBlock())
-
-        # The node we are considering is the gt node
-        for n in graph.nodes:
-            if n.target == operator.ne:
-                node = n
-
-
-        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
-
-        print(positive)
-        print(negative)
-
-        # TODO: this may require a forall to be added to the grammar. Needs discussion.
-        # self.assertEqual(positive, z3.sat)
-        # self.assertEqual(negative, z3.unsat)
-
-
     def test_bmm(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
