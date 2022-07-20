@@ -88,7 +88,8 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     if str(g.view_copy.func.name) == "view_copy":
         return """\
 at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
-  if (!at::detail::computeStride(self.sizes(), self.strides(), size).has_value()) {
+  DimVector shape = infer_size_dv(size, self.numel());
+  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
     return self.reshape(size);
   } else {
     auto output = at::_ops::view::call(self, size);

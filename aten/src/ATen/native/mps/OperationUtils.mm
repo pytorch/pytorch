@@ -192,7 +192,7 @@ MPSShape* getMPSShape(const Tensor& t) {
   {
     NSInteger sz_i = (i < sz) ? t.size(i) : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
@@ -213,7 +213,7 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
   {
     NSInteger sz_i = (i < sz) ? sizes[i] : 1;
 
-    NSNumber* number = [NSNumber numberWithInt:sz_i];
+    NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers count:sz_];
