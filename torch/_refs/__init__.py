@@ -2676,11 +2676,18 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 0)
 
 
-# This not an op, just a method on tensor, so we don't register decomp
+@register_decomposition(torch.ops.aten.unflatten)
+@out_wrapper()
 def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
+    if not sizes:
+        raise RuntimeError("unflatten: sizes must be non-empty")
+    if -1 not in sizes and utils.prod(sizes) != a.shape[dim]:
+        raise RuntimeError(
+            f"unflatten: Provided sizes {sizes} don't multiply up to the size of dim {dim} ({a.shape[dim]}) in the input tensor"
+        )
     out_shape = tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :])
-    return reshape(a, out_shape)
+    return torch.reshape(a, out_shape)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
