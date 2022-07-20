@@ -2241,8 +2241,9 @@ def instance_norm(
             raise RuntimeError(
                 "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
-        weight_value = torch.tensor([1.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        weight_value = torch.tensor(
+            [1.0] * channel_size,
+            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or symbolic_helper._is_none(bias):
@@ -2250,8 +2251,9 @@ def instance_norm(
             raise RuntimeError(
                 "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
-        bias_value = torch.tensor([0.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        bias_value = torch.tensor(
+            [0.0] * channel_size,
+            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
         )
         bias = g.op("Constant", value_t=bias_value)
     if (
@@ -4883,14 +4885,16 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # instance norm computation and reshape
     weight_ = g.op(
         "Constant",
-        value_t=torch.tensor([1.0] * num_groups).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        value_t=torch.tensor(
+            [1.0] * num_groups,
+            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
         ),
     )
     bias_ = g.op(
         "Constant",
-        value_t=torch.tensor([0.0] * num_groups).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        value_t=torch.tensor(
+            [0.0] * num_groups,
+            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
         ),
     )
 
@@ -4900,13 +4904,13 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     norm = symbolic_helper._reshape_helper(g, norm_reshaped, g.op("Shape", input))
 
     if weight is None or weight.node().mustBeNone():
-        weight_value = torch.tensor([1.0]).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        weight_value = torch.tensor(
+            [1.0], dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or bias.node().mustBeNone():
-        bias_value = torch.tensor([0.0]).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        bias_value = torch.tensor(
+            [0.0], dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
         )
         bias = g.op("Constant", value_t=bias_value)
 
