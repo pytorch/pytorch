@@ -210,6 +210,7 @@ __all__ = [
     "multinomial",
     "mv",
     "narrow",
+    "native_layer_norm",
     "ne",
     "neg",
     "new_empty",
@@ -2204,9 +2205,11 @@ def batch_norm(
         return res
 
 
-@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
-def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    if symbolic_helper.is_caffe2_aten_fallback():
+def _layer_norm_shared(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    if (
+        GLOBALS.operator_export_type
+        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+    ):
         return g.at(
             "layer_norm",
             input,
@@ -2216,7 +2219,6 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
             eps_f=eps,
             cudnn_enable_i=cudnn_enable,
         )
-
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
@@ -2226,16 +2228,29 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     numerator = sub(g, input, mean)
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    denominator = sqrt(g, add(g, variance, eps_cst))
+    rdenominator = rsqrt(g, add(g, variance, eps_cst))
 
-    layer_norm = g.op("Div", numerator, denominator)
+    normalized = g.op("Mul", numerator, rdenominator)
 
     if not (weight is None or symbolic_helper._is_none(weight)):
-        layer_norm = mul(g, layer_norm, weight)
+        normalized = mul(g, normalized, weight)
     if not (bias is None or symbolic_helper._is_none(bias)):
-        layer_norm = add(g, layer_norm, bias)
+        normalized = add(g, normalized, bias)
 
-    return layer_norm
+    return normalized, mean, rdenominator
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f")
+def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
+    return _layer_norm_shared(g, input, normalized_shape, weight, bias, eps, False)
+
+
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    normalized, mean, rdenominator = _layer_norm_shared(
+        g, input, normalized_shape, weight, bias, eps, cudnn_enable
+    )
+    return normalized
 
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
