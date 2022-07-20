@@ -3022,8 +3022,6 @@ def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
-    # Try complex inputs
-    # What happens when we change dtype to be complex?
     ends = (0, 1, 2, 10, 50)
     # Start is optional, but we currently don't test `None` because ref does not support
     starts = (1, 3, 10, 50)
@@ -3037,6 +3035,12 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
                     step = sign * step
                 else:
                     step = sign
+
+                if dtype.is_floating_point:
+                    start += 0.1
+                    end += 0.1
+                    step += 0.1
+
                 if step is None:
                     yield SampleInput(start, args=(end,))
                 else:
@@ -10702,7 +10706,7 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_get_torch_func_signature_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
 
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
@@ -10719,6 +10723,8 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # Expected RuntimeError when doing an unsafe cast from a result of dtype torch.float32 into an out= with dtype torch.long
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out')
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
