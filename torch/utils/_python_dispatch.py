@@ -159,6 +159,7 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_dispatch_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_dispatch_mode(self.inner)
