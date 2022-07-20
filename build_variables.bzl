@@ -1086,6 +1086,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+    # This is moved to aten_cpu because some of the custom ops use empty_with_tail_padding
+    # which was available only within aten_native_cpu. Ideally the right fix is to make
+    # empty_with_tail_padding into an op and use dispatcher with it. But exposing it as an op
+    # has limited use and hence does not seem to really make sense.
+    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
@@ -1372,7 +1377,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
-    "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",

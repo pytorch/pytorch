@@ -759,7 +759,7 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.view(numel, grad_output.size(-1))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
     indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
@@ -1014,16 +1014,6 @@ def native_batch_norm(
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
-
-
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
 
 
 @register_decomposition(aten._fused_dropout)
