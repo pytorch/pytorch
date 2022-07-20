@@ -147,8 +147,15 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
   uvec3 src_offset{};
   uvec3 dst_offset{};
 
+  std::vector<Tensor> v_tensors;
+
   for (const auto& tensor : tensors) {
-    const vTensor& v_self = convert(tensor);
+    const Tensor v_tensor = tensor.is_vulkan() ? tensor : tensor.vulkan();
+    v_tensors.emplace_back(v_tensor);
+  }
+
+  for (const auto& v_tensor : v_tensors) {
+    const vTensor& v_self = convert(v_tensor);
 
     api::PipelineBarrier pipeline_barrier{};
 
