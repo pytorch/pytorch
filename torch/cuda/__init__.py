@@ -372,6 +372,13 @@ def GetAllocFreeEvents():
     _lazy_init()
     return _get_alloc_free_events()
 
+
+# def GetNumAllocEvents():
+#     r"""Gets number of allocation/free events
+#     """
+#     _lazy_init()
+#     return _get_num_alloc_events()
+
 def pybind11_test_expose():
     r"""Print Hello World
     """

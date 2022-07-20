@@ -659,12 +659,13 @@ static void bindTestExpose(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   pybind11::class_<c10::cuda::CUDACachingAllocator::AllocFreeEvent>(m, "AllocFreeEvent")
         .def(pybind11::init<>())
-        .def_readonly("start", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
+        .def_readonly("ptr", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::ptr)
         .def_readonly("size", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::size)
         .def_readonly("type", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::type)
         .def_readonly("device", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::device);
   m.def("test_exp", &c10::cuda::CUDACachingAllocator::test_expose, "Print Hello World");
-  m.def("_get_alloc_free_events", &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents, "Get allocation/free sequence.");
+  m.def("_get_alloc_free_events", &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents, "Get allocation/free sequence");
+  // m.def("_get_num_alloc_events", &c10::cuda::CUDACachingAllocator::GetNumAllocEvents, "Get number of allocation/free events");
 }
 
 // Callback for python part. Used for additional initialization of python
