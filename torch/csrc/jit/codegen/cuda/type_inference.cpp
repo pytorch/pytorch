@@ -40,8 +40,8 @@ void copyScalarTypeAndDeviceToOutput(
       out != nullptr,
       "Expect target node's type pointer to be non-nullptr, but get nullptr");
   if (!hasTypeAndDevice(out)) {
-    out->scalarType() = dtype;
-    out->device() = device;
+    node->output(index)->setType(
+        TensorType::create(dtype, device, c10::nullopt, c10::nullopt));
   }
 }
 
