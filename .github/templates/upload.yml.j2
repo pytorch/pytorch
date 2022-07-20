@@ -55,13 +55,13 @@
 {%- endif %}
     with:!{{ binary_env_as_input(config, is_windows) }}
       build_name: !{{ config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      {%- if not use_s3 %}
-      use_s3: False
-      {%- endif %}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

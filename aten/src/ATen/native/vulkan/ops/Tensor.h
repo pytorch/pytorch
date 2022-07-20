@@ -35,6 +35,12 @@ class vTensorStorage final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensorStorage(
+      api::Context* context,
+      IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -55,6 +61,9 @@ class vTensorStorage final {
   TensorOptions options_;
   c10::SmallVector<int64_t, 6u> sizes_;
   c10::SmallVector<int64_t, 6u> strides_;
+  bool is_quantized_{false};
+  double q_scale{1.0f};
+  int64_t q_zero_point{0u};
 
   // Image Texture
   mutable api::VulkanImage image_;
@@ -82,6 +91,12 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensor(
+      api::Context* const context,
+      const IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
 
  private:
   // Even at the cost of a heap allocation plus the resulting negative impact
@@ -136,6 +151,18 @@ class vTensor final {
     return view_->strides_;
   }
 
+  inline bool is_quantized() const {
+    return view_->is_quantized_;
+  }
+
+  inline double get_scale() const {
+    return view_->q_scale;
+  }
+
+  inline int64_t get_zero_point() const {
+    return view_->q_zero_point;
+  }
+
   inline size_t nbytes() const {
     return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
         c10::multiply_integers(sizes());
@@ -178,6 +205,16 @@ inline Tensor convert(const vTensor& tensor) {
       tensor.strides());
 }
 
+inline Tensor convert_quantized(const vTensor& tensor) {
+  TORCH_CHECK(tensor.is_quantized(), "Not a Quantized Tensor");
+  return at::detail::make_tensor<vTensorImpl>(
+      DispatchKeySet(DispatchKey::Vulkan),
+      tensor.options().dtype(),
+      at::Device(at::kVulkan),
+      tensor,
+      tensor.sizes(),
+      tensor.strides());
+}
 } // namespace ops
 } // namespace vulkan
 } // namespace native
