@@ -226,14 +226,17 @@ Tensor quantile_compute(
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
   if (self.device().is_cpu()) {
-    auto all_in_range = q.ge(0).logical_and_(q.le(1)).all();
+    auto q_in_range = q.ge(0).logical_and_(q.le(1)).all();
+    // For Composite Compliance, we use `nonzero().numel()`
+    // to make sure there aren't any out-of-range values in
+    // `q` instead of using `item`.
     if (isTensorSubclassLike(q)) {
       TORCH_CHECK(
-        all_in_range.nonzero().numel() == 0,
+        q_in_range.nonzero().numel() == 0,
         "quantile() q values must be in the range [0, 1]");
     } else {
       TORCH_CHECK(
-        all_in_range.item<bool>(),
+        q_in_range.item<bool>(),
         "quantile() q values must be in the range [0, 1]");
     }
   }
