@@ -1701,6 +1701,10 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
+            if (PySequence_Check(value.ptr()) &&
+                !PySequence_Size(value.ptr())) {
+              return;
+            }
             // For normalization purposes there is an inconsistency within
             // torch.fx that turns all arguments named "self" into "input". Thus
             // this check ensures that those arguments are checked correctly.
@@ -1714,6 +1718,10 @@ void initJITBindings(PyObject* module) {
         std::unordered_map<std::string, IValue> value_map;
         for (const auto& key_pair : values) {
           IValue key = toTypeInferredIValue(key_pair.first);
+          if (PySequence_Check(key_pair.second.ptr()) &&
+              !PySequence_Size(key_pair.second.ptr())) {
+            continue;
+          }
           IValue value = toTypeInferredIValue(key_pair.second);
           TORCH_INTERNAL_ASSERT(
               key.isString(),
@@ -1898,9 +1906,17 @@ void initJITBindings(PyObject* module) {
               }),
           py::call_guard<py::gil_scoped_release>());
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
+    if ((PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr())) ||
+        (PySequence_Check(other.ptr()) && !PySequence_Size(other.ptr()))) {
+      return false;
+    }
     return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
   });
   m.def("_overlaps", [](const py::object& self, const py::object& other) {
+    if ((PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr())) ||
+        (PySequence_Check(other.ptr()) && !PySequence_Size(other.ptr()))) {
+      return false;
+    }
     return toTypeInferredIValue(self).overlaps(toTypeInferredIValue(other));
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
