@@ -1218,8 +1218,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_with_mode(op, args, kwargs)
-            composite_compliance.check_all_permutations(op, args, kwargs)
+            composite_compliance.check_with_mode(op, args, kwargs, self.assertEqual)
+            composite_compliance.check_all_permutations(op, args, kwargs, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
