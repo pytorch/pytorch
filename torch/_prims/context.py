@@ -72,7 +72,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False, should_fallback_fn=lambda *_: True):
+    def __init__(self, strict=False, should_fallback_fn=lambda *_: False):
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
 
