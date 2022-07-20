@@ -388,7 +388,9 @@ TEST(DispatchKeySet, FailAtEndIterator) {
 
 TEST(DispatchKeySet, TestBackendComponentToString) {
   std::unordered_set<std::string> seen_strings;
-  for (int64_t i = 0; i <= static_cast<int64_t>(BackendComponent::EndOfBackendKeys); i++) {
+  for (int64_t i = 0;
+       i <= static_cast<int64_t>(BackendComponent::EndOfBackendKeys);
+       i++) {
     auto k = static_cast<BackendComponent>(i);
     auto res = std::string(toString(k));
     ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
