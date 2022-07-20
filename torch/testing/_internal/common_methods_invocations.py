@@ -6362,7 +6362,7 @@ def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
 
     # NOTE: primTorch is more strict about the type of the fill value argument
     # So we must cast it to the correct dtype
-    from torch._prims_common import dtype_to_type
+    from torch._prims.utils import dtype_to_type
     scalar_type = dtype_to_type(dtype)
 
     def drop_mode_argument(input, pad, mode=None, value=None):
@@ -6413,6 +6413,8 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
+        low = None
+        high = None
         if self.name in ['fft.hfft', 'fft.irfft',
                          '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
@@ -6422,11 +6424,15 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         elif self.name in ['fft.hfftn', 'fft.irfftn',
                            '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
+            # Adjusting the limits because the test would be flaky due to over-saturation of float16
+            # See: https://github.com/pytorch/pytorch/pull/81416
+            low = -1.0
+            high = 1.0
         else:
             shapes = ((2, 8, 16), (32,))
-        nd_tensor = partial(make_tensor, shapes[0], device=device,
+        nd_tensor = partial(make_tensor, shapes[0], device=device, low=low, high=high,
                             dtype=dtype, requires_grad=requires_grad)
-        oned_tensor = partial(make_tensor, shapes[1], device=device,
+        oned_tensor = partial(make_tensor, shapes[1], device=device, low=low, high=high,
                               dtype=dtype, requires_grad=requires_grad)
 
     if self.ndimensional == SpectralFuncType.ND:
