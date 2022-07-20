@@ -157,7 +157,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is not Tensor and has_torch_function_unary(self):
+        if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
         state = torch._utils._get_obj_state(self)

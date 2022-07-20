@@ -274,7 +274,7 @@ def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
     param._backward_hooks = backward_hooks
 
     # Restore state on Parameter like python attr.
-    param = torch._utils._set_obj_state(param, state)
+    param = _set_obj_state(param, state)
     return param
 
 def _get_obj_state(obj):
