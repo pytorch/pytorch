@@ -14001,7 +14001,7 @@ class TestNNDeviceType(NNTestCase):
         gradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_forward_ad=check_forward_ad)
         gradgradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_fwd_over_rev=check_forward_ad)
 
-    @parametrize_test("N", list(range(2, 4)), name_fn=lambda N: 'ConvTranspose{}d'.format(N))
+    @parametrize_test("N", range(2, 4), name_fn=lambda N: 'ConvTranspose{}d'.format(N))
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
         # See https://github.com/pytorch/pytorch/issues/75889

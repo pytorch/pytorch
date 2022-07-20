@@ -1,4 +1,3 @@
-import collections
 import copy
 import gc
 import inspect
@@ -734,8 +733,6 @@ class OpDTypes(Enum):
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        if isinstance(op_list, collections.abc.Iterator):
-            raise ValueError('Prefer non exhaustive iterables like list for op_list')
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
@@ -747,6 +744,7 @@ class ops(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
+        op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
             dtypes: Union[Set[torch.dtype], Set[None]]
@@ -824,6 +822,8 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
+        if op is check_exhausted_iterator:
+            raise ValueError("Parameter op_list is exhausted.")
 
 # Decorator that skips a test if the given condition is true.
 # Notes:

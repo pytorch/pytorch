@@ -151,47 +151,47 @@ class TestReductions(TestCase):
         self._test_dim_keepdim(op, device, ndim=2, dim=-1, keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=1, keepdim=True)
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty(self, device, op: ReductionOpInfo):
         """Tests that dim=[] is a no-op"""
         self._test_dim_keepdim(op, device, ndim=0, dim=[])
         self._test_dim_keepdim(op, device, ndim=2, dim=[])
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_empty_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[], when keepdim=True, is a no-op"""
         self._test_dim_keepdim(op, device, ndim=0, dim=[], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=2, dim=[], keepdim=True)
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
         self._test_dim_keepdim(op, device, ndim=1, dim=[0])
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2])
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_keepdim(self, device, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...], when keepdim=True, reduces dimensions i, j, .... to size 1."""
         self._test_dim_keepdim(op, device, ndim=1, dim=[0], keepdim=True)
         self._test_dim_keepdim(op, device, ndim=3, dim=[0, 2], keepdim=True)
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsorted(self, device, op: ReductionOpInfo):
         """Tests that operator correctly handles unsorted dim list."""
         self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2])
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsorted_keepdim(self, device, op: ReductionOpInfo):
         """Tests that operator correctly handles unsorted dim list when keepdim=True."""
         self._test_dim_keepdim(op, device, ndim=4, dim=[3, 0, 2], keepdim=True)
 
-    @ops(tuple(filter(lambda op: op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_duplicate(self, device, op: ReductionOpInfo):
         """Tests that an error is raised if dim has duplicate entries."""
         with self.assertRaises(RuntimeError):
             self._test_dim_keepdim(op, device, ndim=3, dim=[0, 1, 1, 2])
 
-    @ops(tuple(filter(lambda op: not op.supports_multiple_dims, reduction_ops)), dtypes=OpDTypes.none)
+    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_ops), dtypes=OpDTypes.none)
     def test_dim_multi_unsupported(self, device, op: ReductionOpInfo):
         """Tests that ops claiming to not support multi dim actually don't."""
         with self.assertRaises(TypeError):
@@ -211,7 +211,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
             op(t, dim=0)
 
-    @ops(tuple(filter(lambda op: op.identity is not None, reduction_ops)), dtypes=OpDTypes.supported)
+    @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
         """Tests that the identity value is an identity for the operator"""
         t = make_tensor((10,), dtype=dtype, device=device)
@@ -226,7 +226,7 @@ class TestReductions(TestCase):
     # TODO(@heitorschueroff) Update these to use the nan_policy kwarg once
     # it is added to reduction operators.
 
-    @ops(tuple(filter(lambda op: op.nan_policy == 'propagate', reduction_ops)), dtypes=OpDTypes.supported,
+    @ops(filter(lambda op: op.nan_policy == 'propagate', reduction_ops), dtypes=OpDTypes.supported,
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
     def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
         """Tests that nan is propagated to the output by default"""
@@ -236,7 +236,7 @@ class TestReductions(TestCase):
         result = op(t, *args, **kwargs)
         self.assertTrue(result.isnan())
 
-    @ops(tuple(filter(lambda op: op.nan_policy == 'omit', reduction_ops)), dtypes=OpDTypes.supported,
+    @ops(filter(lambda op: op.nan_policy == 'omit', reduction_ops), dtypes=OpDTypes.supported,
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
     def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
         """Tests that NaN values do not affect the result."""
@@ -363,13 +363,13 @@ class TestReductions(TestCase):
             expected = op.ref(t.detach().cpu().numpy(), *args, **kwargs)
             self.assertEqual(result, expected, exact_dtype=False)
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for scalar input tensors"""
         self._test_ref(op, make_tensor([], dtype=dtype, device=device))
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for small input tensors"""
@@ -378,13 +378,13 @@ class TestReductions(TestCase):
         for dim in [0, 1, 3] + ([[0, 2], [1, 3]] if op.supports_multiple_dims else []):
             self._test_ref(op, t, dim=dim)
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 1D input tensor to check stability"""
         self._test_ref(op, make_tensor((2 ** 20,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 2D input tensor to test parallelism"""
@@ -392,13 +392,13 @@ class TestReductions(TestCase):
         self._test_ref(op, t, dim=1)
 
     @largeTensorTest("8gb")
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
         self._test_ref(op, make_tensor((275000000,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_duplicate_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with duplicate values"""
@@ -408,7 +408,7 @@ class TestReductions(TestCase):
         self._test_ref(op, t, dim=0)
         self._test_ref(op, t, dim=1)
 
-    @ops(tuple(filter(lambda op: op.ref is not None, reduction_ops)),
+    @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""

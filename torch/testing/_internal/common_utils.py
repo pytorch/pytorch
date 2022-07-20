@@ -11,7 +11,6 @@ import platform
 import re
 import gc
 import types
-import collections
 import math
 from functools import partial
 import inspect
@@ -294,14 +293,12 @@ class parametrize(_TestParametrizer):
 
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
-        arg_values (iterable): Non exhaustable iterable of arg values (e.g. range(10)) or
+        arg_values (iterable): Iterable of arg values (e.g. range(10)) or
             tuples of arg values (e.g. [(1, 2), (3, 4)]).
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
         self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
-        if isinstance(arg_values, collections.abc.Iterator):
-            raise ValueError('Prefer non exhaustive iterables like list for arg_values')
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -339,6 +336,7 @@ class parametrize(_TestParametrizer):
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
+            values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
                 if isinstance(values, subtest):
@@ -373,6 +371,9 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
                 yield (gen_test, test_name, param_kwargs)
+
+            if values is check_exhausted_iterator:
+                raise ValueError("Parameter arg_values is exhausted.")
 
 
 class ProfilingMode(Enum):

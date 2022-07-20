@@ -1693,7 +1693,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         class TestParametrized(TestCase):
             @dtypes(torch.float32, torch.float64)
-            @parametrize("x", list(range(3)))
+            @parametrize("x", range(3))
             def test_parametrized(self, x, dtype):
                 pass
 
