@@ -3069,7 +3069,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         if start > end:
             # Should this error?
             continue
-        yield SampleInput(start, args=(end, n_step), kwargs={"dtype":dtype, "device":device})
+        yield SampleInput(start, args=(end, n_step), kwargs={"dtype": dtype, "device": device})
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
@@ -12931,7 +12931,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
-               # NOTE: This is an exact copy of xfails for arange
+               # NOTE: This is an exact copy of xfails for arange except test_out was removed
 
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -20416,7 +20416,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
-        validate_view_consistency = False,
+        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",

@@ -3026,24 +3026,27 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    assert not isinstance(start, complex)
     factory_kwargs = {
         "device": device,
         # "layout":layout,
         # "pin_memory":pin_memory,
-        "requires_grad":requires_grad
+        "requires_grad": requires_grad,
     }
     if steps == 0:
-        res = torch.full((0,), 0, **factory_kwargs, dtype=dtype)
+        res = torch.full((0,), 0, dtype=dtype, **factory_kwargs)
     elif steps == 1:
-        res =  torch.full((1,), start, **factory_kwargs, dtype=dtype)
+        res = torch.full((1,), start, dtype=dtype, **factory_kwargs)
     elif end - start == 0:
-        res =  torch.full((steps,), start, **factory_kwargs, dtype=dtype)
+        res = torch.full((steps,), start, dtype=dtype, **factory_kwargs)
     else:
         step_size = (end - start) / (steps - 1)
         eps = step_size / 2
         # Does linspace actually do its computation in the specified dtype? Does that matter?
-        tmp = torch.arange(start, end + eps, step_size, **factory_kwargs, dtype=torch.float64)
-        res =  prims.to_dtype(tmp, dtype)
+        tmp = torch.arange(
+            start, end + eps, step_size, **factory_kwargs, dtype=torch.float64
+        )
+        res = prims.to_dtype(tmp, dtype)
 
     return res
 
