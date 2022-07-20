@@ -847,7 +847,7 @@ class TestNestedTensorDeviceType(TestCase):
     @dtypes(torch.float, torch.double)
     def test_linear_noncontiguous(self, device, dtype):
         nt_contiguous, nt_noncontiguous = self.random_nt_noncontiguous_pair((2, 3, 6, 7), device, dtype)
-        weight = torch.randn((8, 5))
+        weight = torch.randn((8, 5), device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
             r"for now linear only supports contiguous nested tensor",
