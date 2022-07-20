@@ -270,8 +270,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   {
-    using torch::profiler::impl::Result;
     using torch::profiler::impl::PyFrameState;
+    using torch::profiler::impl::Result;
     py::enum_<EventType>(m, "_EventType")
         .value("TorchOp", EventType::TorchOp)
         .value("Backend", EventType::Backend)
