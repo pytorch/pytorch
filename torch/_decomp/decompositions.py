@@ -1016,16 +1016,6 @@ def native_batch_norm(
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
-
-
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
