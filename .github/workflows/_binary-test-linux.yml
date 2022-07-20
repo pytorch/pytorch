@@ -184,11 +184,13 @@ jobs:
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
             popd
 
-      - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
-        working-directory: pytorch/
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
+
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
