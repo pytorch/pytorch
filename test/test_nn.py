@@ -1607,6 +1607,8 @@ class TestNN(NNTestCase):
         l4 = nn.Linear(4, 5)
         n1 = nn.Sequential(l1, l2, l3, l4)
         self.assertEqual(l4, n1.pop(3))
+        n2 = nn.Sequential(l1, l2, l3)
+        self.assertEqual(n1, n2)
 
     def test_Sequential_extend(self):
         l1 = nn.Linear(10, 20)
@@ -1699,6 +1701,7 @@ class TestNN(NNTestCase):
         modules = [nn.ReLU(), nn.Linear(5, 5), nn.Conv2d(3, 4, 3)]
         module_list = nn.ModuleList(modules)
         self.assertEqual(modules.pop(1), module_list.pop(1))
+        self.assertEqual(modules, module_list)
 
         # verify the right exception is thrown when trying to "forward" through a ModuleList
         self.assertRaises(NotImplementedError, module_list)
