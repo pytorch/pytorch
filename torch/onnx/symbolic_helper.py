@@ -1127,7 +1127,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
+            dtype=pytorch_name_to_type[input.type().scalarType()],
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
@@ -1137,7 +1137,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
+            dtype=pytorch_name_to_type[input.type().scalarType()],
         )
         bias = g.op("Constant", value_t=bias_value)
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
