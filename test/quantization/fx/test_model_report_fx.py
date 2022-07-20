@@ -13,6 +13,7 @@ from torch.ao.quantization.fx._model_report.detector import (
     OutlierDetector,
 )
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
+from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
@@ -1033,7 +1034,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # prepare and callibrate two different instances of same model
             # prepare the model
-            example_input = torch.randn(1, 3, 3, 3)
+            example_input = model_full.get_example_inputs()[0]
             current_backend = torch.backends.quantized.engine
             q_config_mapping = QConfigMapping()
             q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
@@ -1083,6 +1084,61 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # make sure we don't run into error for single report
             model_single_report = model_report_single.generate_model_report(False)
+
+    @skipIfNoFBGEMM
+    def test_generate_visualizer(self):
+        """
+        Tests that the ModelReport class can properly create the ModelReportVisualizer instance
+        Checks that:
+            - Correct number of modules are represented
+            - Modules are sorted
+            - Correct number of features for each module
+        """
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            # test with multiple detectors
+            detector_set = set()
+            detector_set.add(OutlierDetector(reference_percentile=0.95))
+            detector_set.add(InputWeightEqualizationDetector(0.5))
+
+            model = self.TwoThreeOps()
+
+            # get tst model and callibrate
+            prepared_for_callibrate_model, mod_report = _get_prepped_for_calibration_model_helper(
+                model, detector_set, model.get_example_inputs()[0]
+            )
+
+            # now we actually callibrate the model
+            example_input = model.get_example_inputs()[0]
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # try to visualize without generating report, should throw error
+            with self.assertRaises(Exception):
+                mod_rep_visualizaiton = mod_report.generate_visualizer()
+
+            # now get the report by running it through ModelReport instance
+            generated_report = mod_report.generate_model_report(remove_inserted_observers=False)
+
+            # now we get the visualizer should not error
+            mod_rep_visualizer: ModelReportVisualizer = mod_report.generate_visualizer()
+
+            # since we tested with outlier detector, which looks at every base level module
+            # should be six entries in the ordered dict
+            mod_fqns_to_features = mod_rep_visualizer.generated_reports
+
+            self.assertEqual(len(mod_fqns_to_features), 6)
+
+            # outlier detector has 9 feature per module
+            # input-weight has 12 features per module
+            # there are 1 common data point, so should be 12 + 9 - 1 = 20 unique features per common modules
+            # all linears will be common
+            for module_fqn in mod_fqns_to_features:
+                if ".linear" in module_fqn:
+                    linear_info = mod_fqns_to_features[module_fqn]
+                    self.assertEqual(len(linear_info), 20)
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
