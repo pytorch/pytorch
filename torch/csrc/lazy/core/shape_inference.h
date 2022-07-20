@@ -83,6 +83,8 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape__to_copy(const at::Tenso
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_trace(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_zero(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_narrow_copy_symint(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_hardswish(const at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_hardswish_backward(const at::Tensor & grad_output, const at::Tensor & self);
 
 // Non-Native ops
 TORCH_API std::vector<Shape> compute_shape_scalar(const at::Scalar& value, const at::ScalarType& type);
