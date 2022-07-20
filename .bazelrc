@@ -107,6 +107,9 @@ build --per_file_copt='//:aten/src/ATen/RegisterNestedTensorCPU\.cpp$'@-Wno-erro
 build --per_file_copt='//:aten/src/ATen/RegisterQuantizedCPU\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterSparseCPU\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterSparseCsrCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterNestedTensorMeta\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterSparseMeta\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterQuantizedMeta\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterZeroTensor\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:torch/csrc/lazy/generated/RegisterAutogradLazy\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:torch/csrc/lazy/generated/RegisterLazy\.cpp$'@-Wno-error=unused-function

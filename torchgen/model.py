@@ -218,6 +218,9 @@ dispatch_keys = [
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
+    DispatchKey.SparseMeta,
+    DispatchKey.QuantizedMeta,
+    DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
 ]
 
