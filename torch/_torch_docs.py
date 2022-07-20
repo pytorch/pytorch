@@ -4072,7 +4072,8 @@ Args:
 Returns:
     A view of the input with the specified dimension unflattened.
 
-Examples:
+Examples::
+
     >>> torch.unflatten(torch.randn(3, 4, 1), 1, (2, 2)).shape
     torch.Size([3, 2, 2, 1])
     >>> torch.unflatten(torch.randn(3, 4, 1), 1, (-1, 2)).shape
