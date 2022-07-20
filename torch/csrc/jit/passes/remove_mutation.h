@@ -36,6 +36,7 @@ struct TORCH_API MutationRemover {
   static bool hasSideEffectOrAlias(Value* v, AliasDb* aliasDb);
 
  private:
+  friend class TensorExprFuser;
   Node* createSpecialMappedOp(Node* n);
   bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(

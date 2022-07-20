@@ -62,6 +62,9 @@ TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
 
+// Check whether node can be supported by onednn post-op fusion
+bool oneDNNPostopFusableWithInplaceNode(const Node* node);
+
 /// Get the modifiable custom operator set object.
 ///
 /// For static shapes, if a custom operator has been added to the custom

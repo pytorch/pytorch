@@ -50,6 +50,111 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
         return graph
 
+    def _eltwise_list(self):
+        eltwise_list = [
+            [torch.relu, 'aten::relu'],
+            [torch.sigmoid, 'aten::sigmoid'],
+            [torch.tanh, 'aten::tanh'],
+            [nn.SiLU(inplace=False), 'aten::silu'],
+            [nn.LeakyReLU(0.1, inplace=False), 'aten::leaky_relu'],
+            [nn.Hardtanh(inplace=False), 'aten::hardtanh'],
+            [nn.Hardswish(inplace=False), 'aten::hardswish'],
+            [nn.GELU(approximate="none"), 'aten::gelu'],
+            [nn.GELU(approximate="tanh"), 'aten::gelu'],
+        ]
+        return eltwise_list
+
+    def _inplace_eltwise_list(self):
+        def _gelu_(x):
+            return torch._C._nn.gelu_(x)
+
+        def _tanh_gelu_(x):
+            return torch._C._nn.gelu_(x, approximate='tanh')
+
+        eltwise_list = [
+            [torch.relu_, 'aten::relu_'],
+            [torch.sigmoid_, 'aten::sigmoid_'],
+            [torch.tanh_, 'aten::tanh_'],
+            [nn.SELU(inplace=True), 'aten::silu_'],
+            [nn.LeakyReLU(0.1, inplace=True), 'aten::leaky_relu_'],
+            [nn.Hardtanh(inplace=True), 'aten::hardtanh_'],
+            [nn.Hardswish(inplace=True), 'aten::hardswish_'],
+            [_gelu_, 'aten::gelu'],
+            [_tanh_gelu_, 'aten::gelu'],
+        ]
+        return eltwise_list
+
+    def _eltwise_modules(self):
+
+        class ConvEltwise(nn.Module):
+            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
+                super(ConvEltwise, self).__init__()
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.eltwise = eltwise_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.eltwise(x)
+                return x
+
+        return ConvEltwise
+
+    def _clamp_modules(self, inplace=False):
+
+        clamp_fn = torch.clamp_ if inplace else torch.clamp
+
+        class MNoOpt(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MNoOpt, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = clamp_fn(x, min=-0.5, max=0.9)
+                return x
+
+        class MInf(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MInf, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = clamp_fn(x, min=0, max=float('inf'))
+                return x
+
+        class MNegInf(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MNegInf, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = clamp_fn(x, min=float('-inf'), max=0)
+                return x
+
+        class MOptMin(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MOptMin, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = clamp_fn(x, max=2)
+                return x
+
+        class MOptMax(nn.Module):
+            def __init__(self, m, in_channels, out_channels, bias, **kwargs):
+                super(MOptMax, self).__init__()
+                self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = clamp_fn(x, min=0)
+                return x
+
+        return [MNoOpt, MInf, MNegInf, MOptMin, MOptMax]
+
     def test_single_conv(self):
         class M(nn.Module):
             def __init__(self, in_channels, out_channels, bias, **kwargs):
@@ -90,33 +195,88 @@ class TestMkldnnFusion(JitTestCase):
                         self.assertGraphContains(graph, kind=conv_node_name)
 
     def test_conv_eltwise(self):
-        class M(nn.Module):
-            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
-                self.eltwise = eltwise_fn
+        for eltwise_fn, op_name in self._eltwise_list():
+            for bias in [True, False]:
+                m = self._eltwise_modules()(eltwise_fn, 3, 5, bias, kernel_size=(3, 3)).to(memory_format=torch.contiguous_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.contiguous_format)
 
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.eltwise(x)
-                return x
+                graph = self._check_model(m, x)
+                self.assertGraphContains(graph, kind='aten::conv2d')
 
-        for memory_format, enabled in [
-            [torch.contiguous_format, False],
-            [torch.channels_last, True],
-        ]:
-            for eltwise_fn in [torch.relu]:
-                for bias in [True, False]:
-                    for oC in [1, 10]:
-                        m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
-                        x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+    def test_conv_eltwise_channel_last(self):
+        for eltwise_fn, op_name in self._eltwise_list():
+            for bias in [True, False]:
+                m = self._eltwise_modules()(eltwise_fn, 3, 5, bias, kernel_size=(3, 3)).to(memory_format=torch.channels_last)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.channels_last)
 
-                        graph = self._check_model(m, x)
-                        if enabled:
-                            self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
-                            self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-                        else:
-                            self.assertGraphContains(graph, kind='aten::conv2d')
+                graph = self._check_model(m, x)
+                self.assertFused(graph, ['aten::conv2d', op_name])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+
+    def test_conv_inplace_eltwise(self):
+        for eltwise_fn, op_name in self._inplace_eltwise_list():
+            for bias in [True, False]:
+                m = self._eltwise_modules()(eltwise_fn, 3, 5, bias, kernel_size=(3, 3)).to(memory_format=torch.contiguous_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.contiguous_format)
+
+                graph = self._check_model(m, x)
+                self.assertGraphContains(graph, kind='aten::conv2d')
+
+    def test_conv_inplace_eltwise_channel_last(self):
+        for eltwise_fn, op_name in self._inplace_eltwise_list():
+            for bias in [True, False]:
+                m = self._eltwise_modules()(eltwise_fn, 3, 5, bias, kernel_size=(3, 3)).to(memory_format=torch.channels_last)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.channels_last)
+
+                graph = self._check_model(m, x)
+                self.assertFused(graph, ['aten::conv2d', op_name])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+
+    def test_conv_clamp(self):
+        modules = self._clamp_modules(inplace=False)
+        op_name = 'aten::clamp'
+        for M in modules:
+            for bias in [True, False]:
+                m = M(nn.Conv2d, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=torch.contiguous_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.contiguous_format)
+
+                graph = self._check_model(m, x)
+                self.assertGraphContains(graph, kind='aten::conv2d')
+
+    def test_conv_clamp_channel_last(self):
+        modules = self._clamp_modules(inplace=False)
+        op_name = 'aten::clamp'
+        for M in modules:
+            for bias in [True, False]:
+                m = M(nn.Conv2d, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=torch.channels_last)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.channels_last)
+
+                graph = self._check_model(m, x)
+                self.assertFused(graph, ['aten::conv2d', op_name])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+
+    def test_conv_inplace_clamp(self):
+        modules = self._clamp_modules(inplace=True)
+        op_name = 'aten::clamp_'
+        for M in modules:
+            for bias in [True, False]:
+                m = M(nn.Conv2d, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=torch.contiguous_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.contiguous_format)
+
+                graph = self._check_model(m, x)
+                self.assertGraphContains(graph, kind='aten::conv2d')
+
+    def test_conv_inplace_clamp_channel_last(self):
+        modules = self._clamp_modules(inplace=True)
+        op_name = 'aten::clamp_'
+        for M in modules:
+            for bias in [True, False]:
+                m = M(nn.Conv2d, 3, 10, bias, kernel_size=(3, 3)).to(memory_format=torch.channels_last)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=torch.channels_last)
+
+                graph = self._check_model(m, x)
+                self.assertFused(graph, ['aten::conv2d', op_name])
+                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
 
     def test_unsupported_conv(self):
         class M(nn.Module):
@@ -159,6 +319,71 @@ class TestMkldnnFusion(JitTestCase):
             graph = self._check_model(m, x, trace)
             self.assertGraphContains(graph, kind='aten::_convolution')
 
+    def test_conv_sum(self):
+        class M(nn.Module):
+            def __init__(self, in_channels, out_channels, bias, inplace, **kwargs):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.conv2 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.inplace = inplace
+
+            def forward(self, x):
+                identity = x
+                out = self.conv1(x)
+                identity = self.conv2(x)
+                out = out.add_(identity) if self.inplace else out.add(identity)
+                return out
+
+        for memory_format, enabled in [
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
+        ]:
+            for bias in [True, False]:
+                for inplace in [True, False]:
+                    m = M(3, 5, bias, inplace, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+
+                    graph = self._check_model(m, x)
+                    if enabled:
+                        add_str = 'aten::add_' if inplace else 'aten::add'
+                        self.assertFused(graph, ['aten::conv2d', add_str])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, kind='aten::conv2d')
+
+    def test_conv_sum_relu(self):
+        class M(nn.Module):
+            def __init__(self, in_channels, out_channels, bias, inplace_add, inplace_relu, **kwargs):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.conv2 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.inplace_add = inplace_add
+                self.inplace_relu = inplace_relu
+
+            def forward(self, x):
+                identity = x
+                out = self.conv1(x)
+                identity = self.conv2(x)
+                out = out.add_(identity) if self.inplace_add else out.add(identity)
+                out = out.relu_() if self.inplace_relu else out.relu()
+                return out
+
+        for memory_format, enabled in [
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
+        ]:
+            for bias in [True, False]:
+                for inplace_add, inplace_relu in [{True, False}, (False, True), [False, False]]:
+                    m = M(3, 5, bias, inplace_add, inplace_relu, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+                    graph = self._check_model(m, x)
+                    if enabled:
+                        add_str = 'aten::add_' if inplace_add else 'aten::add'
+                        relu_str = 'aten::relu_' if inplace_relu else 'aten::relu'
+                        self.assertFused(graph, ['aten::conv2d', add_str, relu_str])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, kind='aten::conv2d')
 
 if __name__ == "__main__":
     run_tests()

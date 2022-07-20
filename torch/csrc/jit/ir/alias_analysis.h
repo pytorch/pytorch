@@ -171,6 +171,7 @@ class AliasDb {
   void enablePreciseTupleContainerAnalysis();
 
   friend struct MutationRemover;
+  friend class TensorExprFuser;
 
  private:
   // Helper for topologically-safe node moves.

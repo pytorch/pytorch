@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -148,6 +149,27 @@ bool isSupported(Node* node) {
 
   return false;
 }
+
+bool oneDNNPostopFusableWithInplaceNode(const Node* node) {
+  switch (node->kind()) {
+    case aten::gelu_:
+    case aten::sigmoid_:
+    case aten::relu_:
+    case aten::tanh_:
+    case aten::hardswish_:
+    case aten::leaky_relu_:
+    case aten::hardtanh_:
+    case aten::clamp_:
+    // case aten::silu_:
+    // case aten::elu_:
+    // case aten::mish_:
+    case aten::add_:
+      return true;
+    default:
+      return false;
+  }
+}
+
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
@@ -601,6 +623,7 @@ class TensorExprFuser {
     // those in cases where the tensorexpr implementation is faster than the
     // aten implementation.
     if (min_group_size_ == 1 || fusion_node->kind() == aten::conv2d) {
+      fusion_node = MakeOutplaceNode(fusion_node, true);
       fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
 
@@ -804,6 +827,11 @@ class TensorExprFuser {
 
     // Now all the nodes that we're going to fuse are moved next to the fusion
     // group, so we can safely merge them into the fusion group subgraph.
+
+    fusion_group = MakeOutplaceNode(fusion_group, true);
+    to_merge = MakeOutplaceNode(to_merge, true);
+    nodes_to_merge[0] = to_merge;
+
     fusion_group = getOrCreateTensorExprSubgraph(fusion_group);
 
     for (auto n : nodes_to_merge) {
@@ -1107,8 +1135,8 @@ class TensorExprFuser {
       REQ(!toIValue(node->input(5)).value().toBool());
     }
 
-    REQ(tensorexpr::isSupported(node));
-    REQ(typesAreSupported(node));
+    REQ(tensorexpr::isSupported(node) || isOutplaceSupported(node));
+    REQ(typesAreSupportedForOutplace(node));
 
     // A hook to optimizations limitter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
@@ -1120,7 +1148,8 @@ class TensorExprFuser {
       REQ(node->kind() == prim::ListConstruct ||
           node->kind() == prim::TensorExprGroup ||
           node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
-          (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
+          (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())) ||
+          isDynamicShapeSupportedForOutplace(node));
     }
 
     return true;
@@ -1257,6 +1286,136 @@ class TensorExprFuser {
         SubgraphUtils::unmergeSubgraph(fusion_group);
       }
     }
+  }
+
+  bool OneDNNPostopFusableWithGraph(Node* node) {
+    if (!tensorexpr::oneDNNPostopFusableWithInplaceNode(node)) {
+      // check whether node kind is supported by onednn post-op fusion
+      return false;
+    }
+
+    auto inputs_come_from_conv2d = [&](at::ArrayRef<Value*> inputs) {
+      for (auto input : inputs) {
+        auto kind = input->node()->kind();
+        if (kind == aten::conv2d ||
+            (kind == aten::_convolution && tensorexpr::isConv2d(input->node())))
+          return true;
+      }
+      return false;
+    };
+
+    if (node->kind() == aten::relu_) {
+      auto input_node_kind = node->inputs()[0]->node()->kind();
+      if (input_node_kind == aten::add || input_node_kind == aten::add_) {
+        // check whether match conv2d->add->relu fusion
+        return inputs_come_from_conv2d(node->inputs()[0]->node()->inputs());
+      }
+    }
+
+    return inputs_come_from_conv2d(node->inputs());
+  }
+
+  // Make a temporay outplace node to check whether the outplace version
+  // are supported
+  bool isOutplaceSupported(Node* node) {
+    if (!OneDNNPostopFusableWithGraph(node)) {
+      return false;
+    }
+    auto maybe_outplace_node = MakeOutplaceNode(node);
+    if (maybe_outplace_node == node) {
+      return false;
+    } else {
+      bool passed = tensorexpr::isSupported(maybe_outplace_node);
+      maybe_outplace_node->destroy();
+      return passed;
+    }
+  }
+
+  // Make a temporay outplace node to check whether the types
+  // are supported for outplace version
+  bool typesAreSupportedForOutplace(Node* node) {
+    auto maybe_outplace_node = MakeOutplaceNode(node);
+    if (maybe_outplace_node == node) {
+      return typesAreSupported(node);
+    } else {
+      bool passed = typesAreSupported(maybe_outplace_node);
+      maybe_outplace_node->destroy();
+      return passed;
+    }
+  }
+
+  // Make a temporay outplace node to check whether the
+  // outplace version are supported with dynamic shapes
+  bool isDynamicShapeSupportedForOutplace(Node* node) {
+    auto maybe_outplace_node = MakeOutplaceNode(node);
+    if (maybe_outplace_node == node) {
+      return false;
+    } else {
+      bool passed =
+          (maybe_outplace_node->isMemberOf(
+               tensorexpr::getCustomOperatorSet()) ||
+           (maybe_outplace_node->maybeSchema() &&
+            shapeComputeGraphForSchema(maybe_outplace_node->schema())));
+      maybe_outplace_node->destroy();
+      return passed;
+    }
+  }
+
+  // If replacement = True, this function will replace the inplace node with
+  // it's outplace version. If replacement = False, this function will only
+  // create an outplace node to help to finish the TE operator supported checks,
+  // need destory this outplace node after it. It is because we do not know
+  // whether this outplace node can be merged into fusion groups yet. We only do
+  // the replacement all checks are passed/
+  Node* MakeOutplaceNode(Node* node, bool replacement = false) {
+    auto m_remover_ = MutationRemover(graph_);
+    if (!m_remover_.inplaceOpVariant(node)) {
+      return node;
+    }
+
+    Value* mutated_value = node->inputs().at(0);
+    if (!m_remover_.tryMakeCreationAndMutationAtomic(mutated_value, node) &&
+        !m_remover_.tryMakeUnaliasedIfOutputAndMutationAtomic(
+            mutated_value, node)) {
+      return node;
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* new_node;
+    if (m_remover_.isSpecialMappedOp(node)) {
+      new_node = m_remover_.createSpecialMappedOp(node);
+    } else {
+      auto schema_name = node->schema().name();
+      auto new_schema = schema_name.substr(0, schema_name.size() - 1);
+      new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
+      new_node->copyMetadata(node);
+      new_node->insertBefore(node);
+      for (Value* input : node->inputs()) {
+        new_node->addInput(input);
+      }
+      new_node->output()->setType(node->output()->type());
+
+      // weird case where there is an inplace op and an equivalent functional op
+      // of the same symbol, but they have different schemas
+      if (!new_node->maybeOperator()) {
+        new_node->destroy();
+        return node;
+      }
+    }
+    if (!replacement) {
+      return new_node;
+    }
+
+    mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());
+    node->output()->replaceAllUsesWith(new_node->output());
+
+    GRAPH_DEBUG("Replace inplace op from outplace version: ", *new_node);
+    aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
+    aliasDb_->createValue(mutated_value);
+    aliasDb_->writeIndex_->erase(node);
+    node->destroy();
+    aliasDb_->buildWrittenToLocationsIndex();
+    return new_node;
   }
 
   // This function parses the option provided by the environment variable
@@ -1415,6 +1574,17 @@ RegisterOperators TensorExprOps({
         createTensorExprOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
+
+namespace {
+class RegisterInterface {
+ public:
+  RegisterInterface() {
+    RegisterProfilingNode(tensorexpr::oneDNNPostopFusableWithInplaceNode);
+  }
+};
+
+static RegisterInterface register_interface_;
+} // namespace
 
 } // namespace jit
 } // namespace torch

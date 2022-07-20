@@ -362,11 +362,13 @@ void mergeNodeIntoSubgraph(
     auto inputs = subgraphNode->inputs();
     for (size_t i = 0; i < toMerge->outputs().size(); ++i) {
       auto it = std::find(inputs.begin(), inputs.end(), toMerge->outputs()[i]);
-      if (it != inputs.end()) {
+      while (it != inputs.end()) {
         size_t p = it - inputs.begin();
         subgraphNode->removeInput(p);
         subgraph->inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
         subgraph->eraseInput(p);
+        inputs = subgraphNode->inputs();
+        it = std::find(inputs.begin(), inputs.end(), toMerge->outputs()[i]);
       }
     }
   }
