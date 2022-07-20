@@ -882,7 +882,23 @@ class TestJitTraceAutocast(JitTestCase):
         self.assertFalse(aliasdb.move_after_topologically_valid(is_enabled_nodes[0], enter_nodes[0]))
 
 
+    def test_script_autocast_enable_and_check(self):
+        def fn():
+            a = torch.is_autocast_cpu_enabled()
+            with torch.cpu.amp.autocast(enabled=True):
+                b = torch.is_autocast_cpu_enabled()
+                with torch.cpu.amp.autocast(enabled=False):
+                    c = torch.is_autocast_cpu_enabled()
+            return [a, b, c]
 
+        with torch.cpu.amp.autocast(enabled=False):
+            fn_s = torch.jit.script(fn)
+            self.assertEqual([False, True, False], fn())
+            self.assertEqual([False, True, False], fn_s())
+
+        with torch.cpu.amp.autocast(enabled=True):
+            self.assertEqual([True, True, False], fn())
+            self.assertEqual([True, True, False], fn_s())
 
 
 if __name__ == "__main__":
