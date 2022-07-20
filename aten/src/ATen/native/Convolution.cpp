@@ -999,8 +999,14 @@ at::Tensor conv_transpose2d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
