@@ -11,7 +11,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 
 # Copied from functorch
@@ -86,6 +86,23 @@ class TestProxyTensor(TestCase):
         def f(a, b):
             return a + b
         self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
+
+    def test_isolated_graphmodule(self):
+        def is_any_sum(gm):
+            return any(node.target == torch.ops.aten.sum.default for node in gm.graph.nodes)
+
+        def inner(x):
+            return torch.sum(x)
+
+        def f(x):
+            gm = get_isolated_graphmodule(inner, (x,), {})
+            self.assertTrue(is_any_sum(gm))
+            return x + torch.randn(x.shape)
+
+        # get_isolated_graphmodule uses make_fx internally that shouldn't be traced
+        # by the outer make_fx call
+        traced = make_fx(f)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self, device):
