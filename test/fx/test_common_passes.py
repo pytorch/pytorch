@@ -22,13 +22,13 @@ def TorchTensorCall(x):
 
 
 def TakeList(x):
-    z = torch.cat([x,x])
+    z = torch.cat([x, x])
     return z
 
 
 def ReturnList(x):
-    a = torch.arange(10).reshape(5,2)
-    z = torch.split(a, [1,4])
+    a = torch.arange(10).reshape(5, 2)
+    z = torch.split(a, [1, 4])
     return z
 
 
@@ -63,10 +63,10 @@ def MutationMetadata(x):
 
 Passes = [CSEPass]
 Test_Cases = [TakeList,
-             ReturnList,
-             Mutation,
-             MutationInput,
-             MutationMetadata]
+              ReturnList,
+              Mutation,
+              MutationInput,
+              MutationMetadata]
 Factory_Test_Cases = [FactoryFunctionCall, MutationFactory]
 Devices = ["cpu"]
 if torch.cuda.is_available():
@@ -77,7 +77,7 @@ class TestCommanPass(TestCase):
     @parametrize("common_pass,f,device", itertools.product(Passes, Test_Cases, Devices))
     def test_correctness(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
-        
+
         traced_m = make_fx(f)(inp)
         P = common_pass()
 
@@ -90,7 +90,7 @@ class TestCommanPass(TestCase):
         result = modified_m(inp_copy)
 
         self.assertEqual(result, expected)
-    
+
 
     @parametrize("common_pass,f,device", itertools.product(Passes, Factory_Test_Cases, Devices))
     def test_correctness_factory(self, common_pass, f, device):

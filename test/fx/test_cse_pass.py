@@ -16,7 +16,7 @@ P_default = CSEPass(banned_ops=banned_ops)
 
 def check(f, t, delta, check_val=True, graph_input=False, P=None):
     """
-    check if the CSE modified graph of ``f`` 
+    check if the CSE modified graph of ``f``
     1) has delta less nodes, and
     2) do not reduce the number of nodes further on a second pass, and
     3) modified returned is true only if the number of nodes decreases.
@@ -24,7 +24,7 @@ def check(f, t, delta, check_val=True, graph_input=False, P=None):
     Args:
         f: function to be checked
         t: tensor to be passed to f
-        delta: an integer >= -1. 
+        delta: an integer >= -1.
                If delta = -1, it only checks if the new graph has less or equal number of nodes
         check_val: if True, check if the output of f is correct
         graph_input: True is f is type GraphModule
@@ -37,7 +37,7 @@ def check(f, t, delta, check_val=True, graph_input=False, P=None):
 
     if P is None:
         P = P_default
-    
+
     res = P(fx_g)
     new_g = res.graph_module
     new_graph = new_g.graph
@@ -91,22 +91,6 @@ class NoChangeTestCase(TestCase):
             pass
         t = torch.randn(2, 2)
         check(f, t, 0)
-
-    def test_rand_like(self):
-        def f(x):
-            a = torch.rand_like(x)
-            b = torch.rand_like(x)
-            return a + b
-        t = torch.randn(2, 2)
-        check(f, t, 0, check_val=False)
-
-    def test_rand_n(self):
-        def f(x):
-            a = torch.randn(4)
-            b = torch.randn(4)
-            return a + b
-        t = torch.randn(2, 2)
-        check(f, t, 0, check_val=False)
 
 
 class ReduceTestCase(TestCase):
@@ -224,15 +208,32 @@ class TestBannedList(TestCase):
     """
     Test that banned list ban ops as expected.
     """
-    def f(x):
-        a = x+1
-        b = x+1
-        return a + b
+    def test_banned_list(self):
+        def f(x):
+            a = x + 1
+            b = x + 1
+            return a + b
+
+        t = torch.randn(2, 2)
+        P_ban_add = P = CSEPass(banned_ops=[torch.ops.aten.add])
+        check(f, t, 0, P=P_ban_add)  # check that add is banned
+        check(f, t, 1)  # check that add is not banned by default
     
-    t = torch.randn(2, 2)
-    P_ban_add = P = CSEPass(banned_ops=[torch.ops.aten.add])
-    check(f, t, 0, P=P_ban_add)  # check that add is banned
-    check(f, t, 1)  # check that add is not banned by default
+    def test_rand_like(self):
+        def f(x):
+            a = torch.rand_like(x)
+            b = torch.rand_like(x)
+            return a + b
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_rand_n(self):
+        def f(x):
+            a = torch.randn(4)
+            b = torch.randn(4)
+            return a + b
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
 
 
 if __name__ == '__main__':
