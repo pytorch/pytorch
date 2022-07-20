@@ -176,6 +176,10 @@ class Sequential(Module):
         for i in range(n, index, -1):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
+
+    def extend(self, sequential) -> 'Sequential':
+        for layer in sequential:
+            self.append(layer)
         return self
 
 
