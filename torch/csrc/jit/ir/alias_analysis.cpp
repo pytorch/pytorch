@@ -1059,20 +1059,6 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   }
 }
 
-namespace {
-c10::optional<bool> getConstantBooleanInput(
-    Node* node,
-    const std::string& inputName) {
-  TORCH_INTERNAL_ASSERT(
-      node->hasNamedInput(inputName), inputName + " input is expected");
-  auto value = node->namedInput(inputName);
-  TORCH_INTERNAL_ASSERT(
-      value->type() == BoolType::get(),
-      inputName + "training input is expected to be a bool");
-  return constant_as<bool>(value);
-}
-} // namespace
-
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
