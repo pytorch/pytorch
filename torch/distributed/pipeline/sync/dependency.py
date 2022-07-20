@@ -5,14 +5,14 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 """Arbitrary dependency between two autograd lanes."""
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 from torch import Tensor
 
 from .phony import get_phony
 
-__all__ = ['fork', 'Fork', 'join', 'Join']
+__all__: List[str] = []
 
 
 def fork(input: Tensor) -> Tuple[Tensor, Tensor]:

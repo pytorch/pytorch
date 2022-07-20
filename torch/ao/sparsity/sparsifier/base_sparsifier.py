@@ -140,8 +140,10 @@ class BaseSparsifier(abc.ABC):
             module = stack.pop()
             for name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
+                    module_fqn = module_to_fqn(model, child)
+                    assert isinstance(module_fqn, str)  # for mypy
                     self.config.append(
-                        {"tensor_fqn": module_to_fqn(model, child) + ".weight"}
+                        {"tensor_fqn": module_fqn + ".weight"}
                     )
                 else:
                     stack.append(child)
