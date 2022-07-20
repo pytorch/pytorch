@@ -1191,7 +1191,7 @@ def define_buck_targets(
         exported_headers = [
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
