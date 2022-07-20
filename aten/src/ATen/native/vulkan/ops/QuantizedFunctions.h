@@ -19,12 +19,6 @@ Tensor dequantize_helper(
 
 Tensor dequantize(const Tensor& self);
 
-Tensor quantized_add(
-    const Tensor& self_arg,
-    const Tensor& other_arg,
-    const double scale,
-    const int64_t zero_point);
-
 } // namespace ops
 } // namespace vulkan
 } // namespace native
