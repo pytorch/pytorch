@@ -271,6 +271,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   {
     using torch::profiler::impl::Result;
+    using torch::profiler::impl::PyFrameState;
     py::enum_<EventType>(m, "_EventType")
         .value("TorchOp", EventType::TorchOp)
         .value("Backend", EventType::Backend)
