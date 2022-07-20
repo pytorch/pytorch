@@ -7,7 +7,7 @@ from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcas
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
     TVar, DVar, GetItemTensor, IndexSelect
 from torch.fx.experimental.migrate_gradual_types.operation import \
-    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add
+    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add, op_mul
 from torch.fx.node import Target, Node
 from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar, \
     gen_bvar
@@ -15,7 +15,6 @@ from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, ge
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
-from torch.fx.experimental.graph_gradual_typechecker import get_parameter
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
@@ -542,7 +541,13 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
 @register_inference_rule("ne")
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
-def add_inference_rule(n: Node, symbols, constraints, counter):
+def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
+
+    op_code = None
+    if n.target == operator.add or n.target == torch.add:
+        op_code = op_add
+    elif n.target == operator.mul:
+        op_code = op_mul
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         if isinstance(symbols[n.args[0]], TVar) and isinstance(symbols[n.args[1]], TVar):
@@ -567,7 +572,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
             e1 = symbols[n.args[0]]
 
             # we will propagate the runtime value here since this is regular addition
-            c = Conj([BinConstraintD(my_output, BinConstraintD(e1, n.args[1], op_add), op_eq),
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e1, n.args[1], op_code), op_eq),
                       BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
@@ -583,7 +588,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
             e2 = symbols[n.args[1]]
 
             # we will propagate the runtime value here since this is regular addition
-            c = Conj([BinConstraintD(my_output, BinConstraintD(e2, n.args[0], op_add), op_eq),
+            c = Conj([BinConstraintD(my_output, BinConstraintD(e2, n.args[0], op_code), op_eq),
                       BinConstraintD(0, my_output, op_leq)])
             return [c], counter
 
@@ -853,6 +858,7 @@ def maxpool_inference_rule(n: Node, module_instance, symbols, constraints, count
 class ConstraintGenerator:
     def __init__(self, traced, graph=None):
         self.traced = traced  # traced or tracer.root
+        self.traced_params = dict(self.traced.named_parameters())
         self.constraints = []
         self.symbol_dict = {}
         self.graph = traced.graph if hasattr(traced, 'graph') else graph
@@ -918,11 +924,12 @@ class ConstraintGenerator:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'get_attr':
-            t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
-            if isinstance(t.data, torch.Tensor):
-                if len(t.data.shape) > 0:
+            t = self.traced_params.get(n.target, None)
+
+            if isinstance(t, torch.Tensor):
+                if len(t.shape) > 0:
                     res = []
-                    for t in t.data.shape:
+                    for t in t.shape:
                         res.append(t)
                     attr_type = TensorType(res)
                     output, counter = gen_tvar(counter)
