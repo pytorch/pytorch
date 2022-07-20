@@ -23,27 +23,30 @@ namespace c10 {
 // use.
 
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
-  _(CPU, extra) \
-  _(CUDA, extra) \
-  _(HIP, extra) \
-  _(XLA, extra) \
-  _(MPS, extra) \
-  _(IPU, extra) \
-  _(XPU, extra) \
-  _(HPU, extra) \
-  _(VE, extra) \
-  _(Lazy, extra) \
-  _(Meta, extra) \
-  _(PrivateUse1, extra) \
-  _(PrivateUse2, extra) \
+  _(CPU, extra)                                 \
+  _(CUDA, extra)                                \
+  _(HIP, extra)                                 \
+  _(XLA, extra)                                 \
+  _(MPS, extra)                                 \
+  _(IPU, extra)                                 \
+  _(XPU, extra)                                 \
+  _(HPU, extra)                                 \
+  _(VE, extra)                                  \
+  _(Lazy, extra)                                \
+  _(Meta, extra)                                \
+  _(PrivateUse1, extra)                         \
+  _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)
 
 #define C10_FORALL_FUNCTIONALITY_KEYS(_) \
-  _(Dense,) \
-  _(Quantized,Quantized) \
-  _(Sparse,Sparse) \
-  _(NestedTensor,NestedTensor) \
-  _(AutogradFunctionality,Autograd)
+  _(Dense, )                             \
+  _(Quantized, Quantized)                \
+  _(Sparse, Sparse)                      \
+  _(NestedTensor, NestedTensor)          \
+  _(AutogradFunctionality, Autograd)
+
+// WARNING!  If we add a new per-backend functionality key that has higher
+// priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
 
 enum class BackendComponent : uint8_t {
 
@@ -76,7 +79,7 @@ enum class BackendComponent : uint8_t {
   // tensor with the output shape and dtype, but wouldn't actually add anything.
 
   InvalidBit = 0,
-#define DEFINE_BACKEND_COMPONENT(n, _) n ## Bit,
+#define DEFINE_BACKEND_COMPONENT(n, _) n##Bit,
   C10_FORALL_BACKEND_COMPONENTS(DEFINE_BACKEND_COMPONENT, unused)
 #undef DEFINE_BACKEND_COMPONENT
 
@@ -202,20 +205,6 @@ enum class DispatchKey : uint16_t {
 
   SparseCsrCPU,
   SparseCsrCUDA,
-
-  // Note [Non-Customizable Backend Keys]
-  // Every key above here is considered a "non-customizable backend".
-  // These are backends that will work correctly with autograd, but
-  // but currently don't require separate implementations
-  // for autograd sparse or quantized kernels.
-  // Any new backends that don't need to be customized should go above here.
-  // If an existing backend needs to e.g. override autograd, then we can
-  // consider promoting it into the "BackendComponent" enum
-  //
-  // For all intents and purposes from the perspective of DispatchKeySet,
-  // "non-customizable backend" keys are treated the same way
-  // as other functionality keys
-  EndOfNonCustomizableBackends = SparseCsrCUDA,
 
   NestedTensor,
 
@@ -404,31 +393,26 @@ enum class DispatchKey : uint16_t {
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
 
-  // ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
-  // Here are backends which you think of as traditionally specifying
-  // how to implement operations on some device.
+// ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
+// Here are backends which you think of as traditionally specifying
+// how to implement operations on some device.
 
-#define DEFINE_PER_BACKEND_KEYS_FOR_BACKEND(n, prefix) \
-  prefix ## n,
+// See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 
-#define DEFINE_PER_BACKEND_KEYS(_, prefix) \
-  StartOf ## prefix ## Backends, \
-  C10_FORALL_BACKEND_COMPONENTS(DEFINE_PER_BACKEND_KEYS_FOR_BACKEND, prefix) \
-  EndOf ## prefix ## Backends = prefix ## PrivateUse3,
+#define DEFINE_PER_BACKEND_KEYS_FOR_BACKEND(n, prefix) prefix##n,
 
-C10_FORALL_FUNCTIONALITY_KEYS(DEFINE_PER_BACKEND_KEYS)
+#define DEFINE_PER_BACKEND_KEYS(fullname, prefix)      \
+  StartOf##fullname##Backends,                         \
+      C10_FORALL_BACKEND_COMPONENTS(                   \
+          DEFINE_PER_BACKEND_KEYS_FOR_BACKEND, prefix) \
+          EndOf##fullname##Backends = prefix##PrivateUse3,
+
+  C10_FORALL_FUNCTIONALITY_KEYS(DEFINE_PER_BACKEND_KEYS)
 
 #undef DEFINE_PER_BACKEND_KEYS
 #undef DEFINE_PER_BACKEND_KEYS_FOR_BACKEND
 
-  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-
-  // If we add a new per-backend functionality key that has higher priority
-  // than Autograd, then this key should be updated.
-  EndOfRuntimeBackendKeys = EndOfAutogradBackends,
-
-  StartOfDenseBackends = StartOfBackends,
-  EndOfDenseBackends = EndOfBackends,
+      EndOfRuntimeBackendKeys = EndOfAutogradFunctionalityBackends,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Note [Alias Dispatch Keys]
@@ -613,11 +597,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends));
   } else if (
-      k >= DispatchKey::StartOfAutogradBackends &&
-      k <= DispatchKey::EndOfAutogradBackends) {
+      k >= DispatchKey::StartOfAutogradFunctionalityBackends &&
+      k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
     return static_cast<BackendComponent>(
         static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutogradFunctionalityBackends));
   } else {
     return BackendComponent::InvalidBit;
   }
@@ -634,7 +619,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Sparse;
   } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
     return DispatchKey::NestedTensor;
-  } else if (k <= DispatchKey::EndOfAutogradBackends) {
+  } else if (k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
     return DispatchKey::Undefined;
@@ -672,7 +657,8 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
   }
   if (functionality_k == DispatchKey::AutogradFunctionality) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) +
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutogradFunctionalityBackends) +
         static_cast<uint8_t>(backend_k));
   }
   return DispatchKey::Undefined;

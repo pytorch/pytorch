@@ -182,7 +182,7 @@ TEST(DispatchKeySet, SingletonPerBackendFunctionalityKeys) {
     if (tid == DispatchKey::StartOfDenseBackends ||
         tid == DispatchKey::StartOfSparseBackends ||
         tid == DispatchKey::StartOfQuantizedBackends ||
-        tid == DispatchKey::StartOfAutogradBackends) {
+        tid == DispatchKey::StartOfAutogradFunctionalityBackends) {
       continue;
     }
     DispatchKeySet sing(tid);
@@ -225,13 +225,13 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
           tid1 == DispatchKey::StartOfSparseBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
           tid1 == DispatchKey::StartOfNestedTensorBackends ||
-          tid1 == DispatchKey::StartOfAutogradBackends)
+          tid1 == DispatchKey::StartOfAutogradFunctionalityBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
           tid2 == DispatchKey::StartOfNestedTensorBackends ||
-          tid2 == DispatchKey::StartOfAutogradBackends)
+          tid2 == DispatchKey::StartOfAutogradFunctionalityBackends)
         continue;
 
       auto backend1 = toBackendComponent(tid1);
@@ -399,6 +399,14 @@ TEST(DispatchKeySet, TestBackendComponentToString) {
   }
 }
 
+TEST(DispatchKeySet, TestEndOfRuntimeBackendKeysAccurate) {
+  DispatchKey k;
+#define SETTER(fullname, prefix) k = DispatchKey::EndOf##fullname##Backends;
+  C10_FORALL_FUNCTIONALITY_KEYS(SETTER)
+#undef SETTER
+  ASSERT_TRUE(k == DispatchKey::EndOfRuntimeBackendKeys);
+}
+
 TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
   std::unordered_set<std::string> seen_strings;
   for (int i = 0; i <= static_cast<int>(DispatchKey::EndOfAliasKeys); i++) {
@@ -410,7 +418,7 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfQuantizedBackends ||
         k == DispatchKey::StartOfSparseBackends ||
         k == DispatchKey::StartOfNestedTensorBackends ||
-        k == DispatchKey::StartOfAutogradBackends)
+        k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;
     auto res = std::string(toString(k));
     ASSERT_TRUE(res.find("Unknown") == std::string::npos)

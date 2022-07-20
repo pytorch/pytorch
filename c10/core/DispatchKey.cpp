@@ -88,7 +88,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Python:
       return "Python";
 
-
     case DispatchKey::Fake:
       return "Fake";
     case DispatchKey::FuncTorchDynamicLayerBackMode:
@@ -160,7 +159,7 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
-    // Aliases
+      // Aliases
 
     case DispatchKey::Autograd:
       return "Autograd";
@@ -171,41 +170,38 @@ const char* toString(DispatchKey t) {
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return "CompositeExplicitAutogradNonFunctional";
 
-    // Per-backend dispatch keys
+      // Per-backend dispatch keys
 
     default:
       auto bc = toBackendComponent(t);
       auto fk = toFunctionalityKey(t);
 
-    switch(fk) {
+      switch (fk) {
+#define ENTRY(backend, functionality)  \
+  case BackendComponent::backend##Bit: \
+    return #functionality #backend;
 
-#define ENTRY(backend, functionality)    \
-        case BackendComponent::backend ## Bit: \
-          return #functionality #backend;      \
+#define FORALL_BC(dkname, prefix)                  \
+  case DispatchKey::dkname:                        \
+    switch (bc) {                                  \
+      C10_FORALL_BACKEND_COMPONENTS(ENTRY, prefix) \
+      default:                                     \
+        return #prefix "Unknown";                  \
+    }
 
-#define FORALL_BC(dkname, prefix)            \
-      case DispatchKey::dkname: \
-        switch (bc) {                              \
-          C10_FORALL_BACKEND_COMPONENTS(ENTRY, prefix) \
-          default:                                 \
-            return #prefix "Unknown";                  \
-        }
+        C10_FORALL_FUNCTIONALITY_KEYS(FORALL_BC)
 
-      C10_FORALL_FUNCTIONALITY_KEYS(FORALL_BC)
-
-      default:
-        switch (bc) {
-          C10_FORALL_BACKEND_COMPONENTS(ENTRY, Unknown) 
-          default:
-            return "UnknownUnknown";
-        }
+        default:
+          switch (bc) {
+            C10_FORALL_BACKEND_COMPONENTS(ENTRY, Unknown)
+            default:
+              return "UnknownUnknown";
+          }
 
 #undef FORALL_BC
 #undef ENTRY
-    }
-
+      }
   }
-
 }
 
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
