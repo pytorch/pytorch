@@ -24,20 +24,21 @@ static PyObject* THCPStream_pynew(
   int priority = 0;
   int64_t stream_id = 0;
   int64_t device_index = 0;
-  int64_t device_type = static_cast<int64_t>(c10::DeviceType::CUDA);
+  int64_t device_type = 0;
   uint64_t stream_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char* kwlist[] = {
-      "priority", "stream_id", "device_index", "stream_ptr", nullptr};
+      "priority", "stream_id", "device_index", "device_type", "stream_ptr", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iKKK",
+          "|iKKKK",
           kwlist,
           &priority,
           &stream_id,
           &device_index,
+          &device_type,
           &stream_ptr)) {
     return nullptr;
   }
@@ -52,7 +53,7 @@ static PyObject* THCPStream_pynew(
         priority == 0, "Priority was explicitly set for a external stream")
   }
 
-  at::cuda::CUDAStream stream = (stream_id || device_index)
+  at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type)
       : stream_ptr
       ? at::cuda::getStreamFromExternal(
@@ -64,7 +65,7 @@ static PyObject* THCPStream_pynew(
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
   self->device_index = static_cast<int64_t>(stream.device_index());
-  self->device_type = device_type;
+  self->device_type = static_cast<int64_t>(stream.device_type());
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
 
   return (PyObject*)ptr.release();

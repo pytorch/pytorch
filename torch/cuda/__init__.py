@@ -470,7 +470,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    torch._C._cuda_setStream(stream_id=stream.stream_id, device_index=stream.device_index)
+    torch._C._cuda_setStream(stream_id=stream.stream_id, device_index=stream.device_index, device_type=stream.device_type)
 
 def _parse_visible_devices() -> Set[int]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
@@ -600,7 +600,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     _lazy_init()
     streamdata = torch._C._cuda_getCurrentStream(
         _get_device_index(device, optional=True))
-    return Stream(stream_id=streamdata[0], device_index=streamdata[1])
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
@@ -615,7 +615,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     _lazy_init()
     streamdata = torch._C._cuda_getDefaultStream(
         _get_device_index(device, optional=True))
-    return Stream(stream_id=streamdata[0], device_index=streamdata[1])
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def current_blas_handle():

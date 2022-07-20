@@ -153,15 +153,18 @@ PyObject* THCPModule_getCurrentStream_wrap(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getCurrentCUDAStream(device);
-  PyObject* output_tuple = PyTuple_New(2);
+  PyObject* output_tuple = PyTuple_New(3);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
       output_tuple,
       1,
       THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+  PyTuple_SetItem(
+      output_tuple,
+      2,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_type())));
   return output_tuple;
-
   END_HANDLE_TH_ERRORS
 }
 
@@ -184,15 +187,18 @@ PyObject* THCPModule_getDefaultStream_wrap(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getDefaultCUDAStream(device);
-  PyObject* output_tuple = PyTuple_New(2);
+  PyObject* output_tuple = PyTuple_New(3);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
       output_tuple,
       1,
       THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+  PyTuple_SetItem(
+      output_tuple,
+      2,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_type())));
   return output_tuple;
-
   END_HANDLE_TH_ERRORS
 }
 
@@ -209,12 +215,12 @@ PyObject* THCPModule_setStream_wrap(
   // auto stream = at::cuda::CUDAStream::unpack(bits);
   int64_t stream_id = 0;
   int64_t device_index = 0;
-  int64_t device_type = static_cast<int64_t>(DeviceType::CUDA);
+  int64_t device_type = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {"stream_id", "device_index", nullptr};
+  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "|KK", kwlist, &stream_id, &device_index)) {
+          args, kwargs, "|KKK", kwlist, &stream_id, &device_index, &device_type)) {
   }
 
   auto stream =

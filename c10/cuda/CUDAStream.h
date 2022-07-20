@@ -93,6 +93,11 @@ class C10_CUDA_API CUDAStream {
     return unwrap();
   }
 
+  /// Used to avoid baking in device type explicitly to Python-side API.
+  DeviceType device_type() const {
+    return DeviceType::CUDA;
+  }
+
   /// Get the CUDA device index that this stream is associated with.
   DeviceIndex device_index() const {
     return stream_.device_index();
