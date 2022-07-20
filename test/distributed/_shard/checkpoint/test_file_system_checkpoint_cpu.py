@@ -16,7 +16,6 @@ from torch.distributed._shard.sharding_spec import (
     ShardingSpec,
     ShardMetadata,
 )
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -125,9 +124,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @with_comms(init_rpc=False, backend="gloo")
     def test_read_write_shard_tensor(self) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
@@ -138,8 +135,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                "rank:0",
+                "rank:1",
             ],
         )
 
@@ -185,13 +182,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         return paths[0]
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
-        res = torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
+        res = torch.zeros(tensor.shape, device="cpu") if dist.get_rank() == 0 else None
         tensor.gather(out=res)
         return res
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @with_comms(init_rpc=False, backend="gloo")
     def test_load_with_different_shard_plan(self) -> None:
         path = self.get_file_path()
 
@@ -203,18 +198,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
+                    "rank:0",
+                    "rank:1",
                 ],
             ),
             # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:1/cuda:1",
-                    "rank:0/cuda:0",
+                    "rank:0",
+                    "rank:1",
+                    "rank:1",
+                    "rank:0",
                 ],
             ),
             # This requires the tensors to be [10, 20]
@@ -223,27 +218,27 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[2, 20],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[2, 0],
                         shard_sizes=[1, 20],
-                        placement="rank:1/cuda:1",
+                        placement="rank:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[3, 0],
                         shard_sizes=[3, 20],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[6, 0],
                         shard_sizes=[3, 20],
-                        placement="rank:1/cuda:1",
+                        placement="rank:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[9, 0],
                         shard_sizes=[1, 20],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                 ]
             ),
@@ -253,12 +248,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[8, 20],
-                        placement="rank:1/cuda:1",
+                        placement="rank:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8, 0],
                         shard_sizes=[2, 20],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                 ]
             ),
@@ -303,9 +298,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         torch.allclose(store_tensor, load_tensor), msg=f"{s0} vs {s1}"
                     )
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @with_comms(init_rpc=False, backend="gloo")
     def test_load_rowwise_to_colwise(self) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
@@ -314,8 +307,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         src_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                "rank:0",
+                "rank:1",
             ],
         )
 
@@ -323,8 +316,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         dst_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                "rank:0",
+                "rank:1",
             ],
         )
 
@@ -355,9 +348,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @with_comms(init_rpc=False, backend="gloo")
     def test_save_load_bytes(self) -> None:
         path = self.get_file_path()
 
@@ -381,9 +372,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual('string', state_dict_to_load['bytes1'])
 
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @with_comms(init_rpc=False, backend="gloo")
     def test_switch_between_sharded_tensor_to_tensor(self) -> None:
         path = self.get_file_path()
         tensor_size = 32
@@ -392,17 +381,17 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
+                    "rank:0",
+                    "rank:1",
                 ],
             ),
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:1/cuda:1",
-                    "rank:0/cuda:0",
+                    "rank:0",
+                    "rank:1",
+                    "rank:1",
+                    "rank:0",
                 ],
             ),
             EnumerableShardingSpec(
@@ -410,12 +399,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[8],
-                        placement="rank:1/cuda:1",
+                        placement="rank:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8],
                         shard_sizes=[tensor_size - 8],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                 ]
             ),
@@ -424,12 +413,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[10],
-                        placement="rank:0/cuda:0",
+                        placement="rank:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[10],
                         shard_sizes=[tensor_size - 10],
-                        placement="rank:1/cuda:1",
+                        placement="rank:1",
                     ),
                 ]
             ),
@@ -439,7 +428,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             for load_spec in specs:
                 save_dict = {
                     'sharded': sharded_tensor.rand(save_spec, tensor_size),
-                    'replicated': torch.rand(tensor_size, device=self.rank)
+                    'replicated': torch.rand(tensor_size, device=f"cpu:{self.rank}")
                 }
 
                 fs_writer = FileSystemWriter(path=path)
@@ -447,7 +436,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
                 # Freaky Friday the tensors
                 load_dict = {
-                    'sharded': torch.zeros(tensor_size, device=self.rank),
+                    'sharded': torch.zeros(tensor_size, device=f"cpu:{self.rank}"),
                     'replicated': sharded_tensor.zeros(load_spec, tensor_size)
                 }
 
