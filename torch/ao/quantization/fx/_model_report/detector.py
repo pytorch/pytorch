@@ -109,8 +109,8 @@ class PerChannelDetector(DetectorBase):
 
     # Keys for return dictionary
     BACKEND_KEY = "backend"
-    PER_CHAN_SUPPORTED_KEY = "per_channel_supported"
-    PER_CHAN_USED_KEY = "per_channel_used"
+    PER_CHAN_SUPPORTED_KEY = "per_channel_quantization_supported"
+    PER_CHAN_USED_KEY = "per_channel_quantization_used"
 
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
@@ -265,16 +265,20 @@ class DynamicStaticDetector(DetectorBase):
     DEFAULT_POST_OBSERVER_NAME = "model_report_post_observer"
 
     # naming conventions for stationary vs non-stationary data
-    DEFAULT_STATIONARY = "stationary"
-    DEFAULT_NON_STATIONARY = "non-stationary"
+    STATIONARY_STR = "stationary"
+    NON_STATIONARY_STR = "non-stationary"
+
+    # naming for activation
+    INPUT_ACTIVATION_PREFIX = "input_activation_"
+    OUTPUT_ACTIVATION_PREFIX = "output_activation_"
 
     # naming conventions for the keys of the return module info
-    DEFAULT_TOLERANCE_KEY = "tolerance"
+    TOLERANCE_KEY = "dynamic_static_tolerance"
     DEFAULT_DYNAMIC_REC_KEY = "dynamic_recommended"
-    DEFAULT_PRE_OBS_COMP_STAT_KEY = "pre_observer_comp_stat"
-    DEFAULT_POST_OBS_COMP_STAT_KEY = "post_observer_comp_stat"
-    DEFAULT_PRE_OBS_DATA_DIST_KEY = "pre_observer_data_dist"
-    DEFAULT_POST_OBS_DATA_DIST_KEY = "post_observer_data_dist"
+    PRE_OBS_COMP_STAT_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    POST_OBS_COMP_STAT_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
+    PRE_OBS_DATA_DIST_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    POST_OBS_DATA_DIST_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
 
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
@@ -402,17 +406,17 @@ class DynamicStaticDetector(DetectorBase):
                 dynamic_recommended = post_stat <= self.tolerance
 
                 # specify the classifications for whether data distributions considered stationary or non-stationary
-                pre_obs_dist_classif = self.DEFAULT_STATIONARY if pre_stat > self.tolerance else self.DEFAULT_NON_STATIONARY
-                post_obs_dist_classif = self.DEFAULT_STATIONARY if post_stat > self.tolerance else self.DEFAULT_NON_STATIONARY
+                pre_obs_dist_classif = self.STATIONARY_STR if pre_stat > self.tolerance else self.NON_STATIONARY_STR
+                post_obs_dist_classif = self.STATIONARY_STR if post_stat > self.tolerance else self.NON_STATIONARY_STR
 
                 # store the set of important information for this module
                 module_info = {
-                    self.DEFAULT_TOLERANCE_KEY: self.tolerance,
+                    self.TOLERANCE_KEY: self.tolerance,
                     self.DEFAULT_DYNAMIC_REC_KEY: dynamic_recommended,
-                    self.DEFAULT_PRE_OBS_COMP_STAT_KEY: pre_stat,
-                    self.DEFAULT_PRE_OBS_DATA_DIST_KEY: pre_obs_dist_classif,
-                    self.DEFAULT_POST_OBS_COMP_STAT_KEY: post_stat,
-                    self.DEFAULT_POST_OBS_DATA_DIST_KEY: post_obs_dist_classif,
+                    self.PRE_OBS_COMP_STAT_KEY: pre_stat,
+                    self.PRE_OBS_DATA_DIST_KEY: pre_obs_dist_classif,
+                    self.POST_OBS_COMP_STAT_KEY: post_stat,
+                    self.POST_OBS_DATA_DIST_KEY: post_obs_dist_classif,
                 }
 
                 module_dynamic_static_info[fqn] = module_info
@@ -494,7 +498,7 @@ class DynamicStaticDetector(DetectorBase):
             # now set the quantization explanation string
             quantization_reasoning = (
                 quantization_reasoning.format(
-                    module_fqn, module_info[self.DEFAULT_PRE_OBS_DATA_DIST_KEY], module_info[self.DEFAULT_POST_OBS_DATA_DIST_KEY]
+                    module_fqn, module_info[self.PRE_OBS_DATA_DIST_KEY], module_info[self.POST_OBS_DATA_DIST_KEY]
                 )
                 + benefit_str
             )
@@ -502,8 +506,8 @@ class DynamicStaticDetector(DetectorBase):
             # if we have a non-stationary input -> linear -> stationary we suggested static
             # however, we want to also recommend they add a dynamic quantize per tensor right if this change is made
             if (
-                module_info[self.DEFAULT_PRE_OBS_DATA_DIST_KEY] == self.DEFAULT_NON_STATIONARY
-                and module_info[self.DEFAULT_POST_OBS_DATA_DIST_KEY] == self.DEFAULT_STATIONARY
+                module_info[self.PRE_OBS_DATA_DIST_KEY] == self.NON_STATIONARY_STR
+                and module_info[self.POST_OBS_DATA_DIST_KEY] == self.STATIONARY_STR
             ):
                 quantization_reasoning = (
                     quantization_reasoning + dynamic_per_tensor_string + dynamic_per_tensor_reasoning_string
@@ -565,7 +569,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # weight / activation prefix for each of the below info
     WEIGHT_PREFIX = "weight_"
-    ACTIVATION_PREFIX = "pre_activation_"
+    ACTIVATION_PREFIX = "input_activation_"
 
     # string names for keys of info dictionaries
     PER_CHANNEL_MAX_KEY = "per_channel_max"
@@ -575,9 +579,9 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # keys for return dict of recommendations
     RECOMMENDED_KEY = "input_weight_equalization_recommended"
-    COMP_METRIC_KEY = "channel_comparison_metrics"
-    THRESHOLD_KEY = "threshold"
-    CHANNEL_KEY = "channel_axis_selected"
+    COMP_METRIC_KEY = "input_weight_channel_comparison_metrics"
+    THRESHOLD_KEY = "input_weight_threshold"
+    CHANNEL_KEY = "input_weight_channel_axis"
 
     # default weight and info strings
     WEIGHT_STR = "weight"
@@ -667,10 +671,10 @@ class InputWeightEqualizationDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a dict mapping relavent module fqns (str) to a dict with keys:
-            "pre_activation__per_channel_max" : maps to the per_channel max values
-            "pre_activation__per_channel_min" : maps to the per_channel min values
-            "pre_activation_global_max" : maps to the global max recorded
-            "pre_activation_global_min" : maps to the global min recorded
+            "input_activation_per_channel_max" : maps to the per_channel max values
+            "input_activation_per_channel_min" : maps to the per_channel min values
+            "input_activation_global_max" : maps to the global max recorded
+            "input_activation_global_min" : maps to the global min recorded
         """
 
         # return dictionary mapping observer fqns to desired info
@@ -977,15 +981,18 @@ class OutlierDetector(DetectorBase):
     # names for the pre observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
 
+    # pre activation prefix
+    INPUT_ACTIVATION_PREFIX = "input_activation_"
+
     # names for dict keys
     OUTLIER_KEY = "outliers_detected"
-    NUM_BATCHES_KEY = "batches_used"
-    IS_SUFFICIENT_BATCHES_KEY = "is_sufficient_batches"
-    COMP_METRIC_KEY = "percentile_ratios"
-    RATIO_THRES_KEY = "ratio_threshold"
-    REF_PERCENTILE_KEY = "reference_percentile"
-    CHANNEL_AXIS_KEY = "channel_axis"
-    MAX_VALS_KEY = "per_channel_max"
+    NUM_BATCHES_KEY = "outlier_detection_batches_used"
+    IS_SUFFICIENT_BATCHES_KEY = "outlier_detection_is_sufficient_batches"
+    COMP_METRIC_KEY = "outlier_detection_percentile_ratios"
+    RATIO_THRES_KEY = "outlier_detection_ratio_threshold"
+    REF_PERCENTILE_KEY = "outlier_detection_reference_percentile"
+    CHANNEL_AXIS_KEY = "outlier_detection_channel_axis"
+    MAX_VALS_KEY = INPUT_ACTIVATION_PREFIX + "per_channel_max"
     CONSTANT_COUNTS_KEY = "constant_batch_counts"
 
     def __init__(
