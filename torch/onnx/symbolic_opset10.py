@@ -617,34 +617,42 @@ class Quantized:
     # TODO(justinchuby): Support kwargs in leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point)
 
     @staticmethod
+    @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
     def instance_norm(
-        g: _C.Graph,
+        g,
         q_input,
         weight,
         bias,
-        running_mean,
-        running_var,
-        use_input_stats,
-        momentum,
         eps,
-        cudnn_enabled,
         op_scale,
         op_zero_point,
     ):
         input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
 
-        output = opset9.instance_norm(
-            g,
-            input,
-            weight,
-            bias,
-            running_mean,
-            running_var,
-            use_input_stats,
-            momentum,
-            eps,
-            cudnn_enabled,
-        )
+        # Duplicated from opset9.instance_norm
+        channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
+        if weight is None or symbolic_helper._is_none(weight):
+            if channel_size is None:
+                raise RuntimeError(
+                    "Unsupported: ONNX export of instance_norm for unknown channel size."
+                )
+            weight_value = torch.tensor(
+                [1.0] * channel_size,
+                dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
+            )
+            weight = g.op("Constant", value_t=weight_value)
+        if bias is None or symbolic_helper._is_none(bias):
+            if channel_size is None:
+                raise RuntimeError(
+                    "Unsupported: ONNX export of instance_norm for unknown channel size."
+                )
+            bias_value = torch.tensor(
+                [0.0] * channel_size,
+                dtype=symbolic_helper.pytorch_name_to_type[input.type().scalarType()],
+            )
+            bias = g.op("Constant", value_t=bias_value)
+
+        output = g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
