@@ -177,7 +177,7 @@ class DispatchKey(Enum):
         raise AssertionError(f"unknown dispatch key {value}")
 
 
-def codegen_per_backend_entries():
+def codegen_per_backend_entries() -> str:
     r = []
     for fk in FUNCTIONALITY_KEYS:
         for bc in BACKEND_COMPONENTS:
