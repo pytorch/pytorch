@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     run_tests,
     IS_SANDCASTLE,
-    skipIfCrossRef,
     clone_input_helper,
     IS_CI,
     suppress_warnings,
@@ -1150,7 +1149,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipIfCrossRef
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
