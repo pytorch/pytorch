@@ -6414,6 +6414,8 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
+        low = None
+        high = None
         if self.name in ['fft.hfft', 'fft.irfft',
                          '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
@@ -6423,11 +6425,15 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         elif self.name in ['fft.hfftn', 'fft.irfftn',
                            '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
+            # Adjusting the limits because the test would be flaky due to over-saturation of float16
+            # See: https://github.com/pytorch/pytorch/pull/81416
+            low = -1.0
+            high = 1.0
         else:
             shapes = ((2, 8, 16), (32,))
-        nd_tensor = partial(make_tensor, shapes[0], device=device,
+        nd_tensor = partial(make_tensor, shapes[0], device=device, low=low, high=high,
                             dtype=dtype, requires_grad=requires_grad)
-        oned_tensor = partial(make_tensor, shapes[1], device=device,
+        oned_tensor = partial(make_tensor, shapes[1], device=device, low=low, high=high,
                               dtype=dtype, requires_grad=requires_grad)
 
     if self.ndimensional == SpectralFuncType.ND:
@@ -8794,12 +8800,12 @@ def sample_inputs_unflatten(op_info, device, dtype, requires_grad, **kwargs):
             ((8,), -1, (2, 2, 2)),
             ((3, 6, 2), 1, (2, 3)),
             ((3, 6, 2), -2, (2, 3)),
-            ((3, 2, 12), 2, (-1, 2, 2)),
-            ((2, 0, 1), 1, (0, 0, 0, 0))
+            ((3, 2, 12), 2, (3, 2, 2))
             )
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for in_shape, dim, sizes in args:
         yield SampleInput(make_tensor_partial(in_shape), args=(dim, sizes))
+
 
 def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -10533,22 +10539,14 @@ def error_inputs_mean(op_info, device, **kwargs):
             ErrorInput(si2, error_regex=err_msg2),
             ErrorInput(si3, error_regex=err_msg3))
 
-# This provides a numpy reference flatten implentation
-# Since there's no np.flatten, we have to roll our own
-# but it's just a matter of figuring out right shape
-# and calling reshape
 def reference_flatten(input, start_dim=0, end_dim=-1):
     in_shape = input.shape
     in_dim = len(in_shape)
-    for d in start_dim, end_dim:
-        if not((in_dim == 0 and d in (-1, 0)) or -in_dim <= d < in_dim):
-            raise IndexError(f"Dimension out of range (expected to be in range of [{-in_dim}, {in_dim-1}], but got {d}")
-    start_dim = start_dim if start_dim >= 0 else in_dim + start_dim
     end_dim = end_dim if end_dim >= 0 else in_dim + end_dim
     if in_dim == 0:
         end_dim = start_dim
     if end_dim < start_dim:
-        raise RuntimeError("flatten() has invalid args: start_dim cannot come after end_dim")
+        raise RuntimeError
     flatten_bit_dim = functools.reduce(operator.mul, in_shape[start_dim:end_dim + 1], 1)
     out_shape = in_shape[:start_dim] + (flatten_bit_dim,) + in_shape[end_dim + 1:]
     return np.reshape(input, out_shape)
@@ -16760,13 +16758,16 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_flatten,
            ),
     OpInfo('unflatten',
-           op=torch.unflatten,
+           op=torch.Tensor.unflatten,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_unflatten,
-           ),
+           skips=(
+               # RuntimeError: object has no attribute unflatten
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('column_stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
