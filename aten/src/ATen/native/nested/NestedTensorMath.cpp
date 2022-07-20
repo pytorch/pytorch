@@ -97,7 +97,7 @@ Tensor pad_tensor_to_shape(
 } // namespace
 
 at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
-  TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor));
 }
@@ -105,7 +105,7 @@ at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
 at::Tensor wrap_buffer(
     at::Tensor buffer, at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor, const std::vector<int64_t>& offsets) {
-  TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor),
       std::move(nested_stride_tensor), offsets);
@@ -418,6 +418,11 @@ Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
     double padding,
     OptionalIntArrayRef output_size) {
+  // TODO: support noncontiguous case
+  // error out for now
+  TORCH_CHECK(
+      nested_tensor_impl_is_contiguous(get_nested_tensor_impl(t)),
+      "for now to_padded_tensor only supports contiguous nested tensor");
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
   auto max_size = NestedTensor_get_max_size(nt);
@@ -809,8 +814,7 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   if (positive_dim0 == positive_dim1) {
     return self;
   }
-  TORCH_CHECK(positive_dim0 > 0, "Nested tensor dimension 0 cannot be transposed");
-  TORCH_CHECK(positive_dim1 > 0, "Nested tensor dimension 0 cannot be transposed");
+  TORCH_CHECK(positive_dim0 > 0 && positive_dim1 > 0, "Nested tensor dimension 0 cannot be transposed");
   // -- to exclude the implicit batch dimension
   ndims--;
   positive_dim0--;
@@ -850,13 +854,22 @@ NestedTensor_reshape_collapse_batch(const NestedTensorImpl* self_ptr, IntArrayRe
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   // basic information after reshaping
-  int64_t ntensors_reshaped = proposed_shape[0] < 0 ? ntensors : proposed_shape[0];
+  int64_t ntensors_reshaped;
+  if (proposed_shape[0] >= 0) {
+    ntensors_reshaped = proposed_shape[0];
+  }
+  else if (proposed_shape[0] == -1) {
+    ntensors_reshaped = ntensors;
+  }
+  else {
+    AT_ERROR("invalid shape dimension ", proposed_shape[0]);
+  }
   TORCH_CHECK(
       ndims_underlying > 0,
       "shape '",
       proposed_shape,
       "' requests collapsing the implicit batch dimension with the next dimension, "
-      "but there is no more dimension");
+      "but there is not another dimension");
   auto opt_n2unbind = self_ptr->opt_size(1);
   TORCH_CHECK(
       opt_n2unbind.has_value(),
@@ -917,7 +930,16 @@ NestedTensor_reshape_split_batch(const NestedTensorImpl* self_ptr, IntArrayRef p
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   // basic information after reshaping
-  int64_t ntensors_reshaped = proposed_shape[0] < 0 ? ntensors : proposed_shape[0];
+  int64_t ntensors_reshaped;
+  if (proposed_shape[0] >= 0) {
+    ntensors_reshaped = proposed_shape[0];
+  }
+  else if (proposed_shape[0] == -1) {
+    ntensors_reshaped = ntensors;
+  }
+  else {
+    AT_ERROR("invalid shape dimension ", proposed_shape[0]);
+  }
   TORCH_CHECK(
       proposed_shape.size() > 1,
       "shape '",
@@ -931,7 +953,6 @@ NestedTensor_reshape_split_batch(const NestedTensorImpl* self_ptr, IntArrayRef p
   // strictly requires negative size to inherit from old size
   // so user can easily understand our semantics
   // will infer when we come up with a better semantics
-  // int64_t n2stack = proposed_shape[1] < 0 ? ntensors / ntensors_reshaped : proposed_shape[1];
   const int64_t& n2stack = proposed_shape[1];
   TORCH_CHECK(
       ntensors_reshaped * n2stack == ntensors,
@@ -1012,7 +1033,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
       int64_t numel = 1, numel_reshaped = 1;
       for (int64_t idim = 0; idim < ndims_underlying; idim++) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped < 0) {
+        TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
+        if (size_reshaped == -1) {
           size_reshaped = size[idim];
         }
         numel *= size[idim];
@@ -1022,7 +1044,10 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
       int64_t infer_index = -1;
       for (int64_t idim = ndims_underlying; idim < ndims_underlying_reshaped; idim++) {
         const int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped < 0) {
+        if (size_reshaped >= 0) {
+          numel_reshaped *= size_reshaped;
+        }
+        else if (size_reshaped == -1) {
           if (infer_index > -1) {
             throw std::runtime_error("only one dimension can be inferred");
           }
@@ -1031,30 +1056,18 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
           }
         }
         else {
-          numel_reshaped *= size_reshaped;
+          AT_ERROR("invalid shape dimension ", size_reshaped);
         }
       }
       // See Note [inference and inheritance semantics]
-      // if (infer_index > -1) {
-      //   TORCH_CHECK(
-      //       numel_reshaped > 0 && numel % numel_reshaped == 0,
-      //       "for ",
-      //       itensor,
-      //       "-th underlying tensor, shape '",
-      //       proposed_shape,
-      //       "' is converted to '",
-      //       IntArrayRef(size_reshaped_vector),
-      //       "', which is uninferable for input of size ",
-      //       numel);
-      //   size_reshaped_vector[infer_index] = numel / numel_reshaped;
-      // }
       TORCH_CHECK(infer_index == -1, "nested tensor does not infer shape");
     }
     // all negative sizes can be replaced
     else {
       for (int64_t idim = 0; idim < ndims_underlying_reshaped; idim++) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped < 0) {
+        TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
+        if (size_reshaped == -1) {
           size_reshaped = size[idim];
         }
       }
@@ -1115,10 +1128,9 @@ inline void NestedTensor_reshape_copy(
 // Special rules for reshape(nested tensor):
 // 1. Only 1 regular dimension can be collapsed with
 //    or splitted from the implicit batch dimension
-// 2. Any negative size is acceptable
-// 3. Multiple sizes can be negative
-// 4. Instead of infering size, negative size means "inherit the old size",
-//    so negative size is legal for a ragged dimension.
+// 2. Instead of infering size, -1 means "inherit the old size", so:
+//    * negative size is legal for a ragged dimension
+//    * multiple sizes can be -1
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
       proposed_shape.size() > 0,
@@ -1130,7 +1142,16 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
       ntensors > 0,
       "empty nested tensor cannot be reshaped");
   // basic information after reshaping
-  int64_t ntensors_reshaped = proposed_shape[0] < 0 ? ntensors : proposed_shape[0];
+  int64_t ntensors_reshaped;
+  if (proposed_shape[0] >= 0) {
+    ntensors_reshaped = proposed_shape[0];
+  }
+  else if (proposed_shape[0] == -1) {
+    ntensors_reshaped = ntensors;
+  }
+  else {
+    AT_ERROR("invalid shape dimension ", proposed_shape[0]);
+  }
   // deal with operating on implicit batch dimension first
   // it affects `sizes`, `strides`, `offsets` metadata
   std::vector<std::vector<int64_t>> sizes_vector, strides_vector;

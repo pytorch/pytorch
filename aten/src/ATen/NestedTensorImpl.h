@@ -119,11 +119,47 @@ inline NestedTensorImpl* get_nested_tensor_impl(const at::Tensor& tensor) {
   return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
-// TODO: real implementation once we support strides.
-inline bool nested_tensor_impl_is_contiguous(
-    const NestedTensorImpl* nt,
-    at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
-  return memory_format == MemoryFormat::Contiguous;
+inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
+  int64_t ntensors = nt->size(0);
+  if (ntensors == 0) {
+    return true;
+  }
+  // if any underlying tensor is noncontiguous
+  const Tensor& sizemat = nt->get_nested_size_tensor(),
+      & stridemat = nt->get_nested_stride_tensor();
+  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>(),
+      * stridemat_ptr = stridemat.data_ptr<int64_t>();
+  int64_t orig_dim = sizemat.size(1);
+  for (int64_t i = 0; i < ntensors; i++) {
+    if (stridemat_ptr[orig_dim - 1] != 1) {
+      return false;
+    }
+    int64_t product = sizemat_ptr[orig_dim - 1];
+    for (int64_t j = orig_dim - 2; j >= 0; j--) {
+      if (stridemat_ptr[j] != product) {
+      return false;
+    }
+      product *= sizemat_ptr[j];
+    }
+    sizemat_ptr += orig_dim;
+    stridemat_ptr += orig_dim;
+  }
+  // if there is blanck memory between underlying tensors
+  const auto& offsets = nt->get_offsets();
+  if (offsets[0] != 0) {
+      return false;
+    }
+  sizemat_ptr = sizemat.data_ptr<int64_t>();
+  stridemat_ptr = stridemat.data_ptr<int64_t>();
+  for (int64_t i = 1; i < ntensors; i++) {
+    if (offsets[i] != offsets[i - 1] + *sizemat_ptr * *stridemat_ptr) {
+      return false;
+    }
+    sizemat_ptr += orig_dim;
+    stridemat_ptr += orig_dim;
+  }
+  // everything is fine
+  return true;
 }
 
 inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {

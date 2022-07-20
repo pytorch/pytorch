@@ -21,15 +21,20 @@ def _iter_constructors():
 # Helper functions to pad a noncontiguous nested tensor
 # can be replaced once to_padded_tensor supports noncontiguous memory
 def noncontiguous_to_padded_tensor(input, shape=None):
-    if shape is None:
-        # for now to_padded_tensor gives the correct sizes
-        # but wrong entries when the buffer memory is noncontiguous
-        continuous_to_padded_tensor = input.to_padded_tensor(0.0)
-        shape = continuous_to_padded_tensor.shape
     tensors = input.unbind()
-    assert len(tensors) > 0
+    ntensors = len(tensors)
+    assert ntensors > 0
+    if shape is None:
+        shape = []
+        for size in tensors[0].shape:
+            shape.append(size)
+        for i in range(1, ntensors):
+            new_shape = tensors[i].shape
+            for j in range(len(shape)):
+                shape[j] = max(shape[j], new_shape[j])
+        shape = [ntensors] + shape
     result = tensors[0].new_zeros(shape)
-    for itensor in range(len(tensors)):
+    for itensor in range(ntensors):
         tensor = tensors[itensor]
         view = result[itensor]
         for idim in range(tensor.dim()):
@@ -445,15 +450,24 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
-    # actually, this tests noncontiguous_to_padded_tensor
+    # TODO: test noncontiguous to_padded_tensor
+    # For now this tests the functionality of noncontiguous_to_padded_tensor
+    # and the error message of to_padded_tensor
     # since to_padded_tensor does not support noncontiguous buffer yet
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_to_padded_tensor_noncontiguous(self, device, dtype):
         nt_contiguous, nt_noncontiguous = self.random_nt_noncontiguous_pair((2, 3, 6, 7), device, dtype)
+        # test noncontiguous_to_padded_tensor functionality
         self.assertEqual(
             nt_contiguous.to_padded_tensor(0.0),
             noncontiguous_to_padded_tensor(nt_noncontiguous))
+        # test to_padded_tensor error message
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"for now to_padded_tensor only supports contiguous nested tensor",
+            lambda: nt_noncontiguous.to_padded_tensor(0.0)
+        )
 
     @skipMeta
     def test_device_checks(self, device):
@@ -827,6 +841,19 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.functional.F.linear(nt, nt_weight, bias)
 
+    # TODO: test noncontiguous linear
+    # For now this tests the error message of linear
+    # since linear does not support noncontiguous buffer yet
+    @dtypes(torch.float, torch.double)
+    def test_linear_noncontiguous(self, device, dtype):
+        nt_contiguous, nt_noncontiguous = self.random_nt_noncontiguous_pair((2, 3, 6, 7), device, dtype)
+        weight = torch.randn((8, 5))
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"for now linear only supports contiguous nested tensor",
+            lambda: torch.nn.functional.linear(nt_noncontiguous, weight)
+        )
+
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_transpose(self, device, dtype):
@@ -872,6 +899,11 @@ class TestNestedTensorDeviceType(TestCase):
         # error case: invalid proposed shape for underlying tensors
         self.assertRaisesRegex(
             RuntimeError,
+            r"invalid shape dimension -2",
+            lambda: nt.reshape(-2, 2, 3)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
             r"shape '\[.*\]' is invalid for input of size [0-9]+",
             lambda: nt.reshape(4, 2, 3)
         )
@@ -881,7 +913,7 @@ class TestNestedTensorDeviceType(TestCase):
             RuntimeError,
             r"shape '\[.*\]' requests collapsing "
             r"the implicit batch dimension with the next dimension, "
-            r"but there is no more dimension",
+            r"but there is not another dimension",
             lambda: nt_scalar.reshape(8, -1)
         )
         # error case: cannot collapse a ragged dimension with the implicit batch dimension
@@ -931,6 +963,7 @@ class TestNestedTensorDeviceType(TestCase):
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
         pt = nt.to_padded_tensor(0.0)
+        # nested tensor reshaping scheme:
         # (2, 20) -> (2, 4, 5) -> (4, 2, 5) -> (2, 5)
         # (3, 20) -> (3, 4, 5) -> (4, 3, 5) -> (2, 5)
         #                                      (2, 5)
@@ -939,8 +972,14 @@ class TestNestedTensorDeviceType(TestCase):
         #                                      (3, 5)
         #                                      (3, 5)
         #                                      (3, 5)
-        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        # padded tensor reshaping scheme:
         # (2, 3, 20) -> (2, 3, 4, 5) -> (2, 4, 3, 5) -> (8, 3, 5)
+        # inherit only jagged dimension
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
+        self.assertEqual(noncontiguous_to_padded_tensor(ntmh), ptmh)
+        # also inherit regular dimension
+        ntmh = nt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, -1)
         ptmh = pt.reshape(2, -1, 4, 5).transpose(1, 2).reshape(8, -1, 5)
         self.assertEqual(noncontiguous_to_padded_tensor(ntmh), ptmh)
 
