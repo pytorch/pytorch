@@ -408,3 +408,49 @@ a bug if you need this)""")
         return t
 
     return wrapped
+
+
+def _find_proxy_tensor(*objects_to_search):
+    # return first proxy tensor found or None
+    proxy_tensors = (o for o in objects_to_search if isinstance(o, ProxyTensor))
+    return next(proxy_tensors, None)
+
+
+def get_isolated_graphmodule(func, args, kwargs):
+    """A helper function used to get the GraphModule for the given func.
+
+    It's expected to be used in the ProxyTensor tracing context.
+    It detaches the args and kwargs from the current tracer so that the trace of
+    the current graph module can be created without any side-effects.
+    """
+    # make_fx doesn't support kwargs, so we need to do this flattening
+    # and then unflatten the args before calling func
+    nargs = len(args)
+    flat_kwargs = list(kwargs.values())
+    all_args = list(args) + flat_kwargs
+
+    def wrapped(args):
+        fn_args = args[:nargs]
+        kwargs_keys = list(kwargs.keys())
+        fn_kwargs = dict(zip(kwargs_keys, args[nargs:]))
+        return func(*fn_args, **fn_kwargs)
+
+    # extract old tracer object
+    old_tracer = _find_proxy_tensor(*all_args).proxy.tracer
+
+    # create a new tracer object
+    graph = torch.fx.Graph()
+    new_tracer = PythonKeyTracer()
+    new_tracer.graph = graph
+
+    try:
+        for arg in all_args:
+            if isinstance(arg, ProxyTensor):
+                arg.proxy.tracer = new_tracer
+
+        gm = make_fx(wrapped)(all_args)
+    finally:
+        for arg in all_args:
+            if isinstance(arg, ProxyTensor):
+                arg.proxy.tracer = old_tracer
+    return gm
