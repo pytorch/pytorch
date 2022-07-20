@@ -218,7 +218,7 @@ class TestBannedList(TestCase):
         P_ban_add = P = CSEPass(banned_ops=[torch.ops.aten.add])
         check(f, t, 0, P=P_ban_add)  # check that add is banned
         check(f, t, 1)  # check that add is not banned by default
-    
+
     def test_rand_like(self):
         def f(x):
             a = torch.rand_like(x)
