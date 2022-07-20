@@ -1016,16 +1016,6 @@ def native_batch_norm(
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
-
-
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
@@ -1215,35 +1205,3 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
-
-
-# The implementation matches torch.ops.aten.norm
-# torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
-# For 2-norm and -2 matrix norm, it doesn't compute the singular values, it just compute the norm the same as when p > 2.
-@register_decomposition([aten.norm.Scalar, aten.norm.ScalarOpt_dim])
-@reduction_complex_to_real
-def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = False):
-    if dim is None:
-        dim = []
-
-    if p == 0:
-        return (self != 0).sum(dim, keepdim=keepdim)
-    elif p == float("inf"):
-        return self.abs().amax(dim, keepdim=keepdim)
-    elif p == -float("inf"):
-        return self.abs().amin(dim, keepdim=keepdim)
-
-    def fast_pow(x, ord):
-        if ord == 1.0:
-            return x
-        elif ord == 2.0:
-            return x.square()
-        elif ord == 0.5:
-            return x.sqrt()
-        else:
-            return x.pow(ord)
-
-    if not (p % 2.0 == 0.0 and utils.is_float_dtype(self.dtype)):
-        self = self.abs()
-
-    return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
