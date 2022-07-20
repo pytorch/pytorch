@@ -4056,7 +4056,9 @@ unflatten(input, dim, sizes) -> Tensor
 
 Expands a dimension of the input tensor over multiple dimensions.
 
-A tensor reshaping function that does the opposite of :func:`torch.flatten`.
+.. seealso::
+
+    :func:`torch.flatten` the inverse of this function. It coalesces several dimensions into one.
 
 Args:
     {input}
