@@ -399,41 +399,24 @@ TEST(DispatchKeySet, TestBackendComponentToString) {
   }
 }
 
-TEST(DispatchKeySet, TestKeyOrderingInvariants) {
-  for (uint8_t i = static_cast<uint8_t>(DispatchKey::StartOfDenseBackends);
-       i <= static_cast<uint8_t>(DispatchKey::EndOfRuntimeBackendKeys);
-       i++) {
+TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
+  std::unordered_set<std::string> seen_strings;
+  for (int i = 0; i <= static_cast<int>(DispatchKey::EndOfAliasKeys); i++) {
     auto k = static_cast<DispatchKey>(i);
-    // Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-    // The DispatchKey enum includes all of the runtime keys for
-    // Dense/Sparse/Quantized/Autograd, (e.g. CPU, CUDA, SparseCPU, SparseCUDA,
-    // AutogradCPU, AutogradCUDA, etc). And we expect the ordering of those keys
-    // to be the same as the ordering of the backends in the `BackendComponent`
-    // enum. This makes several utilities in `DispatchKey.h` and
-    // `DispatchKeySet.h` significantly easier to implement. The purpose of the
-    // test is to assert (through CI) that this invariant is maintained.
-    //
-    // The only way that we can really check this invariant is by
-    // comparing the string names of each enum.
-    // We only really care about the ordering for "real" keys that are actually
-    // used, which we expect to be able to print properly. This saves us from
-    // having to enumerate the full set of possible runtime keys in
-    // DispatchKey::toString(). It also relies on toString() being implemented
-    // correctly.
-    auto functionality_str = std::string(toString(k));
-    if (functionality_str == "UNKNOWN_TENSOR_TYPE_ID")
+    // These synthetic keys never actually get used and don't need
+    // to be printed
+    if (k == DispatchKey::EndOfFunctionalityKeys ||
+        k == DispatchKey::StartOfDenseBackends ||
+        k == DispatchKey::StartOfQuantizedBackends ||
+        k == DispatchKey::StartOfSparseBackends ||
+        k == DispatchKey::StartOfNestedTensorBackends ||
+        k == DispatchKey::StartOfAutogradBackends)
       continue;
-
-    auto computed_backend_k = toBackendComponent(k);
-    auto computed_backend_str = std::string(toString(computed_backend_k));
-    // Skip, e.g., the "Bit" from "CPUBit"
-    computed_backend_str =
-        computed_backend_str.substr(0, computed_backend_str.size() - 3);
-
-    ASSERT_TRUE(
-        functionality_str.find(computed_backend_str) != std::string::npos)
-        << "DispatchKey invariant broken! Found a key that is not ordered correctly"
-        << " with its backend bit. key = " << toString(k) << ", " << k
-        << ", computed backend = " << toString(computed_backend_k);
+    auto res = std::string(toString(k));
+    ASSERT_TRUE(res.find("Unknown") == std::string::npos)
+        << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
+        << ")";
+    ASSERT_TRUE(seen_strings.count(res) == 0);
+    seen_strings.insert(res);
   }
 }
