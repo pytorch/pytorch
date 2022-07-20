@@ -2483,14 +2483,9 @@ _arange_doc = """
 """
 
 
-float_to_complex_default_dtype = {
-    torch.float16: torch.complex32,
-    torch.float32: torch.complex64,
-    torch.float64: torch.complex128
-}
-
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
+# TODO: currently don't support complex numbers
 def _arange_meta(
     start: NumberType,
     end: NumberType,
@@ -2500,6 +2495,11 @@ def _arange_meta(
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    assert not (
+        isinstance(start, complex)
+        and isinstance(end, complex)
+        and isinstance(step, complex)
+    )
     utils.check(
         step != 0,
         lambda: "step must be nonzero",
@@ -2510,7 +2510,7 @@ def _arange_meta(
     )
     utils.check(
         (step > 0 and end >= start) or (step < 0 and end <= start),
-        lambda: f"upper bound and lower bound inconsistent with step sign",
+        lambda: "upper bound and lower bound inconsistent with step sign",
     )
     if dtype is not None:
         pass
@@ -2519,7 +2519,7 @@ def _arange_meta(
     else:
         dtype = torch.get_default_dtype()
         if all(isinstance(arg, complex) for arg in (start, end, step)):
-            dtype = float_to_complex_default_dtype[dtype]
+            dtype = utils.corresponding_complex_dtype(dtype)
     device = _get_default_device() if device is None else device
     shape = (math.ceil((end - start) / step),)
     strides = utils.make_contiguous_strides_for(shape)
@@ -2535,14 +2535,23 @@ def _arange_aten(
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    return torch.arange(
-        start, end, step, dtype=dtype, device=device, layout=torch.strided, pin_memory=False, requires_grad=requires_grad
+    # mypy: Not all union combinations were tried because there are too many unions
+    return torch.arange(  # type: ignore[call-overload, misc]
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        layout=torch.strided,
+        pin_memory=False,
+        requires_grad=requires_grad,
     )
+
 
 # TODO: maybe prims should not have requires_grad arg
 # see: https://github.com/pytorch/pytorch/pull/77542/files#r873943255
 arange = _make_prim(
-    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Device? device=None, bool? requires_grad=False) -> Tensor",
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Device? device=None, bool? requires_grad=False) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_arange_meta,
     impl_aten=_arange_aten,

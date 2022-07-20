@@ -3022,8 +3022,11 @@ def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
+    # Also see tests in test/test_tensor_creation_ops.py
+    # We won't attempt to merge those here since outputs are explicity checked there
     ends = (0, 1, 2, 10, 50)
     # Start is optional, but we currently don't test `None` because ref does not support
+    # multiple overloads and having optional arguments precede non-optional arguments
     starts = (1, 3, 10, 50)
     steps = (None, 1, 3, 7)
     for start, end in product(starts, ends):
@@ -3036,6 +3039,8 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
                 else:
                     step = sign
 
+                # Even though we support complex dtype, we don't check passing
+                # complex numbers to start, end, step
                 if dtype.is_floating_point:
                     start += 0.1
                     end += 0.1
@@ -10723,7 +10728,7 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Expected RuntimeError when doing an unsafe cast from a result of dtype torch.float32 into an out= with dtype torch.long
+               # Expected RuntimeError when unsafe cast from torch.float32 into an out= with dtype torch.long
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out')
            )),
     BinaryUfuncInfo('clamp_max',
