@@ -25,8 +25,6 @@ struct TORCH_API SchemaInfo {
     initSchemaInfo();
   }
 
-  bool has_side_effects() const;
-
   bool is_mutable();
 
   bool is_mutable(size_t index);
