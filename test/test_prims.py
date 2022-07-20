@@ -201,10 +201,12 @@ class TestPrims(TestCase):
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
         call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
         includes_aten_digamma = any(
-           torch.ops.aten.digamma.default == node.target for node in call_function_nodes
+            torch.ops.aten.digamma.default == node.target
+            for node in call_function_nodes
         )
         includes_prims_digamma = any(
-            torch.ops.prims.digamma.default == node.target for node in call_function_nodes
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
         )
         self.assertTrue(includes_aten_digamma)
         self.assertFalse(includes_prims_digamma)
@@ -218,10 +220,12 @@ class TestPrims(TestCase):
 
         call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
         includes_aten_sigmoid = any(
-              torch.ops.aten.sigmoid.default == node.target for node in call_function_nodes
+            torch.ops.aten.sigmoid.default == node.target
+            for node in call_function_nodes
         )
         includes_prims_digamma = any(
-            torch.ops.prims.digamma.default == node.target for node in call_function_nodes
+            torch.ops.prims.digamma.default == node.target
+            for node in call_function_nodes
         )
         self.assertFalse(includes_aten_sigmoid)
         self.assertFalse(includes_prims_digamma)
