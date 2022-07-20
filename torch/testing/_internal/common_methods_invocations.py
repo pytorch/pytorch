@@ -3014,15 +3014,19 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
-def error_inputs_arange(op, device, dtype, requires_grad, **kwargs):
-    yield ErrorInput(SampleInput(3, kwargs={'step': 0}), error_type=RuntimeError, error_regex='nonzero')
+def error_inputs_arange(op, device, **kwargs):
+    yield ErrorInput(SampleInput(0, args=(3, 0)), error_type=RuntimeError, error_regex='step must be nonzer')
+    yield ErrorInput(SampleInput(0, args=(-3, 2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(3, -2)), error_type=RuntimeError, error_regex='bound inconsistent with step sign')
+    yield ErrorInput(SampleInput(0, args=(float('inf'), 2)), error_type=RuntimeError, error_regex='unsupported range')
+    yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     # Try complex inputs
     # What happens when we change dtype to be complex?
     ends = (0, 1, 2, 10, 50)
-    starts = (1, 3, 10, 50)  # our ref does not support optional start, maybe the rest of our tests are okay with it?
-    # TODO: conditionally have this
+    # Start is optional, but we currently don't test `None` because ref does not support
+    starts = (1, 3, 10, 50)
     steps = (None, 1, 3, 7)
     for start, end in product(starts, ends):
         for sign in (1, -1):
@@ -3033,11 +3037,10 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
                     step = sign * step
                 else:
                     step = sign
-                # print(start, end, step)
                 if step is None:
-                    yield SampleInput(start, args=(end,), kwargs={'dtype': dtype, 'device': device})
+                    yield SampleInput(start, args=(end,))
                 else:
-                    yield SampleInput(start, args=(end, step), kwargs={'dtype': dtype, 'device': device})
+                    yield SampleInput(start, args=(end, step))
 
 
 
@@ -10691,19 +10694,31 @@ op_db: List[OpInfo] = [
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
     OpInfo('arange',
-           # bool and copmlex don't work, yet - we should fix complex?
-           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=True,
            supports_autograd=False,
+           error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
-               # skip these tests since we have non tensor input
-               DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_noncontiguous_samples"),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # https://github.com/pytorch/pytorch/issues/81774
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_get_torch_func_signature_exhaustive'),
+
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Captured graph does not contain aten::arange (succeeds on complex!)
+               # g: graph():
+               #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+               #   return (%25)
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning')
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
@@ -20325,9 +20340,10 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
-            # Skipping the following only made a single test succeed?
-            # skip these tests since we have non tensor input
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+            # Tests that assume input is a tensor or sequence of tensors
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(

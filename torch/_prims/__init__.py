@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor, _TypedStorage
+from torch._C import _get_default_device
 
 import torch._prims_common as utils
 from torch._prims_common import (
@@ -2481,14 +2482,22 @@ _arange_doc = """
     with common difference `step` beginning from `start`.
 """
 
+
+float_to_complex_default_dtype = {
+    torch.float16: torch.complex32,
+    torch.float32: torch.complex64,
+    torch.float64: torch.complex128
+}
+
+# TODO: layout, pin_memory, memory_format
+# TODO: model requires_grad on TensorMeta
 def _arange_meta(
-    start: Number,
-    end: Number,
-    step: Number,
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
     *,
-    dtype: torch.dtype = None,
-    layout: torch.layout = None,
-    device: torch.device = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
     utils.check(
@@ -2496,31 +2505,44 @@ def _arange_meta(
         lambda: "step must be nonzero",
     )
     utils.check(
-        start != float("inf") and start != float("-inf"),
+        math.isfinite(start) and math.isfinite(end),
         lambda: f"unsupported range: {start} -> {end}",
     )
     utils.check(
-        (step > 0 and end >= start) or (step < 0 and end <= start) ,
+        (step > 0 and end >= start) or (step < 0 and end <= start),
         lambda: f"upper bound and lower bound inconsistent with step sign",
     )
+    if dtype is not None:
+        pass
+    elif all(isinstance(arg, int) for arg in (start, end, step)):
+        dtype = torch.int64
+    else:
+        dtype = torch.get_default_dtype()
+        if all(isinstance(arg, complex) for arg in (start, end, step)):
+            dtype = float_to_complex_default_dtype[dtype]
+    device = _get_default_device() if device is None else device
     shape = (math.ceil((end - start) / step),)
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
 
+
 def _arange_aten(
-    start: Number,
-    end: Number,
-    step: Number,
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
     *,
-    dtype: torch.dtype = None,
-    layout: torch.layout = None,
-    device: torch.device = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    return torch.arange(start, end, step, dtype=dtype, device=device, requires_grad=requires_grad)  # what about layout, pin-memory?
+    return torch.arange(
+        start, end, step, dtype=dtype, device=device, layout=torch.strided, pin_memory=False, requires_grad=requires_grad
+    )
 
+# TODO: maybe prims should not have requires_grad arg
+# see: https://github.com/pytorch/pytorch/pull/77542/files#r873943255
 arange = _make_prim(
-    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? requires_grad=False) -> Tensor",
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Device? device=None, bool? requires_grad=False) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_arange_meta,
     impl_aten=_arange_aten,

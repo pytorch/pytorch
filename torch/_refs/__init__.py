@@ -2988,16 +2988,28 @@ def empty_like(
 @out_wrapper()
 @register_decomposition(torch.ops.aten.arange)
 def arange(
-    start: Number,
-    end: Number,
-    step: Number = 1,
+    start: NumberType,
+    end: NumberType,
+    step: NumberType = 1,
     *,
-    dtype: torch.dtype = None,
-    layout: torch.layout = None,
-    device: torch.device = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    return prims.arange(start, end, step, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+    # TODO: update to pass pin_memory and requires_grad once prim supports it
+    # We allow them to be passed to ref to appease decomposition tests
+    return prims.arange(
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        # layout=layout,
+        # pin_memory=pin_memory,
+        requires_grad=requires_grad
+    )
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
