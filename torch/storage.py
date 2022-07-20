@@ -66,6 +66,10 @@ class _StorageBase(object):
     def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
     @property
     def is_cuda(self): ...  # noqa: E704
+    @classmethod
+    def from_file(cls, filename, shared, nbytes) -> T: ...  # noqa: E704
+    @classmethod
+    def _expired(cls, *args, **kwargs) -> T: ...  # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -350,7 +354,7 @@ class _TypedStorage:
                 return _TypedStorage(
                     *args,
                     dtype=cls.dtype,
-                    device='cuda' if eval(cls.__module__) is torch.cuda else 'cpu')
+                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu')
 
             else:
                 if len(args) != 0:
@@ -768,7 +772,7 @@ class _TypedStorage:
         """
         if cls == _TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
-        untyped_storage = eval(cls.__module__)._UntypedStorage.from_file(
+        untyped_storage: _UntypedStorage = _UntypedStorage.from_file(
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
@@ -777,7 +781,7 @@ class _TypedStorage:
 
     @classmethod
     def _expired(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._expired(*args, **kwargs)
+        return _UntypedStorage._expired(*args, **kwargs)
 
     def is_pinned(self):
         return self._storage.is_pinned()
@@ -829,10 +833,10 @@ class _TypedStorage:
         if self.device.type not in ['cpu', 'cuda']:
             return None
 
-        module = 'torch.' if self.device.type == 'cpu' else 'torch.cuda.'
+        module = torch if self.device.type == 'cpu' else torch.cuda
 
         try:
-            return eval(module + storage_name)
+            return getattr(module, storage_name)
         except AttributeError:
             return None
 
