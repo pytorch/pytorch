@@ -82,6 +82,7 @@ def modify_labels(org: str, project: str, pr_num: int) -> None:
 
 
 def main() -> None:
+    # Find all the PRs that have land-pending label
     gh_remove_label('pytorch', 'pytorch', 81706, 'land-failed')
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
@@ -91,6 +92,7 @@ def main() -> None:
 
     check_for_sev(org, project, False)
 
+    # Validate each PR and merge them in
     for pr in prs:
         pr_num = pr.pr_num
         try:

@@ -1,0 +1,39 @@
+name: Periodic Merge
+
+on:
+  schedule:
+    - cron: 1,6,11,16,21,26,31,36,41,51,56 * * * *
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ try-merge-periodic }}
+  cancel-in-progress: true
+
+jobs:
+  try_merge:
+    runs-on: linux.20_04.4x
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup committer id
+        run: |
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
+
+      - name: Merge PRs
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -ex
+          python3 .github/scripts/periodic_merge.py
