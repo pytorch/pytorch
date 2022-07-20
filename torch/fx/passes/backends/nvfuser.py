@@ -27,27 +27,11 @@ def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
 
 # decomposition_table currently contains both aten2aten and aten2prim decomposition
 # this is a hack to seperate them, as we only need aten2prim decomposition for nvfuser-supported aten graph lowering
-aten2aten_decomp = {}
 aten2prim_decomp = {}
 
 for op, decomp_fn in decomposition_table.items():
     if "torch._refs" in decomp_fn.__module__:
         aten2prim_decomp[op] = decomp_fn
-    else:
-        aten2aten_decomp[op] = decomp_fn
-
-aten2aten_decomp_skips = {
-    "aten.native_layer_norm_backward.default",
-    "aten.embedding_dense_backward.default",   # This is hurting nvfuser's perf
-    "aten.addmm.default"
-}
-
-for op, decomp_fn in decomposition_table.items():
-    if "torch._refs" in decomp_fn.__module__:
-        aten2prim_decomp[op] = decomp_fn
-    else:
-        if str(op) not in aten2aten_decomp_skips:
-            aten2aten_decomp[op] = decomp_fn
 
 
 aten2prim_decomp[torch.ops.aten.to.dtype] = aten_to_dtype
@@ -217,6 +201,10 @@ class NvFuserOperatorSupport(OperatorSupport):
 
         # nvFuser FX subgraph should be purely functional
         if node.op not in CALLABLE_NODE_OPS:
+            return False
+
+        # if no prim ref decomposition existed, we do not partition
+        if node.target not in aten2prim_decomp:
             return False
 
         # ops in supported_dict doesn't have overload name
