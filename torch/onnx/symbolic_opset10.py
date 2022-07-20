@@ -616,6 +616,37 @@ class Quantized:
 
     # TODO(justinchuby): Support kwargs in leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point)
 
+    @staticmethod
+    def instance_norm(
+        g: _C.Graph,
+        q_input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        use_input_stats,
+        momentum,
+        eps,
+        cudnn_enabled,
+        op_scale,
+        op_zero_point,
+    ):
+        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+
+        output = opset9.instance_norm(
+            g,
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            use_input_stats,
+            momentum,
+            eps,
+            cudnn_enabled,
+        )
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
     def conv2d_relu(

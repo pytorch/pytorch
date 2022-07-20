@@ -2221,7 +2221,6 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     return layer_norm
 
 
-@symbolic_helper.quantized_args(True, True, True, True, True)
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def instance_norm(
     g,
@@ -2230,17 +2229,17 @@ def instance_norm(
     bias,
     running_mean,
     running_var,
-    use_input_stats,
-    momentum,
-    eps,
-    cudnn_enabled,
+    use_input_stats: int,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: int,
 ):
     symbolic_helper.check_training_mode(use_input_stats, "instance_norm")
     channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
     if weight is None or symbolic_helper._is_none(weight):
         if channel_size is None:
             raise RuntimeError(
-                "Unsupported: ONNX export of instance_norm for unknown " "channel size."
+                "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
         weight_value = torch.tensor([1.0] * channel_size).type(
             "torch." + input.type().scalarType() + "Tensor"
@@ -2249,7 +2248,7 @@ def instance_norm(
     if bias is None or symbolic_helper._is_none(bias):
         if channel_size is None:
             raise RuntimeError(
-                "Unsupported: ONNX export of instance_norm for unknown " "channel size."
+                "Unsupported: ONNX export of instance_norm for unknown channel size."
             )
         bias_value = torch.tensor([0.0] * channel_size).type(
             "torch." + input.type().scalarType() + "Tensor"
