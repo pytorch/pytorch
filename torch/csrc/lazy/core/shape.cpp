@@ -18,8 +18,8 @@ Shape::Shape(
     c10::ArrayRef<int64_t> sizes,
     c10::optional<std::vector<bool>>& is_symbolic)
     : scalar_type_(scalar_type),
-      sizes_(sizes.begin(), sizes.end()),
-      is_symbolic_(std::move(is_symbolic)) {}
+      is_symbolic_(std::move(is_symbolic)),
+      sizes_(sizes.begin(), sizes.end()) {}
 
 std::string Shape::to_string() const {
   return c10::str(toString(scalar_type_), "[", c10::Join(",", sizes_), "]");
