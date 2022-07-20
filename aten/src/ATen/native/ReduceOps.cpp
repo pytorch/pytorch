@@ -1343,34 +1343,13 @@ void impl_func_norm(
     bool keepdim,
     optional<ScalarType> opt_dtype,
     const Tensor& result) {
+  TORCH_WARN_ONCE(
+    "at::norm is deprecated and it is just left for JIT compatibility. ",
+    "It will be removed in a future PyTorch release. Please use ",
+    "`linalg.vector_norm` instead"
+  );
   auto p = opt_p.has_value() ? opt_p.get() : Scalar(2.0).to<double>();
-  auto in_dtype = opt_dtype.value_or(self.scalar_type());
-  auto out_dtype = result.scalar_type();
-
-  // See the note [Reductions do not use vectorized ops]
-  Tensor self_;
-  if (self.is_cpu() && self.is_complex() && std::abs(p.toDouble()) == INFINITY) {
-    if (opt_dtype.has_value()) {
-      self_ = self.to(*opt_dtype).abs();
-    } else {
-      self_ = self.abs();
-    }
-  } else {
-    self_ = self;
-  }
-
-
-  // omit in_dtype in the following call, to avoid make_reduction explicitly
-  // casting input to out_dtype
-  auto iter = isComplexType(self_.scalar_type())
-      ? meta::make_reduction(self_, result, dim, keepdim, in_dtype)
-      : meta::make_reduction_from_out_ty(self_, result, dim, keepdim, out_dtype);
-
-  if (iter.numel() == 0) {
-    result.zero_();
-  } else {
-    norm_stub(iter.device_type(), iter, p);
-  }
+  at::linalg_vector_norm_out(result, self, p, dim, keepdim, opt_dtype);
 }
 
 TORCH_IMPL_FUNC(norm_out)
