@@ -850,6 +850,23 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state.weight.size(), big_model.weight.size())
 
+    def test_serialization_python_attr(self):
+        def _test_save_load_attr(t):
+            t.foo = 'foo'
+            t.pi = 3.14
+
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                loaded_t = torch.load(f)
+
+            self.assertEqual(t, loaded_t)
+            self.assertEqual(t.foo, loaded_t.foo)
+            self.assertEqual(t.pi, loaded_t.pi)
+
+        t = torch.zeros(3, 3)
+        _test_save_load_attr(t)
+        _test_save_load_attr(torch.nn.Parameter(t))
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
@@ -896,6 +913,10 @@ class TestGetStateSubclass(torch.Tensor):
         if not marker == "foo":
             raise RuntimeError("Invalid state for TestGetStateSubclass")
         self.reloaded = True
+
+
+class TestEmptySubclass(torch.Tensor):
+    ...
 
 
 class TestSubclassSerialization(TestCase):
@@ -956,6 +977,25 @@ class TestSubclassSerialization(TestCase):
 
         self.assertEqual(new_tensor.requires_grad, my_tensor.requires_grad)
 
+    def test_empty_class_serialization(self):
+        tensor = TestEmptySubclass([1.])
+        # Ensures it runs fine
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
+
+        tensor = TestEmptySubclass()
+        # Ensures it runs fine
+        # Note that tensor.data_ptr() == 0 here
+        tensor2 = copy.copy(tensor)
+
+        with BytesIOContext() as f:
+            torch.save(tensor, f)
+            f.seek(0)
+            tensor2 = torch.load(f)
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

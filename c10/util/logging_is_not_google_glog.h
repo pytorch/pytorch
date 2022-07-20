@@ -91,17 +91,17 @@ static_assert(
 // should not generate anything in optimized code.
 #define LOG(n)                                 \
   if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+  ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG(n)                   \
   if (-n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
+  ::c10::MessageLogger(__FILE__, __LINE__, -n).stream()
 
 #define LOG_IF(n, condition)                                  \
   if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
+  ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG_IF(n, condition)                    \
   if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
+  ::c10::MessageLogger(__FILE__, __LINE__, -n).stream()
 
 #define VLOG_IS_ON(verboselevel) (CAFFE2_LOG_THRESHOLD <= -(verboselevel))
 
@@ -112,11 +112,10 @@ static_assert(
   ::c10::MessageLogger(file, line, ::c10::GLOG_##n).stream()
 
 // Log only if condition is met.  Otherwise evaluates to void.
-#define FATAL_IF(condition)                                                  \
-  condition ? (void)0                                                        \
-            : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
-              .stream()
+#define FATAL_IF(condition)            \
+  condition ? (void)0                  \
+            : ::c10::LoggerVoidify() & \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
 
 // Check for a given boolean condition.
 #define CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
@@ -131,11 +130,10 @@ static_assert(
   while (false)           \
   CHECK(condition)
 
-#define DLOG(n)                                                            \
-  true ? (void)0                                                           \
-       : ::c10::LoggerVoidify() &                                          \
-          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
-              .stream()
+#define DLOG(n)                   \
+  true ? (void)0                  \
+       : ::c10::LoggerVoidify() & \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #endif // NDEBUG
 
 #define CHECK_OP(val1, val2, op)                                              \

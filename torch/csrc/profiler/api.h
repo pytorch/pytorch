@@ -23,6 +23,7 @@ enum class C10_API_ENUM ProfilerState {
   CPU, // CPU-only profiling
   CUDA, // CPU + CUDA events
   NVTX, // only emit NVTX markers
+  ITT, // only emit ITT markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_ONDEMAND, // run the profiler in on-demand mode
@@ -33,15 +34,16 @@ enum class C10_API_ENUM ActiveProfilerType {
   NONE = 0,
   LEGACY,
   KINETO,
-  NVTX
+  NVTX,
+  ITT
 };
 
 struct TORCH_API ExperimentalConfig {
   explicit ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
       bool profiler_measure_per_kernel = false)
-    : profiler_metrics(std::move(profiler_metrics)),
-      profiler_measure_per_kernel(profiler_measure_per_kernel) {}
+      : profiler_metrics(std::move(profiler_metrics)),
+        profiler_measure_per_kernel(profiler_measure_per_kernel) {}
   ~ExperimentalConfig() = default;
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel = false;
@@ -135,28 +137,31 @@ TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
 // ----------------------------------------------------------------------------
-// -- CUDA --------------------------------------------------------------------
+// -- Annotation --------------------------------------------------------------
 // ----------------------------------------------------------------------------
-using CUDAEventStub = std::shared_ptr<CUevent_st>;
+using ProfilerEventStub = std::shared_ptr<CUevent_st>;
 
-struct TORCH_API CUDAStubs {
-  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns)
+struct TORCH_API ProfilerStubs {
+  virtual void record(int* device, ProfilerEventStub* event, int64_t* cpu_ns)
       const = 0;
-  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2)
-      const = 0;
-  virtual void nvtxMarkA(const char* name) const = 0;
-  virtual void nvtxRangePushA(const char* name) const = 0;
-  virtual void nvtxRangePop() const = 0;
+  virtual float elapsed(
+      const ProfilerEventStub* event,
+      const ProfilerEventStub* event2) const = 0;
+  virtual void mark(const char* name) const = 0;
+  virtual void rangePush(const char* name) const = 0;
+  virtual void rangePop() const = 0;
   virtual bool enabled() const {
     return false;
   }
   virtual void onEachDevice(std::function<void(int)> op) const = 0;
   virtual void synchronize() const = 0;
-  virtual ~CUDAStubs();
+  virtual ~ProfilerStubs();
 };
 
-TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
-TORCH_API const CUDAStubs* cudaStubs();
+TORCH_API void registerCUDAMethods(ProfilerStubs* stubs);
+TORCH_API const ProfilerStubs* cudaStubs();
+TORCH_API void registerITTMethods(ProfilerStubs* stubs);
+TORCH_API const ProfilerStubs* ittStubs();
 
 } // namespace impl
 } // namespace profiler
@@ -168,10 +173,10 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 using torch::profiler::impl::ActivityType;
-using torch::profiler::impl::ProfilerConfig;
-using torch::profiler::impl::ProfilerState;
-using torch::profiler::impl::profilerEnabled;
 using torch::profiler::impl::getProfilerConfig;
+using torch::profiler::impl::ProfilerConfig;
+using torch::profiler::impl::profilerEnabled;
+using torch::profiler::impl::ProfilerState;
 } // namespace profiler
 } // namespace autograd
 } // namespace torch

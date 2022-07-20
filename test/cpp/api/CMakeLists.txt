@@ -55,6 +55,7 @@ target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
 if(NOT MSVC)
   target_compile_options(test_api PRIVATE -Wno-unused-variable)
+  target_compile_options(test_api PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 if(USE_CUDA)

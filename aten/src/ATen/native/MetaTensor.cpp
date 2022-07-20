@@ -24,6 +24,23 @@ Tensor empty_meta(
       size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
+Tensor empty_symint_meta(
+  SymIntArrayRef size,
+  c10::optional<ScalarType> dtype_opt,
+  c10::optional<Layout> layout_opt,
+  c10::optional<Device> device_opt,
+  c10::optional<bool> pin_memory_opt,
+  c10::optional<c10::MemoryFormat> memory_format_opt
+) {
+
+  auto opt_size = asIntArrayRefSlowOpt(size);
+  if (opt_size.has_value()) {
+    return at::detail::empty_meta(*opt_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  }
+  return at::detail::empty_symint_meta(
+      size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+}
+
 Tensor empty_strided_meta(
   IntArrayRef size,
   IntArrayRef stride,

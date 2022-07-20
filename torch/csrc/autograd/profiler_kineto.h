@@ -4,11 +4,17 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
-#include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
+namespace profiler {
+namespace impl {
+struct Result;
+namespace kineto {
+struct ActivityTraceWrapper;
+} // namespace kineto
+} // namespace impl
+} // namespace profiler
 namespace autograd {
 namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
@@ -127,7 +133,8 @@ struct TORCH_API KinetoEvent {
     return *module_hierarchy_;
   }
 
-  KinetoEvent& moduleHierarchy(const std::vector<std::string>& module_hierarchy) {
+  KinetoEvent& moduleHierarchy(
+      const std::vector<std::string>& module_hierarchy) {
     module_hierarchy_ = module_hierarchy;
     return *this;
   }
@@ -208,7 +215,7 @@ struct TORCH_API KinetoEvent {
     return correlation_id_;
   }
 
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
+  KinetoEvent& correlationId(uint64_t correlation_id) {
     correlation_id_ = correlation_id;
     return *this;
   }
@@ -272,8 +279,8 @@ struct TORCH_API KinetoEvent {
   int64_t debug_handle_{-1};
   std::string backend_;
 
-  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
-  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
+  torch::profiler::impl::ProfilerEventStub cuda_event_start_ = nullptr;
+  torch::profiler::impl::ProfilerEventStub cuda_event_end_ = nullptr;
   bool is_python_function_;
 };
 
@@ -285,7 +292,8 @@ struct TORCH_API ProfilerResult {
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
+          trace,
       std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
@@ -306,7 +314,7 @@ struct TORCH_API ProfilerResult {
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-  torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
+  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
   std::vector<experimental_event_t> event_tree_;
 };
 
@@ -352,13 +360,15 @@ TORCH_API void enableProfiler(
  * Additionally, it takes a functor that does in-place post processing of
  * events, e.g. populate stack trace or module hierarchy information lazily
  * using debug_handle.
- * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
- * In this case lite interpreter runtime, records debug handles in RecordFunction, along
- * with other information. Debug handles are eventually passed down to KinetoEvent and
- * recorded as part of the event. KinetoEdgeCPUProfiler,
- * in torch/csrc/jit/mobile/profiler_edge.cpp, enables profiler using post-processing
- * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
- * and generates stack trace and module hierarchy information, once profiling is done.
+ * Example usage is with lite interpreter that has recording scope of
+ * LITE_INTERPRETER. In this case lite interpreter runtime, records debug
+ * handles in RecordFunction, along with other information. Debug handles are
+ * eventually passed down to KinetoEvent and recorded as part of the event.
+ * KinetoEdgeCPUProfiler, in torch/csrc/jit/mobile/profiler_edge.cpp, enables
+ * profiler using post-processing callback, via
+ * enableProfilerWithEventPostProcess, that takes these debug handles and
+ * generates stack trace and module hierarchy information, once profiling is
+ * done.
  */
 using post_process_t = std::function<void(
     /*debug_handle */ int64_t,
@@ -377,4 +387,5 @@ TORCH_API void prepareProfiler(
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
 } // namespace profiler
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

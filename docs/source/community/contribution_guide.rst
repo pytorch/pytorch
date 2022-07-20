@@ -200,7 +200,7 @@ Promoting PyTorch
 Your use of PyTorch in your projects, research papers, write ups, blogs,
 or general discussions around the internet helps to raise awareness for
 PyTorch and our growing community. Please reach out to
-`pytorch-marketing@fb.com <http://mailto:pytorch-marketing@fb.com/>`__
+`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
 for marketing support.
 
 Triaging Issues

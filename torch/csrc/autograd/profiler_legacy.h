@@ -1,20 +1,21 @@
 #pragma once
 
-#include <iostream>
-#include <mutex>
-#include <memory>
-#include <vector>
 #include <cstdint>
-#include <string>
-#include <sstream>
 #include <forward_list>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
 #include <tuple>
+#include <vector>
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/profiler/util.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/util.h>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct Node;
 
@@ -96,10 +97,14 @@ struct TORCH_API LegacyEvent {
 
   std::string kindStr() const {
     switch (kind_) {
-      case EventKind::Mark: return "mark";
-      case EventKind::PushRange: return "push";
-      case EventKind::PopRange: return "pop";
-      case EventKind::MemoryAlloc: return "memory_alloc";
+      case EventKind::Mark:
+        return "mark";
+      case EventKind::PushRange:
+        return "push";
+      case EventKind::PopRange:
+        return "pop";
+      case EventKind::MemoryAlloc:
+        return "memory_alloc";
     }
     throw std::runtime_error("unknown event kind");
   }
@@ -122,7 +127,7 @@ struct TORCH_API LegacyEvent {
 
   double cpuElapsedUs(const LegacyEvent& e) const {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
-    return static_cast<double>(e.cpu_ns_ - cpu_ns_)/(1000.0);
+    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / (1000.0);
   }
 
   void setCpuUs(int64_t cpu_us) {
@@ -144,11 +149,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.is_cuda() ||
-        device.type() == c10::DeviceType::HIP) {
+    if (device.is_cuda() || device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
-    } else if (device.is_cpu() ||
-        device.type() == c10::DeviceType::MKLDNN ||
+    } else if (
+        device.is_cpu() || device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
     } else {
@@ -169,7 +173,7 @@ struct TORCH_API LegacyEvent {
   }
 
   // Node ID corresponding to this event.
-  int nodeId( ) const {
+  int nodeId() const {
     return node_id_;
   }
 
@@ -257,12 +261,12 @@ struct TORCH_API LegacyEvent {
   EventKind kind_;
   uint64_t thread_id_;
   uint64_t fwd_thread_id_;
-  at::RecordFunctionHandle handle_ {0};
+  at::RecordFunctionHandle handle_{0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  torch::profiler::impl::CUDAEventStub cuda_event = nullptr;
+  torch::profiler::impl::ProfilerEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
@@ -286,7 +290,7 @@ struct RangeEventList {
     events_.reserve(kReservedCapacity);
   }
 
-  template<typename... Args>
+  template <typename... Args>
   void record(Args&&... args) {
     std::lock_guard<std::mutex> guard(mutex_);
     events_.emplace_back(std::forward<Args>(args)...);
@@ -335,15 +339,20 @@ struct TORCH_API ProfilerDisableOptions {
 
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
-TORCH_API void enableProfilerLegacy(const torch::profiler::impl::ProfilerConfig&);
+TORCH_API void enableProfilerLegacy(
+    const torch::profiler::impl::ProfilerConfig&);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
-TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
+TORCH_API thread_event_lists disableProfilerLegacy(
+    c10::optional<ProfilerDisableOptions> profilerDisableOptions =
+        c10::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
 // Writes profiled events to a stream.
-TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
+TORCH_API void writeProfilerEventsToStream(
+    std::ostream& out,
+    const std::vector<LegacyEvent*>& events);
 
 // Usage:
 //   {
@@ -356,16 +365,16 @@ struct TORCH_API RecordProfile {
   RecordProfile(const std::string& filename);
 
   ~RecordProfile();
-private:
+
+ private:
   void init();
   std::unique_ptr<std::ofstream> file_;
   std::ostream& out_;
   void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
-// A guard that enables the legacy profiler, taking in an optional callback to process
-// the results
-// Usage:
+// A guard that enables the legacy profiler, taking in an optional callback to
+// process the results Usage:
 // {
 //   TLSLegacyProfilerGuard g([](thread_event_lists profilerResults) {
 //     // process profilerResults
@@ -386,7 +395,8 @@ struct TORCH_API TLSLegacyProfilerGuard {
   }
   ~TLSLegacyProfilerGuard() {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
+    thread_event_lists event_lists =
+        disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
         (*cb_)(event_lists);
@@ -401,4 +411,6 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-}}} // namespace torch::autograd::profiler
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

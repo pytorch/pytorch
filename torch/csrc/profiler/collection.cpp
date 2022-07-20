@@ -1,12 +1,15 @@
 #include <torch/csrc/profiler/collection.h>
 
 #include <algorithm>
+#include <limits>
 #include <queue>
 
 #include <fmt/format.h>
 
+#include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -38,14 +41,14 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
     TORCH_CHECK(
-      dim <= std::numeric_limits<uint32_t>::max(),
-      "Cannot profile Tensors of size > uint32 max. Got dim: ", dim);
+        dim <= std::numeric_limits<uint32_t>::max(),
+        "Cannot profile Tensors of size > uint32 max. Got dim: ",
+        dim);
 
     tensor_metadata_.emplace_back(
-      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-      /*dtype_=*/t.scalar_type(),
-      /*dim_=*/(uint32_t)dim
-    );
+        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*dtype_=*/t.scalar_type(),
+        /*dim_=*/(uint32_t)dim);
 
     for (const auto i : sizes) {
       tensor_sizes_.emplace_back(i);
@@ -57,7 +60,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 
 // This is a custom-iterator-like getter to obtain input shapes and dtypes.
 auto InputOutputEncoder::getNextShapesAndDtypes() {
-  return [this, tag_it = tags_.begin(),
+  return [this,
+          tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_it = tensor_sizes_.begin()]() mutable {
     struct Inputs out;
@@ -65,21 +69,19 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor:
-          {
-            const auto& md = *tensor_metadata_it++;
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.shapes_.back().push_back(*tensor_size_it++);
-            }
-            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        case Tag::Tensor: {
+          const auto& md = *tensor_metadata_it++;
+          for (const auto _ : c10::irange(md.dim_)) {
+            (void)_; // Suppress unused variable warning
+            out.shapes_.back().push_back(*tensor_size_it++);
           }
-          break;
+          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        } break;
 
         case Tag::TensorListBegin:
-            while (*(++tag_it) != Tag::TERMINATOR) {
-              // TODO: Skip TensorLists for now.
-            }
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            // TODO: Skip TensorLists for now.
+          }
           out.dtypes_.emplace_back("TensorList");
           break;
 
@@ -165,38 +167,43 @@ PythonTracerBase& PythonTracerBase::get() {
 } // namespace python_tracer
 
 #define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(                                                 \
-    method_name,                                                        \
-    torch_op_field,                                                     \
-    backend_field,                                                      \
-    allocation_field,                                                   \
-    py_field,                                                           \
-    py_c_field)                                                         \
-  OUT_T(method_name) Result::method_name() const {                      \
-    using out_t = OUT_T(method_name);                                   \
-    return c10::visit(                                                  \
-        c10::overloaded(                                                \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {    \
-              (void)e;                                                  \
-              return torch_op_field;                                    \
-            },                                                          \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t {    \
-              (void)e;                                                  \
-              return backend_field;                                     \
-            },                                                          \
-            [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
-              (void)e;                                                  \
-              return allocation_field;                                  \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {     \
-              (void)e;                                                  \
-              return py_field;                                          \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {    \
-              (void)e;                                                  \
-              return py_c_field;                                        \
-            }),                                                         \
-        extra_fields_);                                                 \
+#define DEFINE_VISITOR(                                                  \
+    method_name,                                                         \
+    torch_op_field,                                                      \
+    backend_field,                                                       \
+    allocation_field,                                                    \
+    oom_field,                                                           \
+    py_field,                                                            \
+    py_c_field)                                                          \
+  OUT_T(method_name) Result::method_name() const {                       \
+    using out_t = OUT_T(method_name);                                    \
+    return c10::visit(                                                   \
+        c10::overloaded(                                                 \
+            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {     \
+              (void)e;                                                   \
+              return torch_op_field;                                     \
+            },                                                           \
+            [&](const ExtraFields<EventType::Backend>& e) -> out_t {     \
+              (void)e;                                                   \
+              return backend_field;                                      \
+            },                                                           \
+            [&](const ExtraFields<EventType::Allocation>& e) -> out_t {  \
+              (void)e;                                                   \
+              return allocation_field;                                   \
+            },                                                           \
+            [&](const ExtraFields<EventType::OutOfMemory>& e) -> out_t { \
+              (void)e;                                                   \
+              return oom_field;                                          \
+            },                                                           \
+            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {      \
+              (void)e;                                                   \
+              return py_field;                                           \
+            },                                                           \
+            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {     \
+              (void)e;                                                   \
+              return py_c_field;                                         \
+            }),                                                          \
+        extra_fields_);                                                  \
   }
 
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
@@ -211,12 +218,24 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-using torch::profiler::impl::kineto::KinetoActivityType;
 namespace {
-KinetoActivityType scopeToType(at::RecordScope scope) {
+auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
-      ? KinetoActivityType::USER_ANNOTATION
-      : KinetoActivityType::CPU_OP;
+      ? libkineto::ActivityType::USER_ANNOTATION
+      : libkineto::ActivityType::CPU_OP;
+}
+
+auto torchOpEndNS(
+    const ExtraFields<EventType::TorchOp>& e,
+    const bool finished,
+    const std::weak_ptr<Result>& parent) {
+  if (finished && e.end_time_ns_ == std::numeric_limits<time_t>::min()) {
+    auto p = parent.lock();
+    if (p) {
+      return p->endTimeNS();
+    }
+  }
+  return e.end_time_ns_;
 }
 } // namespace
 
@@ -225,20 +244,23 @@ DEFINE_VISITOR(
     e.name_,
     e.name_,
     "[memory]",
+    "[OutOfMemory]",
     toString(e),
     e.function_name_.str());
 DEFINE_VISITOR(
     kinetoType,
     scopeToType(e.scope_),
     scopeToType(e.scope_),
-    KinetoActivityType::CPU_INSTANT_EVENT,
-    KinetoActivityType::PYTHON_FUNCTION,
-    KinetoActivityType::PYTHON_FUNCTION);
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
+    libkineto::ActivityType::PYTHON_FUNCTION,
+    libkineto::ActivityType::PYTHON_FUNCTION);
+DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0, 0);
 DEFINE_VISITOR(
     endTimeNS,
-    e.end_time_ns_,
+    torchOpEndNS(e, finished_, parent_),
     e.end_time_us_ * 1000,
+    start_time_ns_,
     start_time_ns_,
     e.end_time_ns_,
     e.end_time_ns_);
@@ -248,16 +270,35 @@ DEFINE_VISITOR(
     start_tid_,
     start_tid_,
     start_tid_,
+    start_tid_,
     start_tid_);
 DEFINE_VISITOR(
     deviceType,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU,
     e.device_type_,
+    e.device_type_,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU);
 #undef DEFINE_VISITOR
 #undef OUT_T
+
+template <typename T, size_t ChunkSize>
+ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
+  static std::atomic<uint64_t> counter_{0};
+  id_start_ = 1 + ChunkSize * counter_++;
+}
+template <class... Args>
+std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::OpList::
+    emplace_back(Args&&... args) {
+  maybe_grow();
+  *next_ = {std::forward<Args>(args)...};
+  auto corr_id = buffer_last_->correlation_id(next_);
+  return {next_++, corr_id};
+}
+uint64_t ThreadLocalSubqueue::OpList::correlationID(const OpList::Iterator& e) {
+  return e.address().first->correlation_id(&*e);
+}
 
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
@@ -267,10 +308,10 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
 }
 
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
-    const at::RecordFunction& fn,
-    uint64_t correlation_id) {
-  auto event = op_events_.emplace_back(
-      correlation_id,
+    const at::RecordFunction& fn) {
+  KinetoObserverContext::Event* event;
+  uint64_t corr_id;
+  std::tie(event, corr_id) = op_events_.emplace_back(
       fn.seqNr(),
       fn.forwardThreadId(),
       fn.scope(),
@@ -279,6 +320,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
       fn.name());
   if (config_.report_input_shapes) {
     inputs_outputs_.push(fn.inputs());
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -310,6 +356,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
   return out;
 }
 
@@ -343,8 +390,9 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   std::lock_guard<std::mutex> guard(sub_queue_mutex_);
   auto it = sub_queues_.find(tid);
   if (it == sub_queues_.end()) {
-    it =
-        sub_queues_.emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_)).first;
+    it = sub_queues_
+             .emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_))
+             .first;
   }
 
   sub_queue_cache_ = SubQueueThreadCache{id_, it->second.get()};
@@ -367,6 +415,32 @@ auto steal_or_default(T& it) {
     ++it;
     return result;
   }
+}
+
+void mark_finished(std::shared_ptr<Result>& r) {
+  TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
+  r->finished_ = true;
+  TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
+}
+
+void addKinetoEvents(
+    std::vector<std::shared_ptr<Result>>& results,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
+  torch::profiler::impl::kineto::TraceWrapper cpu_trace(
+      start_time_us, "PyTorch Profiler");
+
+  for (auto& e : results) {
+    e->kineto_activity_ = cpu_trace.addCPUActivity(
+        e->name(),
+        e->kinetoType(),
+        e->kineto_info_,
+        e->correlationID(),
+        e->start_time_ns_ / 1000,
+        e->endTimeNS() / 1000);
+  }
+
+  cpu_trace.transferCpuTrace(end_time_us);
 }
 
 struct EvaluateFunctionVisitor {
@@ -446,11 +520,11 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
       // encounter such a case we don't push to `end_events_`.
       stacks[event->start_tid_] = event;
     } else {
-      event->finished_ = true;
+      mark_finished(event);
     }
   };
 
-  auto pop_event = [&stacks](const std::shared_ptr<Result>& event) {
+  auto pop_event = [&stacks](std::shared_ptr<Result> event) {
     if (event->finished_) {
       // This event was marked finished by a previous `pop_event` call.
       return;
@@ -461,12 +535,12 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      frame->finished_ = true;
+      mark_finished(frame);
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
 
-    event->finished_ = true;
+    mark_finished(event);
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
@@ -493,7 +567,9 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 } // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
-    std::function<time_t(approx_time_t)> time_converter) {
+    std::function<time_t(approx_time_t)> time_converter,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<time_t>::min()
@@ -518,7 +594,9 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     auto jit_module_it = queue.jit_modules_.begin();
     auto extra_args_it = queue.extra_args_.begin();
     auto gpu_fallback_it = queue.gpu_fallback_.begin();
-    for (auto& i : queue.op_events_) {
+    for (auto event = queue.op_events_.begin(); event != queue.op_events_.end();
+         ++event) {
+      auto& i = *event;
       auto start_time = converter(i.start_time_);
       out.emplace_back(Result::create(
           start_time,
@@ -527,12 +605,14 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/
           ExtraFields<EventType::TorchOp>(
               std::move(i.basic_fields_),
+              ThreadLocalSubqueue::OpList::correlationID(event),
               converter(i.end_time_),
               input_getter(),
               steal_or_default(jit_stack_it),
               steal_or_default(jit_module_it),
               steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it))));
+              steal_or_default(gpu_fallback_it),
+              i.allow_tf32_cublas_)));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();
@@ -550,6 +630,15 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/std::move(i)));
     }
     queue.allocations_.clear();
+    for (auto& i : queue.ooms_) {
+      auto start_time = converter(i.start_time_);
+      out.emplace_back(Result::create(
+          start_time,
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/std::move(i)));
+    }
+    queue.ooms_.clear();
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(
@@ -565,6 +654,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     tracer.clear();
   }
 
+  addKinetoEvents(out, start_time_us, end_time_us);
   build_tree(out);
   return out;
 }

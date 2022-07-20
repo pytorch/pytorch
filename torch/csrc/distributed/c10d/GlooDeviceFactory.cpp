@@ -67,7 +67,7 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 
 #if GLOO_HAVE_TRANSPORT_TCP_TLS
 static std::string cstr_to_std_string(const char* chars) {
-  return std::string (chars != nullptr ? chars : "");
+  return std::string(chars != nullptr ? chars : "");
 }
 
 static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
@@ -84,11 +84,16 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
-  const auto cert = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
-  const auto caFile = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
-  const auto caPath = cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
-  return ::gloo::transport::tcp::tls::CreateDevice(attr, pkey, cert, caFile, caPath);
+  const auto pkey =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
+  const auto cert =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
+  const auto caFile =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
+  const auto caPath =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
+  return ::gloo::transport::tcp::tls::CreateDevice(
+      attr, pkey, cert, caFile, caPath);
 }
 
 C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP_TLS, makeTCPTLSDevice);
@@ -121,9 +126,9 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
 namespace {
-std::shared_ptr<::gloo::transport::Device>
-makeGlooDevice(const std::string& interfaceName, const std::string& hostName)
-{
+std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
+    const std::string& interfaceName,
+    const std::string& hostName) {
   static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
   if (transportName) {
     return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);

@@ -44,9 +44,6 @@ def _rebuild_from_type(func, type, args, dict):
     return ret
 
 def _rebuild_from_type_v2(func, new_type, args, state):
-    if new_type is Tensor:
-        return func(*args)
-
     ret = func(*args)
     if type(ret) is not new_type:
         ret = ret.as_subclass(new_type)
@@ -56,21 +53,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     if getattr(ret.__class__, "__setstate__", Tensor.__setstate__) is not Tensor.__setstate__:
         ret.__setstate__(state)
     else:
-        if isinstance(state, tuple):
-            if not len(state) == 2:
-                raise RuntimeError(f"Invalid serialized state: {state}")
-            dict_state = state[0]
-            slots_state = state[1]
-        else:
-            dict_state = state
-            slots_state = None
-
-        for k, v in dict_state.items():
-            setattr(ret, k, v)
-
-        if slots_state:
-            for k, v in slots_state.items():
-                setattr(ret, k, v)
+        ret = torch._utils._set_obj_state(ret, state)
     return ret
 
 
@@ -96,6 +79,7 @@ class Tensor(torch._C._TensorBase):
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
+
             if self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
@@ -173,24 +157,10 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is Tensor:
-            return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        # Get the state of the python subclass
-        # This loosely mimicks the function on the object class but since Tensor do not inherit
-        # from it, we cannot call that function directly
-        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
-        getstate_fn = getattr(self, "__getstate__", None)
-        if getstate_fn:
-            state = getstate_fn()
-        else:
-            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-            if slots_to_save:
-                state = (self.__dict__, {name: getattr(self, name) for name in slots_to_save if hasattr(self, name)})
-            else:
-                state = self.__dict__
+        state = torch._utils._get_obj_state(self)
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -219,7 +189,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ['xla', 'ort', 'mps', 'hpu']:
+        if self.device.type in ['xla', 'ort', 'hpu']:
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
@@ -289,7 +259,8 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
-        elif self.data_ptr() == 0 and type(self) is not torch.Tensor:
+        elif self.data_ptr() == 0 and type(self) is not torch.Tensor and \
+                type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__:
             arg_wrapper_subclass = (
                 type(self),
                 self.dtype,
@@ -1061,34 +1032,6 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).rename_(names)
         else:
             return super(Tensor, self).rename(names)
-
-    @property
-    def grad(self):
-        """
-        This attribute is ``None`` by default and becomes a Tensor the first time a call to
-        :func:`backward` computes gradients for ``self``.
-        The attribute will then contain the gradients computed and future calls to
-        :func:`backward` will accumulate (add) gradients into it.
-        """
-        if has_torch_function_unary(self):
-            # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
-
-        return self._grad
-
-    @grad.setter
-    def grad(self, new_grad):
-        if has_torch_function_unary(self):
-            # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__set__, (self,), self, new_grad)  # type: ignore[attr-defined]
-        self._grad = new_grad
-
-    @grad.deleter
-    def grad(self):
-        if has_torch_function_unary(self):
-            # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__delete__, (self,), self)  # type: ignore[attr-defined]
-        del self._grad
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):

@@ -1,37 +1,31 @@
+from collections import defaultdict
+
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import torchgen.api.dispatcher as dispatcher
+from torchgen.api.translate import translate
+from torchgen.api.types import Binding, DispatcherSignature, Expr
+from torchgen.context import with_native_function
 from torchgen.model import (
+    Annotation,
     Argument,
+    BackendIndex,
+    BackendMetadata,
+    BaseOperatorName,
+    BaseTy,
+    BaseType,
+    DEFAULT_KERNEL_NAMESPACE,
+    DeviceCheckType,
     DispatchKey,
     FunctionSchema,
-    BaseType,
-    BaseTy,
-    Return,
-    Annotation,
     NativeFunction,
     NativeFunctionsGroup,
     OperatorName,
-    BackendIndex,
-    BackendMetadata,
-    DeviceCheckType,
+    Return,
     SchemaKind,
     Variant,
 )
-from torchgen.utils import (
-    concatMap,
-)
-from torchgen.context import (
-    with_native_function,
-)
-from torchgen.api.types import (
-    DispatcherSignature,
-    Expr,
-    Binding,
-)
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.translate import translate
-
-
-from typing import List, Tuple, Sequence, Dict, Optional, Union
-from collections import defaultdict
+from torchgen.utils import concatMap
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -200,14 +194,20 @@ def generate_function(
         # The new "functional" NativeFunction has:
         # - any mutable arguments have been converted into (immutable) returns.
         #   (if a mutable argument was not also a return, it gets converted to one)
-        # - a "functional" overload name.
+        # - "_functional" appended to the base name, ONLY IF this op has a mutable variant.
+        #   See Note [Overload Ambiguity With Functional Variants]
         # The default grouping logic in signature() actually already does this,
         # so we can piggy-back off it (but we still want return names)
         func = f.func.signature(keep_return_names=True).with_name(
-            f.func.name.remove_inplace().with_overload(
-                "functional"
-                if not f.func.name.overload_name
-                else f"{f.func.name.overload_name}_functional"
+            OperatorName(
+                name=BaseOperatorName(
+                    base=f.func.name.name.base,
+                    inplace=False,
+                    dunder_method=f.func.name.name.dunder_method,
+                    # See Note [Overload Ambiguity With Functional Variants]
+                    functional_overload=f.func.kind() == SchemaKind.mutable,
+                ),
+                overload_name=f.func.name.overload_name,
             )
         )
     elif k == SchemaKind.out:
@@ -229,7 +229,9 @@ def generate_function(
 
     backend_metadata = {
         DispatchKey.CompositeExplicitAutograd: {
-            func.name: BackendMetadata(cpp.name(func), structured=False)
+            func.name: BackendMetadata(
+                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
+            )
         }
     }
 
@@ -256,9 +258,11 @@ def generate_function(
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
             has_composite_explicit_autograd_kernel=True,
+            has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
+            namespace=f.namespace,
         ),
         backend_metadata,
     )

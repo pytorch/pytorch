@@ -11,6 +11,9 @@ __all__ = ['Library', 'impl', 'define']
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
 
+# prim is reserved by TorchScript interpreter
+_reserved_namespaces = ['prim']
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -28,6 +31,10 @@ class Library:
     def __init__(self, ns, kind, dispatch_key=""):
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
+
+        if ns in _reserved_namespaces and kind == "DEF":
+            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
+
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
@@ -39,7 +46,41 @@ class Library:
     def __repr__(self):
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
 
+    def define(self, schema, alias_analysis=""):
+        r'''Defines a new operator and its semantics in the ns namespace.
+
+        Args:
+            schema: function schema to define a new operator.
+            alias_analysis (optional): Indicates if the aliasing properties of the operator arguments can be
+                                       inferred from the schema (default behavior) or not ("CONSERVATIVE").
+        Returns:
+            name of the operator as inferred from the schema.
+
+        Example::
+            >>> my_lib = Library("foo", "DEF")
+            >>> my_lib.define("sum(Tensor self) -> Tensor")
+        '''
+        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
+        # AliasAnalysis type in C++
+        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
+            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
+        return self.m.define(schema, alias_analysis)
+
     def impl(self, op_name, fn, dispatch_key=''):
+        r'''Registers the function implementation for an operator defined in the library.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            fn: function that's the operator implementation for the input dispatch key.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>> def div_cpu(self, other):
+            >>>    return self * (1 / other)
+            >>> my_lib.impl("div.Tensor", "CPU")
+        '''
         if not callable(fn):
             raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
         if dispatch_key == '':
@@ -63,38 +104,47 @@ class Library:
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
 
+
+        if dispatch_key == "Meta":
+            dispatcher_op_name = name
+            if '::' not in dispatcher_op_name:
+                dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
+            # get a string containing the names of every dispatch key that the operator has a registration for.
+            dispatch_key_registration = torch._C._dispatch_dump(dispatcher_op_name)
+            # Internally, we shouldn't be registering meta kernels for any operators that
+            # have CompositeImplicitAutograd kernels.
+            # Instead, we should be letting those decompositions run, and writing meta kernels
+            # only for the base operators.
+            if 'CompositeImplicitAutograd' in dispatch_key_registration:
+                raise RuntimeError(
+                    f"We should not register a meta kernel directly to the operator '{name}',"
+                    " because it has a CompositeImplicitAutograd kernel in core."
+                    " Instead we should let the operator decompose, and ensure that we have meta kernels"
+                    " for the base ops that it decomposes into.")
+
         self.m.impl(name, dispatch_key, fn)
         _impls.add(key)
         self._op_impls.add(key)
 
-    def define(self, schema, alias_analysis=""):
-        '''
-        Takes a schema to define a new operator.
-        Also, optionally takes `alias_analysis` argument to indicate if the aliasing properties of the arguments
-        can be inferred from the schema (default behavior) or not ("CONSERVATIVE").
-
-        Returns the name of the operator as inferred from the schema.
-        '''
-        # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
-        # AliasAnalysis type in C++
-        if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
-        return self.m.define(schema, alias_analysis)
-
     def __del__(self):
-        for key in self._op_impls:
-            _impls.remove(key)
-        del self.m
+        # _op_impls might not have been initialized if an error was thrown in __init__
+        _op_impls_ = getattr(self, '_op_impls', None)
+        if _op_impls_:
+            for key in self._op_impls:
+                _impls.remove(key)
+            del self.m
 
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
 def impl(lib, name, dispatch_key=""):
     def wrap(f):
         lib.impl(name, f, dispatch_key)
+        return f
     return wrap
 
 def define(lib, schema, alias_analysis=""):
     def wrap(f):
         name = lib.define(schema, alias_analysis)
         lib.impl(name, f)
+        return f
     return wrap

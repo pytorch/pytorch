@@ -3439,7 +3439,7 @@ add_docstr_all('scatter_add_',
                r"""
 scatter_add_(dim, index, src) -> Tensor
 
-Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
+Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
 :meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
 an index in :attr:`self` which is specified by its index in :attr:`src`
@@ -4987,6 +4987,14 @@ add_docstr_all('masked_fill',
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+""")
+
+add_docstr_all('grad',
+               r"""
+This attribute is ``None`` by default and becomes a Tensor the first time a call to
+:func:`backward` computes gradients for ``self``.
+The attribute will then contain the gradients computed and future calls to
+:func:`backward` will accumulate (add) gradients into it.
 """)
 
 add_docstr_all('retain_grad',

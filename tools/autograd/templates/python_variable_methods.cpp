@@ -110,17 +110,15 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-
   if (r.idx == 0) {
     if (jit::tracer::isTracing()) {
+      // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
-      return wrap(self_.size(r.toInt64(0)));
+      return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python.
-    return THPSize_New(self_);
+    return THPSize_NewFromSymSizes(self_);
   }
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {

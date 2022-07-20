@@ -1,8 +1,10 @@
 import functools
 import torch
-from typing import Iterator
+from typing import Iterator, TypeVar
 from dataclasses import dataclass
 from contextlib import contextmanager
+
+T = TypeVar('T')
 
 # This file has all the logic to dedupe logic between torch dispatch and
 # torch function modes
@@ -51,7 +53,7 @@ class _ModeInfo:
 # shared version of enable_torch_function/enable_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
-def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[T]:
     if not (
         mode is None or
         isinstance(mode, mode_info.mode_class) or
@@ -61,7 +63,7 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
                          f'or None as an argument got {type(mode)} instead')
     old = mode_info.get_mode()
     if old is mode:
-        yield
+        yield mode  # type: ignore[misc]
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
@@ -79,14 +81,28 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         )
     # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
     # let you directly pass a Tensor subclass type to "mode-ify" it.
-    required_fn = "__" + mode_info.mode_name + "__"
-    if not hasattr(mode, required_fn):
-        raise ValueError(
-            f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
-        )
+    if mode is not None:
+        required_fn = "__" + mode_info.mode_name + "__"
+        if not hasattr(mode, required_fn):
+            raise ValueError(
+                f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
+            )
     mode_info.set_mode(mode)
     try:
-        yield
+        yield mode  # type: ignore[misc]
+    finally:
+        mode_info.set_mode(old)
+
+
+def _restore_mode(mode, mode_info: _ModeInfo):
+    if not hasattr(mode, "ancestors"):
+        raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
+    old = mode_info.get_mode()
+    if old is not None and old not in mode.ancestors:
+        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
+    mode_info.set_mode(mode)
+    try:
+        yield mode
     finally:
         mode_info.set_mode(old)
 
@@ -114,11 +130,43 @@ def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
             f'The callable passed to push_{mode_info.mode_name}_mode'
             f'must return a {mode_info.mode_class_name()}'
         )
+    if old is not None:
+        mode.ancestors = old.ancestors.union({old})  # type: ignore[attr-defined]
+    else:
+        mode.ancestors = set()  # type: ignore[attr-defined]
     mode_info.set_mode(mode)
     try:
         yield mode
     finally:
         mode_info.set_mode(old)
+
+
+# To help with non-lexical scoping, it will error if all the modes are from different scopes or haven't been used
+def find_outermost_mode(modes):
+    outermost = None
+    for mode in modes:
+        if mode is not None:
+            if not hasattr(mode, "ancestors"):
+                raise RuntimeError(f"{mode}, doesn't have ancestors set so the ordering with other modes is unclear")
+            if outermost is None:
+                outermost = mode
+            elif mode not in outermost.ancestors and outermost not in mode.ancestors:
+                raise RuntimeError(f"modes {mode} and {outermost} are not compatible because they "
+                                   "don't come from the same scope")
+            elif outermost in mode.ancestors:
+                outermost = mode
+    return outermost
+
+
+# returns if all are the same mode
+def all_same_mode(modes):
+    return all(tuple(mode == modes[0] for mode in modes))
+
+# returns if all modes are from the current scope, ``cur_mode``
+def all_same_mode_scope(modes, cur_mode):
+    if not hasattr(cur_mode, "ancestors"):
+        return False
+    return all(tuple(mode == cur_mode or mode in cur_mode.ancestors for mode in modes))
 
 @contextmanager
 def no_dispatch():
