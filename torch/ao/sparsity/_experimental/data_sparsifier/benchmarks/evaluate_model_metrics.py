@@ -1,3 +1,4 @@
+from typing import Dict, List
 import torch
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
 import numpy as np  # type: ignore[import]
@@ -79,7 +80,7 @@ def evaluate_metrics(test_dataloader, sparse_model_metadata):
     metadata = pd.read_csv(sparse_model_metadata)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    metrics_dict = {
+    metrics_dict: Dict[str, List] = {
         "norm": [],
         "sparse_block_shape": [],
         "sparsity_level": [],

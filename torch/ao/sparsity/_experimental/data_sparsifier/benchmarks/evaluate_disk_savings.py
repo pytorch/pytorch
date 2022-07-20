@@ -1,3 +1,4 @@
+from typing import Dict, List
 import torch
 import time
 from torch.ao.sparsity._experimental.data_sparsifier import DataNormSparsifier
@@ -6,7 +7,7 @@ from dlrm_utils import get_dlrm_model, get_valid_name  # type: ignore[import]
 import copy
 import zipfile
 from zipfile import ZipFile
-import pandas as pd
+import pandas as pd  # type: ignore[import]
 import argparse
 
 
@@ -109,8 +110,8 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
     orig_model = orig_model.to(device)
     step_time_dict = {}
 
-    stat_dict = {'norm': [], 'sparse_block_shape': [], 'sparsity_level': [], 'step_time_sec': [], 'zip_file_size': [],
-                 'path': []}
+    stat_dict: Dict[str, List] = {'norm': [], 'sparse_block_shape': [], 'sparsity_level': [],
+                                  'step_time_sec': [], 'zip_file_size': [], 'path': []}
     for norm in norms:
         for sbs in sparse_block_shapes:
             if norm == "L2" and sbs == (1, 1):
