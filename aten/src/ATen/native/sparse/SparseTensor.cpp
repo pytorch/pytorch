@@ -132,12 +132,15 @@ SparseTensor new_sparse(
     c10::optional<bool> pin_memory) {
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
-  if (device_or_default(device).is_cuda()) {
-    dispatch_key = DispatchKey::SparseCUDA;
-  } else if (device_or_default(device).is_xpu()) {
-    dispatch_key = DispatchKey::SparseXPU;
-  } else {
-    dispatch_key = DispatchKey::SparseCPU;
+  switch (device_or_default(device).type()) {
+#define DO_CASE(device, _) \
+    case DeviceType::device: \
+      dispatch_key = DispatchKey::Sparse##device; \
+      break;
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    default:
+      TORCH_CHECK(false, "device type not supported for sparse ", device_or_default(device))
   }
   return detail::make_tensor<SparseTensorImpl>(
       DispatchKeySet(dispatch_key),
