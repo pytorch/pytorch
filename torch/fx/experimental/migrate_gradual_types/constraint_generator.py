@@ -5,7 +5,7 @@ from typing import Callable, Dict, Iterable
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
-    TVar, DVar, GetItemTensor, IndexSelect
+    TVar, DVar, GetItemTensor, IndexSelect, Transpose
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add, op_mul
 from torch.fx.node import Target, Node
@@ -77,7 +77,7 @@ def index_select_inference_rule(n: Node, symbols, constraints, counter):
 
     dims, counter = gen_tensor_dims(1, counter)
 
-    # matching constraint
+    # equality constraint
     is_size_1 = BinConstraintT(symbols[n.args[2]], TensorType(dims), op_eq)
     is_dyn = BinConstraintT(symbols[n.args[2]], Dyn, op_eq)
 
@@ -141,6 +141,30 @@ def equality_inference_rule(n: Node, symbols, constraints, counter):
     input = symbols[n.args[0]]
     assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
+
+
+@register_inference_rule("transpose")
+def transpose_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    Can be considered as a sequence of two index selects, so we generate constraints accordingly
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], int)
+    assert isinstance(n.args[2], int)
+
+    output, counter = gen_tvar(counter)
+    symbols[n] = output
+
+    from_arg = symbols[n.args[0]]
+    assert isinstance(from_arg, TVar)
+
+    # input and output are dyn
+    is_dyn = Conj([BinConstraintT(from_arg, Dyn, op_eq), BinConstraintT(output, Dyn, op_eq)])
+
+    # or input is a tensor and we actually do the replacement
+    c3 = Disj([Transpose(i + 1, from_arg, n.args[1], n.args[2], output) for i in range(MAX_TENSOR_RANK)])
+
+    return [Disj([is_dyn, c3])], counter
 
 
 @register_inference_rule("type_as")
