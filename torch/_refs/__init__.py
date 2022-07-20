@@ -33,6 +33,7 @@ from collections.abc import Iterable
 from functools import reduce, partial, wraps
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
+import builtins
 import warnings
 import math
 from enum import Enum
@@ -55,6 +56,7 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "conj_physical",
     "cos",
     "cosh",
     "digamma",
@@ -189,6 +191,8 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "conj",
+    "constant_pad_nd",
     "contiguous",
     "dsplit",
     "dstack",
@@ -237,6 +241,7 @@ __all__ = [
     #
     # Test-related functions
     #
+    "allclose",
     "equal",  # TODO: add OpInfo
 ]
 
@@ -402,6 +407,14 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@register_decomposition(torch.ops.aten.conj_physical)
+@out_wrapper()
+def conj_physical(input: TensorLikeType):
+    if not input.dtype.is_complex:
+        return input
+    return prims.conj_physical(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1151,6 +1164,34 @@ igammac = _make_elementwise_binary_reference(
 )
 
 
+def _check_close_args(
+    name: str,
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float,
+    atol: float,
+) -> None:
+    check(
+        a.dtype == b.dtype,
+        lambda: "{0}: Attempting to compare tensors of different dtypes {1} and {2}!".format(
+            name, a.dtype, b.dtype
+        ),
+        ValueError,
+    )
+    check(
+        rtol >= 0,
+        lambda: "{0}: rtol must be greater than or equal to zero, but got {1}!".format(
+            name, rtol
+        ),
+    )
+    check(
+        atol >= 0,
+        lambda: "{0}: atol must be greater than or equal to zero, but got {1}!".format(
+            name, atol
+        ),
+    )
+
+
 # CompositeImplicitAutograd - don't register decomp
 def isclose(
     a: TensorLikeType,
@@ -1159,25 +1200,7 @@ def isclose(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> TensorLikeType:
-    check(
-        a.dtype == b.dtype,
-        lambda: "torch.isclose: Attempting to compare tensors of different dtypes {0} and {1}!".format(
-            a.dtype, b.dtype
-        ),
-        ValueError,
-    )
-    check(
-        rtol >= 0,
-        lambda: "torch.isclose: rtol must be greater than or equal to zero, but got {0}!".format(
-            rtol
-        ),
-    )
-    check(
-        atol >= 0,
-        lambda: "torch.isclose: atol must be greater than or equal to zero, but got {0}!".format(
-            atol
-        ),
-    )
+    _check_close_args(name="torch.isclose", a=a, b=b, rtol=rtol, atol=atol)
 
     close = eq(a, b)
     if equal_nan and (utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)):
@@ -1416,51 +1439,43 @@ def clamp(
     min: Optional[TensorOrNumberLikeType] = None,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    a, min, max = _maybe_broadcast(a, min, max)
-
     # NOTE: grad behavior with implementation `where` is not consistent on `nan`
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
     if min is not None:
-        a_isnan = isnan(a)
-        condition = bitwise_or(ge(a, min), a_isnan)
+        a_isnan = torch.isnan(a)
+        condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
         # we should also propagate `nan` coming from boundaries. However, that's
         # not necessary since `ge` would already `False` when either operands has
         # a `nan`. So this line below is redundant
         #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
-        a = prims.where(condition, a, min)
+        a = torch.where(condition, a, min)  # type: ignore[arg-type]
     if max is not None:
-        a_isnan = isnan(a)
+        a_isnan = torch.isnan(a)
         # same as above, no need to adjust `nan` from `max`
-        condition = bitwise_or(le(a, max), a_isnan)
-        a = prims.where(condition, a, max)
+        condition = torch.bitwise_or(torch.le(a, max), a_isnan)  # type: ignore[arg-type]
+        a = torch.where(condition, a, max)  # type: ignore[arg-type]
 
     return a
 
 
+@register_decomposition(torch.ops.aten.clamp_min)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "min"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def clamp_min(
     self: TensorLikeType,
-    min: Optional[TensorOrNumberLikeType] = None,
+    min: TensorOrNumberLikeType = None,
 ) -> TensorLikeType:
-    return clamp(self, min=min)
+    return torch.clamp(self, min=min)  # type: ignore[arg-type]
 
 
+@register_decomposition(torch.ops.aten.clamp_max)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "max"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def clamp_max(
     self: TensorLikeType,
-    max: Optional[TensorOrNumberLikeType] = None,
+    max: TensorOrNumberLikeType = None,
 ) -> TensorLikeType:
-    return clamp(self, max=max)
+    return torch.clamp(self, max=max)  # type: ignore[arg-type]
 
 
 #
@@ -1486,7 +1501,10 @@ def where(
         raise NotImplementedError
 
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
-    assert pred.dtype is torch.bool
+    check(
+        pred.dtype is torch.bool,
+        lambda: f"expected predicate to be bool, got {pred.dtype}",
+    )
 
     pred, a, b = _maybe_broadcast(pred, a, b)
     return prims.where(pred, a, b)
@@ -2064,6 +2082,91 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
         for x in tensors
     )
     return cat(aligned_tensors, 1)
+
+
+def conj(input: TensorLikeType) -> TensorLikeType:
+    if not input.dtype.is_complex:
+        return input
+    if input.is_sparse:
+        return torch.conj_physical(input)
+    return prims.conj(input)
+
+
+# This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
+@register_decomposition(torch.ops.aten.constant_pad_nd)
+def constant_pad_nd(
+    input: TensorLikeType, pad: List[int], value: NumberType = 0
+) -> TensorLikeType:
+    check(
+        len(pad) % 2 == 0,
+        lambda: f"Length of pad must be even but instead it equals {len(pad)}",
+    )
+
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    check(
+        l_inp >= l_pad,
+        lambda: "Length of pad should be no more than twice the number of "
+        f"dimensions of the input. Pad length is {len(pad)} while the input has "
+        f"{l_inp} dimensions.",
+    )
+
+    c_input = input
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] < 0:
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
+
+        if pad[pad_idx + 1] < 0:
+            c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
+
+    # if none of the pads are positive we can just return the result
+    if builtins.all(p <= 0 for p in pad):
+        return c_input.clone()
+
+    new_shape = list(input_sizes[:l_diff])
+
+    for i in range(l_pad):
+        pad_idx = len(pad) - ((i + 1) * 2)
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        check(
+            new_dim > 0,
+            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
+            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+            f"which is invalid. Check dimension {l_diff + i} of your input.",
+        )
+        new_shape.append(new_dim)
+
+    memory_format = utils.suggest_memory_format(input)
+    output = torch.empty(
+        new_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+        memory_format=memory_format,
+    )
+
+    if value == 0 and input.dtype == torch.bool:
+        value = False
+    # torch.fill isn't typed to allow complex values
+    output = torch.fill(output, value)  # type: ignore[arg-type]
+
+    c_output = output
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] > 0:
+            c_output = c_output.narrow(
+                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+            )
+        if pad[pad_idx + 1] > 0:
+            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
+
+    prims.copy_to(c_output, c_input)
+    return output
 
 
 def contiguous(
@@ -3005,6 +3108,24 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     return where(mask, prims.to_dtype(value, a.dtype), a)
 
 
+# CompositeImplicitAutograd - don't register decomp
+def allclose(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    rtol: float = 1e-05,
+    atol: float = 1e-08,
+    equal_nan: bool = False,
+) -> bool:
+    """
+    Reference implementation of torch.allclose
+    """
+    _check_close_args(name="torch.allclose", a=a, b=b, rtol=rtol, atol=atol)
+
+    return bool(
+        torch.all(torch.isclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)).item()
+    )
+
+
 # TODO: add OpInfo for torch.equal and refs.equal
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
@@ -3035,3 +3156,4 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.fft

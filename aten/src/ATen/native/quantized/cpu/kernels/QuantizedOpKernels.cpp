@@ -60,36 +60,33 @@ Tensor qcat_nhwc_kernel(
   std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
 
-  const int64_t ndim = qx0.dim();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(
-        qx.dim() == ndim,
+        qx.dim() == qx0.dim(),
         "Tensors must have the same number of dimensions: got ",
         qx.dim(),
         " and ",
-        ndim);
-    for (const auto d : c10::irange(ndim)) {
-      if (d != dim) {
-        TORCH_CHECK(
-            qx.size(d) == qx0.size(d),
-            "Sizes of tensors must match expect in dimension ",
-            d,
-            ". Got",
-            qx.size(d),
-            " and ",
-            qx0.size(d));
-      }
-    }
+        qx0.dim());
+#define CHECK_DIM(d)                                            \
+  TORCH_CHECK(                                                  \
+      qx.size(d) == qx0.size(d),                                \
+      "Sizes of tensors must match expect in dimension 1. Got", \
+      qx.size(d),                                               \
+      " and ",                                                  \
+      qx0.size(d));
+    CHECK_DIM(0);
+    CHECK_DIM(2);
+    CHECK_DIM(3);
     TORCH_CHECK(
         qx.scalar_type() == qx0.scalar_type(),
         "Expected object of scalar type ",
         toString(qx0.scalar_type()),
         " but got scalar type ",
         toString(qx.scalar_type()));
-    Cs_in.push_back(qx.size(dim));
+    Cs_in.push_back(qx.size(1));
     Cs_sum.push_back(C_out);
-    C_out += qx.size(dim);
+    C_out += qx.size(1);
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
@@ -98,38 +95,29 @@ Tensor qcat_nhwc_kernel(
         qx.q_zero_point() == zero_point);
   }
 
-  auto output_sizes = qx0.sizes().vec();
-  output_sizes[dim] = C_out;
-  int64_t outer_size = 1;
-  for (const auto d : c10::irange(qx0.dim())) {
-    if (d != dim) {
-      outer_size *= output_sizes[d];
-    }
-  }
-
+  const int64_t N = qx0.size(0);
+  const int64_t H = qx0.size(2);
+  const int64_t W = qx0.size(3);
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float inv_scale = 1.0 / scale;
 
-  const auto memory_format = qx0.suggest_memory_format();
   auto output = at::_empty_affine_quantized(
-      output_sizes,
-      qx0.options().memory_format(memory_format),
+      {N, C_out, H, W},
+      qx0.options().memory_format(MemoryFormat::ChannelsLast),
       scale,
       zero_point,
       c10::nullopt);
 
-  void* odata = output.data_ptr();
-
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
-  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, outer_size]() {
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
-    at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
         // loop over input tensors
         for (const auto tidx : c10::irange(Cs_in.size())) {
           scalar_t::underlying* optr =
-              reinterpret_cast<scalar_t::underlying*>(odata) +
+              reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
               i * C_out + Cs_sum[tidx];
 
           auto curr_C = Cs_in[tidx];
@@ -662,6 +650,81 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
   });
+}
+
+static void qprelu_out_kernel(Tensor& out,
+                              const Tensor& qx,
+                              const Tensor& qw) {
+  int32_t i_zp = static_cast<int32_t>(qx.q_zero_point());
+  float i_scale = static_cast<float>(qx.q_scale());
+
+  int32_t w_zp = static_cast<int32_t>(qw.q_zero_point());
+  float w_scale = static_cast<float>(qw.q_scale());
+
+  int32_t o_zp = static_cast<int32_t>(out.q_zero_point());
+  float o_scale = static_cast<float>(out.q_scale());
+  float o_inv_scale = 1.0f / o_scale;
+
+  float multiplier = i_scale * w_scale * o_inv_scale;
+
+  int64_t input_ndim = qx.dim();
+  TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
+
+  // Helper to convert 1d tensors or scalar tensor to an nd tensor that broadcasts with input
+  // All elements go into the channel dimension
+  DimVector sizes(input_ndim, 1), strides(input_ndim, 0);
+  auto as_nd = [&](const Tensor& t) {
+    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
+    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+    return t.as_strided(sizes, strides);
+  };
+
+  auto qw_nd = as_nd(qw);
+
+  auto iter = TensorIteratorConfig()
+    .add_output(out)
+    .add_input(qx)
+    .add_input(qw_nd)
+    .build();
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qprelu", [&] {
+    using qVec = Vectorized<scalar_t>;
+    qVec i_zp_vec = qVec(static_cast<scalar_t>(i_zp));
+    qVec w_zp_vec = qVec(static_cast<scalar_t>(w_zp));
+
+    // Quantized one as weight
+    auto qw_one = at::native::quantize_val<scalar_t>(w_scale, w_zp, 1.0f);
+    qVec vec_qw_one = qVec(qw_one);
+    auto vec_qw_one_sub_zp = vec_qw_one.widening_subtract(w_zp_vec)[0];
+    int32_t qw_one_sub_zp = qw_one.val_ - w_zp;
+
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t val_qx, scalar_t val_qw) -> scalar_t {
+        int32_t qx_pos = std::max(static_cast<int32_t>(val_qx.val_), i_zp);
+        int32_t qx_neg = std::min(static_cast<int32_t>(val_qx.val_), i_zp);
+        int32_t qx_pos_sub_zp = qx_pos - i_zp;
+        int32_t qx_neg_sub_zp = qx_neg - i_zp;
+        int32_t qw_sub_zp = val_qw.val_ - w_zp;
+        auto qy_sub_zp = qx_pos_sub_zp * qw_one_sub_zp + qx_neg_sub_zp * qw_sub_zp;
+        return at::native::requantize_from_int<scalar_t>(
+            multiplier, o_zp, qy_sub_zp);
+      },
+      [=](qVec vec_qx, qVec vec_qw) -> qVec {
+        auto vec_qx_pos = vec_qx.maximum(i_zp_vec);
+        auto vec_qx_neg = vec_qx.minimum(i_zp_vec);
+        qVec::int_vec_return_type qx_pos_sub_zp = vec_qx_pos.widening_subtract(i_zp_vec);
+        qVec::int_vec_return_type qx_neg_sub_zp = vec_qx_neg.widening_subtract(i_zp_vec);
+        qVec::int_vec_return_type qw_sub_zp = vec_qw.widening_subtract(w_zp_vec);
+        qVec::int_vec_return_type qy_sub_zp;
+        for (const auto i : c10::irange(qVec::int_num_vecs())) {
+          qy_sub_zp[i] = qx_pos_sub_zp[i] * vec_qw_one_sub_zp + qx_neg_sub_zp[i] * qw_sub_zp[i];
+        }
+        return qVec::requantize_from_int(qy_sub_zp, multiplier, o_zp);
+      });
+  });
+
 }
 
 void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
@@ -3823,6 +3886,7 @@ REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qprelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qgelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
 REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
@@ -3879,6 +3943,7 @@ REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qprelu_stub, &qprelu_out_kernel);
 REGISTER_DISPATCH(qgelu_stub, &qgelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
