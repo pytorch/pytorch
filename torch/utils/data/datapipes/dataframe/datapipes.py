@@ -5,6 +5,16 @@ from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
 
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
+__all__ = [
+    "ConcatDataFramesPipe",
+    "DataFramesAsTuplesPipe",
+    "ExampleAggregateAsDataFrames",
+    "FilterDataFramesPipe",
+    "PerRowDataFramesPipe",
+    "ShuffleDataFramesPipe",
+]
+
+
 @functional_datapipe('_dataframes_as_tuples')
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe):
@@ -12,7 +22,8 @@ class DataFramesAsTuplesPipe(IterDataPipe):
 
     def __iter__(self):
         for df in self.source_datapipe:
-            for record in df.to_records(index=False):
+            # for record in df.to_records(index=False):
+            for record in df_wrapper.iterate(df):
                 yield record
 
 
@@ -23,7 +34,8 @@ class PerRowDataFramesPipe(DFIterDataPipe):
 
     def __iter__(self):
         for df in self.source_datapipe:
-            for i in range(len(df.index)):
+            # TODO(VitalyFedyunin): Replacing with TorchArrow only API, as we are dropping pandas as followup
+            for i in range(len(df)):
                 yield df[i:i + 1]
 
 

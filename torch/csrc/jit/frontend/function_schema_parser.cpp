@@ -2,6 +2,7 @@
 
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
+#include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -27,8 +28,13 @@ namespace jit {
 
 namespace {
 struct SchemaParser {
-  SchemaParser(const std::string& str)
-      : L(std::make_shared<SourceView>(c10::string_view(str))),
+  explicit SchemaParser(const std::string& str)
+      : L(std::make_shared<Source>(
+            c10::string_view(str),
+            c10::nullopt,
+            0,
+            nullptr,
+            Source::DONT_COPY)),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
@@ -142,16 +148,20 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
-    auto p = type_parser.parseType();
-    auto type = std::move(p.first);
-    auto alias_info = std::move(p.second);
+    // fake and real type coincide except for Layout/MemoryFormat/ScalarType
+    // the fake type for these is Int instead
+    auto p = type_parser.parseFakeAndRealType();
+    auto fake_type = std::move(std::get<0>(p));
+    auto real_type = std::move(std::get<1>(p));
+    auto alias_info = std::move(std::get<2>(p));
     c10::optional<int32_t> N;
     c10::optional<IValue> default_value;
     c10::optional<std::string> alias_set;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      type = ListType::create(std::move(type));
+      fake_type = ListType::create(std::move(fake_type));
+      real_type = ListType::create(std::move(real_type));
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
@@ -160,7 +170,10 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = c10::TypeFactory::create<c10::OptionalType>(std::move(type));
+        fake_type =
+            c10::TypeFactory::create<c10::OptionalType>(std::move(fake_type));
+        real_type =
+            c10::TypeFactory::create<c10::OptionalType>(std::move(real_type));
       }
     }
     if (is_return) {
@@ -173,12 +186,14 @@ struct SchemaParser {
     } else {
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
-        default_value = parseDefaultValue(*type, type->kind(), N);
+        // NB: this means we have to unswizzle default too
+        default_value = parseDefaultValue(*fake_type, fake_type->kind(), N);
       }
     }
     return Argument(
         std::move(name),
-        std::move(type),
+        std::move(fake_type),
+        std::move(real_type),
         N,
         std::move(default_value),
         !is_return && kwarg_only,

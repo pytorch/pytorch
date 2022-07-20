@@ -9,6 +9,19 @@ import torch
 from torch._C import parse_schema
 
 
+# How to run this test locally:
+# 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
+#   one with your local changes (venv_yours).
+# In venv_nightly:
+# 2. First ensure that Pytorch is uninstalled, but all prereqs are installed
+# 3. Install torch nightly build with
+#    `pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html`
+# 4. Generate original schemas with
+#    `python test/forward_backward_compatibility/dump_all_function_schemas.py --filename nightly_schemas.txt`
+# Now in venv_yours:
+# 5. Run this test with
+#    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
+
 # The date specifies how long the allowlist exclusion should apply to.
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
@@ -37,8 +50,8 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
-    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
+    ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
+    ("aten::kl_div_backward", datetime.date(2022, 9, 1)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
@@ -50,37 +63,24 @@ ALLOW_LIST = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::gelu", datetime.date(2022, 3, 1)),
-    ("aten::gelu_backward", datetime.date(2022, 3, 1)),
-    ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_forward", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::_index_copy_", datetime.date(2022, 5, 31)),
-    ("aten::_svd_helper", datetime.date(2022, 3, 31)),
-    ("aten::linalg_svdvals", datetime.date(2022, 3, 31)),
-    ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
-    ("aten::linalg_svd", datetime.date(2022, 3, 31)),
-    ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
-    ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
+    ("aten::linalg_solve", datetime.date(2022, 8, 31)),
+    ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
+    ("aten::binary_cross_entropy_with_logits_backward", datetime.date(2022, 9, 21)),
+    ("aten::_linalg_qr_helper", datetime.date(2022, 8, 1)),
+    ("aten::linalg_lu_solve", datetime.date(2022, 8, 1)),
+    ("aten::linalg_lu_solve.out", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det.out", datetime.date(2022, 8, 1)),
+    ("aten::_det_lu_based_helper", datetime.date(2022, 8, 1)),
+    ("aten::slogdet", datetime.date(2022, 8, 1)),
+    ("aten::slogdet.out", datetime.date(2022, 8, 1)),
+    ("aten::linalg_slogdet", datetime.date(2022, 8, 1)),
+    ("aten::linalg_slogdet.out", datetime.date(2022, 8, 1)),
+    ("aten::_linalg_solve", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_solve.solution", datetime.date(2022, 10, 1)),
+    ("aten::solve", datetime.date(9999, 1, 1)),
+    ("aten::solve.solution", datetime.date(9999, 1, 1)),
+    ("aten::_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
@@ -93,28 +93,29 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
-    ("caffe2::", datetime.date(2021, 10, 23)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
-    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
-    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
-    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
-    ("aten::softplus_backward", datetime.date(2022, 1, 31)),
-    ("aten::softplus_backward.grad_input", datetime.date(2022, 1, 31)),
+    ("aten::linalg_solve", datetime.date(2022, 8, 31)),
+    ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
     ("aten::quantile", datetime.date(2022, 9, 30)),
     ("aten::nanquantile", datetime.date(2022, 9, 30)),
-    ("aten::_convolution_double_backward", datetime.date(2022, 3, 31)),
-    ("aten::_scatter_reduce", datetime.date(2022, 1, 31)),
     ("aten::native_multi_head_self_attention", datetime.date(9999, 1, 1)),
     ("aten::_native_multi_head_self_attention", datetime.date(9999, 1, 1)),
     ("aten::grid_sampler_3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
-    ("aten::scatter_reduce.two", datetime.date(2022, 4, 15)),
     ("aten::_s_where", datetime.date(2022, 9, 30)),
-    ("quantized::conv2d_cudnn", datetime.date(2022, 3, 22)),
-    ("quantized::conv2d_relu_cudnn", datetime.date(2022, 3, 22)),
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
+    ("aten::_weight_norm_cuda_interface", datetime.date(9999, 1, 1)),
+    ("aten::_weight_norm_cuda_interface_backward", datetime.date(9999, 1, 1)),
+    ("aten::segment_reduce", datetime.date(2022, 6, 30)),
+    ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
+    ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
+    ("c10d::broadcast", datetime.date(2022, 6, 25)),
+    ("aten::.*functional", datetime.date(2022, 8, 1)),
+    ("aten::_foreach.*", datetime.date(2022, 8, 1)),
+    # TODO: FIXME: prims shouldn't be checked
+    ("prims::.*", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -141,6 +142,7 @@ dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
     ("dist_c10d", datetime.date(2099, 9, 17)),
+    ("__backends__.nnc", datetime.date(2099, 9, 17)),
 ]
 
 def has_valid_upgraders(schema, version_map):

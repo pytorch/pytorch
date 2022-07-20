@@ -395,6 +395,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
+      case aten::logsumexp:
         if (!node->schema().is_mutable()) {
           castTensorInputs(
               node, aten::_autocast_to_full_precision, current_state());
@@ -403,7 +404,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // CastPolicy::fp32_set_opt_dtype
       case aten::prod:
-      case aten::softmax:
       case aten::log_softmax:
       case aten::cumprod:
       case aten::cumsum:
@@ -414,13 +414,21 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         }
         break;
 
+      // cast softmax to fp32 only on GPU
+      case aten::softmax:
+        if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
+          auto context = current_state();
+          context.cpu_enabled = false;
+          castTensorInputs(node, aten::_autocast_to_full_precision, context);
+        }
+        break;
+
       // CastPolicy::promote (promote inputs to the widest type)
       case aten::addcdiv:
       case aten::addcmul:
       case aten::atan2:
       case aten::bilinear:
       case aten::cat:
-      case aten::_cat:
       case aten::cross:
       case aten::dot:
       case aten::equal:

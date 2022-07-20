@@ -106,11 +106,17 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
 
         pg = dist.new_group([1, 0, 3, 2])
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10, pg2=pg)
-        self.assertFalse(cmp_op(st1, st2))
+        with self.assertRaisesRegex(
+            RuntimeError, "All distributed tensors should use the same ProcessGroup"
+        ):
+            cmp_op(st1, st2)
 
         pg = dist.new_group([0, 1, 2, 3])
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10, pg2=pg)
-        self.assertFalse(cmp_op(st1, st2))
+        with self.assertRaisesRegex(
+            RuntimeError, "All distributed tensors should use the same ProcessGroup"
+        ):
+            cmp_op(st1, st2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

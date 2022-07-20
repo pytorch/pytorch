@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+    parametrize, instantiate_parametrized_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -41,7 +41,7 @@ class TestOptim(TestCase):
     exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
-                                sparse_only=False):
+                                sparse_only=False, maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
         params_t = torch.tensor([1.5, 1.5])
@@ -96,7 +96,10 @@ class TestOptim(TestCase):
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
                 self.assertEqual(params.data, params_c.data)
 
-        self.assertLessEqual(params.data.dist(solution), initial_dist)
+        if not maximize:
+            self.assertLessEqual(params.data.dist(solution), initial_dist)
+        else:
+            self.assertGreaterEqual(rosenbrock(params.data), rosenbrock(params_t))
 
     def _test_basic_cases_template(self, weight, bias, input, constructor,
                                    scheduler_constructors, constructor_accepts_maximize=True):
@@ -227,6 +230,12 @@ class TestOptim(TestCase):
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
+        # Make sure that device of state['step'] is still CPU
+        new_state_dict = optimizer_cuda.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in new_state_dict['state'].values():
+                self.assertEqual(state['step'].device.type, 'cpu')
 
         for _i in range(20):
             optimizer.step(fn)
@@ -606,6 +615,12 @@ class TestOptim(TestCase):
             [],
             True
         )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2, maximize=True),
+            [],
+            True,
+            True
+        )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
@@ -614,26 +629,29 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias])
+                lambda weight, bias, maximize: optimizer([weight, bias], maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95))
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95)),
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
+                lambda weight, bias, maximize: optimizer([weight, bias], weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
@@ -677,30 +695,38 @@ class TestOptim(TestCase):
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
-                )
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1, maximize=maximize,
+                ),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
+                    lr=1e-1,
+                    maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
-                [lambda opt: ReduceLROnPlateau(opt)]
+                    lr=1e-1,
+                    maximize=maximize),
+                [lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
+                    lr=1e-1,
+                    maximize=maximize),
                 [lambda opt: ReduceLROnPlateau(opt),
-                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+                 lambda opt: ExponentialLR(opt, gamma=0.99)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
@@ -730,15 +756,20 @@ class TestOptim(TestCase):
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
+                    lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
@@ -770,32 +801,38 @@ class TestOptim(TestCase):
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-2)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2)
+                    lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True)
+                    lr=1e-2, centered=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True, momentum=0.1)
+                    lr=1e-2, centered=True, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1)
+                    lr=1e-2, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1, weight_decay=1)
+                    lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
@@ -1322,6 +1359,18 @@ class TestLRScheduler(TestCase):
         closed_form_scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_closed_form(scheduler, closed_form_scheduler, epochs)
 
+    def test_cos_anneal_lr_continue(self):
+        eta_min = 0.1
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        self.opt.step()
+        scheduler.step()
+        original_lrs = scheduler._last_lr
+        new_scheduler = CosineAnnealingLR(
+            self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
+        new_lrs = new_scheduler._last_lr
+        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
+
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
         for param_group in self.opt.param_groups:
@@ -1436,6 +1485,21 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr4(self):
+        optimizer = torch.optim.SGD([torch.tensor(0.5)], lr=0.1)
+        prev_lr = optimizer.param_groups[0]["lr"]
+
+        schedulers = [
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1),
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1)
+        ]
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers, milestones=[10])
+
+        new_lr = optimizer.param_groups[0]["lr"]
+
+        # Ensure that multiple schedulers does not affect the initial learning rate
+        self.assertEqual(prev_lr, new_lr)
 
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
@@ -1985,23 +2049,22 @@ class TestLRScheduler(TestCase):
         scheduler = MultiplicativeLR(self.opt, lr_lambda=[lambda x1: 0.9, lambda x2: 0.8])
         self._test(scheduler, targets, epochs)
 
-    def test_CosineAnnealingWarmRestarts_lr1(self):
+    @parametrize("T_mult", [1, 2, 4])
+    def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2, 4]
-        for T_mult in T_mults:
-            T_i = 10
-            T_cur = 0
-            targets = [[0.05], [0.5]]
-            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
-            for _ in range(1, iters, 1):
-                T_cur += 1
-                if T_cur >= T_i:
-                    T_cur = T_cur - T_i
-                    T_i = int(T_mult) * T_i
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-            self._test(scheduler, targets, iters)
+        T_i = 10
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+        for _ in range(1, iters, 1):
+            T_cur += 1
+            if T_cur >= T_i:
+                T_cur = T_cur - T_i
+                T_i = int(T_mult) * T_i
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+        self._test(scheduler, targets, iters)
 
     def test_CosineAnnealingWarmRestarts_lr2(self):
         iters = 30
@@ -2615,6 +2678,7 @@ class TestSWAUtils(TestCase):
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
 
+instantiate_parametrized_tests(TestLRScheduler)
 
 if __name__ == '__main__':
     run_tests()

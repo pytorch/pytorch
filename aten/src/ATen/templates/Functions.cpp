@@ -41,18 +41,15 @@ Tensor TensorMaker::make_tensor() {
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
 
-   if (sizes_.size() != 1 || sizes_[0] != 0) {
-     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-     if (strides_) {
-       tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-     } else {
-       tensor_impl->set_sizes_contiguous(sizes_);
-     }
-     if (storage_offset_) {
-       tensor_impl->set_storage_offset(*storage_offset_);
-     }
-   }
+  TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  if (strides_) {
+    tensor_impl->set_sizes_and_strides(sizes_, *strides_);
+  } else {
+    tensor_impl->set_sizes_contiguous(sizes_);
+  }
+  if (storage_offset_) {
+    tensor_impl->set_storage_offset(*storage_offset_);
+  }
 
    return tensor;
  }

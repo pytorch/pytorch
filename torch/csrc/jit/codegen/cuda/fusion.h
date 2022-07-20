@@ -66,6 +66,7 @@ class TORCH_CUDA_CU_API FusionGuard {
   ~FusionGuard();
 
   static Fusion* getCurFusion();
+  static void setCurFusion(Fusion* fusion);
 };
 
 //! Fusion is mutable but unique. Nodes cannot be copied in any way from one

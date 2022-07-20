@@ -328,6 +328,11 @@ Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generato
   return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
+// functional variant, only used by the functionalization pass.
+Tensor normal_functional(const Tensor& self, double mean, double std, c10::optional<at::Generator> generator) {
+  return self.clone().normal_(mean, std, generator);
+}
+
 // ==================================================== Random ========================================================
 
 template<typename RNG>
@@ -449,7 +454,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
     .add_output(ret)
     .add_input(lambda)
     .build();
-  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);

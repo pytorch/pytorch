@@ -184,6 +184,17 @@ TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x) {
   return dx;
 }
 
+TensorView* view_as_real(TensorView* x) {
+  auto input_type = x->getDataType().value();
+  TORCH_CHECK(
+      isComplexType(input_type),
+      "Operand of view_as_real must have complex type");
+
+  auto vec_type = getVectorType(getTypeFromComplexType(input_type), 2);
+  auto tv_vector = bitCastOp(vec_type, x);
+  return viewAsScalar(tv_vector);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

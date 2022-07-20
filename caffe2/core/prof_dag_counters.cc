@@ -51,7 +51,7 @@ void ProfDAGCounters::AddPerOpStartTime(size_t op_id) {
     return;
   }
 
-  CAFFE_ENFORCE(op_id >= 0 && op_id < op_start_times_run_.size());
+  CAFFE_ENFORCE(op_id < op_start_times_run_.size());
   op_start_times_run_[op_id] = timer_.MilliSeconds();
 }
 
@@ -60,7 +60,7 @@ void ProfDAGCounters::AddPerOpEndTime(size_t op_id) {
     return;
   }
 
-  CAFFE_ENFORCE(op_id >= 0 && op_id < op_end_times_run_.size());
+  CAFFE_ENFORCE(op_id < op_end_times_run_.size());
   op_end_times_run_[op_id] = timer_.MilliSeconds();
 }
 
@@ -69,7 +69,7 @@ void ProfDAGCounters::AddPerOpAsyncEndTime(size_t op_id) {
     return;
   }
 
-  CAFFE_ENFORCE(op_id >= 0 && op_id < op_async_end_times_run_.size());
+  CAFFE_ENFORCE(op_id < op_async_end_times_run_.size());
   op_async_end_times_run_[op_id] = timer_.MilliSeconds();
 }
 

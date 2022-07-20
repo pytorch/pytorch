@@ -96,9 +96,12 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // str
     val = IValue(static_cast<std::string>(
         profile_ivalue->s(Symbol::attr("profiled_str"))));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_ival"))) {
+    // ival
+    val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
-    GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
-    TORCH_WARN(
+    GRAPH_DEBUG("no profile info in profile_ivalue node: ", *profile_ivalue);
+    TORCH_WARN_ONCE(
         __func__,
         " profile_node ",
         *profile_ivalue,
@@ -576,7 +579,7 @@ struct CudaGraphFuser {
     Value* producer_for_chunk = *it;
     size_t producer_index = it - chunk->inputs().begin();
 
-    // all uses of the chunk must be in in this consumer
+    // all uses of the chunk must be in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)
@@ -664,7 +667,7 @@ struct CudaGraphFuser {
         auto input_c_strides = input_strides.concrete_sizes().value();
         auto output_c_sizes = producer_output_sizes.concrete_sizes().value();
         int output_index = int(output_c_sizes.size()) - 1;
-        strides.resize(output_index);
+        strides.resize(output_index + 1);
         AT_ASSERT(output_index >= int(input_c_sizes.size()) - 1);
         for (int input_index = int(input_c_sizes.size()) - 1; input_index >= 0;
              input_index--, output_index--) {
@@ -1148,15 +1151,83 @@ struct CudaGraphFuser {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
+  void removeNoopBinaryOps(Block* block) {
+    for (Node* node : block->nodes()) {
+      for (Block* b : node->blocks()) {
+        removeNoopBinaryOps(b);
+      }
+
+      if (node->matches(
+              "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+              /*const_inputs=*/{attr::alpha, attr::other}) ||
+          node->matches(
+              "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+              /*const_inputs=*/{attr::alpha, attr::other})) {
+        // x + 0 == x - 0 == x
+        // if either scalar input is a float, than removing this operator could
+        // remove type promotion and affect semantics
+        auto scalar_type =
+            node->input(0)->type()->expectRef<TensorType>().scalarType();
+        if (!scalar_type.has_value() ||
+            !at::isFloatingType(scalar_type.value())) {
+          auto inps = node->inputs();
+          if (!inps.at(1)->type()->isSubtypeOf(IntType::get()) ||
+              !inps.at(2)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
+        if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
+            node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x + 0 == x - 0 == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+        }
+      } else if (
+          node->matches(
+              "aten::mul(Tensor self, Scalar other) -> Tensor",
+              /*const_inputs=*/attr::other) ||
+          node->matches(
+              "aten::div(Tensor self, Scalar other) -> Tensor",
+              /*const_inputs=*/attr::other)) {
+        // x * 1 == x / 1 == x
+        // is the node is a division or other isn't an integer, than removing
+        // this operator could remove type promotion and affect semantics
+        auto scalar_type =
+            node->input(0)->type()->expectRef<TensorType>().scalarType();
+        if (!scalar_type.has_value() ||
+            !at::isFloatingType(scalar_type.value())) {
+          if (node->kind() == aten::div ||
+              !node->input(1)->type()->isSubtypeOf(IntType::get())) {
+            continue;
+          }
+        }
+
+        if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x * 1 == x / 1 == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+        }
+      }
+    }
+  }
+
   void optimizeFusedGraphs() {
     for (Node* node : block_->nodes()) {
       if (node->kind() != kind_) {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);
+      GRAPH_DEBUG("before optimizing: ", *subgraph);
+      removeNoopBinaryOps(subgraph->block());
       EliminateDeadCode(subgraph);
       EliminateCommonSubexpression(subgraph);
       ConstantPooling(subgraph);
+      GRAPH_DEBUG("after optimizing: ", *subgraph);
     }
   }
 
@@ -1190,8 +1261,6 @@ struct CudaGraphFuser {
 
     GRAPH_DEBUG("after scan and merge", *graph_);
     refreshAliasDb();
-
-    // fuseConcats();
 
     optimizeFusedGraphs();
 
@@ -1632,6 +1701,16 @@ void guardFusionGroup(
             versioning_if,
             view,
             profiled_ival);
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_ival"))) {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(
+                    c10::Symbol::fromQualString("prim::CudaFusionIvalGuard"),
+                    {profiled_ival, const_o},
+                    1)
+                ->insertBefore(versioning_if)
+                ->output();
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)
@@ -2032,7 +2111,7 @@ void decomposeLinearOps(Block* block) {
     for (Block* b : n->blocks()) {
       decomposeLinearOps(b);
     }
-    // only decompose `linear` layer with bias.
+    // only decompose `linear` layer with bias
     if (n->kind() == aten::linear &&
         !n->input(2)->type()->isSubtypeOf(
             static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -2047,16 +2126,30 @@ void decomposeLinearOps(Block* block) {
     auto matmul = graph->insertNode(
         graph->create(aten::matmul, {n->input(0), weight_t->output()}, 1));
     auto input_tensor_type = n->input(0)->type()->cast<c10::TensorType>();
+    if (!input_tensor_type) {
+      TORCH_WARN_ONCE(
+          "linear input 0 is required to be tensor for linear decompose");
+      continue;
+    }
     auto mat0_size = input_tensor_type->sizes().concrete_sizes();
     auto mat1_size =
         n->input(1)->type()->cast<c10::TensorType>()->sizes().concrete_sizes();
 
-    // TODO: The assert is not necessary when we can handle matmul, right now we
-    // are splitting the linear between matmul & bias_add. Our fuser can only
-    // take the second half and we would need the size information.
-    TORCH_INTERNAL_ASSERT(
-        mat0_size.has_value() && mat1_size.has_value(),
-        "concrete shape for linear input & weight are required");
+    // TODO: Continuing here is not necessary when we can handle matmul, right
+    // now we are splitting the linear between matmul & bias_add. Our fuser can
+    // only take the second half and we would need the size information.
+    if (!mat0_size.has_value() || !mat1_size.has_value()) {
+      TORCH_WARN_ONCE(
+          "concrete shape for linear input & weight are required to decompose into matmul + bias");
+      continue;
+    }
+
+    // only decompose for input with nDims >= 4. since lower rank linear eager
+    // is already fused
+    if (mat0_size->size() < 4) {
+      continue;
+    }
+
     auto out_size = mat0_size.value();
     TORCH_INTERNAL_ASSERT(
         mat1_size->size() == 2 || mat1_size->size() == 1,
@@ -2084,10 +2177,14 @@ void decomposeLinearOps(Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
-      {{aten::view, prim::view_copy},
-       {aten::reshape, prim::reshape_copy},
-       {aten::squeeze, prim::squeeze_copy},
-       {aten::unsqueeze, prim::unsqueeze_copy}});
+      {{aten::expand, prim::expand_copy},
+       {aten::expand_as, prim::expand_as_copy}});
+  // TODO: revert disabled aten::view
+  //    ({{aten::view, prim::view_copy},
+  //     {aten::reshape, prim::reshape_copy},
+  //     {aten::squeeze, prim::squeeze_copy},
+  //     {aten::unsqueeze, prim::unsqueeze_copy},
+  //     {aten::flatten, prim::flatten_copy}});
 
   std::vector<Node*> maybe_safe_alias_nodes;
   for (Node* n : block->nodes()) {
@@ -2132,10 +2229,14 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 // Supports View, Reshape, Squeeze, and Unsqueeze
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
-      {{prim::view_copy, aten::view},
-       {prim::reshape_copy, aten::reshape},
-       {prim::squeeze_copy, aten::squeeze},
-       {prim::unsqueeze_copy, aten::unsqueeze}});
+      {{prim::expand_copy, aten::expand},
+       {prim::expand_as_copy, aten::expand_as}});
+  // TODO: revert disabled aten::view
+  //    ({{prim::view_copy, aten::view},
+  //     {prim::flatten_copy, aten::flatten},
+  //     {prim::reshape_copy, aten::reshape},
+  //     {prim::squeeze_copy, aten::squeeze},
+  //     {prim::unsqueeze_copy, aten::unsqueeze}});
 
   std::vector<Node*> alias_copy_ops;
   for (Node* n : block->nodes()) {
@@ -2198,9 +2299,11 @@ void decomposeConvOps(Block* block) {
 
     auto bias_tensor_type = n->input(2)->type()->cast<c10::TensorType>();
     auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
-    TORCH_INTERNAL_ASSERT(
-        bias_size_opt.has_value(),
-        "concrete shape for bias input to conv2d are required");
+    if (!bias_size_opt.has_value()) {
+      TORCH_WARN_ONCE(
+          "concrete shape for bias input is required to decompose into conv + bias");
+      continue;
+    }
     // bias shape (C)
     auto bias_size = bias_size_opt.value();
 
@@ -2299,7 +2402,7 @@ void separateNestedViews(Node* cuda_fusion_group) {
       auto parent = parent_value->node();
 
       auto grandparent_value = parent->input(0);
-      auto grandparent = grandparent_value->node();
+      C10_UNUSED auto grandparent = grandparent_value->node();
 
       // Before: gp -> x -> n
       // After: gp -> x / gp -> n
@@ -2336,12 +2439,16 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("Remove inplace operations: ", *graph);
 
   // TODO: separate passes into different file;
-  // TODO: restore decomposition after fusion, in case we are decomposing
-  //       operation that can't be fused;
-  decomposeLinearOps(graph->block());
+  if (isEnabled(EnableOption::LinearDecomposition)) {
+    // TODO: restore decomposition after fusion, in case we are decomposing
+    //       operation that can't be fused;
+    decomposeLinearOps(graph->block());
+  }
   GRAPH_DEBUG("After decompose Linear Ops by nvfuser: ", *graph);
 
-  decomposeConvOps(graph->block());
+  if (isEnabled(EnableOption::ConvDecomposition)) {
+    decomposeConvOps(graph->block());
+  }
   GRAPH_DEBUG("After decompose decompose Conv Ops by nvfuser: ", *graph);
 
   replaceAliasOpsWithCopy(graph, graph->block());

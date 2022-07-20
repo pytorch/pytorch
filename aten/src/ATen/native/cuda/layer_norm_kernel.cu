@@ -1,17 +1,28 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
 #include <type_traits>
 
 #include <thrust/tuple.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/thread_constants.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/native_layer_norm_backward_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#endif
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -839,23 +850,25 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
+  // Calling the kernel for M==0 gives a CUDA error
+  // See: https://github.com/pytorch/pytorch/pull/28614
   if (M > 0) {
     LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
-
-    const auto input_shape = input.sizes();
-    const size_t axis = input.dim() - normalized_shape.size();
-
-    std::vector<int64_t> stat_shape;
-    for (size_t idx = 0; idx < axis; ++idx) {
-      stat_shape.push_back(input_shape[idx]);
-    }
-    for (size_t idx = axis; idx < input.dim(); ++idx) {
-      stat_shape.push_back(1);
-    }
-
-    mean = mean.view(stat_shape);
-    rstd = rstd.view(stat_shape);
   }
+  const auto input_shape = input.sizes();
+  const size_t axis = input.dim() - normalized_shape.size();
+
+  std::vector<int64_t> stat_shape;
+  for (size_t idx = 0; idx < axis; ++idx) {
+    stat_shape.push_back(input_shape[idx]);
+  }
+  for (size_t idx = axis; idx < input.dim(); ++idx) {
+    stat_shape.push_back(1);
+  }
+
+  mean = mean.view(stat_shape);
+  rstd = rstd.view(stat_shape);
+
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -927,7 +940,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
                         c10::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (M > 0) {
+  if (M > 0 && N > 0) {
     LayerNormBackwardKernelImpl(
         dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
   }

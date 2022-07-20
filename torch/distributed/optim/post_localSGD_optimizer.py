@@ -1,5 +1,6 @@
 import torch
 import torch.distributed.algorithms.model_averaging.averagers as averagers
+import warnings
 
 
 class PostLocalSGDOptimizer(torch.optim.Optimizer):
@@ -19,7 +20,10 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
         >>>  import torch.nn as nn
         >>>  from torch.distributed.optim import PostLocalSGDOptimizer
-        >>> from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import post_localSGD_hook
+        >>>  from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
+        >>>    PostLocalSGDState,
+        >>>    post_localSGD_hook,
+        >>>  )
         >>>
         >>>  model = nn.parallel.DistributedDataParallel(
         >>>     module, device_ids=[rank], output_device=rank
@@ -65,24 +69,41 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         return self.optim.__repr__()
 
     def state_dict(self):
-        return self.optim.state_dict()
+        r"""
+        This is the same as :class:`torch.optim.Optimizer` :meth:`state_dict`,
+        but adds an extra entry to record model averager's step to the checkpoint
+        to ensure reload does not cause unnecessary warm up again.
+        """
+        optim_state_dict = self.optim.state_dict()
+        optim_state_dict['step'] = self.averager.step
+        return optim_state_dict
 
     def load_state_dict(self, state_dict):
+        r"""
+        This is the same as :class:`torch.optim.Optimizer` :meth:`load_state_dict`,
+        but also restores model averager's step value to the one
+        saved in the provided ``state_dict``.
+
+        If there is no ``"step"`` entry in ``state_dict``,
+        it will raise a warning and initialize the model averager's step to 0.
+        """
         self.optim.load_state_dict(state_dict)
+        if 'step' in state_dict:
+            self.averager.step = state_dict['step']
+        else:
+            warnings.warn("Loaded state dict does not contain a step counter for an averager. "
+                          "Setting step counter to 0.")
+            self.averager.step = 0
 
     def step(self):
         r"""
         Performs a single optimization step (parameter update).
         """
         self.optim.step()
-        for param_group in self.param_groups:
-            for params in param_group["params"]:
-                if params.grad is None:
-                    continue
-                self.averager.average_parameters(iter(params))
+        self.averager.average_parameters(params=self.param_groups)
 
-    def zero_grad(self):
-        self.optim.zero_grad()
+    def zero_grad(self, set_to_none: bool = False):  # type: ignore[override]
+        self.optim.zero_grad(set_to_none=set_to_none)
 
     def add_param_group(self, param_group):
         self.optim.add_param_group(param_group)

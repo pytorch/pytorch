@@ -39,6 +39,7 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -58,6 +59,11 @@ try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupUCC
+except ImportError:
+    _UCC_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +92,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
 
 class Backend(object):
     """
-    An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+    An enum-like class of available backends: GLOO, NCCL, UCC, MPI, and other registered
     backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
@@ -105,6 +111,7 @@ class Backend(object):
     UNDEFINED = "undefined"
     GLOO = "gloo"
     NCCL = "nccl"
+    UCC = "ucc"
     MPI = "mpi"
     TCP = "tcp"
     _plugins: Dict[str, Callable] = {}
@@ -122,7 +129,7 @@ class Backend(object):
             )
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
 
@@ -145,9 +152,12 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        assert not hasattr(Backend, name.upper()), (
-            f"{name.upper()} c10d backend already exist"
-        )
+        # Allow UCC plugin if Pytorch is not built with native support.
+        # TODO: remove this exception once UCC plugin is fully deprecated.
+        if (name != Backend.UCC or (name == Backend.UCC and is_ucc_available())):
+            assert not hasattr(Backend, name.upper()), (
+                f"{name.upper()} c10d backend already exist"
+            )
         assert name.upper() not in Backend._plugins, (
             f"{name.upper()} c10d backend creator function already exist"
         )
@@ -215,6 +225,16 @@ _default_pg_init_method = None
 _group_count = 0
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
+
+def _get_pg_device(group: ProcessGroup):
+    """
+    Returns the device to use with ``group``.
+    This is cuda for NCCL and CPU for everything else
+    """
+    if _check_for_nccl_backend(group):
+        return torch.device("cuda", torch.cuda.current_device())
+    return torch.device("cpu")
 
 
 def _store_based_barrier(rank, store, timeout):
@@ -402,6 +422,13 @@ def is_gloo_available():
     return _GLOO_AVAILABLE
 
 
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
+
+
 def is_initialized():
     """
     Checking if the default process group has been initialized
@@ -501,12 +528,13 @@ def init_process_group(
     Args:
         backend (str or Backend): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            and ``nccl``. This field should be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
+            ``nccl``, and ``ucc``. This field should be given as a lowercase
+            string (e.g., ``"gloo"``), which can also be accessed via
             :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
             multiple processes per machine with ``nccl`` backend, each process
             must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks.
+            between processes can result in deadlocks. ``ucc`` backend is
+            experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -537,6 +565,9 @@ def init_process_group(
             continue executing user code since failed async NCCL operations
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
+            For ``ucc``, blocking wait is supported similar to NCCL. However,
+            async error handling is done differently since with UCC we have
+            progress thread and not watch-dog thread.
         group_name (str, optional, deprecated): Group name.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
@@ -672,7 +703,7 @@ def _new_process_group_helper(
     is_default_group = len(group_ranks) == 0
 
     backend = Backend(backend)
-    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
+    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL, ProcessGroupUCC]
     if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError(
@@ -756,6 +787,33 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
+            _pg_names[pg] = group_name
+        elif backend == Backend.UCC and is_ucc_available():
+            # TODO: once UCC plugin is fully deprecated, remove
+            # is_ucc_available() from above elif-condition and raise
+            # RuntimeError if is_ucc_available() returns false.
+
+            pg = ProcessGroupUCC(prefix_store, rank, world_size, timeout=timeout)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if get_debug_level() == DebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout,
+                    )
+            _pg_map[pg] = (Backend.UCC, store)
             _pg_names[pg] = group_name
         else:
             assert backend.upper() in Backend._plugins, (
@@ -1053,8 +1111,8 @@ def batch_isend_irecv(p2p_op_list):
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
-    Process each of the operations in p2p_op_list and return the corresponding
-    requests. NCCL and Gloo backend are currently supported.
+    Process each of the operations in ``p2p_op_list`` and return the corresponding
+    requests. NCCL, Gloo, and UCC backend are currently supported.
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is
@@ -1070,7 +1128,7 @@ def batch_isend_irecv(p2p_op_list):
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
-        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size)%world_size)
         >>> reqs = batch_isend_irecv([send_op, recv_op])
         >>> for req in reqs:
         >>>     req.wait()
@@ -1081,6 +1139,12 @@ def batch_isend_irecv(p2p_op_list):
     .. note:: Note that when this API is used with the NCCL PG backend, users must set
         the current GPU device with `torch.cuda.set_device`, otherwise it will
         lead to unexpected hang issues.
+
+        In addition, if this API is the first collective call in the ``group``
+        passed to ``dist.P2POp``, all ranks of the ``group`` must participate in
+        this API call; otherwise, the behavior is undefined. If this API call is
+        not the first collective call in the ``group``, batched P2P operations
+        involving only a subset of ranks of the ``group`` are allowed.
     """
     _check_p2p_op_list(p2p_op_list)
     backend = get_backend(p2p_op_list[0].group)
@@ -1548,19 +1612,20 @@ def all_gather_multigpu(
         work.wait()
 
 
-def _object_to_tensor(obj):
+def _object_to_tensor(obj, device):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.ByteTensor(byte_storage).to(device)
+    local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size):
+    tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
 
@@ -1628,16 +1693,9 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    input_tensor, local_size = _object_to_tensor(obj)
-    current_device = torch.device("cpu")
-    is_nccl_backend = _check_for_nccl_backend(group)
-    if is_nccl_backend:
-        # See note about using torch.cuda.current_device() here in docstring.
-        # We cannot simply use my_rank since rank == device is not necessarily
-        # true.
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        input_tensor = input_tensor.to(current_device)
-        local_size = local_size.to(current_device)
+    current_device = _get_pg_device(group)
+    input_tensor, local_size = _object_to_tensor(obj, current_device)
+
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
@@ -1729,14 +1787,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appopriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    input_tensor, local_size = _object_to_tensor(obj)
-    current_device = torch.device("cpu")
-    is_nccl_backend = _check_for_nccl_backend(group)
+    current_device = _get_pg_device(group)
+    input_tensor, local_size = _object_to_tensor(obj, current_device)
 
-    if is_nccl_backend:
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        input_tensor = input_tensor.to(current_device)
-        local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
@@ -1774,8 +1827,6 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         return
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
-        if tensor.device != torch.device("cpu"):
-            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1837,35 +1888,20 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         _warn_not_in_group("broadcast_object_list")
         return
 
-    my_rank = get_rank()
-    # Serialize object_list elements to tensors on src rank.
-    if my_rank == src:
-        tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
-        object_sizes_tensor = torch.cat(size_list)
-    else:
-        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
-
     # Current device selection.
     # To preserve backwards compatibility, ``device`` is default to ``None``
     # in which case we run current logic of device selection, i.e.
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    is_nccl_backend = _check_for_nccl_backend(group)
-    current_device = None
-    if device is not None:
-        if is_nccl_backend and device.type != "cuda":
-            raise ValueError("device type must be cuda for nccl backend")
-        current_device = device
+    current_device = device or _get_pg_device(group)
+    my_rank = get_rank()
+    # Serialize object_list elements to tensors on src rank.
+    if my_rank == src:
+        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device) for obj in object_list])
+        object_sizes_tensor = torch.cat(size_list)
     else:
-        current_device = torch.device("cpu")
-        if is_nccl_backend:
-            # See note about using torch.cuda.current_device() here in
-            # docstring. We cannot simply use my_rank since rank == device is
-            # not necessarily true.
-            current_device = torch.device("cuda", torch.cuda.current_device())
-    if is_nccl_backend:
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -1874,13 +1910,12 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.empty(
+        object_tensor = torch.empty(  # type: ignore[call-overload]
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
+            device=current_device
         )
 
-    if is_nccl_backend:
-        object_tensor = object_tensor.to(current_device)
     broadcast(object_tensor, src=src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
@@ -1960,9 +1995,10 @@ def scatter_object_list(
         )
 
     my_rank = get_rank(group)
+    pg_device = _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj) for obj in scatter_object_input_list]
+            *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -1973,11 +2009,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.tensor([0], dtype=torch.long)
+        max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1986,7 +2022,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
-    obj_tensor_size = torch.tensor([0], dtype=torch.long)
+    obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,

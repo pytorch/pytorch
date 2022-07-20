@@ -149,7 +149,6 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     }
 
     auto start = std::get<0>(buf_ranges.at(buf));
-    auto end = std::get<1>(buf_ranges.at(buf));
 
     // Release memory for buffers whose liveness range ends before the creation
     // time of this buf.

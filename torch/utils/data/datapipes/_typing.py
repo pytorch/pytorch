@@ -3,9 +3,9 @@
 
 import collections
 import functools
-import inspect
 import numbers
 import sys
+from torch.utils.data.datapipes._hook_iterator import hook_iterator
 from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
@@ -21,7 +21,6 @@ from typing import _GenericAlias  # type: ignore[attr-defined, no-redef]
 class GenericMeta(ABCMeta):  # type: ignore[no-redef]
     pass
 
-import torch
 
 class Integer(numbers.Integral):
     pass
@@ -202,7 +201,7 @@ def issubinstance(data, data_type):
 # [Note: TypeMeta and TypeAlias]
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
 # TODO: When PyTorch drops the support for Python 3.6, it can be converted
-# into the Alias system and using `__class_getiterm__` for DataPipe. The
+# into the Alias system and using `__class_getitem__` for DataPipe. The
 # typing system will gain benefit of performance and resolving metaclass
 # conflicts as elaborated in https://www.python.org/dev/peps/pep-0560/
 
@@ -249,15 +248,15 @@ class _DataPipeMeta(GenericMeta):
     r"""
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
     on the type, and validate the return hint of `__iter__`.
+
+    Note that there is subclass `_IterDataPipeMeta` specifically for `IterDataPipe`.
     """
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
-        if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
-
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
+        # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
         cls.__origin__ = None
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
@@ -337,58 +336,51 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
-def hook_iterator(namespace, profile_name):
+class _IterDataPipeMeta(_DataPipeMeta):
+    r"""
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad various functions for behaviors
+    specific to `IterDataPipe`.
+    """
 
-    def context():
-        return torch.autograd.profiler.record_function(profile_name)
+    def __new__(cls, name, bases, namespace, **kwargs):
 
-    class IteratorDecorator:
-        '''Wrap the iterator return result by adding __next__'''
-        def __init__(self, iterator):
-            self.iterator = iterator
+        if 'reset' in namespace:
+            reset_func = namespace['reset']
 
-        def __iter__(self):
-            return self
+            @functools.wraps(reset_func)
+            def conditional_reset(*args, **kwargs):
+                r"""
+                Only execute DataPipe's `reset()` method if `_restored` is False. This allows recently
+                restored DataPipe to preserve its restored state during the initial `__iter__` call.
+                """
+                datapipe = args[0]
+                if datapipe._restored is True:
+                    datapipe._restored = False
+                else:
+                    datapipe._number_of_samples_yielded = 0
+                    reset_func(*args, **kwargs)
 
-        def __next__(self):
-            with context():
-                return next(self.iterator)
+            namespace['reset'] = conditional_reset
 
-    func = namespace['__iter__']
+        if '__setstate__' in namespace:
+            setstate_func = namespace['__setstate__']
 
-    if inspect.isgeneratorfunction(func):
-        @functools.wraps(func)
-        def wrap_generator(*args, **kwargs):
-            gen = func(*args, **kwargs)
-            try:
-                with context():
-                    response = gen.send(None)
-                while True:
-                    request = yield response
-                    with context():
-                        response = gen.send(request)
-            except StopIteration as e:
-                return e.value
+            @functools.wraps(setstate_func)
+            def wrap_setstate(*args, **kwargs):
+                r"""
+                Set `_restored` to True during `__setstate__`, such that the next `reset()` call during
+                iterator creation will not actually reset the state of the DataPipe.
+                """
+                datapipe = args[0]
+                datapipe._restored = True
+                return setstate_func(*args, **kwargs)
 
-        namespace['__iter__'] = wrap_generator
-    else:
-        if '__next__' in namespace:
-            next_func = namespace['__next__']
+            namespace['__setstate__'] = wrap_setstate
 
-            @functools.wraps(next_func)
-            def wrap_next(*args, **kwargs):
-                with context():
-                    return next_func(*args, **kwargs)
+        if '__iter__' in namespace:
+            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-            namespace['__next__'] = wrap_next
-        else:
-            # have the __iter__ but not __next__ like what _ChildDataPipe did.
-            @functools.wraps(func)
-            def wrap_iter(*args, **kwargs):
-                iter_ret = func(*args, **kwargs)
-                return IteratorDecorator(iter_ret)
-
-            namespace['__iter__'] = wrap_iter
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
@@ -428,6 +420,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
+
 
 def reinforce_type(self, expected_type):
     r"""

@@ -214,9 +214,7 @@ void initGoogleLogging(char const* name) {
     ::google::InitGoogleLogging(name);
 #if !defined(_MSC_VER)
     // This is never defined on Windows
-#if !defined(__XROS__)
     ::google::InstallFailureSignalHandler();
-#endif
 #endif
   }
 }

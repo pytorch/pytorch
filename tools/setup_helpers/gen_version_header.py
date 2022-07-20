@@ -4,7 +4,7 @@
 
 import argparse
 import os
-from typing import Dict, Tuple, cast
+from typing import cast, Dict, Tuple
 
 Version = Tuple[int, int, int]
 
@@ -76,7 +76,9 @@ if __name__ == "__main__":
         help="Path to the template (i.e. version.h.in)",
     )
     parser.add_argument(
-        "--version-path", required=True, help="Path to the file specifying the version",
+        "--version-path",
+        required=True,
+        help="Path to the file specifying the version",
     )
     parser.add_argument(
         "--output-path",

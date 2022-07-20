@@ -4,6 +4,8 @@ import torch.optim._functional as F
 
 from torch import Tensor
 
+__all__ : List[str] = []
+
 # Define a TorchScript compatible Functional Adagrad Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
@@ -27,6 +29,7 @@ class _FunctionalAdagrad(object):
         eps: float = 1e-10,
         coalesce_grad: bool = True,
         foreach: bool = False,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -40,6 +43,7 @@ class _FunctionalAdagrad(object):
         }
         self.coalesce_grad = coalesce_grad
         self.foreach = foreach
+        self.maximize = maximize
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -92,4 +96,5 @@ class _FunctionalAdagrad(object):
                       lr_decay=self.defaults['lr_decay'],
                       eps=self.defaults['eps'],
                       has_sparse_grad=has_sparse_grad,
-                      foreach=self.foreach)
+                      foreach=self.foreach,
+                      maximize=self.maximize)

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <iterator>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
@@ -14,7 +16,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // It corresponds to "dense" functionality, "CPU" backend.
   // This means that it gets a dense functionality bit, and a cpu backend bit
   // set.
-  auto undefined_set = DispatchKeySet();
   auto dense_cpu_set = DispatchKeySet(DispatchKey::CPU);
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::Dense));
   ASSERT_TRUE(dense_cpu_set.has_backend(BackendComponent::CPUBit));
@@ -48,8 +49,6 @@ TEST(DispatchKeySet, ShowSemantics) {
        DispatchKey::Dense,
        DispatchKey::CUDA,
        DispatchKey::CPU});
-  auto fpga = DispatchKeySet(DispatchKey::FPGA);
-  auto fpga_and_cpu = DispatchKeySet({DispatchKey::FPGA, DispatchKey::CPU});
   // this keyset has all of the building block keys:
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradFunctionality));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::Dense));
@@ -86,8 +85,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // Iterators allow you to iterate individually through the DispatchKey's in a
   // DispatchKeySet
   auto empty_set = DispatchKeySet();
-  auto t1 = empty_set.begin();
-  auto t2 = empty_set.end();
   ASSERT_EQ(*empty_set.begin(), *empty_set.end());
 
   // However, only keys that correspond to actual runtime indices of kernels in
@@ -227,11 +224,13 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
       if (tid1 == DispatchKey::StartOfDenseBackends ||
           tid1 == DispatchKey::StartOfSparseBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
+          tid1 == DispatchKey::StartOfNestedTensorBackends ||
           tid1 == DispatchKey::StartOfAutogradBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
+          tid2 == DispatchKey::StartOfNestedTensorBackends ||
           tid2 == DispatchKey::StartOfAutogradBackends)
         continue;
 
@@ -316,6 +315,25 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_TRUE(full_set.begin() != ++full_set.begin());
 }
 
+TEST(DispatchKeySet, getHighestPriorityBackendTypeId) {
+  // AutogradCPU isn't a backend key so it is ignored
+  DispatchKeySet dense_cpu({DispatchKey::AutogradCPU, DispatchKey::CPU});
+  ASSERT_EQ(DispatchKey::CPU, c10::highestPriorityBackendTypeId(dense_cpu));
+
+  // Functionalize isn't a backend key so it is ignored
+  DispatchKeySet sparse_cuda(
+      {DispatchKey::Functionalize, DispatchKey::SparseCUDA});
+  ASSERT_EQ(
+      DispatchKey::SparseCUDA, c10::highestPriorityBackendTypeId(sparse_cuda));
+
+  // quantizedCUDA has higher priority than CUDA
+  DispatchKeySet quantized_cuda(
+      {DispatchKey::CUDA, DispatchKey::QuantizedCUDA});
+  ASSERT_EQ(
+      DispatchKey::QuantizedCUDA,
+      c10::highestPriorityBackendTypeId(quantized_cuda));
+}
+
 TEST(DispatchKeySet, IteratorEmpty) {
   DispatchKeySet empty_set;
   uint8_t i = 0;
@@ -349,29 +367,12 @@ TEST(DispatchKeySet, IteratorCrossProduct) {
 
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (const auto& it : full_set) {
-    i++;
-  }
-  // Total # of runtime entries includes an entry for DispatchKey::Undefined,
-  // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
-}
-
-TEST(DispatchKeySet, IteratorRangeFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (DispatchKey dispatch_key : full_set) {
-    i++;
-  }
+  std::ptrdiff_t count = std::distance(full_set.begin(), full_set.end());
 
   // Total # of runtime entries includes an entry for DispatchKey::Undefined,
   // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
+  ASSERT_EQ(count, std::ptrdiff_t{num_runtime_entries} - 1);
 }
-
 TEST(DispatchKeySet, FailAtEndIterator) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint64_t raw_repr = full_set.raw_repr();

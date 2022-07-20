@@ -38,8 +38,8 @@ torch.onnx.export(MyModule(),
 # graph(%input : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu),
 #       %y : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
 #   %2 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::Relu(%input)
-#   %3 : Tensor = onnx::ATen[operator="mul"](%2, %2)
-#   %4 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::ATen[operator="add"](%3, %y)
+#   %3 : Tensor = aten::ATen[operator="mul"](%2, %2)
+#   %4 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::ATen[operator="add"](%3, %y)
 #   return (%4)
 
 graph = onnx.load(f.name)

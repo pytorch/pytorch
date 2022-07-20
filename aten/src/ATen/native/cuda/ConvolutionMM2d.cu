@@ -151,10 +151,14 @@ void slow_conv2d_forward(
   resize_output(output, {batchSize, nOutputPlane, outputHeight, outputWidth});
 
   // Create temporary columns
-  auto columns = at::empty({nInputPlane * kW * kH, outputHeight * outputWidth}, input.options());
+  at::Tensor columns;
 
   const bool requires_columns = (
       kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0);
+
+  if (requires_columns) {
+    columns = at::empty({nInputPlane * kW * kH, outputHeight * outputWidth}, input.options());
+  }
 
   if (bias.defined()) {
     TORCH_CHECK(bias.scalar_type() == input.scalar_type(),
@@ -189,7 +193,7 @@ void slow_conv2d_forward(
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
       int64_t m = nOutputPlane;
-      int64_t n = columns.size(1);
+      int64_t n = outputHeight * outputWidth;
       int64_t k = nInputPlane*kH*kW;
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)

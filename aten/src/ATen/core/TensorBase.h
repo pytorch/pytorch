@@ -17,6 +17,7 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
@@ -155,16 +156,19 @@ class TORCH_API TensorBase {
     return at::isSignedType(this->scalar_type());
   }
 
+  c10::SymInt sym_size(int64_t dim) const {
+    return impl_->sym_size(dim);
+  }
+
   int64_t size(int64_t dim) const {
-    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return sizes()[dim];
+    return impl_->size(dim);
   }
 
   int64_t stride(int64_t dim) const {
+    const auto strides = this->strides();
+    const auto ndim = static_cast<int64_t>(strides.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return strides()[dim];
+    return strides[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
@@ -217,6 +221,9 @@ class TORCH_API TensorBase {
   IntArrayRef sizes() const {
     return impl_->sizes();
   }
+  c10::SymIntArrayRef sym_sizes() const {
+    return impl_->sym_sizes();
+  }
   IntArrayRef strides() const {
     return impl_->strides();
   }
@@ -244,7 +251,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse()) {
+    if (layout() == at::kStrided) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
@@ -338,12 +345,12 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s layout.
-  Layout layout() const noexcept {
+  Layout layout() const {
     return impl_->layout();
   }
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`).
-  caffe2::TypeMeta dtype() const noexcept {
+  caffe2::TypeMeta dtype() const {
     return impl_->dtype();
   }
 
@@ -368,6 +375,12 @@ class TORCH_API TensorBase {
   bool is_cuda() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_cuda();
+  }
+
+  /// Returns if a `Tensor` has IPU backend.
+  bool is_ipu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ipu();
   }
 
   /// Returns if a `Tensor` has XPU backend.
@@ -421,10 +434,10 @@ class TORCH_API TensorBase {
     return impl_->is_mkldnn();
   }
 
-  /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const {
+  /// Returns if a `Tensor` is mps tensor.
+  bool is_mps() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_mlc();
+    return impl_->is_mps();
   }
 
   /// Returns if a `Tensor` is ort tensor.
@@ -705,9 +718,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(TensorBase)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(TensorBase)>::type, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -913,7 +926,6 @@ struct ExclusivelyOwnedTraits<at::TensorBase> {
       toDestroy->refcount_ = 0;
       toDestroy->weakcount_ = 0;
 #endif
-      toDestroy->release_resources();
       delete toDestroy;
     }
   }

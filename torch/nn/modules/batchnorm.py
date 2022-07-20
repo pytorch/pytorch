@@ -10,6 +10,8 @@ from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module
 
+__all__ = ['BatchNorm1d', 'LazyBatchNorm1d', 'BatchNorm2d', 'LazyBatchNorm2d', 'BatchNorm3d',
+           'LazyBatchNorm3d', 'SyncBatchNorm']
 
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
@@ -118,14 +120,14 @@ class _NormBase(Module):
 class _BatchNorm(_NormBase):
     def __init__(
         self,
-        num_features,
-        eps=1e-5,
-        momentum=0.1,
-        affine=True,
-        track_running_stats=True,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True,
         device=None,
         dtype=None
-    ):
+    ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_BatchNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs

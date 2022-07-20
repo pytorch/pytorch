@@ -23,6 +23,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
   ${TENSOREXPR_TEST_ROOT}/test_te_fuser_pass.cpp
   ${TENSOREXPR_TEST_ROOT}/test_type.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_type_specializations.cpp
 )
 
 if(USE_CUDA)

@@ -3,19 +3,18 @@
  * @generated
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
- * cd ~/pytorch && python tools/codegen/decompositions/gen_jit_decompositions.py
+ * cd ~/pytorch && python torchgen/decompositions/gen_jit_decompositions.py
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/decomposition_registry_util.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
 
-
 const std::string decomp_funcs =
-R"(def var_decomposition(input: Tensor,
+    R"(def var_decomposition(input: Tensor,
     dim: Optional[List[int]]=None,
     correction: Optional[int]=None,
     keepdim: bool=False) -> Tensor:

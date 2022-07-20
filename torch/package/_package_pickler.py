@@ -1,6 +1,17 @@
 """isort:skip_file"""
-from pickle import EXT1, EXT2, EXT4, GLOBAL, STACK_GLOBAL, Pickler, PicklingError
-from pickle import _compat_pickle, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]
+    _compat_pickle,
+    _extension_registry,
+    _getattribute,
+    _Pickler,
+    EXT1,
+    EXT2,
+    EXT4,
+    GLOBAL,
+    Pickler,
+    PicklingError,
+    STACK_GLOBAL,
+)
 from struct import pack
 from types import FunctionType
 
@@ -24,15 +35,15 @@ class PackagePickler(_Pickler):
         # is imported, then the offending library removes its dispatch entries,
         # leaving PackagePickler with a stale dispatch table that may cause
         # unwanted behavior.
-        self.dispatch = _Pickler.dispatch.copy()
-        self.dispatch[FunctionType] = PackagePickler.save_global
+        self.dispatch = _Pickler.dispatch.copy()  # type: ignore[misc]
+        self.dispatch[FunctionType] = PackagePickler.save_global  # type: ignore[assignment]
 
     def save_global(self, obj, name=None):
         # unfortunately the pickler code is factored in a way that
         # forces us to copy/paste this function. The only change is marked
         # CHANGED below.
-        write = self.write
-        memo = self.memo
+        write = self.write  # type: ignore[attr-defined]
+        memo = self.memo  # type: ignore[attr-defined]
 
         # CHANGED: import module from module environment instead of __import__
         try:
@@ -44,7 +55,7 @@ class PackagePickler(_Pickler):
         _, parent = _getattribute(module, name)
         # END CHANGED
 
-        if self.proto >= 2:
+        if self.proto >= 2:  # type: ignore[attr-defined]
             code = _extension_registry.get((module_name, name))
             if code:
                 assert code > 0
@@ -59,13 +70,13 @@ class PackagePickler(_Pickler):
         if parent is module:
             name = lastname
         # Non-ASCII identifiers are supported only with protocols >= 3.
-        if self.proto >= 4:
-            self.save(module_name)
-            self.save(name)
+        if self.proto >= 4:  # type: ignore[attr-defined]
+            self.save(module_name)  # type: ignore[attr-defined]
+            self.save(name)  # type: ignore[attr-defined]
             write(STACK_GLOBAL)
         elif parent is not module:
-            self.save_reduce(getattr, (parent, lastname))
-        elif self.proto >= 3:
+            self.save_reduce(getattr, (parent, lastname))  # type: ignore[attr-defined]
+        elif self.proto >= 3:  # type: ignore[attr-defined]
             write(
                 GLOBAL
                 + bytes(module_name, "utf-8")
@@ -74,7 +85,7 @@ class PackagePickler(_Pickler):
                 + b"\n"
             )
         else:
-            if self.fix_imports:
+            if self.fix_imports:  # type: ignore[attr-defined]
                 r_name_mapping = _compat_pickle.REVERSE_NAME_MAPPING
                 r_import_mapping = _compat_pickle.REVERSE_IMPORT_MAPPING
                 if (module_name, name) in r_name_mapping:
@@ -92,10 +103,10 @@ class PackagePickler(_Pickler):
             except UnicodeEncodeError:
                 raise PicklingError(
                     "can't pickle global identifier '%s.%s' using "
-                    "pickle protocol %i" % (module, name, self.proto)
+                    "pickle protocol %i" % (module, name, self.proto)  # type: ignore[attr-defined]
                 ) from None
 
-        self.memoize(obj)
+        self.memoize(obj)  # type: ignore[attr-defined]
 
 
 def create_pickler(data_buf, importer, protocol=4):

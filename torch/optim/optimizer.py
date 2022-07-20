@@ -6,6 +6,7 @@ from itertools import chain
 import warnings
 import functools
 
+__all__ = ['Optimizer']
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
@@ -53,6 +54,11 @@ class Optimizer(object):
         for param_group in param_groups:
             self.add_param_group(param_group)
 
+        # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
+        # which I don't think exists
+        # https://github.com/pytorch/pytorch/issues/72948
+        self._warned_capturable_if_run_uncaptured = True
+
     def __getstate__(self):
         return {
             'defaults': self.defaults,
@@ -74,6 +80,26 @@ class Optimizer(object):
                     format_string += '    {0}: {1}\n'.format(key, group[key])
         format_string += ')'
         return format_string
+
+    # Currently needed by Adam and AdamW
+    def _cuda_graph_capture_health_check(self):
+        if torch.has_cuda and torch.cuda.is_available():
+            capturing = torch.cuda.is_current_stream_capturing()
+
+            if capturing and not self.defaults['capturable']:
+                raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
+                                   self.__class__.__name__ +
+                                   " but this instance was constructed with capturable=False.")
+
+            if (
+                (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
+                and self.defaults["capturable"]
+                and (not capturing)
+            ):
+                print("Warning: This instance was constructed with capturable=True, but step() " +
+                      "is running without CUDA graph capture. If you never intend to graph-capture this " +
+                      "instance, capturable=True can impair performance, and you should set capturable=False.")
+                self._warned_capturable_if_run_uncaptured = True
 
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
@@ -151,17 +177,19 @@ class Optimizer(object):
                   zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups)))}
 
-        def cast(param, value):
+        def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if param.is_floating_point():
-                    value = value.to(param.dtype)
-                value = value.to(param.device)
+                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+                if (key != "step"):
+                    if param.is_floating_point():
+                        value = value.to(param.dtype)
+                    value = value.to(param.device)
                 return value
             elif isinstance(value, dict):
-                return {k: cast(param, v) for k, v in value.items()}
+                return {k: cast(param, v, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:

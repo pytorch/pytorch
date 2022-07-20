@@ -157,18 +157,19 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     if not isinstance(lazy_out, (tuple, list)):
         lazy_out = (lazy_out,)
 
-    return_value_handler = ReturnValueHandler(lazy_out)
+    args_and_out = tuple(lazy_args) + tuple(lazy_out)
+    return_value_handler = ReturnValueHandler(args_and_out)
     if debug:
         print("Fx code:\n", model.code)
-        print("LTC IR:", lazy_debug.dump_ir(lazy_out, "text"))
+        print("LTC IR:", lazy_debug.dump_ir(args_and_out, "text"))
 
     # TODO: this part is TS backend specific for now and will be generalized to
     # support XLA
-    graph_input_tensor_ids, graph_input_ivalues = computation.get_tensors_ts_device_data_node(lazy_out)
+    graph_input_tensor_ids, graph_input_ivalues = computation.get_tensors_ts_device_data_node(args_and_out)
     assert len(graph_input_tensor_ids) == len(graph_input_ivalues)
     graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues)
 
-    graph_hash = computation.get_graph_hash(lazy_out)
+    graph_hash = computation.get_graph_hash(args_and_out)
 
     if debug:
         print("graph_hash", graph_hash)
@@ -178,12 +179,21 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     # sync the list of output tensors so the computation graph for these
     # tensors will be cached. Those computation graphs can be retrieved
     # by graph hash later.
-    lazy.sync_multi(lazy_out, [])
+    lazy.sync_multi(args_and_out, [])
 
     def optimized_mod(*args):
-        if len(lazy_out) == 0:
+        if len(args_and_out) == 0:
             return ()
         graph_input = graph_input_matcher(args)
-        return return_value_handler.duplicate_eager_tensors(computation.run_cached_graph(graph_hash, graph_input))
+        res = return_value_handler.duplicate_eager_tensors(computation.run_cached_graph(graph_hash, graph_input))
+
+        assert len(res) == len(args_and_out)
+        for i, arg in enumerate(args):
+            # only copy those tensors that get inplace updated
+            if arg is not res[i]:
+                arg.copy_(res[i])
+
+        # skip the args
+        return res[len(args):]
 
     return optimized_mod

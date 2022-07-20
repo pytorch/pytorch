@@ -8,6 +8,7 @@ from torch.autograd import (
     kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
     _prepare_profiler, _supported_activities, _kineto_step,
 )
+from torch._C._autograd import _ExperimentalConfig
 import torch
 import torch.cuda
 from torch.futures import Future
@@ -83,6 +84,10 @@ class profile(object):
         use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
             ``use_kineto=True`` and can be used to lower the overhead for GPU-only profiling.
 
+        experimental_config (_ExperimentalConfig) : A set of experimental options
+            used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
+
+
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
@@ -127,7 +132,8 @@ class profile(object):
             with_stack=False,
             with_modules=False,
             use_kineto=False,
-            use_cpu=True):
+            use_cpu=True,
+            experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -141,6 +147,9 @@ class profile(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        if experimental_config is None:
+            experimental_config = _ExperimentalConfig()
+        self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
@@ -175,7 +184,8 @@ class profile(object):
             self.profile_memory,
             self.with_stack,
             self.with_flops,
-            self.with_modules)
+            self.with_modules,
+            self.experimental_config)
 
     def __enter__(self):
         if not self.enabled:
@@ -428,20 +438,17 @@ class record_function(ContextDecorator):
         self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # TODO: TorchScript ignores standard type annotation here
-        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
-        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
+        # Stores underlying RecordFunction as a tensor. TODO: move to custom
+        # class (https://github.com/pytorch/pytorch/issues/35026).
+        self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
-        self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
+        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            # Local variable is needed by TorchScript to refine Optional[T] to T
-            record = self.record
-            assert record is not None
-            torch.ops.profiler._record_function_exit(record)
+            torch.ops.profiler._record_function_exit(self.handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -468,12 +475,72 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-
-        # Local variable is needed by TorchScript to refine Optional[T] to T
-        record = self.record
-        assert record is not None
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
         return profiled_future
+
+
+class emit_itt(object):
+    """Context manager that makes every autograd operation emit an ITT range.
+
+    It is useful when running the program under Intel(R) VTune Profiler::
+
+        vtune <--vtune_flags> <regular command here>
+
+    The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
+    control the collection of trace data during its execution across different Intel tools.
+    This context manager is to annotate Intel(R) VTune Profiling trace. With help of this context manager,
+    you will be able to see labled ranges in Intel(R) VTune Profiler GUI.
+
+    .. warning:
+        This context manager should not be called recursively, i.e. at most one
+        instance should be enabled at any given time.
+
+    Args:
+        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+            Default: ``True``.
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the itt range wrapping
+            each autograd op will append information about the sizes of Tensor arguments received
+            by that op, in the following format:
+            ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
+            Non-tensor arguments will be represented by ``[]``.
+            Arguments will be listed in the order they are received by the backend op.
+            Please note that this order may not match the order in which those arguments were passed
+            on the Python side.  Also note that shape recording may increase the overhead of itt range creation.
+
+    Example:
+        >>> with torch.autograd.profiler.emit_itt():
+        ...     model(x)
+
+    """
+    def __init__(self, enabled=True, record_shapes=False):
+        self.enabled = enabled
+        self.entered = False
+        self.record_shapes = record_shapes
+
+    def __enter__(self):
+        if not self.enabled:
+            return
+        if self.entered:
+            raise RuntimeError("ITT annotation context manager is not reentrant")
+        self.entered = True
+        _enable_profiler(
+            ProfilerConfig(
+                ProfilerState.ITT,
+                self.record_shapes,
+                False,
+                False,
+                False,
+                False,
+                _ExperimentalConfig()),
+            set()
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.enabled:
+            return
+        _disable_profiler()
+        return False
 
 
 class emit_nvtx(object):
@@ -576,7 +643,8 @@ class emit_nvtx(object):
                 False,
                 False,
                 False,
-                False),
+                False,
+                _ExperimentalConfig()),
             set()
         )
         return self

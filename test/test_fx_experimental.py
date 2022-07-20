@@ -3,7 +3,9 @@
 import math
 import numbers
 import operator
+import pickle
 import sys
+import tempfile
 import unittest
 from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
@@ -26,6 +28,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+import torch.fx.experimental.meta_tracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -35,7 +38,7 @@ from torch.fx.operator_schemas import (
     type_matches,
     create_type_hint,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.split_module import split_module
 from torch.testing._internal.common_device_type import (
     ops,
@@ -69,93 +72,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
 
 
 class TestFXExperimental(JitTestCase):
-    def test_serialize_graph(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.e = torch.rand(4)
-                self.conv = torch.nn.Conv2d(3, 3, 2, bias=False)
-
-            def forward(self, a, b, c):
-                add_1 = a + b
-                conv1 = self.conv(c)
-                linear = self.linear(add_1 + conv1)
-                add_2 = linear + self.e
-                return add_2
-
-        m = TestModule()
-        traced = symbolic_trace(m)
-        a = torch.rand(4)
-        b = torch.rand(4)
-        c = torch.rand(3, 3, 2, 2)
-        graph_manipulation.get_size_of_all_nodes(traced, [a, b, c])
-
-        partitioner = Partitioner()
-        devices = [Device("dev_0", 5000, 0), Device("dev_1", 125, 1)]
-        partitioner_config = PartitionerConfig(devices, PartitionMode.sparse_nn)
-        ret = partitioner.partition_graph(traced, m, partitioner_config)
-        module_with_submodules = ret.module_with_submodules
-        # Fix for now to add type/shape to output
-        for node in traced.graph.nodes:
-            if node.op == "output":
-                node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-        for mod in module_with_submodules.modules():
-            if isinstance(mod, GraphModule):
-                for node in mod.graph.nodes:
-                    node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-        for node in module_with_submodules.graph.nodes:
-            node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-
-        weights1 = {}
-        weights2 = {}
-        serialized_graph1 = graph_manipulation.serialize_module(traced, weights1)
-        serialized_graph2 = graph_manipulation.serialize_module(
-            module_with_submodules, weights2
-        )
-        assert len(weights1) == 4
-        assert len(weights2) == 4
-        assert len(serialized_graph1["nodes"]) == 10
-        assert len(serialized_graph1["weights"]) == 4
-        assert len(serialized_graph1["modules"]) == 0
-        assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 4
-        assert len(serialized_graph2["modules"]) == 1
-        assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
-        assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
-        assert serialized_graph1["weights"]["linear.weight"]["is_quantized"] is False
-        assert serialized_graph1["nodes"][0]["shape"] == "[4]"
-        assert serialized_graph1["nodes"][0]["dtype"] == "torch.float32"
-        assert serialized_graph1["nodes"][0]["target"] == "a"
-        assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
-        assert serialized_graph1["nodes"][0]["name"] == "a"
-        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
-        assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
-
-        # Test the users of the nodes. No users of the last/output node.
-        assert serialized_graph2["nodes"][0]["users"][0]["name"] == "submod_0"
-        assert serialized_graph2["nodes"][1]["users"][0]["name"] == "submod_0"
-        assert serialized_graph2["nodes"][4]["users"][0]["name"] == "output"
-        assert serialized_graph2["nodes"][5]["users"] == []
-
-        # Test quantization info serialization.
-        x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
-        q_tensor = torch.quantize_per_tensor(x, 1, 0, torch.qint32)
-        q_tensor_channel = torch.quantize_per_channel(
-            x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
-        )
-        result, _ = graph_manipulation.serialize_tensor_quantization(
-            q_tensor, weights={}, pcq_prefix="foo"
-        )
-        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(
-            q_tensor_channel, weights={}, pcq_prefix="bar"
-        )
-        assert result["qscheme"] == "torch.per_tensor_affine"
-        assert result["q_scale"] == 1.0
-        assert result2["qscheme"] == "torch.per_channel_affine"
-        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
-        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
-
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -666,6 +582,37 @@ class TestFXExperimental(JitTestCase):
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_meta_tracer(self):
+        class MetaTracerTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
+                self.layernorm = torch.nn.LayerNorm(16)
+
+            def forward(self, x):
+                emb = self.emb(x)
+                emb = emb + torch.arange(emb.shape[-1], dtype=torch.float, device=emb.device)
+                lol = self.layernorm(emb)
+                return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
+
+        mttm = MetaTracerTestModule()
+        for BS in [15, 35]:
+            x = torch.zeros(BS, dtype=torch.long).random_(42)
+            meta_args = {'x' : x.to(device='meta')}
+            gm = torch.fx.experimental.meta_tracer.symbolic_trace(mttm, meta_args=meta_args)
+            torch.testing.assert_close(gm(x), mttm(x))
+
+            # Test serialization/deserialization
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with open(f'{tmp_dir}/meta_module.pkl', 'wb') as f:
+                    pickle.dump(gm, f)
+
+                with open(f'{tmp_dir}/meta_module.pkl', 'rb') as f:
+                    loaded = pickle.load(f)
+
+                torch.testing.assert_close(loaded(x), mttm(x))
+
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -1518,105 +1465,6 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {
-            # See: https://github.com/pytorch/pytorch/issues/64997
-            "as_strided",
-            "block_diag",
-            "broadcast_tensors",
-            "cartesian_prod",
-            "contiguous",
-            "einsum",
-            "expand",
-            "expand_as",
-            "fill_",
-            "T",   # Implemented with a lambda
-            "H",   # Implemented with a lambda
-            "mT",  # Implemented with a lambda
-            "mH",  # Implemented with a lambda
-            "gradient",
-            "histogramdd",
-            "igamma",
-            "igammac",
-            "index_put",
-            "linalg_pinv_singular",  # Implemented with a lambda (only the singular variant)
-            "nn.functional.conv2d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.embedding",  # Implemented with a lambda
-            "nn.functional.embedding_bag",  # Implemented with a lambda
-            "nn.functional.rrelu",  # Implemented with a lambda
-            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
-            "nonzero",
-            "polygamma",
-            "special.polygamma",
-            "repeat",
-            "reshape_as",
-            "resize_",
-            "resize_as_",
-            "special.zeta",
-            "sum_to_size",
-            "to_sparse",
-            "unique",
-            "unique_consecutive",
-            "view",
-            "view_as",
-            "unfold",
-            "where",
-            "zero_",
-            'bfloat16',
-            'bool',
-            'byte',
-            'char',
-            'double',
-            'float',
-            'half',
-            'int',
-            'long',
-            'short',
-            'empty_like',
-            'ones_like',
-            'randn_like',
-            'zeros_like',
-            'full_like',
-            'rand_like',
-            'randint_like',
-            'new_ones',
-            'new_empty',
-            'new_zeros',
-            'new_full',
-            'normal',
-            'multinomial',
-            'bernoulli',
-            "__getitem__",
-            "__radd__",
-            "__rsub__",
-            "__rmul__",
-            "__rdiv__",
-            "__rmod__",
-            "__rpow__",
-            '__rand__',
-            '__ror__',
-            '__rxor__',
-            "__rmatmul__",
-            "atleast_1d",
-            "atleast_2d",
-            "atleast_3d",
-            "svd_lowrank",  # implemented with a lambda
-            "pca_lowrank",  # implemented with a lambda
-            "column_stack",
-        }
-
-        # Unsupported input types
-        if op.name in op_skip:
-            return
-
-        if op.formatted_name in op_skip:
-            return
-
-        if op.name.startswith('_masked.'):
-            return
-
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -1718,6 +1566,40 @@ class TestModule(torch.nn.Module):
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
 
+    def test_normalize_quantized_eb(self):
+        target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        args = (
+            torch.empty((2, 3), dtype=torch.uint8),
+            torch.empty((2,), dtype=torch.int64),
+            torch.empty((2,), dtype=torch.int64),
+        )
+        norm_args_and_kwargs = normalize_function(
+            target, args, normalize_to_only_use_kwargs=True
+        )
+        self.assertTrue(norm_args_and_kwargs is not None)
+        self.assertEqual(
+            set(norm_args_and_kwargs.kwargs.keys()),
+            {
+                "weight",
+                "indices",
+                "offsets",
+                "scale_grad_by_freq",
+                "mode",
+                "pruned_weights",
+                "per_sample_weights",
+                "compressed_indices_mapping",
+                "include_last_offset",
+            },
+        )
+        self.assertEqual(norm_args_and_kwargs.args, tuple())
+
+    def test_normalize_args_op_overload(self):
+        for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
+            inp1 = torch.rand([1])
+            inp2 = torch.rand([4])
+            args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
+            self.assertIs(kwargs["input"], inp1)
+            self.assertIs(kwargs["the_template"], inp2)
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

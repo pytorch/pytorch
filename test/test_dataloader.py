@@ -35,8 +35,9 @@ from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
+                                                  IS_MACOS)
 
 
 try:
@@ -46,7 +47,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_IN_CI:
+    if IS_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -132,9 +133,46 @@ class TestDatasetRandomSplit(TestCase):
         self.assertEqual(len(splits[0]), 2)
         self.assertEqual(len(splits[1]), 4)
 
+        splits = random_split([1, 2, 3, 4, 5, 6], [0.5, 0.5])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 3)
+        self.assertEqual(len(splits[1]), 3)
+
+        # Odd size splits
+        self.assertEqual(
+            len(random_split(range(3), [0.5, 0.5], generator=torch.Generator().manual_seed(1))),
+            2
+        )
+
+        # Odd sized round-robin splits
+        splits = random_split(range(106), [0.1, 0.2, 0.3, 0.4],
+                              generator=torch.Generator().manual_seed(1))
+        self.assertEqual(len(splits[0]), 11)
+        self.assertEqual(len(splits[1]), 22)
+        self.assertEqual(len(splits[2]), 31)
+        self.assertEqual(len(splits[3]), 42)
+
+
     def test_splits_are_mutually_exclusive(self):
         data = [5, 2, 3, 4, 1, 6]
         splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        splits = random_split(data, [0.33, 0.67])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        data = [1, 2, 3, 4]
+        splits = random_split(data, [0.25, 0.75])
         all_values = []
         all_values.extend(list(splits[0]))
         all_values.extend(list(splits[1]))
@@ -165,6 +203,13 @@ class TestDatasetRandomSplit(TestCase):
         for batch in data_loader:
             pass
 
+        # fractional splitting
+        dataset = CustomDataset(self, x)
+        dataset = random_split(dataset, [1.0])[0]
+        data_loader = DataLoader(dataset)
+        for batch in data_loader:
+            pass
+
     def test_splits_reproducibility(self):
         self.assertEqual(
             [list(x) for x in random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(1))],
@@ -174,6 +219,23 @@ class TestDatasetRandomSplit(TestCase):
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
         )
+        self.assertEqual(
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+        )
+        self.assertEqual(
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+        )
+
+    def test_incomplete_fractional_splits(self):
+        with self.assertRaises(ValueError):
+            # should raise since the sum of fractions is not 1
+            random_split([1, 2, 3, 4], [0.1])
+
+        with self.assertRaises(ValueError):
+            # should raise since fraction > 1
+            random_split([1, 2, 3, 4], [1.1])
 
     def test_splits_generator(self):
         # A random_split without a specific generator should affect the default one
@@ -659,8 +721,6 @@ class TestProperExitIterableDataset(IterableDataset):
             raise StopIteration
         return torch.tensor(-1000)
 
-    next = __next__  # py2 compatibility
-
 
 # See TestDataLoader.test_proper_exit for usage
 def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
@@ -1064,6 +1124,8 @@ except RuntimeError as e:
             next(loader2_it)
             next(loader1_it)
             next(loader2_it)
+            del loader1_it
+            del loader2_it
 
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
@@ -1375,6 +1437,7 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    @unittest.skipIf(IS_MACOS, "Not working on macos")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1831,7 +1894,10 @@ except RuntimeError as e:
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
+                # TODO: Fix test for 'loader_kill' that would cause running out of shared memory.
+                # Killing loader process would prevent DataLoader iterator clean up all queues
+                # and worker processes
+                exit_methods = [None, 'loader_error', 'worker_error', 'worker_kill']
                 persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
@@ -2166,12 +2232,19 @@ class TestDataLoader2(TestCase):
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
-        dp = IterableWrapper(list(range(1000)))
+        dp = IterableWrapper(list(range(1000))).sharding_filter()
         dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
         dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
+
+    class Sorter(IterDataPipe):
+        def __init__(self, datapipe):
+            self.datapipe = datapipe
+
+        def __iter__(self):
+            return iter(sorted(self.datapipe))
 
     def test_shuffle(self):
         items = list(range(1000))
@@ -2180,18 +2253,20 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertEqual(items, list(dl))
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
+        self.assertEqual(list(dl), items)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2334,6 +2409,19 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertTrue(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertTrue(sample['another_dict']['a_number'].is_pinned(device='cuda'))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_only_device(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device='cuda')
+        for sample in loader:
+            self.assertFalse(sample['a_tensor'].is_pinned(device='cuda'))
+            self.assertFalse(sample['another_dict']['a_number'].is_pinned(device='cuda'))
 
 class DummyDataset(torch.utils.data.Dataset):
     def __init__(self):

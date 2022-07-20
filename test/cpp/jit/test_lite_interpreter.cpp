@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -563,8 +564,7 @@ TEST(LiteInterpreterTest, GetContainTypes) {
   std::stringstream ss;
   m._save_for_mobile(ss, {}, true);
 
-  auto contained_types = _get_mobile_model_contained_types(ss);
-  AT_ASSERT(contained_types.size() >= 0);
+  _get_mobile_model_contained_types(ss);
 }
 
 namespace {
@@ -599,7 +599,7 @@ void runAndCheckTorchScriptModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
     const std::vector<IValue>& expect_result_list,
-    const int64_t expect_version) {
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -616,7 +616,7 @@ void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
     const std::vector<IValue>& expect_result_list,
-    const int64_t expect_version) {
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -634,13 +634,14 @@ void backportAllVersionCheck(
     std::stringstream& test_model_file_stream,
     std::vector<IValue>& input_data,
     std::vector<IValue>& expect_result_list,
-    const int64_t expect_from_version) {
+    const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
-  AT_ASSERT(from_version == expect_from_version);
+  EXPECT_EQ(from_version, expect_from_version);
+  AT_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
   constexpr int64_t minimum_to_version = 4;
-  int64_t current_to_version = from_version - 1;
+  auto current_to_version = from_version - 1;
 
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
@@ -679,6 +680,7 @@ void backportAllVersionCheck(
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
+  torch::jit::register_flatbuffer_all();
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
@@ -717,7 +719,11 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
-  module_freeze._save_for_mobile(input_model_stream);
+  module_freeze._save_for_mobile(
+      input_model_stream,
+      /*extra_files=*/{},
+      /*save_mobile_debug_info=*/false,
+      /*use_flatbuffer=*/true);
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
   std::vector<IValue> expect_result_list;
@@ -740,7 +746,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_model_stream,
       input_data,
       expect_result_list,
-      caffe2::serialize::kProducedBytecodeVersion);
+      9); // flatbuffer starts at 9
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
@@ -1174,7 +1180,6 @@ TEST(RunTimeTest, ParseOperator) {
   std::vector<IValue> constants{
       to_tuple({1}),
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
   // 2. Parse the function
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
@@ -1187,7 +1192,6 @@ TEST(RunTimeTest, ParseOperator) {
       function.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operators)).elements(),
-      model_version,
       1,
       function.get());
   const size_t rsize = 5;
@@ -1559,7 +1563,6 @@ TEST(RunTimeTest, RuntimeCall) {
   std::vector<IValue> constantsCall{
       1,
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
 
   auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
   c10::ivalue::TupleElements debug_handles_m_tuple;
@@ -1570,7 +1573,6 @@ TEST(RunTimeTest, RuntimeCall) {
       foo.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
-      model_version,
       1,
       foo.get());
   parseConstants(
@@ -1587,7 +1589,6 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
-      model_version,
       1,
       call.get());
   parseConstants(
@@ -2085,16 +2086,14 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    byteCodeFunctionWithOperator.function.initialize_operators(true);
     ASSERT_EQ(
         byteCodeFunctionWithOperator.function.get_code().operators_.size(),
         byteCodeFunctionWithOperator.function.get_code().op_names_.size());
     if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.name, op.overload_name, op.num_specified_args);
       }
     }
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);

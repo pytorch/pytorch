@@ -45,8 +45,8 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-# Don't run cpp tests a second time in the sharded ort_test2 job
-if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+# Only run cpp tests in the first shard, don't run cpp tests a second time in the second shard
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   echo "Running C++ tests.."
   for test in $(find "$cpp_test_dir" -executable -type f); do
     case "$test" in
@@ -172,9 +172,7 @@ fi
 # ONNX tests #
 ##############
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  # Check out torch/vision at 0.9.0-rc1 commit
-  # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
+  pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
   pip install -q --user ninja flatbuffers==2.0 numpy==1.21.5 onnxruntime==1.11.0
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
   # We don't actually need it for our tests, but it's imported if it's present, so uninstall.

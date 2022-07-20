@@ -36,7 +36,7 @@ class FixedLearningRate : public LearningRateFunctor<T> {
 };
 
 // Alter: alternatate learning rate with active_period and inactive_period.
-// update for for a duration of active_period and then stop for a duration of
+// update for a duration of active_period and then stop for a duration of
 // inactive_period if active_first, and vice versa
 template <typename T>
 class AlternateLearningRate : public LearningRateFunctor<T> {

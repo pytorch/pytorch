@@ -136,7 +136,7 @@ Tensor run(
       output_size,
       padded_input.options().dtype(),
       padded_input.suggest_memory_format(),
-      padded_input.names());
+      padded_input.opt_names());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
       context.op.get(),                                   // operator

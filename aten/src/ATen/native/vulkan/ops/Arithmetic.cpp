@@ -54,7 +54,7 @@ Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::ShaderSource& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -66,110 +66,95 @@ Tensor arithmetic_scalar(
       v_self.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
-      const float other_val = alpha_arg
-          ? other.to<float>() * alpha_arg->to<float>()
-          : other.to<float>();
-      const struct Block final {
-        uvec3 extents;
-        float other;
-      } block{
-          v_self.extents(),
-          other_val,
-      };
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
+  const struct Block final {
+    uvec3 extents;
+    float other;
+  } block{
+      v_self.extents(),
+      other_val,
+  };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          v_output.extents(),
-          adaptive_work_group_size(v_output.extents()),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
 
 Tensor& arithmetic_scalar_(
-    Tensor& self,
+    Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::ShaderSource& shader_descriptor) {
+  TORCH_CHECK(
+      self_arg.is_vulkan(),
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
+
   api::Context* const context = api::context();
 
-  TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+  vTensor& v_self = convert(self_arg);
 
-  vTensor& v_self = convert(self);
+  const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
+                                    : other.to<float>();
+  const struct Block final {
+    uvec3 extents;
+    float other;
+  } block{
+      v_self.extents(),
+      other_val,
+  };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY (v_self.has_image()) {
-      const float other_val = alpha_arg
-          ? other.to<float>() * alpha_arg->to<float>()
-          : other.to<float>();
-      const struct Block final {
-        uvec3 extents;
-        float other;
-      } block{
-          v_self.extents(),
-          other_val,
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          v_self.extents(),
-          adaptive_work_group_size(v_self.extents()),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_self.extents(),
+      // local work group size
+      adaptive_work_group_size(v_self.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_self.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
+      // params buffer
+      params.buffer());
 
-  return self;
+  return self_arg;
 }
 
 Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
+    const api::ShaderSource& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -185,124 +170,105 @@ Tensor arithmetic_tensor(
       v_self.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY (v_self.has_image() && v_other.has_image()) {
-      const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input1_extents;
-        uint32_t fill_1;
-        uvec3 input2_extents;
-        float alpha;
-      } block{
-          v_output.extents(),
-          0u,
-          v_self.extents(),
-          0u,
-          v_other.extents(),
-          alpha,
-      };
+  const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input1_extents;
+    uint32_t fill_1;
+    uvec3 input2_extents;
+    float alpha;
+  } block{
+      v_output.extents(),
+      0u,
+      v_self.extents(),
+      0u,
+      v_other.extents(),
+      alpha,
+  };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          v_output.extents(),
-          adaptive_work_group_size(v_output.extents()),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(command_buffer, vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
 
 Tensor& arithmetic_tensor_(
-    Tensor& self,
+    Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor) {
-  check_inputs(self, other_arg);
-  api::Context* const context = api::context();
+    const api::ShaderSource& shader_descriptor) {
+  check_inputs(self_arg, other_arg);
 
   TORCH_CHECK(
-      self.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+      self_arg.is_vulkan(),
+      "Vulkan: In-place operator is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self);
+  api::Context* const context = api::context();
+
+  vTensor& v_self = convert(self_arg);
 
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY (
-        v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
-      const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
-      const struct Block final {
-        uvec3 extents;
-        uint32_t fill_0;
-        uvec3 input_extents;
-        float alpha;
-      } block{
-          v_self.extents(),
-          0u,
-          v_other.extents(),
-          alpha,
-      };
+  const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
+  const struct Block final {
+    uvec3 extents;
+    uint32_t fill_0;
+    uvec3 input_extents;
+    float alpha;
+  } block{
+      v_self.extents(),
+      0u,
+      v_other.extents(),
+      alpha,
+  };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          v_self.extents(),
-          adaptive_work_group_size(v_self.extents()),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_other.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-  return self;
+  context->submit_compute_job(
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_self.extents(),
+      // local work group size
+      adaptive_work_group_size(v_self.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_self.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
+      v_other.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
+
+  return self_arg;
 }
 
 Tensor add_scalar(
@@ -333,7 +299,10 @@ Tensor add_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& add_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
@@ -372,7 +341,10 @@ Tensor sub_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& sub_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }

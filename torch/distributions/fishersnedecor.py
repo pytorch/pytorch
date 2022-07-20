@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['FisherSnedecor']
 
 class FisherSnedecor(Distribution):
     r"""
@@ -52,6 +53,12 @@ class FisherSnedecor(Distribution):
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 2] = nan
         return df2 / (df2 - 2)
+
+    @property
+    def mode(self):
+        mode = (self.df1 - 2) / self.df1 * self.df2 / (self.df2 + 2)
+        mode[self.df1 <= 2] = nan
+        return mode
 
     @property
     def variance(self):

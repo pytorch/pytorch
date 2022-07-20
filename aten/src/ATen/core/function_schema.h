@@ -20,6 +20,8 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
+using AliasTypeSet = std::vector<TypePtr>;
+
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -30,8 +32,19 @@ struct Argument {
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
+    : Argument(name, type, type, N, default_value, kwarg_only, alias_info) {}
+
+  Argument(
+      std::string name,
+      TypePtr fake_type,
+      TypePtr real_type,
+      c10::optional<int32_t> N = c10::nullopt,
+      c10::optional<IValue> default_value = c10::nullopt,
+      bool kwarg_only = false,
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        type_(type ? std::move(type) : TensorType::get()),
+        type_(fake_type ? std::move(fake_type) : TensorType::get()),
+        real_type_(real_type ? std::move(real_type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
@@ -46,6 +59,7 @@ struct Argument {
   Argument(const Argument& rhs)
       : name_(rhs.name_),
         type_(rhs.type_),
+        real_type_(rhs.real_type_),
         N_(rhs.N_),
         default_value_(rhs.default_value_),
         alias_info_(rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr),
@@ -58,6 +72,7 @@ struct Argument {
     if (this != &rhs) {
       name_ = rhs.name_;
       type_ = rhs.type_;
+      real_type_ = rhs.real_type_;
       N_ = rhs.N_;
       default_value_ = rhs.default_value_;
       alias_info_ = rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr;
@@ -72,6 +87,9 @@ struct Argument {
   }
   const TypePtr& type() const {
     return type_;
+  }
+  const TypePtr& real_type() const {
+    return real_type_;
   }
   c10::optional<int32_t> N() const {
     return N_;
@@ -153,6 +171,7 @@ struct Argument {
  private:
   std::string name_;
   TypePtr type_;
+  TypePtr real_type_; // this is ScalarType, not int, e.g.
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
@@ -185,9 +204,24 @@ inline bool operator!=(const Argument& lhs, const Argument& rhs) {
   return !(lhs == rhs);
 }
 
+enum struct TORCH_API SchemaArgType { input, output };
+
+/**
+ * struct SchemaArgument
+ *
+ * Structure used to represent arguments or returns for a schema.
+ */
+struct TORCH_API SchemaArgument {
+  SchemaArgType type;
+  size_t index;
+  bool operator==(const SchemaArgument& rhs) const {
+    return type == rhs.type && index == rhs.index;
+  }
+};
+
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
-struct FunctionSchema {
+struct TORCH_API FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
@@ -342,6 +376,49 @@ struct FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
+  bool is_mutable(size_t index) const {
+    TORCH_INTERNAL_ASSERT(
+        index < arguments().size(),
+        "Invalid index for schema.");
+    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    return aliasInfo && aliasInfo->isWrite();
+  }
+  bool is_mutable(c10::string_view name) const {
+    c10::optional<int> index = argumentIndexWithName(name);
+    TORCH_INTERNAL_ASSERT(
+        index != c10::nullopt, "Schema has no argument named ", name);
+
+    return is_mutable(*index);
+  }
+
+  // Returns whether lhs and rhs may alias directly.
+  // This does not account for cases where lhs or rhs are a container that
+  // may contain elements that alias the other argument.
+  // FunctionSchema::may_contain_alias will include that functionality.
+  bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
+
+  // Returns whether lhs and rhs may alias directly or whether lhs/rhs are a container
+  // that may contain elements that alias the other argument.
+  // bidirectional = false only returns whether lhs may contain an alias of rhs
+  // while bidirectional = true returns both directions.
+  bool may_contain_alias(const SchemaArgument& lhs, const SchemaArgument& rhs, bool bidirectional = true) const;
+
+  // Returns whether the two AliasTypeSets contain any similarities
+  // ie: whether the two type sets can alias.
+  bool canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const;
+
+  // Recursively Finds all contained types within the AliasTypeSet.
+  c10::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const;
+
+  // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
+  // Used to map types to a type such that all types that can alias will be mapped to the same type.
+  // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
+  // on 'List[int]'.
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) const;
+
+  // Returns either arguments() or returns() depending on the SchemaArgType
+  // output => returns(), input => arguments()
+  std::vector<Argument> getCorrectList(SchemaArgType type) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
@@ -492,6 +569,26 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
         unopt_type->kind() == c10::TypeKind::StringType) &&
         arg.default_value().value().isString()) {
       printQuotedString(out, arg.default_value().value().toStringRef());
+    } else if (type->kind() == TypeKind::ListType && type->castRaw<ListType>()->getElementType()->kind() == c10::TypeKind::IntType) {
+      // We want to faithfully replicate JIT schema.
+      // in native_functions.yaml defaults for int arrays with a single value always look like
+      //   int[2] stride=1
+      // instead of
+      //   int[2] stride=[1, 1]
+      auto default_val = arg.default_value().value().toIntList();
+      if (default_val.size() > 1) {
+        auto all_defaults_the_same = true;
+        for (const auto i : c10::irange(1, default_val.size())) {
+          if (default_val[0] != default_val[i]) all_defaults_the_same = false;
+        }
+        if (all_defaults_the_same) {
+          out << default_val[0];
+        } else {
+          out << arg.default_value().value();
+        }
+      } else {
+        out << arg.default_value().value();
+      }
     } else {
       out << arg.default_value().value();
     }
@@ -509,5 +606,16 @@ inline std::string toString(const FunctionSchema& schema) {
 }
 
 } // namespace c10
+
+namespace std {
+template<>
+  struct hash<c10::SchemaArgument> {
+    size_t operator()(const c10::SchemaArgument& arg) const
+    {
+      return c10::hash_combine(std::hash<size_t>()(arg.index), std::hash<size_t>()(static_cast<std::size_t>(arg.type)));
+    }
+  };
+} // namespace std
+
 
 #include <ATen/core/function_schema_inl.h>  // IWYU pragma: keep

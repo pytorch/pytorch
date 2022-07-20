@@ -1,13 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/TensorIterator.h>
-#include <aten/src/ATen/TensorUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/squeeze.h>
+#endif
 
 constexpr float EPSILON = 1e-12;
 
@@ -45,32 +59,6 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 } // namespace
 
 namespace at { namespace native {
-
-Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::empty_like(input);
-  if (!log_target) {
-    TensorIterator iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(target)
-        .add_input(grad)
-        .build();
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
-      scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
-      gpu_kernel(iter,
-        [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
-          return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
-        });
-    });
-  }
-  else {
-    grad_input = -at::exp(target) * grad;
-    if (reduction == at::Reduction::Mean) {
-      grad_input /= input.numel();
-    }
-  }
-
-  return grad_input;
-}
 
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -164,17 +152,10 @@ namespace {
 
 constexpr int NLL_LOSS_THREADS = 32;
 
-#define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                   \
-  [&] {                                                                     \
-    at::ScalarType _it = TYPE;                                              \
-    RECORD_KERNEL_FUNCTION_DTYPE(NAME, _it)                                 \
-    switch (_it) {                                                          \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, at::ScalarType::Byte, uint8_t, index_t, __VA_ARGS__) \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, at::ScalarType::Long, int64_t, index_t, __VA_ARGS__)\
-      default:                                                              \
-        AT_ERROR(#NAME, " not implemented for '", toString(_it), "'");      \
-    }                                                                       \
-  }()
+#define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
+  AT_DISPATCH_SWITCH(TYPE, NAME,                                              \
+  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
+  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(

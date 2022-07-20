@@ -17,7 +17,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
-#include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
@@ -25,6 +24,7 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
 #include <ATen/core/CheckMemoryFormat.h>
@@ -32,7 +32,8 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <ATen/core/SymInt.h>
+#include <c10/core/SymInt.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
 
 
@@ -131,6 +132,7 @@ class TORCH_API Tensor: public TensorBase {
 
   // Aliased by Dimname overloads, so need explicit using
   using TensorBase::size;
+  using TensorBase::sym_size;
   using TensorBase::stride;
 
   /// Should be used if *this can reasonably be expected to be contiguous and
@@ -567,9 +569,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -634,8 +636,7 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-// See Note [Avoiding Include Cycles In Static Dispatch]
-${static_dispatch_ops_headers}
+
 namespace at {
 ${tensor_method_definitions}
 } // namespace at

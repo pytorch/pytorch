@@ -8,6 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 #include <c10/util/TypeSafeSignMath.h>
+#include <ATen/OpMathType.h>
 
 #include <type_traits>
 
@@ -24,12 +25,38 @@ void logical_not_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
+const char neg_name[] = "neg_kernel";
 void neg_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "neg_cuda", [&]() {
+  auto dtype = iter.dtype();
+  if (at::isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+  static const auto neg_string = jiterator_stringify(
+      template <typename T>
+      T neg_kernel(T a) {
+        return -a;
+      }
+  ); // neg_string
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "neg_cuda", [&]() {
+      jitted_gpu_kernel<
+        /*name=*/ neg_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, neg_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "neg_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return -a;
+      });
+  });
+#endif
+  } else {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, dtype, "neg_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return -a;
     });
   });
+  }
 }
 
 void sign_kernel_cuda(TensorIteratorBase& iter){
@@ -47,9 +74,17 @@ void sign_kernel_cuda(TensorIteratorBase& iter){
 }
 
 void signbit_kernel_cuda(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return is_negative(a); });
-  });
+  // NOTE: signbit does not always support integral arguments.
+  if (at::isIntegralType(iter.input_dtype(), /*includeBool=*/false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(), "signbit_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return is_negative(a); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
+    });
+  }
 }
 
 template<typename T>
@@ -76,7 +111,7 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
           }
         }
       ); // sgn_string
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sgn_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ sgn_name,
         /*return_dtype=*/ scalar_t,
@@ -84,9 +119,10 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
         /*arity=*/ 1>(iter, sgn_string);
       });
   #else
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sgn_cuda", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return sgn_wrapper(a);
+        return sgn_wrapper(opmath_t{a});
       });
   });
   #endif

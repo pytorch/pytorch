@@ -261,17 +261,29 @@ namespace {
 // expressions.
 class Inputs : public IterVisitor {
  private:
-  //! Optional list of all input vals. If empty, vals with no defining
-  //! expression are considered as inputs.
+  //! Optional list of input vals. While traversing to inputs if a value in the
+  //! all_inputs list is found, that value will be added to the inputs_ and
+  //! traversal will not go into its definition. Otherwise traversal follows
+  //! definition paths until hitting a definition that is a nullptr (i.e. a
+  //! terminating input).
   const std::vector<Val*>& all_inputs_;
   std::vector<Val*> inputs_;
 
   Inputs(const std::vector<Val*>& all_inputs) : all_inputs_(all_inputs) {}
 
+  std::vector<Statement*> next(Val* v) override {
+    if (std::find(inputs_.begin(), inputs_.end(), v) != inputs_.end()) {
+      return {};
+    }
+    return IterVisitor::next(v);
+  }
+
   void handle(Val* val) override {
-    if ((all_inputs_.empty() && val->definition() == nullptr) ||
+    // If there's no definition to val, or val is within the provided inputs
+    if (val->definition() == nullptr ||
         std::find(all_inputs_.begin(), all_inputs_.end(), val) !=
             all_inputs_.end()) {
+      // if not already placed in the inputs
       if (std::find(inputs_.begin(), inputs_.end(), val) == inputs_.end()) {
         inputs_.push_back(val);
       }
