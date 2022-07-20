@@ -29,7 +29,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // All of the keys corresponding to functorch transforms should not be copied over.
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
-  key_set_ = key_set_ - c10::functorch_transforms_ks;
+  key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -190,6 +190,8 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     set_storage_offset(value_.storage_offset());
   }
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
+    // .to() should not re-entrantly go through functionalization.
+    at::AutoDispatchSkipFunctionalize guard;
     value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
