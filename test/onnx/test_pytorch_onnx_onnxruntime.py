@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import onnx_test_common
 import parameterized
+
+import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -31,8 +33,6 @@ from pytorch_test_common import (
     skipScriptTest,
     skipTraceTest,
 )
-
-import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import verification
@@ -11812,13 +11812,68 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
-    def test_quantized_cat(self):
-        class QuantizedConcatenationModel(torch.nn.Module):
+    def test_quantized_cat_when_concatinating_the_same_tensor(self):
+        class QuantizedSelfConcatenationModel(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.quantized.QFunctional().cat((x, x), dim=1)
 
         q_input = torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8)
-        self.run_test(QuantizedConcatenationModel(), q_input)
+        self.run_test(QuantizedSelfConcatenationModel(), q_input)
+
+    @common_utils.parametrize(
+        "x, y",
+        [
+            common_utils.subtest(
+                [
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(
+                        torch.zeros(1, 3), 0.26, 128, torch.quint8
+                    ),
+                ],
+                name="different_shape",
+            ),
+            common_utils.subtest(
+                [
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 42, 1, torch.quint8),
+                ],
+                name="different_scale",
+            ),
+            common_utils.subtest(
+                [
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 63, torch.quint8),
+                ],
+                name="different_zero_point",
+            ),
+            common_utils.subtest(
+                [
+                    torch.quantize_per_tensor(
+                        torch.ones(2, 3), 0.26, 128, torch.quint8
+                    ),
+                    torch.quantize_per_tensor(torch.ones(2, 3), 0.1, 63, torch.quint8),
+                ],
+                name="different_zero_point_and_scale",
+            ),
+        ],
+    )
+    @unittest.skip(
+        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
+    )
+    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
+    def test_quantized_cat(self, x: torch.Tensor, y: torch.Tensor):
+        class QuantizedConcatenationModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.quantized.QFunctional().cat((x, y), dim=0)
+
+        self.run_test(QuantizedConcatenationModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     # torch.jit.frontend.FrontendError:
