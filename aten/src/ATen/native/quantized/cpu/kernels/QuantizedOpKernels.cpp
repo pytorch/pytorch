@@ -60,36 +60,33 @@ Tensor qcat_nhwc_kernel(
   std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
 
-  const int64_t ndim = qx0.dim();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(
-        qx.dim() == ndim,
+        qx.dim() == qx0.dim(),
         "Tensors must have the same number of dimensions: got ",
         qx.dim(),
         " and ",
-        ndim);
-    for (const auto d : c10::irange(ndim)) {
-      if (d != dim) {
-        TORCH_CHECK(
-            qx.size(d) == qx0.size(d),
-            "Sizes of tensors must match expect in dimension ",
-            d,
-            ". Got",
-            qx.size(d),
-            " and ",
-            qx0.size(d));
-      }
-    }
+        qx0.dim());
+#define CHECK_DIM(d)                                            \
+  TORCH_CHECK(                                                  \
+      qx.size(d) == qx0.size(d),                                \
+      "Sizes of tensors must match expect in dimension 1. Got", \
+      qx.size(d),                                               \
+      " and ",                                                  \
+      qx0.size(d));
+    CHECK_DIM(0);
+    CHECK_DIM(2);
+    CHECK_DIM(3);
     TORCH_CHECK(
         qx.scalar_type() == qx0.scalar_type(),
         "Expected object of scalar type ",
         toString(qx0.scalar_type()),
         " but got scalar type ",
         toString(qx.scalar_type()));
-    Cs_in.push_back(qx.size(dim));
+    Cs_in.push_back(qx.size(1));
     Cs_sum.push_back(C_out);
-    C_out += qx.size(dim);
+    C_out += qx.size(1);
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
@@ -98,38 +95,29 @@ Tensor qcat_nhwc_kernel(
         qx.q_zero_point() == zero_point);
   }
 
-  auto output_sizes = qx0.sizes().vec();
-  output_sizes[dim] = C_out;
-  int64_t outer_size = 1;
-  for (const auto d : c10::irange(qx0.dim())) {
-    if (d != dim) {
-      outer_size *= output_sizes[d];
-    }
-  }
-
+  const int64_t N = qx0.size(0);
+  const int64_t H = qx0.size(2);
+  const int64_t W = qx0.size(3);
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float inv_scale = 1.0 / scale;
 
-  const auto memory_format = qx0.suggest_memory_format();
   auto output = at::_empty_affine_quantized(
-      output_sizes,
-      qx0.options().memory_format(memory_format),
+      {N, C_out, H, W},
+      qx0.options().memory_format(MemoryFormat::ChannelsLast),
       scale,
       zero_point,
       c10::nullopt);
 
-  void* odata = output.data_ptr();
-
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
-  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, outer_size]() {
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
-    at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
         // loop over input tensors
         for (const auto tidx : c10::irange(Cs_in.size())) {
           scalar_t::underlying* optr =
-              reinterpret_cast<scalar_t::underlying*>(odata) +
+              reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
               i * C_out + Cs_sum[tidx];
 
           auto curr_C = Cs_in[tidx];

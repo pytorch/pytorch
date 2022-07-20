@@ -35,7 +35,9 @@ __all__ = [
     "margin_ranking_loss",
     "mish",
     "mse_loss",
+    "prelu",
     "relu",
+    "relu6",
     "selu",
     "softplus",
     "softshrink",
@@ -272,7 +274,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(abs(a) > abs(lambd), a, 0)
+    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(torch.ops.aten.softshrink)
@@ -282,6 +284,10 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
+    check(
+        lambd >= 0,
+        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+    )
     ge_mask = a > lambd
     le_mask = a < -lambd
     zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
@@ -502,6 +508,7 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+@register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -538,3 +545,17 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
+
+@register_decomposition(torch.ops.aten.relu6)
+def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.relu6
+    """
+    if inplace:
+        raise NotImplementedError
+
+    # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
+    # It may be better to use clamp here, but we use hardtanh to replicate
+    # the behavior of the existing implementation
+    return refs.nn.functional.hardtanh(a, 0, 6)

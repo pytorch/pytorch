@@ -62,21 +62,14 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
-
-  libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
-    name: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-      build-generates-artifacts: false
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
@@ -127,6 +120,7 @@ jobs:
         ]}
 
   ios-12-5-1-x86-64:
+    if: false
     name: ios-12-5-1-x86-64
     uses: ./.github/workflows/_ios-build-test.yml
     with:
@@ -231,6 +225,7 @@ jobs:
       sync-tag: rocm-build
 
   linux-focal-rocm5_1-py3_7-test:
+    if: false # Disabling temporarily due to network upgrade to ROCm CI machines.
     name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_1-py3_7-build
