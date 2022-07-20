@@ -536,13 +536,14 @@ class TestCommon(TestCase):
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
         )
 
@@ -1230,10 +1231,12 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
             composite_compliance.check_backward_formula(
                 op.get_op(), args, kwargs,
                 sample.output_process_fn_grad,
-                op.gradcheck_wrapper)
+                op.gradcheck_wrapper, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1251,8 +1254,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
             composite_compliance.check_forward_ad_formula(
-                op.get_op(), args, kwargs, op.gradcheck_wrapper)
+                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
 class TestMathBits(TestCase):
@@ -1443,7 +1448,7 @@ class TestMathBits(TestCase):
         )
 
 # input strides and size may have been altered due to the result of an inplace op
-def test_inplace_view(func, input, rs, input_size, input_strides):
+def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
     # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
@@ -1470,7 +1475,7 @@ class TestTagsMode(TorchDispatchMode):
             old_size = args[0].size()
             old_stride = args[0].stride()
             rs = func(*args, **kwargs)
-            test_inplace_view(func, args[0], rs, old_size, old_stride)
+            check_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
             rs = func(*args, **kwargs)
         return rs
@@ -1492,12 +1497,12 @@ class TestTags(TestCase):
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
-                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+                check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
