@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ try-merge-periodic }}
+  group: try-merge-periodic
   cancel-in-progress: true
 
 jobs:
