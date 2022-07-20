@@ -1,3 +1,4 @@
+from typing import Dict, List
 import torch
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
 import numpy as np  # type: ignore[import]
@@ -51,7 +52,7 @@ def measure_forward_pass(sparse_model_metadata, device, sparse_dlrm, **batch):
     available in sparse_model_metadata file.
     If sparse_dlrm=True, then the SparseDLRM model is loaded, otherwise the standard one is.
     """
-    time_taken_dict = {
+    time_taken_dict: Dict[str, List] = {
         "norm": [],
         "sparse_block_shape": [],
         "sparsity_level": [],
