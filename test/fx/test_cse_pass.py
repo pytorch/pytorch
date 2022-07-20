@@ -73,7 +73,7 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
             self.assertTrue(torch.all(true_result == our_result), (
                 f"results are different {true_result}, {our_result}"))  # check results are the same
 
-class TestCSE(TestCase):
+class TestCSEPass(TestCase):
 
     def test_nochange(self):
         def f(x):
