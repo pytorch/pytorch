@@ -1349,7 +1349,7 @@ void impl_func_norm(
     "`linalg.vector_norm` instead"
   );
   auto p = opt_p.has_value() ? opt_p.get() : Scalar(2.0).to<double>();
-  at::linalg_vector_norm_out(result, self, p, dim, keepdim, opt_dtype);
+  at::linalg_vector_norm_out(const_cast<Tensor&>(result), self, p, dim, keepdim, opt_dtype);
 }
 
 TORCH_IMPL_FUNC(norm_out)
