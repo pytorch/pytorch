@@ -3,7 +3,7 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <aten/src/ATen/quantized/Quantizer.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>

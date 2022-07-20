@@ -318,12 +318,15 @@ class _Reduce_Scatter(Function):
 class _AllGather(Function):
     @staticmethod
     def forward(ctx, group, tensor):
+        # Need contiguous tensors for collectives.
+        tensor = tensor.contiguous()
+
         ctx.group = group
         out_tensor_list = [
             torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
         ]
 
-        dist.all_gather(out_tensor_list, tensor.contiguous(), group=group)
+        dist.all_gather(out_tensor_list, tensor, group=group)
         return tuple(out_tensor_list)
 
     @staticmethod
@@ -350,7 +353,6 @@ class _AllGatherBase(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank(group=ctx.group)
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:

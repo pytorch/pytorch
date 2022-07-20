@@ -197,6 +197,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::CompositeExplicitAutograd:
       return "CompositeExplicitAutograd";
 
+    case DispatchKey::CompositeExplicitAutogradNonFunctional:
+      return "CompositeExplicitAutogradNonFunctional";
+
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
 
@@ -349,6 +352,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::CompositeImplicitAutograd},
       {"CompositeExplicitAutograd",
        c10::DispatchKey::CompositeExplicitAutograd},
+      {"CompositeExplicitAutogradNonFunctional",
+       c10::DispatchKey::CompositeExplicitAutogradNonFunctional},
   };
   auto it = key_map.find(k);
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);

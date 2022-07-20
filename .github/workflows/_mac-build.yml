@@ -20,6 +20,13 @@ on:
         type: string
         default: ""
         description: What xcode version to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID:
@@ -40,7 +47,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
     env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -111,7 +117,7 @@ jobs:
         # Only if sccache is installed, see above
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
-          name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}-${{ steps.get-job-id.outputs.job-id }}.json
+          name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}-${{ steps.get-job-id.outputs.job-id }}
           retention-days: 14
           if-no-files-found: warn
           path: sccache-stats-*.json

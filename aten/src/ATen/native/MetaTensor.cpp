@@ -32,6 +32,11 @@ Tensor empty_symint_meta(
   c10::optional<bool> pin_memory_opt,
   c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
+
+  auto opt_size = asIntArrayRefSlowOpt(size);
+  if (opt_size.has_value()) {
+    return at::detail::empty_meta(*opt_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  }
   return at::detail::empty_symint_meta(
       size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
