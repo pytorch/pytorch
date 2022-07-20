@@ -107,8 +107,6 @@ try:
                 raise NotImplementedError('operation not yet implemented')
 
         else:
-            # print(constraint)
-
             raise NotImplementedError('Operation not yet implemented')
 
 
@@ -274,7 +272,6 @@ try:
 
         generator = ConstraintGenerator(tracer_root, graph)
         new_constraints, counter = generator.generate_constraints(counter)
-
 
         condition_constraint = new_constraints.conjucts[-1]
 
