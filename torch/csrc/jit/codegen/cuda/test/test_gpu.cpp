@@ -24684,6 +24684,66 @@ TEST_F(NVFuserTest, FusionInlineRepro1803_CUDA) {
   TORCH_CHECK(tvs.var_sum->getComputeAtPosition() == 1);
 }
 
+TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  std::vector<int64_t> shape = {2, 1, 768};
+  std::vector<int64_t> sum_to_shape = {768};
+  std::vector<int64_t> sum_to_axes = {0, 1};
+  double kProb = 0.5;
+
+  std::vector<Int*> sum_to_symb;
+  std::transform(
+      sum_to_shape.begin(),
+      sum_to_shape.end(),
+      std::back_inserter(sum_to_symb),
+      [](int s) -> Int* { return IrBuilder::create<Int>(s); });
+
+  TensorView* tv0 = makeContigConcreteTensor(shape);
+  TensorView* tv1 = makeContigConcreteTensor(shape);
+  TensorView* tv2 = makeContigConcreteTensor(shape, DataType::Bool);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+
+  Double* prob = IrBuilder::create<Double>(kProb);
+  auto grad_input = dropout_backward(tv1, tv2, prob);
+  auto grad_gelu = gelu_backward(grad_input, tv0);
+  auto grad_bias = sum_to(grad_gelu, sum_to_symb);
+
+  fusion->addOutput(grad_gelu);
+  fusion->addOutput(grad_bias);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const auto mask_options =
+      at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  at::Tensor a = at::randn(shape, options);
+  at::Tensor b = at::randn(shape, options);
+  at::Tensor c = at::randn(shape, options);
+  auto mask = at::gt(c, 0.0f);
+  std::vector<IValue> aten_inputs = {a, b, mask};
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto dinput = at::native_dropout_backward(b, mask, kProb);
+  auto dgelu = at::gelu_backward(dinput, a, "none");
+  auto dbias = dgelu.sum(sum_to_axes);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      aten_inputs,
+      {dgelu, dbias},
+      __LINE__,
+      __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

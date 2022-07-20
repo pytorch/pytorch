@@ -980,8 +980,9 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
 
   bool unroll = rparams.isUnrolled();
 
-  // Cache inputs if unrolled
-  auto cached_inputs = scheduler_utils::cacheInputs(fusion, unroll);
+  // Cache inputs even if not unrolled, as otherwise we may not create a
+  // persistent buffer if that persistent buffer would be the input.
+  auto cached_inputs = scheduler_utils::cacheInputs(fusion, true);
 
   // Cache and fork outputs
   auto cached_outputs = scheduler_utils::cacheAndForkOutputs(fusion, unroll);

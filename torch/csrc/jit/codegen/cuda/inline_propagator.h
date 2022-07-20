@@ -25,6 +25,7 @@ class TORCH_CUDA_CU_API InlinePropagatorSelector
 
   InlinePropagatorSelector(std::unordered_set<TensorView*> selected)
       : selected_(std::move(selected)){};
+
   const std::unordered_set<TensorView*>& selected() const {
     return selected_;
   }
@@ -35,6 +36,10 @@ class TORCH_CUDA_CU_API MaxPosCalculator {
 
   // Root domains in producer that's unmappable to any of its consumers
   std::unordered_set<IterDomain*> unmappable_dims_;
+
+  // User set IterDomains to not inline, used in schedulers to avoid inlining
+  // trivial reductions
+  std::unordered_set<IterDomain*> uninlinable_ids_;
 
   // Iterate through all TVs and collect the dimensions of each TV that don't
   // map to all its consumer TVs.
@@ -65,7 +70,9 @@ class TORCH_CUDA_CU_API MaxPosCalculator {
       TensorView* producer,
       TensorView* consumer) const;
 
-  MaxPosCalculator(ComputeAtMode mode);
+  MaxPosCalculator(
+      ComputeAtMode mode,
+      std::unordered_set<IterDomain*> uninlinable_ids = {});
 };
 
 // Propagate inline position to the `selected` tensors in the DAG. If `selected`
@@ -101,7 +108,8 @@ class TORCH_CUDA_CU_API InlinePropagator
       TensorView* reference,
       int64_t reference_pos,
       ComputeAtMode mode = ComputeAtMode::Standard,
-      std::unordered_set<TensorView*> selected = {});
+      std::unordered_set<TensorView*> selected = {},
+      std::unordered_set<IterDomain*> uninlinable_ids = {});
 
   InlinePropagator(
       TensorView* reference,

@@ -25,7 +25,10 @@ bool InlinePropagatorSelector::allowSibling(TensorView* from, TensorView* to) {
   return true;
 }
 
-MaxPosCalculator::MaxPosCalculator(ComputeAtMode mode) : mode_(mode) {
+MaxPosCalculator::MaxPosCalculator(
+    ComputeAtMode mode,
+    std::unordered_set<IterDomain*> uninlinable_ids)
+    : mode_(mode), uninlinable_ids_(std::move(uninlinable_ids)) {
   buildUnmappableDims();
 }
 
@@ -63,6 +66,10 @@ bool MaxPosCalculator::isAllowedID(
 
   if (!allow_reduction) {
     allowed = allowed && !id->isReduction();
+  }
+
+  if (uninlinable_ids_.count(id)) {
+    return false;
   }
 
   if (!allow_vectorize) {
@@ -198,8 +205,9 @@ InlinePropagator::InlinePropagator(
     TensorView* reference,
     int64_t reference_pos,
     ComputeAtMode mode,
-    std::unordered_set<TensorView*> selected)
-    : max_pos_calc(mode),
+    std::unordered_set<TensorView*> selected,
+    std::unordered_set<IterDomain*> uninlinable_ids)
+    : max_pos_calc(mode, std::move(uninlinable_ids)),
       selected_(std::move(selected)),
       reference_(reference),
       mode_(mode) {
