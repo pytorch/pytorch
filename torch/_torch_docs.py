@@ -4070,7 +4070,7 @@ Args:
          equal ``input.shape[dim]``.
 
 Returns:
-    A ``View`` of ``input`` with the specified dimension unflattened.
+    A view of the input with the specified dimension unflattened.
 
 Examples:
     >>> torch.unflatten(torch.randn(3, 4, 1), 1, (2, 2)).shape
