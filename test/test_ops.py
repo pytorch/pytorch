@@ -1230,7 +1230,12 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs, sample.output_process_fn_grad)
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
+            composite_compliance.check_backward_formula(
+                op.get_op(), args, kwargs,
+                sample.output_process_fn_grad,
+                op.gradcheck_wrapper, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1248,7 +1253,10 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
 class TestMathBits(TestCase):
@@ -1439,7 +1447,7 @@ class TestMathBits(TestCase):
         )
 
 # input strides and size may have been altered due to the result of an inplace op
-def test_inplace_view(func, input, rs, input_size, input_strides):
+def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
     # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
@@ -1466,7 +1474,7 @@ class TestTagsMode(TorchDispatchMode):
             old_size = args[0].size()
             old_stride = args[0].stride()
             rs = func(*args, **kwargs)
-            test_inplace_view(func, args[0], rs, old_size, old_stride)
+            check_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
             rs = func(*args, **kwargs)
         return rs
@@ -1488,15 +1496,15 @@ class TestTags(TestCase):
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
-                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+                check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
-    ref_ops_names = itertools.chain.from_iterable(
-        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls)
+    ref_ops_names = tuple(itertools.chain.from_iterable(
+        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
     ref_db_names = set(ref_op.name for ref_op in python_ref_db)
 
     # TODO: References that do not have an entry in python_ref_db
@@ -1519,11 +1527,86 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros_like'
     }
 
+    not_in_decomp_table = {
+        # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
+        '_refs.nn.functional.mse_loss',
+        '_refs.masked_fill',
+        '_refs.transpose',
+        '_refs.var',
+        # these are not aten ops?
+        '_refs.broadcast_shapes',
+        '_refs.broadcast_tensors',
+        '_refs.nn.functional.tanhshrink',
+        '_refs.swap_axes',
+        # CompositeImplicitAutograd
+        '_refs.allclose',
+        '_refs.atleast_1d',
+        '_refs.atleast_2d',
+        '_refs.atleast_3d',
+        '_refs.broadcast_to',
+        '_refs.chunk',
+        '_refs.column_stack',
+        '_refs.contiguous',
+        '_refs.dsplit',
+        '_refs.dstack',
+        '_refs.fill',
+        '_refs.flatten',
+        '_refs.fliplr',
+        '_refs.flipud',
+        '_refs.float_power',
+        '_refs.hsplit',
+        '_refs.hstack',
+        '_refs.isclose',
+        '_refs.isfinite',
+        '_refs.narrow',
+        '_refs.positive',
+        '_refs.ravel',
+        '_refs.reshape',
+        '_refs.square',
+        '_refs.tensor_split',
+        '_refs.true_divide',
+        '_refs.trunc_divide',
+        '_refs.vsplit',
+        '_refs.vstack',
+        # ref implementation missing kwargs
+        '_refs.empty',  # missing "pin_memory"
+        '_refs.empty_like',  # missing "layout"
+        '_refs.full',  # missing "layout"
+        '_refs.full_like',  # missing "layout"
+        '_refs.ones',  # missing "layout"
+        '_refs.ones_like',  # missing "layout"
+        '_refs.round',  # missing "decimals"
+        '_refs.scalar_tensor',  # missing "layout"
+        '_refs.zeros',  # missing "layout"
+        '_refs.zeros_like',  # missing "layout"
+        # other
+        '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
+        '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
+        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
+        '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
+    }
+
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_python_ref_db(self, op):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         self.assertIn(op, self.ref_db_names)
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_decomp_table(self, op):
+        path = op.split('.')
+        module_path = '.'.join(path[:-1])
+        op_name = path[-1]
+        op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+
+        if op in self.not_in_decomp_table:
+            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
+                             f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
+        else:
+            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
+                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (

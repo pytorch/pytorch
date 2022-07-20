@@ -210,6 +210,7 @@
   variants: function
   dispatch:
     CUDA: fused_dropout_cuda
+  tags: nondeterministic_seeded
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
   variants: function
@@ -221,6 +222,7 @@
   dispatch:
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
+  tags: nondeterministic_seeded
 
 - func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   dispatch:
@@ -243,6 +245,7 @@
   dispatch:
     CompositeImplicitAutograd: dropout
     NestedTensorCPU, NestedTensorCUDA: dropout_nested
+  tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   dispatch:
@@ -892,6 +895,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: bernoulli
+  tags: nondeterministic_seeded
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -924,6 +928,7 @@
 - func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  tags: nondeterministic_seeded
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
@@ -2487,6 +2492,13 @@
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
 
+- func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _validate_compressed_sparse_indices_cpu
+    CUDA: _validate_compressed_sparse_indices_cuda
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
 
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
@@ -2679,13 +2691,6 @@
   manual_cpp_binding: True
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: kl_div
-
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  dispatch:
-    CPU: kl_div_backward_cpu
-    CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -3741,6 +3746,7 @@
   device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -3749,12 +3755,15 @@
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -3767,10 +3776,13 @@
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -3787,8 +3799,10 @@
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  tags: nondeterministic_seeded
 
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -3957,6 +3971,7 @@
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
+  tags: nondeterministic_seeded
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3994,6 +4009,7 @@
     MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
+    QuantizedCPU: prelu_quantized_cpu
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
@@ -4563,7 +4579,7 @@
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
 
-- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4572,7 +4588,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -5186,6 +5202,7 @@
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
+  tags: nondeterministic_seeded
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
@@ -5203,12 +5220,14 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+  tags: nondeterministic_seeded
 
 - func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
+  tags: nondeterministic_seeded
 
 # When more variants get ported to native, this dispatch will get more
 # complicated
@@ -5756,6 +5775,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -5771,6 +5791,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -6331,12 +6352,30 @@
     MPS: set_mps_
   autogen: set, set.out
 
+# Not making it CompositeImplicitAutograd because lift
+# should be a primitive w.r.t. functorch
+
+# TODO: this should have a view annotation
+# TODO: shouldn't be a method
 - func: lift(Tensor self) -> Tensor
   variants: method
   dispatch:
-    # Not making it CompositeImplicitAutograd because lift
-    # should be a primitive w.r.t. functorch
     CompositeExplicitAutograd: lift
+
+# lift_fresh is called with an argument that is guaranteed to be
+# fresh (i.e., newly allocated).  This is ONLY called from a
+# torch.tensor call; if you FX trace a lift_fresh, you are obligated
+# to convert this into a lift_fresh_copy (because FX will violate the
+# freshness invariant when tracing).
+- func: lift_fresh(Tensor(a) self) -> Tensor(a)
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh
+
+# Like lift, but it clones the input.
+- func: lift_fresh_copy(Tensor self) -> Tensor
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutograd: lift_fresh_copy
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
@@ -6437,6 +6476,7 @@
   dispatch:
     CPU: index_add_cpu_out
     CUDA: index_add_cuda_out
+    MPS: index_add_mps_out
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: index_add.out
@@ -7735,6 +7775,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: multinomial
+  tags: nondeterministic_seeded
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8425,6 +8466,7 @@
     CPU, CUDA: normal
     MPS: normal_mps
     Meta: normal_meta
+  tags: nondeterministic_seeded
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8437,6 +8479,7 @@
     CPU, CUDA: normal
     MPS: normal_mps
     Meta: normal_meta
+  tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8449,6 +8492,7 @@
     CPU, CUDA: normal
     MPS: normal_mps
     Meta: normal_meta
+  tags: nondeterministic_seeded
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -9689,6 +9733,7 @@
   dispatch:
     CPU: rrelu_with_noise_cpu
     CUDA: rrelu_with_noise_cuda
+  tags: nondeterministic_seeded
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
   python_module: nn
@@ -10488,6 +10533,7 @@
   dispatch:
     CPU: upsample_nearest1d_out_cpu
     CUDA: upsample_nearest1d_out_cuda
+    MPS: upsample_nearest1d_out_mps
 
 - func: _upsample_nearest_exact1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -11608,6 +11654,13 @@
   variants: function
 
 - func: linalg_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
+- func: linalg_vecdot(Tensor x, Tensor y, *, int dim=-1) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_vecdot.out(Tensor x, Tensor y, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 - func: linalg_matrix_exp(Tensor self) -> Tensor
@@ -13067,3 +13120,9 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+# Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
+# within test/test_python_dispatch.py
+- func: _foobar(Tensor self, bool arg1=True, bool arg2=True, *, bool arg3=True) -> Tensor
+  dispatch:
+    CPU: foobar

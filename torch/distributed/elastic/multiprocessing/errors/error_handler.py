@@ -12,8 +12,9 @@ import os
 import time
 import traceback
 import warnings
-from typing import Optional
+from typing import Any, Dict, Optional
 
+__all__ = ['ErrorHandler']
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,28 @@ class ErrorHandler:
             with open(file, "w") as fp:
                 json.dump(data, fp)
 
+    def override_error_code_in_rootcause_data(
+        self,
+        rootcause_error_file: str,
+        rootcause_error: Dict[str, Any],
+        error_code: int = 0,
+    ):
+        """
+        Modify the rootcause_error read from the file, to correctly set the exit code.
+        """
+        if "message" not in rootcause_error:
+            log.warning(
+                f"child error file ({rootcause_error_file}) does not have field `message`. \n"
+                f"cannot override error code: {error_code}"
+            )
+        elif isinstance(rootcause_error["message"], str):
+            log.warning(
+                f"child error file ({rootcause_error_file}) has a new message format. \n"
+                f"skipping error code override"
+            )
+        else:
+            rootcause_error["message"]["errorCode"] = error_code
+
     def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
         """
         Dumps parent error file from child process's root cause error and error code.
@@ -89,19 +112,7 @@ class ErrorHandler:
             # Override error code since the child process cannot capture the error code if it
             # is terminated by singals like SIGSEGV.
             if error_code:
-                if "message" not in rootcause_error:
-                    log.warning(
-                        f"child error file ({rootcause_error_file}) does not have field `message`. \n"
-                        f"cannot override error code: {error_code}"
-                    )
-                elif isinstance(rootcause_error["message"], str):
-                    log.warning(
-                        f"child error file ({rootcause_error_file}) has a new message format. \n"
-                        f"skipping error code override"
-                    )
-                else:
-                    rootcause_error["message"]["errorCode"] = error_code
-
+                self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
             log.debug(
                 f"child error file ({rootcause_error_file}) contents:\n"
                 f"{json.dumps(rootcause_error, indent=2)}"

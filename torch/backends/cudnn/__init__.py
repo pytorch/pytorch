@@ -102,15 +102,18 @@ def is_acceptable(tensor):
     return True
 
 
-def set_flags(_enabled=None, _benchmark=None, _deterministic=None, _allow_tf32=None):
+def set_flags(_enabled=None, _benchmark=None, _benchmark_limit=None, _deterministic=None, _allow_tf32=None):
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
+                  None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
                   torch._C._get_cudnn_deterministic(),
                   torch._C._get_cudnn_allow_tf32())
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
     if _benchmark is not None:
         torch._C._set_cudnn_benchmark(_benchmark)
+    if _benchmark_limit is not None and is_available():
+        torch._C._cuda_set_cudnn_benchmark_limit(_benchmark_limit)
     if _deterministic is not None:
         torch._C._set_cudnn_deterministic(_deterministic)
     if _allow_tf32 is not None:
@@ -119,9 +122,9 @@ def set_flags(_enabled=None, _benchmark=None, _deterministic=None, _allow_tf32=N
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, allow_tf32=True):
+def flags(enabled=False, benchmark=False, benchmark_limit=10, deterministic=False, allow_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, deterministic, allow_tf32)
+        orig_flags = set_flags(enabled, benchmark, benchmark_limit, deterministic, allow_tf32)
     try:
         yield
     finally:
@@ -141,6 +144,9 @@ class CudnnModule(PropModule):
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
+    benchmark_limit = None
+    if is_available():
+        benchmark_limit = ContextProp(torch._C._cuda_get_cudnn_benchmark_limit, torch._C._cuda_set_cudnn_benchmark_limit)
     allow_tf32 = ContextProp(torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32)
 
 # This is the sys.modules replacement trick, see
@@ -152,3 +158,4 @@ enabled: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
+benchmark_limit: int
