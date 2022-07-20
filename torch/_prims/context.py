@@ -92,7 +92,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         func = mapping.get(orig_func, None)
         if func is not None:
             # If the ref exists query whether we should use it or not
-            if self.should_fallback_fn(self, orig_func, func, args, kwargs):
+            if self.should_fallback_fn(self, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
@@ -111,7 +111,7 @@ def _is_node_supported_nvfuser(node):
     )
 
 
-def _is_func_unsupported_nvfuser(torch_function_mode, orig_func, func, args, kwargs):
+def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     with torch.overrides.enable_torch_function_mode(
         torch_function_mode, replace=torch_function_mode.inner
     ):
