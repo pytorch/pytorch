@@ -153,7 +153,6 @@ class Context final {
 
   DescriptorSet submit_compute_prologue(
       CommandBuffer&,
-      const ShaderLayout::Signature&,
       const ShaderSource&,
       const utils::uvec3&);
 
@@ -166,7 +165,6 @@ class Context final {
  public:
   template <typename... Arguments>
   void submit_compute_job(
-      const ShaderLayout::Signature&,
       const ShaderSource&,
       const PipelineBarrier&,
       const utils::uvec3&,
@@ -270,7 +268,6 @@ inline void bind(
 
 template <typename... Arguments>
 inline void Context::submit_compute_job(
-    const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
@@ -302,8 +299,8 @@ inline void Context::submit_compute_job(
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Factor out template parameter independent code to minimize code bloat.
-  DescriptorSet descriptor_set = submit_compute_prologue(
-      cmd_, shader_layout_signature, shader_descriptor, local_work_group_size);
+  DescriptorSet descriptor_set =
+      submit_compute_prologue(cmd_, shader_descriptor, local_work_group_size);
 
   detail::bind(
       descriptor_set,
