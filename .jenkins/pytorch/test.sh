@@ -489,10 +489,10 @@ test_forward_backward_compatibility() {
   REPO_DIR=$(pwd)
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
     echo "On trunk, we should compare schemas with torch built from the parent commit"
-    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+    SHA_TO_COMPARE=c144a09961a3cf9af7382ee6d23af182a57e667a
   else
     echo "On pull, we should compare schemas with torch built from the merge base"
-    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+    SHA_TO_COMPARE=c144a09961a3cf9af7382ee6d23af182a57e667a
   fi
   export SHA_TO_COMPARE
 
