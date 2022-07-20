@@ -1,6 +1,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/schema_info.h>
 
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
@@ -103,8 +104,6 @@
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
-#include <ATen/core/function_schema.h>
-
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
@@ -121,11 +120,14 @@
 namespace torch {
 namespace jit {
 
-using ::c10::AliasInfo;
-using ::c10::Argument;
-using ::c10::FunctionSchema;
+using c10::AliasInfo;
+using c10::Argument;
+using c10::FunctionSchema;
+using c10::SchemaArgType;
+using c10::SchemaArgument;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
+using torch::utils::SchemaInfo;
 
 static std::shared_ptr<c10::SymbolicIntNode> toSymIntNode(
     std::shared_ptr<c10::SymbolicIntNode> a,
@@ -209,6 +211,16 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
   }
 
   virtual std::shared_ptr<SymbolicIntNode> lt(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual std::shared_ptr<SymbolicIntNode> le(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual std::shared_ptr<SymbolicIntNode> ge(
       const std::shared_ptr<SymbolicIntNode>& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
@@ -1258,6 +1270,20 @@ void initJITBindings(PyObject* module) {
             return a->lt(snb);
           })
       .def(
+          "__le__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->le(snb);
+          })
+      .def(
+          "__ge__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->ge(snb);
+          })
+      .def(
           "__bool__",
           [](std::shared_ptr<c10::SymbolicIntNode> a) { return a->bool_(); })
       .def(
@@ -1339,8 +1365,13 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          auto bytes = py::bytes(reinterpret_cast<const char*>(data), size);
-          buffer.attr("write")(std::move(bytes));
+          // Writting an empty file is a noop
+          if (size == 0) {
+            return size;
+          }
+          auto memory_view = py::memoryview::from_memory(
+              reinterpret_cast<const char*>(data), size);
+          buffer.attr("write")(std::move(memory_view));
           return size;
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
@@ -1548,10 +1579,15 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func = py::cpp_function(
-                  [op, symbol](py::args args, py::kwargs kwargs) {
+              auto func =
+                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
+                                       py::args args, py::kwargs kwargs) {
+                    ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
                   });
@@ -1587,8 +1623,14 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+
           auto func = py::cpp_function(
-              [operations, symbol](py::args args, py::kwargs kwargs) {
+              [operations, symbol, allow_numbers_as_tensors](
+                  py::args args, py::kwargs kwargs) {
+                ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
                     operations, symbol, args, kwargs, false);
               },
@@ -1622,7 +1664,63 @@ void initJITBindings(PyObject* module) {
     }
     return type.value();
   });
-
+  py::enum_<SchemaArgType>(m, "_SchemaArgType")
+      .value("input", SchemaArgType::input)
+      .value("output", SchemaArgType::output);
+  py::class_<SchemaArgument>(m, "_SchemaArgument")
+      .def(py::init<SchemaArgType, size_t>())
+      .def_readwrite("type", &SchemaArgument::type)
+      .def_readwrite("index", &SchemaArgument::index);
+  py::class_<SchemaInfo>(m, "_SchemaInfo")
+      .def(py::init<FunctionSchema>())
+      .def("is_mutable", [](SchemaInfo& self) { return self.is_mutable(); })
+      .def(
+          "is_mutable",
+          [](SchemaInfo& self, size_t index) { return self.is_mutable(index); })
+      .def(
+          "is_mutable",
+          [](SchemaInfo& self, c10::string_view name) {
+            return self.is_mutable(name);
+          })
+      .def(
+          "may_alias",
+          [](SchemaInfo& self,
+             const SchemaArgument& lhs,
+             const SchemaArgument& rhs) { return self.may_alias(lhs, rhs); })
+      .def(
+          "may_contain_alias",
+          [](SchemaInfo& self,
+             const SchemaArgument& lhs,
+             const SchemaArgument& rhs) {
+            return self.may_contain_alias(lhs, rhs);
+          })
+      .def(
+          "add_argument_value",
+          [](SchemaInfo& self,
+             const std::string& name,
+             const py::object& value) {
+            if (name == "input") {
+              self.addArgumentValue("self", toTypeInferredIValue(value));
+            } else {
+              self.addArgumentValue(name, toTypeInferredIValue(value));
+            }
+          })
+      .def("add_argument_values", [](SchemaInfo& self, const py::dict& values) {
+        std::unordered_map<std::string, IValue> value_map;
+        for (const auto& key_pair : values) {
+          IValue key = toTypeInferredIValue(key_pair.first);
+          IValue value = toTypeInferredIValue(key_pair.second);
+          TORCH_INTERNAL_ASSERT(
+              key.isString(),
+              "Add argument value keys types should be strings.");
+          if (key.toStringRef() == "input") {
+            value_map["self"] = value;
+          } else {
+            value_map[key.toStringRef()] = value;
+          }
+        }
+        self.addArgumentValues(value_map);
+      });
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })

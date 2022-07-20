@@ -1134,7 +1134,7 @@ class TestAssertCloseSparseCSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1192,7 +1192,7 @@ class TestAssertCloseSparseCSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 
@@ -1250,7 +1250,7 @@ class TestAssertCloseSparseBSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1308,7 +1308,7 @@ class TestAssertCloseSparseBSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 

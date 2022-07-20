@@ -1,10 +1,11 @@
 load("//third_party:glog.buck.bzl", "define_glog")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
 load("//third_party:kineto.buck.bzl", "define_kineto")
+load("//:buckbuild.bzl", "third_party")
 
 define_glog()
 
-define_xnnpack()
+define_xnnpack(third_party)
 
 define_kineto()
 
@@ -328,4 +329,74 @@ cxx_binary(
     ],
     visibility = ["PUBLIC"],
     deps = [":flatc_library"],
+)
+
+cxx_library(
+    name = "gtest_headers",
+    exported_preprocessor_flags = [
+        "-DGTEST_USE_OWN_TR1_TUPLE=0",
+        "-DGTEST_HAS_TR1_TUPLE=0",
+        "-D_CRT_DECLARE_NONSTDC_NAMES",
+        "-D_CRT_NONSTDC_NO_WARNINGS",
+        "-D_CRT_NONSTDC_NO_DEPRECATE",
+    ],
+    include_directories = [
+        "googletest/googletest",
+    ],
+    public_system_include_directories = [
+        "googletest/googletest/include",
+    ],
+    raw_headers = glob([
+        "googletest/googletest/src/**/*.h",
+        "googletest/googletest/include/**/*.h",
+    ]),
+    visibility = [
+        "PUBLIC",
+    ],
+)
+
+cxx_library(
+    name = "gtest",
+    srcs = [
+        "googletest/googletest/src/gtest-all.cc",
+        "googletest/googletest/src/gtest_main.cc",
+    ],
+    include_directories = [
+        "googletest/googletest",
+    ],
+    raw_headers = glob([
+        "googletest/googletest/src/**/*.cc",
+        "googletest/googletest/src/**/*.h",
+    ]),
+    visibility = [
+        "PUBLIC",
+    ],
+    xcode_public_headers_symlinks = True,
+    exported_deps = [
+        ":gtest_headers",
+    ],
+)
+
+cxx_library(
+    name = "gmock",
+    srcs = [
+        "googletest/googlemock/src/gmock-all.cc",
+    ],
+    include_directories = [
+        "googletest/googlemock",
+    ],
+    public_system_include_directories = [
+        "googletest/googlemock/include",
+    ],
+    raw_headers = glob([
+        "googletest/googlemock/include/**/*.h",
+        "googletest/googlemock/src/**/*.cc",
+    ]),
+    visibility = ["PUBLIC"],
+    deps = [
+        ":gtest",
+    ],
+    exported_deps = [
+        ":gtest_headers",
+    ],
 )

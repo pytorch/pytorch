@@ -440,7 +440,8 @@ c10::IValue preprocess(
   return cu.serialize();
 }
 
-static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
+// static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
 } // namespace nnc
 } // namespace mobile

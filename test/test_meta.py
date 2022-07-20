@@ -30,6 +30,8 @@ import re
 from collections import defaultdict
 import unittest
 import warnings
+import weakref
+
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -166,6 +168,35 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.storage_offset(), y.storage_offset())
 
+    def test_weakref(self):
+        x = torch.randn(4, 4, 4)
+        m = MetaConverter()
+        y = m(x)
+        z = m(x)
+        self.assertIs(y, z)
+        self.assertEqual(len(m.tensor_memo), 1)
+        self.assertEqual(len(m.storage_memo), 1)
+        del x
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+        li = []
+        for i in range(4):
+            li.append(torch.rand([i]))
+            m(li[-1])
+        self.assertEqual(len(m.tensor_memo), 4)
+        del li
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+
+    def test_tensor_outlives_converter(self):
+        m = MetaConverter()
+        ref = weakref.ref(m)
+        x = torch.randn([4, 4])
+        y = m(x)
+        del m
+        self.assertIs(ref(), None)
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -384,7 +415,6 @@ meta_function_expected_failures = {
     torch.fft.hfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.fft.hfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.floor_divide: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::floor_divide, aten::floor_divide.out
     torch.frexp: {bf16, f16, f32, f64},  # aten::frexp.Tensor_out
     torch.functional.istft: {f32, f64},  # aten::view_as_complex
     torch.functional.unique: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_unique2, aten::unique_dim
@@ -417,7 +447,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multilabel_margin_loss: {f32, f64},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
-    torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
@@ -438,9 +467,7 @@ meta_function_expected_failures = {
     torch.linalg.eigvals: {f32, f64},
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
-    torch.linalg.slogdet: {f32, f64},  # aten::linalg_slogdet
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular
-    torch.logdet: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
 }
 
 """
@@ -469,6 +496,7 @@ meta_function_skips = {
     torch.nanmean: {bf16, f16, f32, f64},  # TODO(chilli): Doesn't seem to work for some reason?
     torch.nn.functional.nll_loss: {bf16, f32, f64},  # TODO
     torch.linalg.pinv: {f32, f64},
+    torch.linalg.vecdot: {f16, bf16, f32, f64},  # aten::prod
     torch.empty: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -525,7 +553,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
-    torch.nn.functional.prelu: {f16},  # aten::prelu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
     torch.vdot: {f16},  # aten::vdot
@@ -612,8 +639,6 @@ meta_dispatch_expected_failures = {
     aten.count_nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.equal.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.floor_divide.default: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.floor_divide.out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.frexp.Tensor: {bf16, f16, f64, f32},
     aten.grid_sampler_2d.default: {f64, f32},
     aten.grid_sampler_3d.default: {f64, f32},
@@ -645,7 +670,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
-    aten.prelu.default: {bf16, f64, f32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -672,10 +696,8 @@ meta_dispatch_expected_failures = {
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_lstsq.default: {f32, f64},  # aten::linalg_lstsq.out
-    aten.linalg_slogdet.default: {f32, f64},  # aten::linalg_slogdet
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
-    aten.logdet.default: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.symeig.default: {f32, f64},  # aten::_symeig_helper
@@ -691,6 +713,7 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
+    aten.empty.SymInt: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
@@ -733,7 +756,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
-    aten.prelu.default: {f16},  # aten::prelu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive

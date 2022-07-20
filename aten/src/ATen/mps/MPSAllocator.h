@@ -63,13 +63,18 @@ struct HeapBlock;
 struct BufferBlock
 {
   id<MTLBuffer> buffer;
-  size_t size;
+  size_t size; // size after alignment
+  size_t requested_size; // requested size (before alignment)
+  // buffer shape is used for retrieving base of views in cached graphs
+  std::vector<int64_t> shape;
   bool in_use;
   HeapBlock* heap;
   id_t buf_id;
 
-  BufferBlock(size_t Size, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr, id_t BufID = 0) :
-            buffer(Buffer), size(Size), in_use(false), heap(Heap), buf_id(BufID) { }
+  BufferBlock(size_t Size, size_t RequestedSize = 0, const id<MTLBuffer> Buffer = nullptr,
+              HeapBlock* Heap = nullptr, id_t BufID = 0) :
+              buffer(Buffer), size(Size), requested_size(RequestedSize),
+              in_use(false), heap(Heap), buf_id(BufID) { }
 
   static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
     return (a->size != b->size) ? a->size < b->size : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
@@ -193,6 +198,9 @@ public:
   void Free(void* ptr);
   void EmptyCache();
   bool isSharedBuffer(void* ptr);
+  ssize_t getRequestedBufferSize(void* ptr);
+  void setBufferShape(void* ptr, const IntArrayRef& shape);
+  IntArrayRef getBufferShape(void* ptr);
 
   inline id<MTLDevice> Device() const { return m_device; }
   void enable_debug_info() { m_enable_debug_info = true; }

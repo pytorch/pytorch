@@ -30,13 +30,13 @@ env:
   CROSS_COMPILE_ARM64: 1
 
 concurrency:
-  group: macos-arm64-binary-wheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-arm64-binary-wheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
   wheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -211,7 +211,7 @@ jobs:
           docker system prune -af
   wheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -386,7 +386,7 @@ jobs:
           docker system prune -af
   wheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -561,7 +561,7 @@ jobs:
           docker system prune -af
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-12
+    runs-on: macos-12-xl
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

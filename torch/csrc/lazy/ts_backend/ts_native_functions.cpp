@@ -1,5 +1,7 @@
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/Functions.h>
 #include <ATen/MetaFunctions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
@@ -18,6 +20,8 @@
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/library.h>
+
+using at::Tensor;
 
 namespace torch {
 namespace lazy {
@@ -46,48 +50,8 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(
 
 } // namespace
 
-at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return self;
-}
-
-at::Tensor LazyNativeFunctions::as_strided(
-    const at::Tensor& self,
-    at::IntArrayRef size,
-    at::IntArrayRef stride,
-    c10::optional<int64_t> storage_offset) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  torch::lazy::LazyTensorPtr self_tensor = torch::lazy::TryGetLtcTensor(self);
-  auto xsize = torch::lazy::ToI64Vector(size);
-  auto xstride = torch::lazy::ToI64Vector(stride);
-  if (!torch::lazy::StrideIsSupported(xstride)) {
-    return at::native::
-        call_fallback_fn<&ltc_eager_fallback, ATEN_OP(as_strided)>::call(
-            self, size, stride, storage_offset);
-  }
-  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::as_strided(
-      self_tensor, std::move(xsize), std::move(xstride), storage_offset));
-}
-
-const at::Tensor& LazyNativeFunctions::as_strided_(
-    const at::Tensor& self,
-    at::IntArrayRef size,
-    at::IntArrayRef stride,
-    c10::optional<int64_t> storage_offset) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  auto xsize = torch::lazy::ToI64Vector(size);
-  auto xstride = torch::lazy::ToI64Vector(stride);
-  if (!torch::lazy::StrideIsSupported(xstride)) {
-    return at::native::
-        call_fallback_fn<&ltc_eager_fallback, ATEN_OP(as_strided_)>::call(
-            self, size, stride, storage_offset);
-  }
-  torch::lazy::as_strided_(
-      self_tensor, std::move(xsize), std::move(xstride), storage_offset);
-  return self;
-}
-
+// clone is special in LT because we make it a no-op.
+// This should be safe to do, because every operator in the LT is functional.
 at::Tensor LazyNativeFunctions::clone(
     const at::Tensor& self,
     c10::optional<at::MemoryFormat> memory_format) {
@@ -211,12 +175,19 @@ at::Tensor LazyNativeFunctions::_to_copy(
   auto lazy_self = torch::lazy::TryGetLtcTensor(self);
   if (!lazy_self && device && device->type() == c10::kLazy) {
     // Case 1: eager->lazy (we create a new lazy tensor)
-
-    auto eager_tensor =
-        self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
-    lazy_self = torch::lazy::GetOrCreateLtcTensor(
-        eager_tensor, torch::lazy::atenDeviceToBackendDevice(*device));
-    return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
+    // See Note [Lazy Tensor Functionalization]
+    // Invariant: if the functionalization key is in the exclude set, then we're
+    // expected to return an ordinary tensor, which will be "lifted" into a
+    // functional wrapper later.
+    bool functionalize_output =
+        !c10::impl::tls_local_dispatch_key_set().excluded_.has(
+            c10::DispatchKey::Functionalize);
+    return torch::lazy::to_lazy_tensor(
+        self,
+        options,
+        *device,
+        /*non_blocking=*/non_blocking,
+        /*functionalize_output=*/functionalize_output);
   } else if (device && device->type() != c10::kLazy) {
     // Case 2: lazy->eager (forces a graph break since we are materializing a
     // tensor)
@@ -298,22 +269,21 @@ at::Tensor LazyNativeFunctions::_to_copy(
   }
 };
 
-at::Tensor LazyNativeFunctions::diagonal(
-    const at::Tensor& self,
-    int64_t offset,
-    int64_t dim1,
-    int64_t dim2) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  auto input = GetLtcTensor(self);
-  auto input_shape = input->shape();
-  dim1 = at::maybe_wrap_dim(dim1, self);
-  dim2 = at::maybe_wrap_dim(dim2, self);
-  auto diagonal_info = DiagonalInfo{offset, dim1, dim2};
-  auto view_info =
-      ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
-
-  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
+at::Tensor LazyNativeFunctions::empty_symint(
+    c10::SymIntArrayRef size,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<at::MemoryFormat> memory_format) {
+  // TODO: support SymIntNodes as well
+  return empty(
+      c10::asIntArrayRefSlow(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      memory_format);
 }
 
 at::Tensor LazyNativeFunctions::empty(
@@ -330,7 +300,18 @@ at::Tensor LazyNativeFunctions::empty(
                                   .pinned_memory(pin_memory)
                                   .dtype(dtype);
   auto x_result = at::empty(size, options, memory_format);
-  return CreateLtcTensor(x_result, GetLtcDevice(device));
+  auto tensor = CreateLtcTensor(x_result, GetLtcDevice(device));
+  // See Note [Lazy Tensor Functionalization]
+  if (c10::impl::tls_local_dispatch_key_set().excluded_.has(
+          c10::DispatchKey::Functionalize)) {
+    // Invariant: if the functionalization key is in the exclude set, then we're
+    // expected to return an ordinary tensor, which will be "lifted" into a
+    // functional wrapper later.
+    return tensor;
+  } else {
+    auto wrapped = at::functionalization::impl::to_functional_tensor(tensor);
+    return wrapped;
+  }
 }
 
 at::Tensor LazyNativeFunctions::empty_strided(
@@ -342,16 +323,7 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t = empty(size, dtype, layout, device, pin_memory, c10::nullopt);
-  return LazyNativeFunctions::as_strided(t, size, stride, /*storage_offset=*/0);
-}
-
-at::Tensor LazyNativeFunctions::expand(
-    const at::Tensor& self,
-    at::IntArrayRef size,
-    bool implicit) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::expand(torch::lazy::TryGetLtcTensor(self), size.vec()));
+  return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
 at::Tensor& LazyNativeFunctions::fill_(
@@ -412,17 +384,6 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
           indices);
 }
 
-at::Tensor LazyNativeFunctions::narrow(
-    const at::Tensor& self,
-    int64_t dim,
-    int64_t start,
-    int64_t length) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::narrow(self_tensor, dim, start, length));
-}
-
 at::Tensor& LazyNativeFunctions::normal_(
     at::Tensor& self,
     double mean,
@@ -453,124 +414,160 @@ at::Tensor& LazyNativeFunctions::normal_(
   // std::move(shapes)); lazy_self.SetInPlaceIrValue(node); return self;
 };
 
-at::Tensor LazyNativeFunctions::permute(
-    const at::Tensor& self,
-    at::IntArrayRef dims) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::permute(self_tensor, torch::lazy::ToI64Vector(dims)));
-}
-
-at::Tensor LazyNativeFunctions::select(
-    const at::Tensor& self,
-    int64_t dim,
-    int64_t index) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::select(torch::lazy::TryGetLtcTensor(self), dim, index));
-}
-
-at::Tensor LazyNativeFunctions::slice(
-    const at::Tensor& self,
-    int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step) {
-  int64_t start_val = start.has_value() ? start.value() : 0;
-  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::slice(
-      torch::lazy::TryGetLtcTensor(self), dim, start_val, end_val, step));
-}
-
-at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::squeeze(torch::lazy::TryGetLtcTensor(self)));
-}
-
-at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::squeeze(torch::lazy::TryGetLtcTensor(self), dim));
-}
-
-at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  torch::lazy::squeeze_(self_tensor);
-  return self;
-}
-
-at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  torch::lazy::squeeze_(self_tensor, dim);
-  return self;
-}
-
-at::Tensor LazyNativeFunctions::t(const at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::transpose(torch::lazy::TryGetLtcTensor(self), 0, 1));
-}
-
-at::Tensor& LazyNativeFunctions::t_(at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  torch::lazy::transpose_(self_tensor, 0, 1);
-  return self;
-}
-
-at::Tensor LazyNativeFunctions::transpose(
-    const at::Tensor& self,
-    int64_t dim0,
-    int64_t dim1) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::transpose(torch::lazy::TryGetLtcTensor(self), dim0, dim1));
-}
-
-at::Tensor& LazyNativeFunctions::transpose_(
-    at::Tensor& self,
-    int64_t dim0,
-    int64_t dim1) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  torch::lazy::transpose_(self_tensor, dim0, dim1);
-  return self;
-}
-
-at::Tensor LazyNativeFunctions::unsqueeze(const at::Tensor& self, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::unsqueeze(torch::lazy::TryGetLtcTensor(self), dim));
-}
-
-at::Tensor& LazyNativeFunctions::unsqueeze_(at::Tensor& self, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  torch::lazy::unsqueeze_(self_tensor, dim);
-  return self;
-}
-
-at::Tensor LazyNativeFunctions::view(
-    const at::Tensor& self,
-    at::IntArrayRef size) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::view(self_tensor, torch::lazy::ToI64Vector(size)));
-}
-
 at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
-  return torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::view(self_tensor, torch::lazy::ToI64Vector(size)));
+  return LazyNativeFunctions::view_copy(self, size);
+}
+
+// This is needed by the torch.tensor constructor.
+// LazyTensor always opts into functionalization.
+// "lifting" a tensor for functionalization means wrapping it in a
+// FunctionalTensorWrapper object.
+at::Tensor LazyNativeFunctions::lift(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      !at::functionalization::impl::isFunctionalTensor(tensor));
+  return at::functionalization::impl::to_functional_tensor(tensor);
+}
+
+// All of the below ops correspond to CompositeExplicitAutograd kernels from
+// core that call into view operators internally. These are all composite ops
+// that LTC can technically re-use / get for free, but we need to
+// "functionalize" them to remove the view ops before we can use them.
+at::Tensor LazyNativeFunctions::block_diag(at::TensorList tensors) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      block_diag)>::call(tensors);
+}
+at::Tensor LazyNativeFunctions::new_empty_strided(
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::functionalization::
+      functionalize_aten_op<ATEN_OP(new_empty_strided)>::call(
+          self, size, stride, dtype, layout, device, pin_memory);
+}
+
+at::Tensor LazyNativeFunctions::narrow_copy(
+    const at::Tensor& self,
+    int64_t dim,
+    int64_t start,
+    int64_t length) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      narrow_copy)>::call(self, dim, start, length);
+}
+at::Tensor LazyNativeFunctions::pixel_shuffle(
+    const at::Tensor& self,
+    int64_t upscale_factor) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      pixel_shuffle)>::call(self, upscale_factor);
+}
+at::Tensor LazyNativeFunctions::pixel_unshuffle(
+    const at::Tensor& self,
+    int64_t downscale_factor) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      pixel_unshuffle)>::call(self, downscale_factor);
+}
+at::Tensor LazyNativeFunctions::select_backward(
+    const at::Tensor& grad_output,
+    at::IntArrayRef input_sizes,
+    int64_t dim,
+    int64_t index) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      select_backward)>::call(grad_output, input_sizes, dim, index);
+}
+at::Tensor LazyNativeFunctions::_trilinear(
+    const at::Tensor& i1,
+    const at::Tensor& i2,
+    const at::Tensor& i3,
+    at::IntArrayRef expand1,
+    at::IntArrayRef expand2,
+    at::IntArrayRef expand3,
+    at::IntArrayRef sumdim,
+    int64_t unroll_dim) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(_trilinear)>::
+      call(i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim);
+}
+::std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::linalg_inv_ex(
+    const at::Tensor& self,
+    bool check_errors) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      linalg_inv_ex)>::call(self, check_errors);
+}
+at::Tensor LazyNativeFunctions::linalg_pinv(
+    const at::Tensor& self,
+    const c10::optional<at::Tensor>& atol,
+    const c10::optional<at::Tensor>& rtol,
+    bool hermitian) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP2(
+      linalg_pinv, atol_rtol_tensor)>::call(self, atol, rtol, hermitian);
+}
+
+// functionalize_aten_op can't handle out= ops directly.
+// Instead, we can call the composite kernel from core, and copy and mutations
+// back to the inputs.
+at::Tensor& LazyNativeFunctions::logsumexp_out(
+    const at::Tensor& self,
+    at::IntArrayRef dim,
+    bool keepdim,
+    at::Tensor& out) {
+  auto self_wrapped = at::functionalization::impl::to_functional_tensor(self);
+  auto out_wrapped = at::functionalization::impl::to_functional_tensor(out);
+  // directly call the composite kernel from core.
+  // Make sure to re-enable functionalization first.
+  auto curr_tls = c10::impl::tls_local_dispatch_key_set();
+  auto tls_reenable_functionalize = c10::impl::PODLocalDispatchKeySet();
+  tls_reenable_functionalize.set_included(curr_tls.included_);
+  tls_reenable_functionalize.set_excluded(
+      curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
+  c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
+  at::native::logsumexp_out(self_wrapped, dim, keepdim, out_wrapped);
+  auto out_unwrapped =
+      at::functionalization::impl::from_functional_tensor(out_wrapped);
+  // propagate mutations back to the inputs (including resizing)
+  out.resize_(out_unwrapped.sizes());
+  out.copy_(out_unwrapped);
+  return out;
+}
+
+at::Tensor LazyNativeFunctions::diagonal_backward(
+    const at::Tensor& grad_output,
+    at::IntArrayRef input_sizes,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
+}
+
+at::Tensor LazyNativeFunctions::slice_backward(
+    const at::Tensor& grad_output,
+    at::IntArrayRef input_sizes,
+    int64_t dim,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
+}
+
+// re-use the composite kernel from core, that way we don't need to provide a
+// backwards formula for native_group_norm
+std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
+  return at::native::math_group_norm(
+      input, weight, bias, N, C, HxW, group, eps);
 }
 
 void InitializeAtenBindings() {}
