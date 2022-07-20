@@ -1,11 +1,12 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 
+import unittest
 import logging
 
 def are_aliased(x, y):
@@ -58,6 +59,7 @@ class InplaceLoggingTensor(LoggingTensorReentrant):
 
 
 
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
     # We can unify testing and use functionalize() here instead
     # if/when functorch moves into core.
@@ -109,6 +111,10 @@ class TestFunctionalization(TestCase):
             torch._sync(out_functional_)
             out_functional_unwrapped = torch._from_functional_tensor(out_functional_)
             self.assertEqual(out_ref_, out_functional_unwrapped)
+
+    def test_save_for_backwards_segfault(self):
+        inp = torch._to_functional_tensor(LoggingTensor(torch.randn(2, 2))).requires_grad_(True)
+        inp.exp()
 
     def test_multiple_views_of_same_base(self):
         def f(x):
@@ -457,10 +463,27 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     ge_scalar = torch.ops.aten.ge.Scalar(a_1, 0);  a_1 = None
-    _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
-    _tensor_constant0 = self._tensor_constant0
-    return _tensor_constant0
+    to_dtype_layout = torch.ops.aten.to.dtype_layout(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
+    return to_dtype_layout
     """)
+
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
+    def test_metadata_change_out_op(self):
+        def f(t, y):
+            out_1 = torch.ones(1)
+            return torch.add(t, y, out=out_1)
+
+        inpt1, inpt2 = torch.tensor([1]), torch.tensor([1])
+        inpt1_func, inpt2_func = torch._to_functional_tensor(inpt1), torch._to_functional_tensor(inpt2)
+
+        out_ref = f(inpt1, inpt2)
+        torch._enable_functionalization(reapply_views=True)
+        try:
+            out_functional = f(inpt1_func, inpt2_func)
+        finally:
+            torch._disable_functionalization()
+        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
+
 
     def test_only_one_view(self):
         def f(x):
@@ -826,47 +849,6 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):
             x1_not_functional.add_(x2_functional)
-
-    # This tests the behavior of functionalization with multiple layers of wrapped tensor subclasses.
-    def test_multiple_levels_of_wrapping(self):
-        def f(x):
-            # call an inplace op and have it get logged twice (by the outer + inner wrapper)
-            x.add_(1)
-
-        # Test 1: both the inner and outer wrapper are "functionalized"
-        x_inner_and_outer_functional = torch._to_functional_tensor(
-            InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4)))))
-
-        with capture_logs() as logs:
-            f(x_inner_and_outer_functional)
-
-        # Since both wrappers were unctionalized, they both log "add"
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, 1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
-
-        # Test 2: only the inner wrapper is "functionalized"
-        x_only_inner_functional = InplaceLoggingTensor(torch._to_functional_tensor(LoggingTensor(torch.ones(4))))
-
-        with capture_logs() as logs:
-            f(x_only_inner_functional)
-
-        # Since only the inner wrapper is functionalized, then the inner (first) log is functionalized
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add.Tensor($0, 1)
-$3 = torch._ops.aten.add_.Tensor($2, 1)""")
-
-        # Test 3: only the inner wrapper is "functionalized"
-        x_only_outer_functional = torch._to_functional_tensor(InplaceLoggingTensor(LoggingTensor(torch.ones(4))))
-
-        with capture_logs() as logs:
-            f(x_only_outer_functional)
-
-        # Only the outer add_ is functionalized
-        # Since only the outer wrapper is functionalized, then the outer (second) log is functionalized
-        self.assertExpectedInline('\n'.join(logs), """\
-$1 = torch._ops.aten.add_.Tensor($0, 1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 if __name__ == '__main__':
     run_tests()
