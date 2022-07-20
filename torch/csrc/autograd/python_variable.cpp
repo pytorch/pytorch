@@ -789,45 +789,79 @@ PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_T(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "T");
+// CRTP base class to implement the python bindings for a Tensor property in
+// PyTorch A class that implements a property is expected to have:
+// - static constexpr const char* name;
+//   - This variable should hold the Python name of the property
+// - static Tensor fn(const Tensor&);
+//   - This function calls the relevant ATen on the tensor
+template <typename T>
+struct GetterBase {
+  static PyObject* getter(THPVariable* self, void* /*unused*/) {
+    HANDLE_TH_ERRORS
+    if (check_has_torch_function((PyObject*)self)) {
+      return handle_torch_function_getter(self, T::name);
+    }
+    return THPVariable_Wrap(T::fn(THPVariable_Unpack(self)));
+    END_HANDLE_TH_ERRORS
   }
-  const auto& var = THPVariable_Unpack(self);
-  return THPVariable_Wrap(var.numpy_T());
-  END_HANDLE_TH_ERRORS
-}
+};
 
-PyObject* THPVariable_get_H(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "H");
+struct PropertyT : GetterBase<PropertyT> {
+  static constexpr const char* name = "T";
+  static Tensor fn(const Tensor& t) {
+    return t.numpy_T();
   }
-  const auto& var = THPVariable_Unpack(self);
-  return THPVariable_Wrap(var.matrix_H());
-  END_HANDLE_TH_ERRORS
-}
+};
 
-PyObject* THPVariable_get_mT(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "mT");
+struct PropertyH : GetterBase<PropertyH> {
+  static constexpr const char* name = "H";
+  static Tensor fn(const Tensor& t) {
+    return t.matrix_H();
   }
-  const auto& var = THPVariable_Unpack(self);
-  return THPVariable_Wrap(var.mT());
-  END_HANDLE_TH_ERRORS
-}
+};
 
-PyObject* THPVariable_get_mH(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "mH");
+struct PropertymT : GetterBase<PropertymT> {
+  static constexpr const char* name = "mT";
+  static Tensor fn(const Tensor& t) {
+    return t.mT();
   }
-  const auto& var = THPVariable_Unpack(self);
-  return THPVariable_Wrap(var.mH());
-  END_HANDLE_TH_ERRORS
-}
+};
+
+struct PropertymH : GetterBase<PropertymH> {
+  static constexpr const char* name = "mH";
+  static Tensor fn(const Tensor& t) {
+    return t.mH();
+  }
+};
+
+struct PropertyData : GetterBase<PropertyData> {
+  static constexpr const char* name = "data";
+  static Tensor fn(const Tensor& t) {
+    return t.variable_data();
+  }
+};
+
+struct PropertyGrad : GetterBase<PropertyGrad> {
+  static constexpr const char* name = "grad";
+  static Tensor fn(const Tensor& t) {
+    return t.grad();
+  }
+};
+
+struct PropertyReal : GetterBase<PropertyReal> {
+  static constexpr const char* name = "real";
+  static Tensor fn(const Tensor& t) {
+    return at::real(t);
+  }
+};
+
+struct PropertyImag : GetterBase<PropertyImag> {
+  static constexpr const char* name = "imag";
+  static Tensor fn(const Tensor& t) {
+    return at::imag(t);
+  }
+};
 
 PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -887,16 +921,6 @@ static PyObject* THPVariable_is_leaf(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_data(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "data");
-  }
-  const auto& var = THPVariable_Unpack(self).variable_data();
-  return THPVariable_Wrap(var);
-  END_HANDLE_TH_ERRORS
-}
-
 int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -912,15 +936,6 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
-}
-
-PyObject* THPVariable_get_grad(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "grad");
-  }
-  return THPVariable_Wrap(THPVariable_Unpack(self).grad());
-  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
@@ -1393,28 +1408,6 @@ static PyObject* THPVariable_device(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_real(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "real");
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  auto real = at::real(self_);
-  return THPVariable_Wrap(real);
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THPVariable_get_imag(THPVariable* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "imag");
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  auto imag = at::imag(self_);
-  return THPVariable_Wrap(imag);
-  END_HANDLE_TH_ERRORS
-}
-
 int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
@@ -1450,10 +1443,10 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr,
      nullptr,
      nullptr},
-    {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
-    {"H", (getter)THPVariable_get_H, nullptr, nullptr, nullptr},
-    {"mT", (getter)THPVariable_get_mT, nullptr, nullptr, nullptr},
-    {"mH", (getter)THPVariable_get_mH, nullptr, nullptr, nullptr},
+    {"T", (getter)PropertyT::getter, nullptr, nullptr, nullptr},
+    {"H", (getter)PropertyH::getter, nullptr, nullptr, nullptr},
+    {"mT", (getter)PropertymT::getter, nullptr, nullptr, nullptr},
+    {"mH", (getter)PropertymH::getter, nullptr, nullptr, nullptr},
     {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
     {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
     {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
@@ -1469,17 +1462,17 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr,
      nullptr},
     {"data",
-     (getter)THPVariable_get_data,
+     (getter)PropertyData::getter,
      (setter)THPVariable_set_data,
      nullptr,
      nullptr},
     {"_grad",
-     (getter)THPVariable_get_grad,
+     (getter)PropertyGrad::getter,
      (setter)THPVariable_set_grad,
      nullptr,
      nullptr}, // Allows the python class to override .grad
     {"grad",
-     (getter)THPVariable_get_grad,
+     (getter)PropertyGrad::getter,
      (setter)THPVariable_set_grad,
      nullptr,
      nullptr},
@@ -1534,12 +1527,12 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr,
      nullptr},
     {"real",
-     (getter)THPVariable_get_real,
+     (getter)PropertyReal::getter,
      (setter)THPVariable_set_real,
      nullptr,
      nullptr},
     {"imag",
-     (getter)THPVariable_get_imag,
+     (getter)PropertyImag::getter,
      (setter)THPVariable_set_imag,
      nullptr,
      nullptr},
@@ -2310,6 +2303,9 @@ c10::IntArrayRef concrete_strides_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
 
@@ -2367,6 +2363,9 @@ c10::IntArrayRef concrete_sizes_fn(
       "torch.ops.aten");
 
   if (out == Py_None) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
 

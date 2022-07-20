@@ -1130,7 +1130,7 @@ class TestTorchFunctionMode(TestCase):
         with torch.overrides.push_torch_function_mode(A):
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
+            self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1323,8 +1323,7 @@ class TestTorchFunctionMode(TestCase):
         class A(TorchFunctionMode):
             pass
 
-        x = A()
-        with x:
+        with A() as x:
             pass
 
         with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):

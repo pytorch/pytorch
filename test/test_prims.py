@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+import torch._refs as refs
+
 
 if TEST_SCIPY:
     import scipy.special
@@ -219,6 +221,69 @@ class TestPrims(TestCase):
         result_nvfuser = fn(a, b_dict, executor="nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
 
+    @dtypes(torch.float32)
+    def test_memory_format_strides(self, device, dtype):
+        shapes = (
+            (),
+            (0,),
+            (1,),
+            (5),
+            (1, 0),
+            (1, 1),
+            (3, 7),
+            (3, 0, 2),
+            (1, 1, 2),
+            (4, 1, 1),
+            (7, 8, 9),
+        )
+
+        channels_last_shapes = (
+            (0, 0, 0, 0),
+            (1, 0, 3, 0),
+            (0, 2, 3, 5),
+            (2, 2, 2, 0),
+            (5, 4, 3, 2),
+            (8, 8, 7, 2),
+            (9, 1, 3, 1),
+            (4, 5, 8, 7)
+        )
+
+        channels_last_3d_shapes = (
+            (0, 8, 7, 9, 2),
+            (5, 0, 7, 9, 2),
+            (5, 0, 7, 9, 0),
+            (5, 8, 7, 9, 2),
+            (5, 1, 7, 9, 2),
+            (5, 1, 7, 9, 1),
+        )
+
+        pairs = (
+            (shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.contiguous_format),
+            (channels_last_3d_shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.channels_last),
+            (channels_last_3d_shapes, torch.channels_last_3d),
+        )
+
+        for shapes, memory_format in pairs:
+            for shape in shapes:
+                # tests empty
+                expected = torch.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                actual = refs.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests clone
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype)
+                expected = torch.clone(a, memory_format=memory_format)
+                actual = torch.clone(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests contiguous
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype, noncontiguous=True)
+                expected = a.contiguous(memory_format=memory_format)
+                actual = refs.contiguous(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
@@ -238,6 +303,46 @@ $1 = torch._ops.prims.sin.default($0)""")
 
 
 instantiate_device_type_tests(TestPrims, globals())
+
+
+class TestRefs(TestCase):
+    @dtypes(torch.float32)
+    def test_constant_pad_nd_memory_format(self, device, dtype):
+        # Test memory format is preserved in unambiguous cases
+        for mf, ndim in (
+                (torch.channels_last, 4),
+                (torch.contiguous_format, 4),
+                (torch.channels_last_3d, 5),
+                (torch.contiguous_format, 5),
+        ):
+            a = torch.zeros([2] * ndim).to(memory_format=mf)
+            res = refs.constant_pad_nd(a, pad=[1] * (2 * ndim))
+            self.assertTrue(res.is_contiguous(memory_format=mf))
+
+        # Ambiguous cases
+
+        # is_channels_last_ and is_contiguous_, results in channels_last output
+        a = torch.empty_strided((2, 1, 2, 2), stride=(4, 1, 2, 1))
+        self.assertTrue(a.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(a.is_contiguous())
+        actual = refs.constant_pad_nd(a, pad=[1] * 8)
+        expect = torch.constant_pad_nd(a, pad=[1] * 8)
+        self.assertEqual(actual.stride(), expect.stride())
+        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+
+        # is_channels_last_contiguous_ but not is_channels_last_, results in
+        # contiguous output
+        a = torch.empty_strided((2, 1, 2, 2), stride=(4, 4, 2, 1))
+        self.assertTrue(a.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(a.is_contiguous())
+        actual = refs.constant_pad_nd(a, pad=[1] * 8)
+        expect = torch.constant_pad_nd(a, pad=[1] * 8)
+        self.assertEqual(actual.stride(), expect.stride())
+        self.assertTrue(actual.is_contiguous())
+
+
+instantiate_device_type_tests(TestRefs, globals())
+
 
 if __name__ == "__main__":
     run_tests()
