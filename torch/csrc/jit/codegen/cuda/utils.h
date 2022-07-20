@@ -46,6 +46,8 @@ enum class DebugDumpOption {
                     //! associated with what's running
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
+  InlinePropagator, //! When running InlinePropagator, print propagation
+                    //! path and inlining result
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

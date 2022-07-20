@@ -147,9 +147,17 @@ size_t InlinePropagator::getMaxPosAll(TensorView* tv, bool check_siblings) {
 }
 
 void InlinePropagator::setCAPos(TensorView* tv) {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
   size_t pos = mapped_reference_pos_.at(tv);
+  if (debug) {
+    std::cout << "  Setting CA pos of " << tv << ":" << std::endl;
+    std::cout << "    mapped position: " << pos << std::endl;
+  }
   if ((selected_.empty() || selected_.count(tv)) && !tv->isFusionInput()) {
     auto max_pos = getMaxPosAll(tv);
+    if (debug) {
+      std::cout << "    max inlinable position: " << max_pos << std::endl;
+    }
     if (mode_ == ComputeAtMode::Standard) {
       TORCH_INTERNAL_ASSERT(
           pos <= max_pos,
@@ -167,12 +175,22 @@ void InlinePropagator::setCAPos(TensorView* tv) {
       pos--;
     }
     auto current_ca_pos = tv->getComputeAtPosition();
+    if (debug) {
+      std::cout << "    current CA position: " << current_ca_pos << std::endl;
+    }
     if (pos > current_ca_pos) {
+      if (debug) {
+        std::cout << "    new CA position: " << pos << std::endl;
+      }
       tv->setComputeAt(pos);
       for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
         needs_update_max_producer_.insert(consumer_tv);
       }
+    } else if (debug) {
+      std::cout << "    CA position not changed" << std::endl;
     }
+  } else if (debug) {
+    std::cout << "    tensor not selected, skip" << std::endl;
   }
 }
 
@@ -201,7 +219,13 @@ InlinePropagator::InlinePropagator(
 }
 
 void InlinePropagator::setUp() {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
   mapped_reference_pos_[reference_] = reference_pos_;
+  if (debug) {
+    std::cout << "InlinePropagator::setUp" << std::endl;
+    std::cout << "  reference: " << reference_ << " @ " << reference_pos_
+              << std::endl;
+  }
   setCAPos(reference_);
 }
 
@@ -273,6 +297,12 @@ void InlinePropagator::tearDown() {
 }
 
 void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateC2P" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
+  }
   // Step 1: find mapped_reference_pos_[to]
   int from_pos;
   if (mode_ != ComputeAtMode::MostInlined) {
@@ -297,6 +327,12 @@ void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
 }
 
 void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateP2C" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
+  }
   // Step 1: find mapped_reference_pos_[to]
   int from_pos;
   if (mode_ != ComputeAtMode::MostInlined) {
@@ -321,6 +357,12 @@ void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
 }
 
 void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateSibling" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
+  }
   // Step 1: find mapped_reference_pos_[to]
   auto from_pos = mapped_reference_pos_.at(from);
   TORCH_CHECK(
