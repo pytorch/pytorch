@@ -94,6 +94,17 @@ class _TestJITIRToONNX:
         w = torch.randn(4, 1, 3, 3)
         self.run_test(graph_ir, (x, w))
 
+    def test_log_softmax(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=0]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2)
+        self.run_test(graph_ir, (x,))
+
 
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
