@@ -1441,22 +1441,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
 
     # NB. All the repeated code and weird python is to please TorchScript.
-    #     The usual implementation would look as follows (modulo some typing issues):
-    #
-    #   kwargs = {} if out is None else dict(out=out)
-    #   # In these cases we compute the "Frobenius norm"
-    #   if (p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2)) or p is None:
-    #       p = 2
-    #   if isinstance(dim, int):
-    #       dim = [dim]
-    #   if isinstance(p, str):
-    #       # Here we either call the nuclear norm, or we call matrix_norm with some arguments
-    #       # that will throw an error
-    #       if dim is None:
-    #           dim = tuple(range(input.ndim))
-    #       return torch.linalg.matrix_norm(input, p, dim, keepdim, dtype=dtype, **kwargs)
-    #   else:
-    #       return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype, **kwargs)
+    #     For a more compact implementation see the relevant function in `_refs/__init__.py`
 
     # We don't do this for MPS or sparse tensors
     if input.layout == torch.strided and input.device.type in ("cpu", "cuda", "meta"):
