@@ -12,6 +12,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 echo "Clang version:"
 clang --version
 
+python test/run_test.py --export-past-test-times
+
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
 export ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=1:symbolize=1:detect_odr_violation=0
@@ -36,9 +38,5 @@ python setup.py build --cmake-only
 popd
 
 print_sccache_stats
-
-cd torch-*
-python test/run_test.py --export-past-test-times
-popd
 
 assert_git_not_dirty
