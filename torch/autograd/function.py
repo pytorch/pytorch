@@ -22,12 +22,15 @@ class FunctionCtx(object):
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
 
-        Note that if tensors that are neither input nor output are saved for backward,
-        your custom Function may not support
+        Note that if intermediary tensors (i.e., tensors that are neither input
+        nor output) are saved for backward, your custom Function may not support
         `double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
         Custom Functions that do not support double backward should decorate their
         :func:`backward` method with `@once_differentiable` so that performing
-        double backward raises an error.
+        double backward raises an error. If you'd like to support double backawrd
+        you can either recompute intermediaries based on the inputs during backward
+        or return the intermediaries as the outputs of the custom Function. See
+        the tutorial linked above for more details.
 
         In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
