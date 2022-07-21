@@ -127,7 +127,7 @@ inline bool is_channels_last_strides_2d_s4(
     if (sizes[d] == 0) {
       return false;
     }
-    if (strides[d] < min) {
+    if (strides[d] < min && !(d == 0 && sizes[d] == 1)) {
       return false;
     }
     // Fallback to NCHW as default layout for ambiguous cases
@@ -166,7 +166,7 @@ inline bool is_channels_last_strides_3d_s5(
     if (sizes[d] == 0) {
       return false;
     }
-    if (strides[d] < min) {
+    if (strides[d] < min && !(d == 0 && sizes[d] == 1)) {
       return false;
     }
     if (d == 0 && min == strides[1]) {
