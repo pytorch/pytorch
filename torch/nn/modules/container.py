@@ -138,6 +138,9 @@ class Sequential(Module):
     def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
         del self[key]
+        # To preserve numbering
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
         return v
 
     @_copy_to_script_wrapper
