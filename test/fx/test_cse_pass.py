@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: fx"]
 
 import torch
-import torch.fx as fx
 
 from torch.testing._internal.common_utils import (
     TestCase, run_tests)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
+from torch.fx import symbolic_trace
 
 import random
 
@@ -190,7 +190,7 @@ class TestCSEPass(TestCase):
                 vals.append(new_val)
             return vals[-1]
 
-        fx_g = fx.symbolic_trace(f)
+        fx_g = symbolic_trace(f)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
         t = torch.randn(2, 2)

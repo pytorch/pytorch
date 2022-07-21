@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: fx"]
 
 import torch
-import torch.fx as fx
 
 from torch.testing._internal.common_utils import (
     TestCase, parametrize, instantiate_parametrized_tests, run_tests)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass
+from torch.fx.graph_module import GraphModule
 
 import itertools
 
@@ -85,7 +85,7 @@ class TestCommonPass(TestCase):
 
         res = P(traced_m)
         modified_m = res.graph_module
-        assert isinstance(modified_m, fx.GraphModule)
+        assert isinstance(modified_m, GraphModule)
 
         inp_copy = inp.clone()
         expected = f(inp)
@@ -102,7 +102,7 @@ class TestCommonPass(TestCase):
 
         res = P(traced_m)
         modified_m = res.graph_module
-        assert isinstance(modified_m, fx.GraphModule)
+        assert isinstance(modified_m, GraphModule)
 
         inp_copy = inp.clone()
         expected = f(inp, device)
