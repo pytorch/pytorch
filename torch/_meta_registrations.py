@@ -1,14 +1,14 @@
+from typing import List, Optional
+
 import torch
-from torch import Tensor
 import torch._prims_common as utils
+from torch import Tensor
 from torch._prims_common import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
     check,
     elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 from torch._prims_common.wrappers import out_wrapper
-
-from typing import List, Optional
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
