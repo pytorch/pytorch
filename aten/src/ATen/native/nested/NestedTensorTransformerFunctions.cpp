@@ -21,7 +21,11 @@ inline void check_nested_tensor_matrix_constraints(
       !dense_matrix.is_nested(),
       caller,
       " does not support nested weight when input is a nested tensor.")
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+  // TODO: support noncontiguous case
+  // error out for now
+  TORCH_CHECK(
+      nested_tensor_impl_is_contiguous(nt_input),
+      "for now linear only supports contiguous nested tensor");
   TORCH_CHECK(
       nested_tensor.dim() == 3 && dense_matrix.dim() == 2,
       caller,

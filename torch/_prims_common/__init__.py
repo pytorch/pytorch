@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
@@ -56,8 +55,11 @@ torch_function_passthrough = {
     torch.Tensor.numel,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -69,82 +71,6 @@ TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
-
-
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
-
-
-def TensorMeta(
-    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
-    *,
-    shape: Optional[ShapeType] = None,
-    strides: Optional[StrideType] = None,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[torch.device, str]] = None,
-):
-    if isinstance(tensorlike, Number):
-        assert not shape and (shape is None or isinstance(shape, Sequence))
-        assert not strides and (strides is None or isinstance(strides, Sequence))
-        inferred_shape: Tuple[int, ...] = ()
-        inferred_strides: Tuple[int, ...] = ()
-        inferred_dtype = type_to_dtype(type(tensorlike))
-        inferred_device = torch.device("cpu")
-        # TODO: This looks wrong, a number that is wrapped into a tensor
-        # needs to behave differently than a scalar tensor for type
-        # promotion purposes
-    elif tensorlike is not None:
-        assert isinstance(tensorlike, torch.Tensor)
-        inferred_shape = tuple(tensorlike.shape)
-        inferred_strides = tuple(tensorlike.stride())
-        inferred_dtype = tensorlike.dtype
-        inferred_device = tensorlike.device
-    else:
-        # If no tensorlike "example" is given then all metadata
-        # must be provided explicitly
-        assert shape is not None
-        assert strides is not None
-        assert dtype is not None
-        assert device is not None
-
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
-
-    if isinstance(device, str):
-        device = torch.device(device)
-
-    if isinstance(tensorlike, FakeTensor):
-        mode = tensorlike.fake_mode
-    else:
-        mode = get_prim_fake_mode()
-
-    if device.type == "meta":
-        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-    else:
-        return FakeTensor(
-            mode,
-            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
-            device,
-        )
 
 
 def same_shape(a: ShapeType, b: ShapeType) -> bool:
@@ -540,7 +466,17 @@ def canonicalize_dim(rank: int, idx: int) -> int:
 
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
-def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
+@overload
+def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+    pass
+
+
+@overload
+def canonicalize_dims(rank: int, indices: int) -> int:
+    pass
+
+
+def canonicalize_dims(rank, indices):
     if isinstance(indices, int):
         return canonicalize_dim(rank, indices)
 
@@ -704,7 +640,7 @@ def extract_shape_from_varargs(
     """
 
     # Handles tuple unwrapping
-    if len(shape) == 1 and isinstance(shape[0], tuple):
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
     validate_shape(shape)  # type: ignore[arg-type]
@@ -1326,6 +1262,18 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
+def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    ndim = len(shape) if isinstance(shape, Sequence) else 1
+    if ndim == 4:
+        return make_channels_last_2d_strides_for(shape)
+    elif ndim == 5:
+        return make_channels_last_3d_strides_for(shape)
+    else:
+        raise RuntimeError(
+            f"no channels last format strides exist in {ndim} dimensions"
+        )
+
+
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
 ) -> Tuple[int, ...]:
@@ -1393,3 +1341,46 @@ def check(
     """
     if not b:
         raise exc_type(s())
+
+
+# This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
+# c10/core/MemoryFormat.h into one function
+def are_strides_like_channels_last(
+    shape: Sequence[int], strides: Sequence[int]
+) -> bool:
+    ndim = len(shape)
+
+    if ndim == 4:
+        # Check for channels_last_2d
+        dim_order = [1, 3, 2, 0]
+    elif ndim == 5:
+        # Check for channels_last_3d
+        dim_order = [1, 4, 3, 2, 0]
+    else:
+        return False
+
+    if strides[1] == 0:
+        return False
+
+    min = 0
+    for d in dim_order:
+        if shape[d] == 0:
+            return False
+        if strides[d] < min:
+            return False
+        if d == 0 and min == strides[1]:
+            return False
+        min = strides[d]
+        if strides[d] > 1:
+            min *= shape[d]
+    return True
+
+
+def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    if x.layout != torch.strided:
+        return torch.contiguous_format
+
+    if are_strides_like_channels_last(x.shape, x.stride()):
+        return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
+
+    return torch.contiguous_format

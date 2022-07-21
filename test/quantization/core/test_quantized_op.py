@@ -469,6 +469,40 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                                  msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::prelu op."""
+    def test_qprelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        num_params = (0, 1)  # 0: num_parameter = num_channels
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, num_params, dtypes, memory_formats)
+        for shape, num_param, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+            num_parameter = 1 if num_param == 1 or len(shape) == 1 else shape[1]
+            W = torch.randn(num_parameter)
+            W, w_scale, w_zero_point = \
+                torch.randn(num_parameter), 0.2, 0
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+            qW = torch.quantize_per_tensor(W, scale=w_scale, zero_point=w_zero_point,
+                                           dtype=torch_type)
+            dqW = qW.dequantize()
+
+            op = torch.nn.functional.prelu
+            qop = torch.ops.quantized.prelu
+            dqY = op(dqX, dqW)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = qop(qX, qW, scale, zero_point)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.prelu failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
@@ -2277,9 +2311,9 @@ class TestQuantizedOps(TestCase):
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
         batches_list = (1, 7)
-        num_groups_list = (1, 2)
-        channels_per_groups = (1, 2)
-        elements_per_channels = (8, 17)
+        num_groups_list = (1, 4)
+        channels_per_groups = (1, 36, 72)
+        elements_per_channels = (8, 128, 1024)
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
@@ -2344,7 +2378,7 @@ class TestQuantizedOps(TestCase):
                         ch_end = ch_start + channels_per_group
                         group_vals = dqX[batch_idx][ch_start:ch_end]
                         assume(
-                            float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.01
+                            float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.001
                             or group_vals.numel() < 5)
 
                 qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)

@@ -16,12 +16,9 @@ Tensor softmax_internal(
     const bool half_to_float,
     const api::ShaderSource& shader_descriptor) {
   TORCH_CHECK(
-      input_arg.dim() == 4,
-      "Vulkan softmax expects 4-dimensional input!");
+      input_arg.dim() == 4, "Vulkan softmax expects 4-dimensional input!");
 
-  TORCH_CHECK(
-      dim == 1,
-      "Vulkan softmax expects dim == 1 (channel)");
+  TORCH_CHECK(dim == 1, "Vulkan softmax expects dim == 1 (channel)");
 
   api::Context* const context = api::context();
 
@@ -34,45 +31,37 @@ Tensor softmax_internal(
       "Vulkan softmax expects batch dim == 1");
 
   c10::SmallVector<int64_t, 4u> output_sizes{
-    v_input_sizes[Layout::Activation4D::batch],
-    v_input_sizes[Layout::Activation4D::channels],
-    v_input_sizes[Layout::Activation4D::height],
-    v_input_sizes[Layout::Activation4D::width],
+      v_input_sizes[Layout::Activation4D::batch],
+      v_input_sizes[Layout::Activation4D::channels],
+      v_input_sizes[Layout::Activation4D::height],
+      v_input_sizes[Layout::Activation4D::width],
   };
 
   vTensor v_output{
-    context,
-    output_sizes,
-    v_input.options(),
+      context,
+      output_sizes,
+      v_input.options(),
   };
 
   const api::utils::uvec3 global_work_group_size = {
-    safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::width]),
-    safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::height]),
-    1,
+      safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::width]),
+      safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::height]),
+      1,
   };
   const api::utils::uvec3 local_work_group_size = {8, 8, 1};
 
   const struct Block final {
     uvec3 iextents;
     int last_texel_end_offset;
-  } block {
-    v_input.extents(),
-    safe_downcast<int32_t>(
-        (v_input_sizes[Layout::Activation4D::channels] - 1) % 4
-    )
-  };
+  } block{
+      v_input.extents(),
+      safe_downcast<int32_t>(
+          (v_input_sizes[Layout::Activation4D::channels] - 1) % 4)};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -88,9 +77,7 @@ Tensor softmax_internal(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -101,8 +88,7 @@ Tensor softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(
-      input_arg, dim, half_to_float, VK_KERNEL(softmax));
+  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(softmax));
 }
 
 Tensor log_softmax(

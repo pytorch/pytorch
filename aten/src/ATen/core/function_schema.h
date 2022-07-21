@@ -20,6 +20,8 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
+using AliasTypeSet = std::vector<TypePtr>;
+
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -202,9 +204,24 @@ inline bool operator!=(const Argument& lhs, const Argument& rhs) {
   return !(lhs == rhs);
 }
 
+enum struct TORCH_API SchemaArgType { input, output };
+
+/**
+ * struct SchemaArgument
+ *
+ * Structure used to represent arguments or returns for a schema.
+ */
+struct TORCH_API SchemaArgument {
+  SchemaArgType type;
+  size_t index;
+  bool operator==(const SchemaArgument& rhs) const {
+    return type == rhs.type && index == rhs.index;
+  }
+};
+
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
-struct FunctionSchema {
+struct TORCH_API FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
@@ -359,11 +376,11 @@ struct FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
-  bool is_mutable(size_t index) const {
+  bool is_mutable(const c10::SchemaArgument &argument) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size(),
+        argument.index < getCorrectList(argument.type).size(),
         "Invalid index for schema.");
-    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
   bool is_mutable(c10::string_view name) const {
@@ -371,8 +388,38 @@ struct FunctionSchema {
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
-    return is_mutable(*index);
+    return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
+
+  // Returns whether lhs and rhs may alias directly.
+  // This does not account for cases where lhs or rhs are a container that
+  // may contain elements that alias the other argument.
+  // FunctionSchema::may_contain_alias will include that functionality.
+  bool may_alias(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
+
+  // Returns whether lhs and rhs may alias directly or whether lhs/rhs are a container
+  // that may contain elements that alias the other argument.
+  // bidirectional = false only returns whether lhs may contain an alias of rhs
+  // while bidirectional = true returns both directions.
+  bool may_contain_alias(const SchemaArgument& lhs, const SchemaArgument& rhs, bool bidirectional = true) const;
+
+  // Returns whether the two AliasTypeSets contain any similarities
+  // ie: whether the two type sets can alias.
+  bool canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const;
+
+  // Recursively Finds all contained types within the AliasTypeSet.
+  c10::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const;
+
+  // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
+  // Used to map types to a type such that all types that can alias will be mapped to the same type.
+  // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
+  // on 'List[int]'.
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) const;
+
+  // Returns either arguments() or returns() depending on the SchemaArgType
+  // output => returns(), input => arguments()
+  const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
+
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
@@ -559,5 +606,16 @@ inline std::string toString(const FunctionSchema& schema) {
 }
 
 } // namespace c10
+
+namespace std {
+template<>
+  struct hash<c10::SchemaArgument> {
+    size_t operator()(const c10::SchemaArgument& arg) const
+    {
+      return c10::hash_combine(std::hash<size_t>()(arg.index), std::hash<size_t>()(static_cast<std::size_t>(arg.type)));
+    }
+  };
+} // namespace std
+
 
 #include <ATen/core/function_schema_inl.h>  // IWYU pragma: keep

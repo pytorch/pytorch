@@ -609,6 +609,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if(${USE_ITT})
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
+    )
+  endif()
+
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -2047,7 +2054,7 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
-  if(CAFFE2_USE_MKLDNN)
+  if(USE_MKLDNN)
       target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
   endif()
   if(WIN32)
