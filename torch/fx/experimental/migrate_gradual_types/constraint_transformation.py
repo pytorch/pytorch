@@ -2,8 +2,7 @@
 import copy
 import itertools
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT, MAX_TENSOR_RANK
-from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar, \
-    Transpose
+from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar
 from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool
@@ -39,28 +38,6 @@ def valid_index(index, dims):
         return F()
 
 
-@register_transformation_rule(Transpose)
-def transform_transpose(constraint, counter):
-    """
-    Similar to a sequence of two index-selects
-    """
-    dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
-    is_valid_index1 = valid_index(constraint.index1, dims)
-    is_valid_index2 = valid_index(constraint.index2, dims)
-    new_dims = copy.deepcopy(dims)
-    nat_constraints = gen_nat_constraints(dims)
-
-    if is_valid_index1 == T() and is_valid_index2 == T():
-        new_dims[constraint.index1] = dims[constraint.index2]
-        new_dims[constraint.index2] = dims[constraint.index1]
-
-    transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
-                                   *nat_constraints,
-                                   is_valid_index1, is_valid_index2,
-                                   BinConstraintT(constraint.output, TensorType(new_dims), op_eq)])
-    return transformed_constraint, counter
-
-
 @register_transformation_rule(IndexSelect)
 def transform_index_select(constraint, counter):
     """
@@ -78,6 +55,7 @@ def transform_index_select(constraint, counter):
         new_dims = copy.deepcopy((dims))
         new_dims[constraint.index] = constraint.dim_replace
 
+
     transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
                                    *nat_constraints,
                                    is_valid_index,
@@ -85,7 +63,6 @@ def transform_index_select(constraint, counter):
 
     # print(constraints)
     return transformed_constraint, counter
-
 
 @register_transformation_rule(GetItem)
 def transform_get_item(constraint, counter):
