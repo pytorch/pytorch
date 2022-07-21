@@ -136,7 +136,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - name: Checkout PyTorch to pytorch dirs
+      - name: Checkout PyTorch to pytorch dir2
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
