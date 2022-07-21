@@ -13,6 +13,7 @@ import functools
 try:
     import torchdynamo
     from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
+    import functorch
 
     TEST_DYNAMO = True
 except ImportError:
