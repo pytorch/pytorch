@@ -11822,11 +11822,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def _test_conv2d(stride, kernel_size, groups, dilation):
             padding = kernel_size // 2
 
-            input = torch.empty(BATCH_SIZE, IN_CH, SPATIAL, SPATIAL)\
-                    .uniform_(-8.0, 8.0).requires_grad_(True)
+            input = torch.empty(BATCH_SIZE, IN_CH, SPATIAL, SPATIAL).uniform_(-8.0, 8.0).requires_grad_(True)
 
-            weight = torch.empty(OUT_CH, IN_CH // groups, kernel_size, kernel_size)\
-                    .uniform_(-4.0, 4.0).requires_grad_(True)
+            weight = torch.empty(OUT_CH, IN_CH // groups, kernel_size, kernel_size).uniform_(-4.0, 4.0).requires_grad_(True)
 
             output = F.conv2d(input, weight,
                               stride=stride, padding=padding, dilation=dilation, groups=groups)
