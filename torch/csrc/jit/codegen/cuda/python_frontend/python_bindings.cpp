@@ -654,12 +654,15 @@ void initNvFuserPythonBindings(PyObject* module) {
 
         std::vector<torch::jit::fuser::cuda::Val*> output_shape_on_bcast(
             output_shape.size(), nullptr);
+        bool has_expand = false;
         for (const auto idx : c10::irange(output_shape.size())) {
-          if (is_expand_dim[idx]) {
+          if (is_expand_dim[idx] && output_shape[idx] != 1 &&
+              output_shape[idx] != -1) {
             // TODO: this would be tricky to handle on dynamic shapes, we'll
             // need to pass-in a symbol instead somehow.
             output_shape_on_bcast[idx] =
                 IrBuilder::create<Int>(output_shape[idx]);
+            has_expand = true;
           } else {
             output_shape_on_bcast[idx] = IrBuilder::create<Int>(-1);
           }
@@ -667,8 +670,12 @@ void initNvFuserPythonBindings(PyObject* module) {
 
         auto bcasted_input =
             torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
-        return torch::jit::fuser::cuda::expand(
-            bcasted_input, output_shape_on_bcast);
+        if (has_expand) {
+          return torch::jit::fuser::cuda::expand(
+              bcasted_input, output_shape_on_bcast);
+        } else {
+          return bcasted_input;
+        }
       },
       py::return_value_policy::reference);
 
