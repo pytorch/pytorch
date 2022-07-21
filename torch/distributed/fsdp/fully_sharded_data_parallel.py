@@ -3104,7 +3104,7 @@ class FullyShardedDataParallel(nn.Module):
                         # then a default hook (`all_reduce`) will be used
                         self.communication_hook(self.communication_hook_state, param.grad)
 
-                    self._cast_grad_to_param_dtype(grad, param)
+                    self._cast_grad_to_param_dtype(param.grad, param)
 
                 # Regardless of sharding or not, offload the grad to CPU if we are
                 # offloading params. This is so param and grad reside on same device
