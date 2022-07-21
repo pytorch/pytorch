@@ -251,9 +251,7 @@ make_fx_failures = {
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
-    xfail('nanquantile'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('quantile'),
     xfail('tensor_split'),
     xfail('corrcoef'),
 
