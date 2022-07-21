@@ -1565,6 +1565,7 @@ class THCCachingAllocator {
 
   // record allocate/free events
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
+  AllocFreeEvent current_alloc_free_event;
   std::vector<unsigned int> num_alloc_events;
 
   // allocated blocks by device pointer
@@ -1585,13 +1586,14 @@ class THCCachingAllocator {
     return &cuda_free_mutex;
   }
 
-  void append_alloc_free_event(AllocFreeEvent E) {
-    if (num_alloc_events[E.device] >= alloc_free_events[E.device].size()) {
-      alloc_free_events[E.device].resize(
-          alloc_free_events[E.device].size() * 2);
+  void append_alloc_free_event() {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (num_alloc_events[current_alloc_free_event.device] >= alloc_free_events[current_alloc_free_event.device].size()) {
+      alloc_free_events[current_alloc_free_event.device].resize(
+          alloc_free_events[current_alloc_free_event.device].size() * 2);
     }
-    alloc_free_events[E.device][num_alloc_events[E.device]] = E;
-    num_alloc_events[E.device] += 1;
+    alloc_free_events[current_alloc_free_event.device][num_alloc_events[current_alloc_free_event.device]] = current_alloc_free_event;
+    num_alloc_events[current_alloc_free_event.device] += 1;
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
     std::vector<std::vector<AllocFreeEvent>> result = alloc_free_events;
@@ -1630,14 +1632,13 @@ class THCCachingAllocator {
 
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
-    AllocFreeEvent E = {
+    current_alloc_free_event = {
         reinterpret_cast<intptr_t>(nullptr), // ptr
         size, // size: of allocation in bytes
         1, // type: 1 = allocation; 0 = free
         device // allocation device
     };
-    append_alloc_free_event(
-        E); // if allocation fails we still record the event with a nullptr
+    append_alloc_free_event(); // if allocation fails we still record the event with a nullptr
             // ptr is modified if allocation succeeds
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
@@ -1660,13 +1661,13 @@ class THCCachingAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     device_allocator[block->device]->free(block);
-    AllocFreeEvent E = {
+    current_alloc_free_event = {
         reinterpret_cast<intptr_t>(block->ptr), // ptr
         block->size, // size: of allocation in bytes
         0, // type: 1 = allocation; 0 = free
         block->device // allocation device
     };
-    append_alloc_free_event(E);
+    append_alloc_free_event();
   }
 
   void setMemoryFraction(double fraction, int device) {
