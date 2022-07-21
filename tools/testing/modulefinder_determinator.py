@@ -1,9 +1,9 @@
-import os
 import modulefinder
-import sys
+import os
 import pathlib
+import sys
 import warnings
-from typing import Dict, Any, List, Set
+from typing import Any, Dict, List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
