@@ -284,6 +284,7 @@ def in_kernel_invocation_manager(fake_mode):
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
+    has_sym_ints: bool
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
@@ -298,6 +299,7 @@ class FakeTensor(torch.Tensor):
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
+        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -309,11 +311,13 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
 
     def stride(self):
-        # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
-        # The reason this needs to be here instead of __torch_dispatch__ is that
-        # when aten.stride goes into __torch_dispatch__, it expects a list of
-        # concrete ints to be returned. So we need to short-circuit that entirely
-        return symbolic_shapes.create_contiguous(self.shape)
+        if symbolic_shapes.has_symbolic_sizes_strides(self):
+            # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
+            # The reason this needs to be here instead of __torch_dispatch__ is that
+            # when aten.stride goes into __torch_dispatch__, it expects a list of
+            # concrete ints to be returned. So we need to short-circuit that entirely
+            return symbolic_shapes.create_contiguous(self.shape)
+        return self.stride()
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -359,6 +363,7 @@ class FakeTensor(torch.Tensor):
                     fake_mode = arg.fake_mode
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+
         with enable_torch_dispatch_mode(fake_mode):
             return func(*args, **kwargs)
 
@@ -453,18 +458,20 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        flat_arg_tensors = [i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)]
+        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        if has_symbolic_sizes:
+            with enable_torch_dispatch_mode(self), torch.overrides.enable_reentrant_dispatch():
+                if func in meta_table:
+                    r = meta_table[func](*args, **kwargs)
+                    return r
+                elif func in decomposition_table:
+                    r = decomposition_table[func](*args, **kwargs)
+                    return r
 
-        with enable_torch_dispatch_mode(self), torch.overrides.enable_reentrant_dispatch():
-            if func in meta_table:
-                r = meta_table[func](*args, **kwargs)
-                return r
-            elif func in decomposition_table:
-                r = decomposition_table[func](*args, **kwargs)
-                return r
-
-        with no_dispatch():
-            if symbolic_shapes.is_symbolic_op(func):
-                return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+            with no_dispatch():
+                if symbolic_shapes.is_symbolic_op(func):
+                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
 
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
@@ -474,9 +481,10 @@ class FakeTensorMode(TorchDispatchMode):
             with no_dispatch():
                 return func(*args, **kwargs)
 
-        constructors = [torch.ops.aten.empty.SymInt]
-        if func not in constructors:
-            raise RuntimeError(f"Couldn't find symbolic meta function/decomposition, {func}")
+        if has_symbolic_sizes:
+            constructors = [torch.ops.aten.empty.SymInt]
+            if func not in constructors:
+                raise RuntimeError(f"Couldn't find symbolic meta function/decomposition, {func}")
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator

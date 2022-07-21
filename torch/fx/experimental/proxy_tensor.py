@@ -504,11 +504,22 @@ a bug if you need this)""")
         shape_env = ShapeEnv()
         arg_cnt = 0
 
+        # todo: FIgure out a more informative name
         def wrap_fake_symbolic(x):
             nonlocal arg_cnt
             if isinstance(x, torch.Tensor):
                 arg_cnt += 1
-                val = FakeTensor(fake_tensor_mode, torch.empty([shape_env.create_symint(f"arg_{arg_cnt}_{idx}", sz) for idx, sz in enumerate(x.shape)], device='meta'), x.device)
+                val = FakeTensor(
+                    fake_tensor_mode,
+                    torch.empty(
+                        [
+                            shape_env.create_symint(f"s_{arg_cnt}^{idx}", sz)
+                            for idx, sz in enumerate(x.shape)
+                        ],
+                        device="meta",
+                    ),
+                    x.device,
+                )
                 return val
             return x
 
