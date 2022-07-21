@@ -1666,7 +1666,7 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(foo, concrete_args=concrete_args)
         x = torch.randn(5, 3)
         y = torch.randn(5, 3)
-        l  = [torch.randn(5, 3)] * 10
+        l = [torch.randn(5, 3)] * 10
 
         torch.testing.assert_close(traced(x, y, l), foo(x, y, l))
 

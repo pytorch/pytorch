@@ -555,7 +555,8 @@ class _PyTreeCodeGen(CodeGen):
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
             function_definition += f"""
-    {', '.join(var.name for var in free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(arg.name for arg in function_args)}], self._in_spec)"""
+    {', '.join(var.name for var in free_vars)}, = fx_pytree.tree_flatten_spec\
+([{', '.join(arg.name for arg in function_args)}], self._in_spec)"""
         return function_definition
 
     def generate_output(self, output_args):

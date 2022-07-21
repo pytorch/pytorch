@@ -540,6 +540,9 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
+
+            # TODO: this seems sketchy. We're not carrying forward type annotations
+            # or default values
             self.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo([_ParamDescr(arg, '', '') for arg in orig_args[:total_args]], in_spec, None)
             )
