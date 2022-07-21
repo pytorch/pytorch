@@ -159,18 +159,7 @@ class Sequential(Module):
             return combined
 
     def __rmul__(self, other: int) -> 'Sequential':
-        if not isinstance(other, int):
-            raise TypeError(f"unsupported operand type(s) for *: {type(other)} and {type(self)}")
-        elif (other <= 0):
-            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
-        else:
-            combined = Sequential()
-            offset = 0
-            for _ in range(other):
-                for module in self:
-                    combined.add_module(str(offset), module)
-                    offset += 1
-            return combined
+        return self.mul(other)
 
     def __imul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):
@@ -178,13 +167,11 @@ class Sequential(Module):
         elif (other <= 0):
             raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
         else:
+            len_original = len(self)
             offset = len(self)
-            copy = Sequential()
-            for i, module in enumerate(self):
-                copy.add_module(str(i), module)
             for _ in range(other-1):
-                for module in copy:
-                    self.add_module(str(offset), module)
+                for i in range(len_original):
+                    self.add_module(str(i + offset), self._modules[str(i)])
                     offset += 1
             return self
 
