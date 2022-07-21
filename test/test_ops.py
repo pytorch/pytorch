@@ -9,7 +9,6 @@ import torch
 import contextlib
 from importlib import import_module
 from torch.utils._pytree import tree_map
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -1447,6 +1446,23 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+
+def test_nondeterministic_seeded(func, args, kwargs):
+    if func is None or torch.Tag.inplace_view in func.tags:
+        return
+    results = []
+    for i in range(2):
+        results.append(func(*args, **kwargs))
+    try:
+        TestCase.assertEqual(TestCase(), results[0], results[1])
+    except AssertionError:
+        assert torch.Tag.nondeterministic_seeded in func.tags, f'{func} should be nondeterministic_seeded'
+    try:
+        TestCase.assertEqual(TestCase(), results[0], results[1], atol=0, rtol=0)
+    except AssertionError:
+        assert torch.Tag.nondeterministic_bitwise in func.tags or torch.Tag.nondeterministic_seeded in func.tags, f'{func} should be nondeterministic_bitwise'
+
+
 # input strides and size may have been altered due to the result of an inplace op
 def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
@@ -1471,6 +1487,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 # ouput tensor properties
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        test_nondeterministic_seeded(func, args, kwargs)
         if isinstance(args[0], torch.Tensor):
             old_size = args[0].size()
             old_stride = args[0].stride()
