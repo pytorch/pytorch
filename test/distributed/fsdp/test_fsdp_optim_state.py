@@ -305,6 +305,7 @@ class TestFSDPOptimState(FSDPTest):
         losses = []
         module = model.module if hasattr(model, "module") else model
         for _ in range(num_iters):
+            optim.zero_grad()
             inp = module.get_input(device)
             output = model(*inp)
             loss = module.get_loss(inp, output).to(device)
