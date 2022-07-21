@@ -19,7 +19,7 @@ class TORCH_API Shape {
   Shape(
       at::ScalarType scalar_type,
       c10::ArrayRef<int64_t> sizes,
-      c10::optional<std::vector<bool>> is_symbolic=c10::nullopt);
+      c10::optional<std::vector<bool>> is_symbolic = c10::nullopt);
 
   std::string to_string() const;
 
