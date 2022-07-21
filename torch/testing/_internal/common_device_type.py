@@ -823,7 +823,8 @@ class ops(_TestParametrizer):
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
         if op is check_exhausted_iterator:
-            raise ValueError("Parameter op_list is exhausted.")
+            raise ValueError('An empty op_list was passed to @ops. '
+                             'Note that this may result from reuse of a generator.')
 
 # Decorator that skips a test if the given condition is true.
 # Notes:

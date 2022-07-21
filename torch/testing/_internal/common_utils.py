@@ -373,7 +373,8 @@ class parametrize(_TestParametrizer):
                 yield (gen_test, test_name, param_kwargs)
 
             if values is check_exhausted_iterator:
-                raise ValueError("Parameter arg_values is exhausted.")
+                raise ValueError('An empty arg_values was passed to @parametrize. '
+                                 'Note that this may result from reuse of a generator.')
 
 
 class ProfilingMode(Enum):
