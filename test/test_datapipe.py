@@ -30,7 +30,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
@@ -521,7 +520,7 @@ class TestDataFramesPipes(TestCase):
         df_numbers['k'] = df_numbers['j'] + df_numbers.i * 3
         expected = list(dp_numbers)
         actual = list(df_numbers)
-        self.assertEquals(expected, actual)
+        self.assertEqual(expected, actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -532,7 +531,7 @@ class TestDataFramesPipes(TestCase):
         dp_numbers = self._get_datapipe(range=1000)
         df_result = [tuple(item) for item in df_numbers]
         self.assertNotEqual(list(dp_numbers), df_result)
-        self.assertEquals(list(dp_numbers), sorted(df_result))
+        self.assertEqual(list(dp_numbers), sorted(df_result))
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -542,21 +541,21 @@ class TestDataFramesPipes(TestCase):
         last_batch = df_numbers_list[-1]
         self.assertEqual(4, len(last_batch))
         unpacked_batch = [tuple(row) for row in last_batch]
-        self.assertEquals([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
+        self.assertEqual([(96, 0), (97, 1), (98, 2), (99, 0)], unpacked_batch)
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_unbatch(self):
         df_numbers = self._get_dataframes_pipe(range=100).batch(8).batch(3)
         dp_numbers = self._get_datapipe(range=100)
-        self.assertEquals(list(dp_numbers), list(df_numbers.unbatch(2)))
+        self.assertEqual(list(dp_numbers), list(df_numbers.unbatch(2)))
 
     @skipIfNoDataFrames
     @skipIfNoDill
     def test_filter(self):
         df_numbers = self._get_dataframes_pipe(range=10).filter(lambda x: x.i > 5)
         actual = list(df_numbers)
-        self.assertEquals([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
+        self.assertEqual([(6, 0), (7, 1), (8, 2), (9, 0)], actual)
 
     @skipIfNoDataFrames
     @skipIfNoDill
@@ -1640,8 +1639,9 @@ class TestFunctionalIterDataPipe(TestCase):
         # Reset Test:
         n_elements_before_reset = 3
         res_before_reset, res_after_reset = reset_after_n_next_calls(zipped_dp, n_elements_before_reset)
-        self.assertEqual(list((i, i) for i in range(5))[:n_elements_before_reset], res_before_reset)
-        self.assertEqual(list((i, i) for i in range(5)), res_after_reset)
+        expected_res = [(i, i) for i in range(5)]
+        self.assertEqual(expected_res[:n_elements_before_reset], res_before_reset)
+        self.assertEqual(expected_res, res_after_reset)
 
 
 class TestFunctionalMapDataPipe(TestCase):
@@ -2332,7 +2332,7 @@ def unbatch(x):
 class TestSerialization(TestCase):
     @skipIfNoDill
     def test_spawn_lambdas_iter(self):
-        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1)
+        idp = dp.iter.IterableWrapper(range(3)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(idp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
@@ -2340,7 +2340,7 @@ class TestSerialization(TestCase):
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
-        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1)
+        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
@@ -2639,8 +2639,7 @@ class TestSharding(TestCase):
         expected = list(dp0)
 
         dp0 = self._get_pipeline().sharding_filter()
-        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2,
-                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:
             items.append(i)
