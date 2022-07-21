@@ -24,6 +24,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -1234,6 +1235,34 @@ class DummyProcessGroup(dist.ProcessGroup):
             tensor.add_(2)
 
         return DummyWork()
+
+
+class CompilerTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CompilerTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(CompilerTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def test_make_fx(self):
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("gloo", rank=self.rank, world_size=self.world_size)
+
+        def fn(x):
+            y = x + x
+            dist.all_reduce(y)
+            return y * 2
+
+        x = torch.ones(2, 2) * self.rank
+        fx_fn = make_fx(fn)(x)
+
+        self.assertEqual(fn(x), fx_fn(x))
 
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
