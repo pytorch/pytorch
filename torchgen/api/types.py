@@ -42,6 +42,9 @@ class Namespace:
     def __str__(self) -> Optional[str]:
         return self._val
 
+    def __hash__(self) -> int:
+        return hash(self._val)
+
     def __eq__(self, other: Union["Namespace", str]) -> bool:
         if isinstance(other, str):
             return self._val == other
