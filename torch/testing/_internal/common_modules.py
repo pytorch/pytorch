@@ -8,7 +8,7 @@ import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
-from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
@@ -1117,28 +1117,12 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False, transposed=True),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
-               dtypes=floating_and_complex_types_and(torch.chalf),
                skips=(
                    # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   # Not implmented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule',
-                                'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
-                                dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_multiple_device_transfer',
-                                dtypes=(torch.chalf,), device_type='cuda'),
-                   # Ref: https://github.com/pytorch/pytorch/issues/73502
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
