@@ -2531,6 +2531,53 @@ scalar_tensor = _make_prim(
 #
 
 
+def _addbmm_meta(
+    input: TensorLikeType,
+    batch1: TensorLikeType,
+    batch2: TensorLikeType,
+    *,
+    beta: NumberType,
+    alpha: NumberType,
+) -> TensorLikeType:
+    input_shape = input.shape
+    batch1_shape = batch1.shape
+    batch2_shape = batch2.shape
+
+    out_shape = input_shape
+    is_cuda = input.device.type == "cuda"
+    strides = utils.make_contiguous_strides_for(out_shape, row_major=is_cuda)
+    O = TensorMeta(
+        shape=out_shape, strides=strides, dtype=input.dtype, device=input.device
+    )
+    return O
+
+
+def _addbmm_aten(
+    input: Tensor,
+    batch1: Tensor,
+    batch2: Tensor,
+    *,
+    beta: NumberType,
+    alpha: NumberType,
+) -> Tensor:
+    return torch.addbmm(input, batch1, batch2, beta, alpha)
+
+
+_addbmm_docs = """
+    Performs a batch matrix-matrix product of matrices stored in `batch1` and `batch2`,
+    with a reduced add step (all matrix multiplications get accumulated along the
+    first dimension). input is added to the final result.
+"""
+
+addbmm = _make_prim(
+    schema="addbmm(Tensor input, Tensor batch1, Tensor batch2, Scalar beta, Scalar alpha) -> Tensor O",
+    meta=_addbmm_meta,
+    impl_aten=_addbmm_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_addbmm_docs,
+)
+
+
 def _svd_meta(
     A: TensorLikeType, *, full_matrices: bool
 ) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
