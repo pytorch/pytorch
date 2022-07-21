@@ -21,33 +21,27 @@ Tensor permute_4d(
   const vTensor& v_self = convert(input);
 
   const struct Block final {
-    uvec3 size;                // output texture size
-    uint32_t fill_0;           // dummy
-    uvec3 isize;               // input texture size
-    uint32_t fill_1;           // dummy
-    uvec4 tensor_size;         // output tensor size
-    uvec4 itensor_size;        // input tensor size
-    uvec4 dims;                // output dims
-  } block {
-    v_output.extents(),
-    0u,
-    v_self.extents(),
-    0u,
-    out_size,
-    in_size,
-    out_dims,
+    uvec3 size; // output texture size
+    uint32_t fill_0; // dummy
+    uvec3 isize; // input texture size
+    uint32_t fill_1; // dummy
+    uvec4 tensor_size; // output tensor size
+    uvec4 itensor_size; // input tensor size
+    uvec4 dims; // output dims
+  } block{
+      v_output.extents(),
+      0u,
+      v_self.extents(),
+      0u,
+      out_size,
+      in_size,
+      out_dims,
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(permute_4d),
       // pipeline barrier
@@ -63,9 +57,7 @@ Tensor permute_4d(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -74,8 +66,8 @@ Tensor permute_4d(
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
   auto nDims = safe_downcast<uint32_t>(self.dim());
-  TORCH_CHECK(dims.size() == (size_t)nDims,
-           "number of dims don't match in permute");
+  TORCH_CHECK(
+      dims.size() == (size_t)nDims, "number of dims don't match in permute");
 
   uvec4 in_size{1u, 1u, 1u, 1u}, out_size{1u, 1u, 1u, 1u};
   uvec4 out_dims{0u, 1u, 2u, 3u};
@@ -86,8 +78,7 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   std::vector<bool> seen(nDims);
   for (const auto i : c10::irange(nDims)) {
     auto dim = safe_downcast<uint32_t>(maybe_wrap_dim(dims[i], nDims));
-    TORCH_CHECK(!seen[dim],
-             "repeated dim in permute");
+    TORCH_CHECK(!seen[dim], "repeated dim in permute");
     seen[dim] = true;
     newSizes[i] = oldSizes[dim];
     if (dim != i) {
@@ -103,10 +94,7 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
     return self;
   }
 
-  vTensor v_output{
-    api::context(),
-    newSizes,
-    self.options()};
+  vTensor v_output{api::context(), newSizes, self.options()};
 
   return permute_4d(self, in_size, out_size, out_dims, v_output);
 }

@@ -710,10 +710,34 @@ uint64_t get_bytecode_version_from_bytes(char* flatbuffer_content) {
 
 mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
   auto* ff_module = mobile::serialization::GetMutableModule(flatbuffer_content);
-  FlatbufferLoader loader;
-  loader.setShouldLoadOperators(false);
-  mobile::Module m = loader.parseModule(ff_module);
-  return mobile::get_module_info(m);
+  mobile::ModuleInfo minfo;
+  minfo.operator_version = ff_module->operator_version();
+  minfo.bytecode_version = ff_module->bytecode_version();
+
+  uint32_t mobile_ivalue_size = ff_module->mobile_ivalue_size();
+  if (mobile_ivalue_size == 0) {
+    mobile_ivalue_size = ff_module->ivalues()->size();
+  }
+
+  std::vector<std::string> type_name_list;
+  for (uint32_t i = 0; i < mobile_ivalue_size; i++) {
+    const auto* ival = ff_module->ivalues()->Get(i);
+    if (const auto* func = ival->val_as_Function()) {
+      minfo.function_names.insert(func->qn()->str());
+      for (const auto* op : *func->operators()) {
+        at::OperatorName opname(op->name()->str(), op->overload_name()->str());
+        minfo.opname_to_num_args[mobile::operator_str(opname)] =
+            op->num_args_serialized();
+      }
+      for (const auto* type_ann : *func->type_annotations()) {
+        type_name_list.push_back(type_ann->str());
+      }
+    }
+  }
+  c10::TypeParser parser(type_name_list);
+  parser.parseList();
+  minfo.type_names = parser.getContainedTypes();
+  return minfo;
 }
 
 mobile::Module load_mobile_module_from_stream_with_copy(
