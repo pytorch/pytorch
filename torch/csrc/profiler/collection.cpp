@@ -56,7 +56,6 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
-      out.shapes_.emplace_back();
       switch (*tag_it) {
         case Tag::Tensor: {
           const auto& md = *tensor_metadata_it++;
@@ -85,7 +84,6 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
-          out.shapes_.pop_back();
           terminate = true;
           break;
 

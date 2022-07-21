@@ -53,7 +53,6 @@ struct TensorMetadata {
 };
 
 struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
   std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
