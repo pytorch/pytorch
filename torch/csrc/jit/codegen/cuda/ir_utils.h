@@ -156,6 +156,18 @@ std::vector<int> normalizeOld2New(
 // Reference is found through direct pointer comparison.
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
+//! Replace Vals in an index Val as specified by replacement_map while
+//! cloning the given index Val. The index val is assumed to represent
+//! a tensor index consisting of Ints  and arithmetic expressions.
+//!
+//! This is similar to replaceValInExpr but is different as Vals are
+//! cloned such that no other exprs using the same leaf Vals are not
+//! modified. TODO: Consider cleaning up the multiple replacement
+//! routines.
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 // Makes rfactor generic with reduction ops and Welford
 TORCH_CUDA_CU_API TensorView* rfactorHelper(
     TensorView* red_tv,

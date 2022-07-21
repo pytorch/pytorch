@@ -809,6 +809,97 @@ Val* getReductionInitValOf(TensorView* tv) {
   return init;
 }
 
+namespace {
+
+struct ReplaceValInIndexVal : public OptInDispatch {
+ public:
+  //! Apply replacements to index as specified in
+  //! replacement_map. index is assumed to consist only from Int and
+  //! NamedScalar
+  static Val* replace(
+      Val* index,
+      const std::unordered_map<Val*, Val*>& replacement_map) {
+    ReplaceValInIndexVal replace_index_val(replacement_map);
+    replace_index_val.handle(index);
+    // Return the original index if not replaced
+    if (replace_index_val.is_replaced_) {
+      return replace_index_val.last_visited_val_;
+    } else {
+      return index;
+    }
+  }
+
+ private:
+  ReplaceValInIndexVal(const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {}
+
+  using OptOutDispatch::handle;
+
+  void handle(Val* val) override {
+    TORCH_INTERNAL_ASSERT(
+        val->isA<Int>() || val->isA<NamedScalar>(),
+        "Invalid Val type: ",
+        val->toString());
+
+    // if val appears in the replacement map, stop traversing and set
+    // the current val with the replacement
+    auto it = replacement_map_.find(val);
+    if (it != replacement_map_.end()) {
+      last_visited_val_ = it->second;
+      is_replaced_ = true;
+      return;
+    }
+
+    // Recursively traverse its defining expr
+    auto def = val->definition();
+    if (def != nullptr) {
+      TORCH_INTERNAL_ASSERT(
+          def->isA<UnaryOp>() || def->isA<BinaryOp>(),
+          "Unexpected definition: ",
+          def->toString());
+      handle(val->definition());
+      // last_visited_val_ is set in the expr handlers
+    } else {
+      last_visited_val_ = val;
+    }
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(UnaryOp* uop) override {
+    handle(uop->in());
+    auto inp = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
+    last_visited_val_ = out;
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(BinaryOp* bop) override {
+    handle(bop->lhs());
+    auto lhs = last_visited_val_;
+    handle(bop->rhs());
+    auto rhs = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(bop->out()->isA<Int>());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<BinaryOp>(bop->getBinaryOpType(), out, lhs, rhs);
+    last_visited_val_ = out;
+  }
+
+ private:
+  const std::unordered_map<Val*, Val*>& replacement_map_;
+  Val* last_visited_val_ = nullptr;
+  bool is_replaced_ = false;
+};
+
+} // namespace
+
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map) {
+  return ReplaceValInIndexVal::replace(index, replacement_map);
+}
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

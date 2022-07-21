@@ -2721,8 +2721,8 @@ std::pair<Val*, Val*> hoistPredicates(
     Val* stop_index,
     const std::vector<kir::ForLoop*>& loops,
     std::vector<IterDomain*> loop_domains,
-    const std::unordered_map<IterDomain*, Val*> start_initial_loop_index_map,
-    const std::unordered_map<IterDomain*, Val*> stop_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*>& start_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*>& stop_initial_loop_index_map,
     kir::ForLoop* unswitch_or_vec_loop,
     IterDomain* predicated_consumer_id,
     TensorView* predicated_consumer_tv) {
@@ -2769,6 +2769,22 @@ std::pair<Val*, Val*> hoistPredicates(
   }
 
   return {hoisted_start_index, hoisted_stop_index};
+}
+
+// Updates a loop index map with a loop index protected by magic zero
+std::unordered_map<IterDomain*, Val*> updateInitialLoopIndexMap(
+    const std::unordered_map<IterDomain*, Val*>& initial_loop_index_map,
+    const IndexMagicZeroInfo& magic_zero_info) {
+  if (magic_zero_info.original_loop_index != nullptr) {
+    TORCH_INTERNAL_ASSERT(magic_zero_info.protected_loop_index != nullptr);
+    auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        magic_zero_info.loop_id, IdMappingMode::EXACT);
+    auto updated_map = initial_loop_index_map;
+    updated_map[concrete_loop_id] = magic_zero_info.protected_loop_index;
+    return updated_map;
+  } else {
+    return initial_loop_index_map;
+  }
 }
 
 } // namespace
@@ -2886,13 +2902,38 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
     auto stop_index = consumer_stop_indexing_it->second;
     auto start_index = consumer_start_index_map.at(contig_id);
 
+    IndexMagicZeroInfo start_magic_zero_info;
+    IndexMagicZeroInfo stop_magic_zero_info;
+
+    // When the start and stop indices are not the same, apply the
+    // magic-zero protection separately for both of them.
+    if (stop_index != start_index) {
+      start_magic_zero_info = protectPredicateIndexWithMagicZero(
+          start_index, start_indexing_from_idgraph, loops);
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+    } else {
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+      start_magic_zero_info = stop_magic_zero_info;
+    }
+
+    start_index = start_magic_zero_info.index;
+    stop_index = stop_magic_zero_info.index;
+
+    // Update the loop-index map with the magic-zero protection info
+    // before passing it to the hoisting function
     std::tie(start_index, stop_index) = hoistPredicates(
         start_index,
         stop_index,
         loops,
         stop_indexing_from_idgraph.resolved_loop_domains,
-        start_indexing_from_idgraph.initial_concrete_index_map,
-        stop_indexing_from_idgraph.initial_concrete_index_map,
+        updateInitialLoopIndexMap(
+            start_indexing_from_idgraph.initial_concrete_index_map,
+            start_magic_zero_info),
+        updateInitialLoopIndexMap(
+            stop_indexing_from_idgraph.initial_concrete_index_map,
+            stop_magic_zero_info),
         unswitch_or_vec_loop,
         contig_id,
         consumer_tv);
@@ -2933,19 +2974,6 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
   }
 
   return pred_info_vec;
-}
-
-bool Index::protectWithMagicZero(
-    kir::ForLoop* loop,
-    IterDomain* reference_domain,
-    Val* ind) {
-  bool ref_dom_simple =
-      (reference_domain == nullptr ? true
-                                   : reference_domain->definition() != nullptr);
-  bool ind_simple =
-      (ind == nullptr ? true
-                      : ind->definition() != nullptr && !ind->isZeroInt());
-  return loop->isUnrolled() && (!ref_dom_simple || !ind_simple);
 }
 
 RootPredicateInfo RootPredicateInfo::getFalseInfo() {

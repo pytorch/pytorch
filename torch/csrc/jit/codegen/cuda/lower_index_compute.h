@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/index_compute.h>
 
 namespace torch {
 namespace jit {

@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -194,6 +195,99 @@ class UnswitchInElseChecker : public kir::IrVisitor {
     }
     kir::IrVisitor::handle(for_loop);
   }
+};
+
+class PredicateMagicZeroChecker : public kir::IrVisitor {
+ public:
+  // Checks if all predicated domains of the provided tv are protected with
+  // magic zero
+  static bool isProtected(TensorView* tv, GpuLower& gpulw) {
+    PredicateMagicZeroChecker checker(
+        loweredTv(tv, gpulw), gpulw.kernel()->topLevelExprs());
+    return checker.is_protected_;
+  }
+
+ private:
+  using kir::IrVisitor::handle;
+
+  PredicateMagicZeroChecker(TensorView* tv, std::vector<Expr*> exprs)
+      : tv_(tv) {
+    handle(exprs);
+  }
+
+  void handle(kir::IfThenElse* ite) final {
+    auto prev_predicate = predicate_;
+    predicate_ = ite->predicate()->value();
+    kir::IrVisitor::handle(ite);
+    predicate_ = prev_predicate;
+  }
+
+  void handle(Expr* expr) final {
+    if (expr->outputs().size() && expr->outputs()[0]->isA<kir::TensorIndex>()) {
+      auto ti = expr->outputs()[0]->as<kir::TensorIndex>();
+      if (ti->view() == tv_) {
+        is_protected_ = checkPredicateOfTensor(predicate_);
+        return;
+      }
+    }
+
+    if (expr->isA<kir::ForLoop>()) {
+      handle(expr->as<kir::ForLoop>());
+    } else if (expr->isA<kir::IfThenElse>()) {
+      handle(expr->as<kir::IfThenElse>());
+    } else {
+      for (auto input : expr->inputs()) {
+        handle(input);
+      }
+    }
+  }
+
+  // Return true If all predicated domains are protected
+  bool checkPredicateOfTensor(Val* predicate) {
+    auto id_predicates = decomposeCompoundPredicate(predicate);
+    for (auto id_predicate : id_predicates) {
+      // Just check if nvfuser_zero is used. Not perfect but probably
+      // good enough.
+      is_magic_zero_found_ = false;
+      handle(id_predicate);
+      if (!is_magic_zero_found_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Decompose "X && Y" to a vector of {X, Y}.
+  std::vector<Val*> decomposeCompoundPredicate(Val* predicate) {
+    if (auto binary_op = dynamic_cast<BinaryOp*>(predicate->definition())) {
+      if (binary_op->getBinaryOpType() == BinaryOpType::And) {
+        auto pred = decomposeCompoundPredicate(binary_op->lhs());
+        auto rhs_pred = decomposeCompoundPredicate(binary_op->rhs());
+        pred.insert(pred.end(), rhs_pred.begin(), rhs_pred.end());
+        return pred;
+      }
+    }
+
+    return {predicate};
+  }
+
+  void handle(Val* val) final {
+    if (isMagicZero(val)) {
+      is_magic_zero_found_ = true;
+      return;
+    }
+
+    auto def = val->definition();
+    if (def != nullptr) {
+      handle(def);
+    }
+  }
+
+ private:
+  bool is_protected_ = false;
+  Val* predicate_ = nullptr;
+  TensorView* tv_ = nullptr;
+  bool is_magic_zero_found_ = false;
 };
 
 // Basically just TransformPropagator, except that it checks the consistency
@@ -24742,6 +24836,35 @@ TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
       {dgelu, dbias},
       __LINE__,
       __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionInsertMagicZero1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 32);
+  tv2->split(-1, 2);
+  tv2->reorder({{1, 2}, {2, 1}});
+  tv2->merge(0);
+
+  TransformPropagator propagator(tv2);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
+
+  tv0->computeAt(tv2, 1);
+
+  // The predicate of tv2 should be protected with magic zero
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      PredicateMagicZeroChecker::isProtected(tv2, gpulw),
+      "Failed to protect the predicates of ",
+      tv2->toString());
 }
 
 } // namespace jit
