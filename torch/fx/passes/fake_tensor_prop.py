@@ -11,7 +11,9 @@ class FakeTensorProp(torch.fx.Interpreter):
     Execute an FX graph Node-by-Node and record a fake tensor representing
     the metadata for the node.  Unlike ShapeProp, (1) this propagation
     is cheap--it does the propagation with meta tensors which do not actually
-    store data, and (2) the fake tensors have much more fine grained
+    store data, and (2) the fake tensors have much more fine grained information,
+    e.g., they have accurate alias information that can be consulted by looking
+    at the storages.
 
     Args:
          module (GraphModule): The module to be executed
