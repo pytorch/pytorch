@@ -1,13 +1,13 @@
 import torch
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+from torch._prims_common import (
     check,
     TensorLikeType,
     ShapeType,
     DimsType,
 )
-from torch._prims.wrappers import (
+from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._decomp import register_decomposition

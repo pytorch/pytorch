@@ -41,7 +41,10 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
-from torch.distributed.algorithms._comm_hooks import allreduce_hook
+from torch.distributed.algorithms._comm_hooks import (
+    LOW_PRECISION_HOOKS,
+    default_hooks,
+)
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -1340,6 +1343,15 @@ class FullyShardedDataParallel(nn.Module):
             and self.mixed_precision.reduce_dtype is not None
         )
 
+    def _low_precision_hook_enabled(self) -> bool:
+        """
+        Wether a low precision hook is registered or not.
+        """
+        return (
+            self.communication_hook is not None
+            and self.communication_hook in LOW_PRECISION_HOOKS
+        )
+
     def _cast_fp_inputs_to_precision(
         self, dtype: torch.dtype, *args: Any, **kwargs: Any
     ) -> Tuple[Any, Any]:
@@ -2558,7 +2570,7 @@ class FullyShardedDataParallel(nn.Module):
                     try:
                         yield
                     finally:
-                        if offload_to_cpu:
+                        if offload_to_cpu and (not rank0_only or my_rank == 0):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
@@ -2908,9 +2920,12 @@ class FullyShardedDataParallel(nn.Module):
             with torch.cuda.stream(self._streams["post_backward"]):
                 orig_grad_data = param.grad.data
                 if (
-                    self._mixed_precision_enabled_for_reduce()
+                    self._mixed_precision_enabled_for_reduce() and not self._low_precision_hook_enabled()
                 ):
                     # Cast gradient to precision in which it should be communicated.
+                    # If a low precision hook is registered and reduce_dtype is specified
+                    # in `MixedPrecision`, communication hook will take care of
+                    # casting to lower precision and back.
                     # TODO: Make this a communication hook when communication hooks
                     # are implemented for FSDP. Note that this is a noop if the
                     # reduce_dtype matches the param dtype.
@@ -3006,8 +3021,13 @@ class FullyShardedDataParallel(nn.Module):
                     # would thus be in this reduced precision, or
                     # 2) parameters did not have precision reduced, but grads
                     # had reduced precision for communication.
+                    # If a lower precision hook is registered, gradients are casted
+                    # back by the hook.
+                    # However, if a low precision hook is attached to the model.
+                    # casting happens inside the hook.
                     if (
-                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                        not self._low_precision_hook_enabled() and
+                        (self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce())
                     ):
                         # Cast gradients back to the full parameter precision so that
                         # optimizer.step() happens in full precision.
@@ -4070,7 +4090,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.allreduce_hook
+            return default_hooks.allreduce_hook
 
     def _get_default_comm_hook_state(self) -> Any:
         r"""
@@ -4079,7 +4099,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.AllReduceState(process_group=self.process_group)
+            return default_hooks.DefaultState(process_group=self.process_group)
 
     def register_comm_hook(self, state: object, hook: callable):
         """
