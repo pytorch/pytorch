@@ -49,6 +49,7 @@ class TORCH_API DimensionNode {
   virtual int64_t getStaticValue() const {
     TORCH_CHECK(false, "NYI");
   };
+  virtual ~DimensionNode() = default;
 };
 
 } // namespace lazy
