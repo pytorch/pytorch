@@ -6362,7 +6362,7 @@ def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
 
     # NOTE: primTorch is more strict about the type of the fill value argument
     # So we must cast it to the correct dtype
-    from torch._prims.utils import dtype_to_type
+    from torch._prims_common import dtype_to_type
     scalar_type = dtype_to_type(dtype)
 
     def drop_mode_argument(input, pad, mode=None, value=None):
@@ -13788,38 +13788,22 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
-           # `ref` for this function is backward of
-           # corresponding `conv*d` whose correctness
-           # is verified via `gradcheck` tests on
-           # the `conv*d` op.
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_and_complex_types_and(torch.int64),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=(
+           decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
-               DecorateInfo(
-                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')
-           ),
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
            skips=(
-               # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64,)),
-               # RuntimeError: UNSUPPORTED DTYPE: complex
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                            dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.float,)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose2d',
@@ -13855,6 +13839,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-04, rtol=2e-04), }),
+                   'TestCompositeCompliance', 'test_operator', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -17114,6 +17101,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -17239,6 +17228,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: new_empty is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
@@ -17269,6 +17260,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
