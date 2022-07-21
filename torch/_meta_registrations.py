@@ -7,10 +7,33 @@ from torch._prims_common import (
     elementwise_dtypes,
 )
 from torch._prims_common.wrappers import out_wrapper
+from torch.utils._pytree import tree_map
 
 from typing import List, Optional
 
+aten = torch.ops.aten
+
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+
+meta_table = {}
+
+
+def register_meta(op, register_dispatcher=True):
+    def wrapper(f):
+        def add_func(op):
+            meta_table[op] = f
+            if register_dispatcher:
+                name = (
+                    op.__name__
+                    if op._overloadname != "default"
+                    else op.overloadpacket.__name__
+                )
+                meta_lib.impl(name, f)
+
+        tree_map(add_func, op)
+        return f
+
+    return wrapper
 
 
 def toRealValueType(dtype):
@@ -22,13 +45,13 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
-@torch.library.impl(meta_lib, "_fft_c2c")
+@register_meta(aten._fft_c2c.default)
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
     return self.new_empty(self.size())
 
 
-@torch.library.impl(meta_lib, "_fft_r2c")
+@register_meta(aten._fft_r2c.default)
 def meta_fft_r2c(self, dim, normalization, onesided):
     assert self.dtype.is_floating_point
     output_sizes = list(self.size())
@@ -43,8 +66,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
-@torch.library.impl(meta_lib, "_fft_c2r.out")
-@torch.library.impl(meta_lib, "_fft_c2r")
+@register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
     assert self.dtype.is_complex
@@ -53,13 +75,13 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@torch.library.impl(meta_lib, "conj_physical.out")
+@register_meta([aten.conj_physical.out])
 def meta_conj_physical_out(self, out):
     return torch._resize_output_(out, self.size(), self.device)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
-@torch.library.impl(meta_lib, "index_select")
+@register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
     result_size = list(self.size())
     if self.dim() > 0:
@@ -67,23 +89,18 @@ def meta_index_select(self, dim, index):
     return self.new_empty(result_size)
 
 
-@torch.library.impl(meta_lib, "index_select.out")
+@register_meta(aten.index_select.out)
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@torch.library.impl(meta_lib, "max")
+@register_meta([aten.max.default, aten.min.default])
 def meta_max(self):
     return self.new_empty(())
 
 
-@torch.library.impl(meta_lib, "min")
-def meta_min(self):
-    return self.new_empty(())
-
-
-@torch.library.impl(meta_lib, "angle")
+@register_meta(aten.angle.default)
 def meta_angle(self):
     _, result_dtype = elementwise_dtypes(
         self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
@@ -91,7 +108,7 @@ def meta_angle(self):
     return self.new_empty(self.size(), dtype=result_dtype)
 
 
-@torch.library.impl(meta_lib, "angle.out")
+@register_meta(aten.angle.out)
 def meta_angle_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.angle(self))
@@ -113,9 +130,7 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-# Keeping this meta impl around, but we don't want to register it directly to the meta key
-# because `aten::linalg_eigh` is composite.
-# `_linalg_eigh` is implemented internally as a structured kernel, so we have meta support.
+# @register_meta(aten.linalg_eigh.default)
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
@@ -127,7 +142,7 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
-@torch.library.impl(meta_lib, "reflection_pad2d")
+@register_meta(aten.reflection_pad2d.default)
 def meta_pad2d(self, padding):
     valid_dims = self.size(1) != 0 and self.size(2) != 0
     check(
@@ -152,7 +167,7 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@torch.library.impl(meta_lib, "dot")
+@register_meta(aten.dot.default)
 def meta_dot(self, tensor):
     check(
         self.dim() == 1 and tensor.dim() == 1,
@@ -168,7 +183,7 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@torch.library.impl(meta_lib, "var_mean.correction")
+@register_meta(aten.var_mean.correction)
 def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     dim = utils.reduction_dims(self.shape, dim)
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -177,7 +192,7 @@ def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     return result1, result2
 
 
-@torch.library.impl(meta_lib, "inverse")
+@register_meta(aten.inverse.default)
 def meta_inverse(self):
     # Bug: https://github.com/pytorch/pytorch/issues/77498
     if self.numel() == 0:
@@ -193,7 +208,7 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
-@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
+@register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
         self.ndim == 3 or self.ndim == 4,
@@ -218,10 +233,7 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-# Leaving this function around because a python implementation
-# of indexing shape inference is useful,
-# but not registering it to the dispatcher because we already
-# get shape inference through structured kernels
+@register_meta(aten.index.Tensor, register_dispatcher=False)
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -479,8 +491,7 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@torch.library.impl(meta_lib, "diag")
-@torch.library.impl(meta_lib, "diag.out")
+@register_meta([aten.diag.default, aten.diag.out])
 @out_wrapper()
 def meta_diag(self, dim=0):
     check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
