@@ -106,7 +106,6 @@ _DEFAULT_OP_INT8_CONFIGS = [
         torch.nn.InstanceNorm3d,
         torch.nn.LayerNorm,
         torch.nn.Dropout,
-        torch.nn.PReLU,
         torch.nn.functional.elu,
         torch.nn.functional.hardswish,
         torch.nn.functional.instance_norm,
