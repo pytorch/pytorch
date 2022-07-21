@@ -165,7 +165,7 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-lite-interpreter-x86-64
-      xcode-version: "12"
+      xcode-version: "13.3.1"
       runner-type: macos-12-xl
       build-generates-artifacts: false
     secrets:
