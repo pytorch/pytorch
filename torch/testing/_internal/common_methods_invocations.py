@@ -3704,8 +3704,9 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
     return tuple(samples)
 
 def error_inputs_bernoulli(op_info, device, **kwargs):
+    # more than one element of the written-to tensor refers to a single memory location
     x = torch.rand((1,), device=device).expand((6,))
-    err_msg = 'more than one element of the written-to tensor refers to a single memory location'
+    err_msg = 'unsupported operation'
     yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
                      error_regex=err_msg)
 
@@ -4441,30 +4442,34 @@ def error_inputs_multinomial(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, args=(3,)),
                      error_regex="number of categories cannot exceed")
 
-    inputs = [[1., -1., 1.], [1., inf, 1.], [1., -inf, 1.], [1., 1., nan]]
+    inputs = ((1., -1., 1.), (1., inf, 1.), (1., -inf, 1.), (1., 1., nan))
+
     err_msg1 = "probability tensor contains either `inf`, `nan` or element < 0"
     err_msg2 = "invalid multinomial distribution"
 
-    err_msg = r"invalid multinomial distribution \(sum of probabilities <= 0\)"
+    rep_arg = (False, True) if torch.device(device).type == 'cpu' else (False,)
 
-    rep_arg = [False, True] if device == 'cpu' else [False]
+    for shape, rep in product(inputs, rep_arg):
+        kwargs = {'num_samples': 2, 'replacement': rep}
 
-    for rep in rep_arg:
-        for input in inputs:
-            yield ErrorInput(SampleInput(torch.tensor(input), kwargs={'num_samples': 2, 'replacement': rep}),
-                             error_regex=err_msg1 if rep is False else err_msg2)
+        # error case when input tensor contains `inf`, `nan` or negative element
+        yield ErrorInput(SampleInput(torch.tensor(shape), kwargs=kwargs),
+                         error_regex=err_msg1 if rep is False else err_msg2)
 
+        # error case for the invalid multinomial distribution, 1-dimensional input
         x = torch.zeros(3, device=device)
-        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
-                         error_regex=err_msg)
+        yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                         error_regex=err_msg2)
 
+        # error case for the invalid multinomial distribution, 2-dimensional input
         x = torch.zeros(3, 3, device=device)
-        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
-                         error_regex=err_msg)
+        yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                         error_regex=err_msg2)
 
+        # error case for the invalid multinomial distribution
         x[1, :] = 1
-        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
-                         error_regex=err_msg)
+        yield ErrorInput(SampleInput(x, kwargs=kwargs),
+                         error_regex=err_msg2)
 
 def error_inputs_gradient(op_info, device, **kwargs):
     for dtype in [torch.long, torch.float32, torch.complex64]:
