@@ -1,0 +1,212 @@
+name: linux-binary-test
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+        description: The build's name
+      build_environment:
+        required: true
+        type: string
+        description: The build environment
+      PYTORCH_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/pytorch repository
+      BUILDER_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/builder repository
+      PACKAGE_TYPE:
+        required: true
+        type: string
+        description: Package type
+      DESIRED_CUDA:
+        required: true
+        type: string
+        description: Desired Cuda version
+      GPU_ARCH_VERSION:
+        required: false
+        type: string
+        description: GPU Arch version
+      GPU_ARCH_TYPE:
+        required: true
+        type: string
+        description: GPU Arch type
+      DOCKER_IMAGE:
+        required: true
+        type: string
+        description: Docker image to use
+      LIBTORCH_CONFIG:
+        required: false
+        type: string
+        description: Desired libtorch config (for libtorch builds only)
+      LIBTORCH_VARIANT:
+        required: false
+        type: string
+        description: Desired libtorch variant (for libtorch builds only)
+      DESIRED_DEVTOOLSET:
+        required: false
+        type: string
+        description: Desired dev toolset
+      DESIRED_PYTHON:
+        required: false
+        type: string
+        description: Desired python version
+      runs_on:
+        required: true
+        type: string
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
+    secrets:
+      github-token:
+        required: true
+        description: Github Token
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
+      LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      # Needed for conda builds
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      ANACONDA_USER: pytorch
+      AWS_DEFAULT_REGION: us-east-1
+      BINARY_ENV_FILE: /tmp/env
+      BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Make the env permanent during this workflow (but not the secrets)
+        shell: bash
+        run: |
+          {
+            echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
+            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
+            echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
+
+            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
+            echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
+            echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
+            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
+            echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
+            echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
+            echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
+            echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
+            echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
+
+            echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
+            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
+            echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
+            echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
+            echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+            echo "SHA1=${{ env.SHA1 }}"
+          } >> "${GITHUB_ENV} }}"
+
+        # Setup the environment
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: ./.github/actions/setup-ssh
+        with:
+          github-secret: ${{ secrets.github-token }}
+      - name: Clean workspace
+        shell: bash
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+
+
+      - name: Checkout PyTorch to pytorch dir
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+
+      - name: Checkout pytorch/builder to builder dir
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+
+      - name: Pull Docker image
+        uses: ./pytorch/.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ inputs.DOCKER_IMAGE }}
+
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        working-directory: pytorch/
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
