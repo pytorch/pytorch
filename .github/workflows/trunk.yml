@@ -134,7 +134,7 @@ jobs:
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   macos-12-py3-x86-64-build:
-    name: macos-12-py3-x86-64-build
+    name: macos-12-py3-x86-64
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-x86-64
@@ -146,7 +146,7 @@ jobs:
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-x86-64-test:
-    name: macos-12-py3-x86-64-test
+    name: macos-12-py3-x86-64
     uses: ./.github/workflows/_mac-test.yml
     needs: macos-12-py3-x86-64-build
     with:
@@ -160,8 +160,8 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  macos-10-py3-x86-64-lite-interpreter-build:
-    name: macos-10-py3-x86-64-lite-interpreter-build
+  macos-10-py3-x86-64-lite-interpreter-build-test:
+    name: macos-10-py3-x86-64-lite-interpreter
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-10-py3-lite-interpreter-x86-64
@@ -173,7 +173,7 @@ jobs:
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-build:
-    name: macos-12-py3-arm64-build
+    name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-arm64
@@ -185,7 +185,7 @@ jobs:
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
-    name: macos-12-py3-arm64-mps-test
+    name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-test-arm64.yml
     needs: macos-12-py3-arm64-build
     with:
