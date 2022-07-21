@@ -146,22 +146,6 @@ struct EventFieldsVisitor {
     }
   }
 
-  void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
-    kineto_event_.get()
-        .deviceIndex(alloc.device_index_)
-        .nBytes(alloc.alloc_size_);
-
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
-    addMetadata("Device Id", std::to_string(alloc.device_index_));
-    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    if (alloc.total_allocated_ >= 0) {
-      addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    }
-    if (alloc.total_reserved_ >= 0) {
-      addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-    }
-  }
-
   template <typename T>
   void handleJIT(T& fields) {
     auto& jit_stack = fields.jit_stack_;
@@ -293,22 +277,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       record_queue_.getSubqueue()->emplace_allocation_event(
           torch::profiler::impl::getApproximateTime(),
           ptr,
-          alloc_size,
-          total_allocated,
-          total_reserved,
-          device.type(),
-          device.index());
-    }
-  }
-
-  void reportOutOfMemory(
-      int64_t alloc_size,
-      int64_t total_allocated,
-      int64_t total_reserved,
-      c10::Device device) override {
-    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
-      record_queue_.getSubqueue()->emplace_ooms_event(
-          torch::profiler::impl::getApproximateTime(),
           alloc_size,
           total_allocated,
           total_reserved,
