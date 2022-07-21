@@ -29,7 +29,6 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      # add backwards_compat test back when fixed from https://github.com/pytorch/pytorch/pull/81160
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -37,6 +36,7 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-docs:
@@ -148,20 +148,20 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-build:
-    name: linux-bionic-cuda11.6-py3.10-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
-  linux-bionic-cuda11_6-py3_10-gcc7-test:
-    name: linux-bionic-cuda11.6-py3.10-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-build
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },

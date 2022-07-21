@@ -71,6 +71,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     nn.Dropout: nnq.Dropout,
+    nn.PReLU: nnq.PReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
