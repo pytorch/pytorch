@@ -99,7 +99,7 @@ jobs:
           PR_BODY="${PR_BODY//[$'\n\r']}"
 
           # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreck havoc internally
+          # wreak havoc internally
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
