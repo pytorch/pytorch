@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
+import unittest
 
 import torch
 from torch.onnx import verification
@@ -103,6 +104,20 @@ class _TestJITIRToONNX:
           return (%y)
         """
         x = torch.randn(5, 2)
+        self.run_test(graph_ir, (x,))
+
+    @unittest.skipIf(
+        not torch.cuda.is_available(), "half_to_float only on CUDA implementation"
+    )
+    def test_log_softmax_half_to_float(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=1]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2).half().to("cuda")
         self.run_test(graph_ir, (x,))
 
 
