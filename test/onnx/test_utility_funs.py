@@ -11,6 +11,7 @@ import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
+    BATCH_SIZE,
     skipIfNoCuda,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
@@ -1044,46 +1045,90 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
-    @skipIfUnsupportedMinOpsetVersion(15)
-    def test_valid_node_after_custome_node(self):
-        from apex.normalization.fused_layer_norm import FusedLayerNorm
+    @skipIfNoCuda
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_node_shape_after_apex(self):
+        
+        try:
+            from apex.normalization.fused_layer_norm import FusedLayerNorm
+        except Exception:
+            raise unittest.SkipTest("Apex is not available")
+        
         self.addCleanup(unregister_custom_op_symbolic, "::PythonOp", 1)
-
-        def PythonOp(g, self, *args):
-            return g.op("com.microsoft::PythonOp", self).setType(self.type())
-
-        register_custom_op_symbolic("aten::embedding", PythonOp, 1)
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+            return g.op("com.microsoft::PythonOp")
+        register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
 
         class CustomPythonOp(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, hidden_size, vocab_size, max_position_embeddings, type_vocab_size, num_attention_heads=12, layer_norm_eps=1e-12):
                 super(CustomPythonOp, self).__init__()
-                self.embedding = torch.nn.Embedding(10, 3)
-                self.layernorm = FusedLayerNorm
+                self.word_embeddings = torch.nn.Embedding(vocab_size, hidden_size, padding_idx=0)
+                self.position_embeddings = torch.nn.Embedding(max_position_embeddings, hidden_size)
+                if type_vocab_size > 0:
+                    self.token_type_embeddings = torch.nn.Embedding(type_vocab_size, hidden_size)
+                else:
+                    self.token_type_embeddings = None
+                self.layernorm = FusedLayerNorm(hidden_size, eps=layer_norm_eps)
+                self.in_proj = torch.nn.Linear(hidden_size, hidden_size * 3, bias=True)
+                self.num_heads = num_attention_heads
 
-            def forward(self, x):
-                x = self.embedding(x)
-                y = x.transpose(0, 1)
-                return y
+            def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
+                device = input_ids.device if input_ids is not None else inputs_embeds.device
+                input_shape = input_ids.size() #input_ids=torch.Tensor(a, b) > %43 <- a, %46 <- b
+                seq_length = input_shape[1]
 
-        model = CustomPythonOp()
-        model = torch.jit.script(model)
-        x = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
-        print("script graph: ", model.graph)
+                if position_ids is None:
+                    position_ids = torch.arange(seq_length, dtype=torch.long, device=device)
+                    position_ids = position_ids.unsqueeze(0).expand(input_shape)
+                if token_type_ids is None:
+                    token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+                if inputs_embeds is None:
+                    inputs_embeds = self.word_embeddings(input_ids)
+
+                position_embeddings = self.position_embeddings(position_ids)
+                embeddings = inputs_embeds + position_embeddings
+
+                if self.token_type_embeddings:
+                    embeddings = embeddings + self.token_type_embeddings(token_type_ids)
+
+                embedding_output = self.layernorm(embeddings)
+                embedding_output = embedding_output * (attention_mask.unsqueeze(-1).type_as(embedding_output))
+                if attention_mask is None:
+                    attention_mask = torch.ones(input_shape, device=device)
+
+                query = embedding_output.transpose(0, 1)
+                tgt_len, bsz, embed_dim = query.size()
+                q, _, _ = self.in_proj(query).chunk(3, dim=-1)
+
+                head_dim = embed_dim // self.num_heads
+                scaling = (head_dim * 1) ** -0.5
+                q = (
+                    q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim)
+                    .transpose(0, 1) * scaling
+                )
+                return q
+
+        hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = 768, 128000, 512, 0, 16
+        model = CustomPythonOp(hidden_size, vocab_size, max_position_embeddings, type_vocab_siz).to("cuda").eval()
+        input_ids = torch.ones(batch_size, max_position_embeddings, device=torch.device("cuda")).long()
+        attention_mask = torch.cat(((torch.ones(17, device=torch.device("cuda"))), torch.zeros(max_position_embeddings-17, device=torch.device("cuda"))))
+        attention_masks = attention_mask.repeat(batch_size, 1)
         f = io.BytesIO()
         torch.onnx.export(
             model,
-            (x,),
+            (input_ids, attention_masks),
             f,
             opset_version=self.opset_version,
+            input_names=["input_ids", "attention_masks"],
+            dynamic_axes={"input_ids":[0, 1], "attention_masks":[0, 1]},
             custom_opsets={"com.microsoft": 1},
         )
-
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        print(graph)
-        self.assertEqual(graph.graph.node[0].op_type, "PythonOp")
-        self.assertEqual(graph.opset_import[0].version, self.opset_version)
-        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
-        self.assertEqual(graph.opset_import[1].version, 1)
+        for node in graph.graph.node:
+            if node.op_type == "Constant":
+                print(node)
+                if node.attribute[0].t.dims:
+                    self.assertNotEqual(node.attribute[0].t.dims[0], 3)
 
     def test_custom_opsets_gelu(self):
         self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
