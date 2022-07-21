@@ -37,6 +37,9 @@ class _DistWrapper:
         return 1
 
     def broadcast_object(self, object: Any) -> Any:
+        """
+        Same as c10d::broadcast_object_list but works without distributed enabled.
+        """
         object_list = [object]
         if self.use_dist:
             dist.broadcast_object_list(
@@ -46,6 +49,9 @@ class _DistWrapper:
         return object_list[0]
 
     def gather_object(self, object: Any) -> Union[List[Any], None]:
+        """
+        Same as c10d::gather_object but works without distributed enabled.
+        """
         if self.use_dist:
             gather_objs = [None] * dist.get_world_size(self.group) if self.is_coordinator else None
 
@@ -61,6 +67,9 @@ class _DistWrapper:
         return result
 
     def all_gather_object(self, object: Any) -> List[Any]:
+        """
+        Same as c10d::all_gather_object but works without distributed enabled.
+        """
         if self.use_dist:
             gather_objs = [None] * dist.get_world_size(self.group)
 
@@ -73,7 +82,10 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: List[Any]) -> Any:
+    def scatter_object(self, object_list: Optional[List[Any]]) -> Any:
+        """
+        Same as c10d::scatter_object but works without distributed enabled.
+        """
         if self.use_dist:
             gather_result = [None]
             dist.scatter_object_list(
@@ -85,14 +97,25 @@ class _DistWrapper:
 
             local_reply = gather_result[0]
         else:
+            assert object_list is not None
             local_reply = object_list[0]
         return local_reply
 
-    def reduce_scatter(self,
+    def reduce_scatter(
+        self,
         step: str,
         map_fun: Callable[[], Any],
         reduce_fun: Callable[[List[Any]], List[Any]]
     ) -> Any:
+        """
+        Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
+
+        This method operates in the following way:
+            Run ``map_cp`` on all ranks
+            Gather results on rank 0
+            Call ``reduce_cb`` on all those values
+            Scatter to each rank part of the result.
+        """
         try:
             local_data = map_fun()
         except BaseException as e:
@@ -101,6 +124,7 @@ class _DistWrapper:
         all_data = self.gather_object(local_data)
         all_results = None
         if self.is_coordinator:
+            assert all_data is not None
             node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
 
             if len(node_failures) == 0:
@@ -117,11 +141,21 @@ class _DistWrapper:
             raise result
         return result
 
-    def all_reduce(self,
+    def all_reduce(
+        self,
         step: str,
         map_cb: Callable[[], Any],
         reduce_cb: Callable[[List[Any]], Any]
     ) -> Tuple[Any, Any]:
+        """
+        Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
+
+        This method operates in the following way:
+            Run ``map_cp`` on all ranks
+            Gather results on rank 0
+            Call ``reduce_cb`` on all those values
+            Broadcast the reduced value to all ranks
+        """
         try:
             local_data = map_cb()
         except BaseException as e:
@@ -130,6 +164,7 @@ class _DistWrapper:
         all_data = self.gather_object(local_data)
         result = None
         if self.is_coordinator:
+            assert all_data is not None
             node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
 
             if len(node_failures) == 0:
@@ -146,10 +181,18 @@ class _DistWrapper:
             raise result
         return result
 
-    def all_gather(self,
+    def all_gather(
+        self,
         step: str,
         map_fun: Callable[[], Any],
-    ) -> Tuple[Any, Any]:
+    ) -> List[Any]:
+        """
+        Compute a value on each rank, then all_gather them.
+
+        This method operates in the following way:
+            Run ``map_cp`` on all ranks
+            all_gather the values to all ranks
+        """
         try:
             result = map_fun()
         except BaseException as e:
@@ -162,31 +205,24 @@ class _DistWrapper:
             raise CheckpointException(step, node_failures)
         return all_results
 
-    def broadcast(self,
+    def broadcast(
+        self,
         step: str,
         map_cb: Callable[[], Any],
     ) -> Any:
-        result = None
-        if self.is_coordinator:
-            try:
-                result = map_cb()
-            except BaseException as e:
-                result = CheckpointException(step, { self.rank: e })
-        result = self.broadcast_object(result)
-        if isinstance(result, CheckpointException):
-            raise result
-        return result
+        """
+        Compute a value on rank 0 and broadcast it.
 
-    def all_to_all(self,
-        step: str,
-        map_cb: Callable[[], Any],
-    ) -> Any:
+        This method operates in the following way:
+            Run ``map_cp`` on rank 0
+            broadcast the value
+        """
         result = None
         if self.is_coordinator:
             try:
                 result = map_cb()
             except BaseException as e:
-                result = CheckpointException(step, { self.rank: e })
+                result = CheckpointException(step, {self.rank: e})
         result = self.broadcast_object(result)
         if isinstance(result, CheckpointException):
             raise result
