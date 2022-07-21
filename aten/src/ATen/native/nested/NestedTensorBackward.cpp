@@ -96,11 +96,11 @@ Tensor nested_softmax_backward(
   std::vector<int64_t> offsets = NestedTensor_get_offsets(output_ptr);
   std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(output_ptr);
 
-  // switch to unbind
+  // Unbind nt into individual tensor slices for calculating the derivative
   std::vector<Tensor> grad_output_unbind{grad_output.unbind()},
       grad_unbind{grad.unbind()}, output_unbind{output.unbind()};
 
-  for (const int64_t i: c10::irange(ntensors)) {
+  for(const auto i: c10::irange(ntensors)) {
     at::_softmax_backward_data_out(
         grad_output_unbind[i],
         grad_unbind[i],
