@@ -1101,6 +1101,14 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(1, 9, 1)).data_ptr())
         self.assertRaises(RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device)))
 
+        x = torch.rand((1, 4, 3, 5)).to(memory_format=torch.channels_last)
+        y = x.reshape(1, 4, 3, 5)
+        self.assertEqual(x, y)
+
+        x = torch.rand((1, 4, 4, 3, 5)).to(memory_format=torch.channels_last_3d)
+        y = x.reshape(1, 4, 4, 3, 5)
+        self.assertEqual(x, y)
+
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)

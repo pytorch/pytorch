@@ -23,6 +23,10 @@ TEST(MemoryFormatTest, SetMemoryFormat) {
   // Ambiguous case where we fallback to Contiguous;
   // This should be `EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);`
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
+  t = at::rand({1, 2, 3, 4}).to(at::MemoryFormat::ChannelsLast);
+  t = t.reshape({1, 2, 3, 4});
+  // The stride of reshaped tensor is [2, 1, 8, 2].
+  EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 TEST(MemoryFormatTest, TransposeMemoryFormat) {

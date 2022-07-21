@@ -128,7 +128,13 @@ inline bool is_channels_last_strides_2d_s4(
     if (sizes[d] == 0) {
       return false;
     }
-    if (strides[d] < min) {
+    // Special case for channels_last format.
+    // channels_last tensor with sizes[0] == 1 ([1,C,H,W]@[CWH,1,CW,C]).
+    // Reshape tensor to the same shape ([1,C,H,W]@[C,1,CW,C]). issue #78611
+    // Reshaped tensor will get unexpected stride and
+    // is_channels_last_contiguous_ will be set to true. It should be identified
+    // as channels_last to align with is_channels_last_contiguous_.
+    if (strides[d] < min && !(d == 0 && sizes[0] == 1)) {
       return false;
     }
     // Fallback to NCHW as default layout for ambiguous cases
@@ -168,7 +174,7 @@ inline bool is_channels_last_strides_3d_s5(
     if (sizes[d] == 0) {
       return false;
     }
-    if (strides[d] < min) {
+    if (strides[d] < min && !(d == 0 && sizes[0] == 1)) {
       return false;
     }
     if (d == 0 && min == strides[1]) {
