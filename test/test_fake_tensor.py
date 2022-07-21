@@ -88,6 +88,11 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertTrue(isinstance(out, FakeTensor))
 
+    def test_setitem(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.rand([16, 1], device="cpu")
+            x[..., 0] = 0
+
     def test_constructor(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             x = torch.rand([4, 4], device="cpu")

@@ -106,16 +106,16 @@ inline Variable valueToTensor(
   at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackLong(value)), options, device);
+    return at::lift_fresh(at::indexing::scalarToTensor(
+        Scalar(THPUtils_unpackLong(value)), options, device));
   }
   if (PyFloat_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackDouble(value)), options, device);
+    return at::lift_fresh(at::indexing::scalarToTensor(
+        Scalar(THPUtils_unpackDouble(value)), options, device));
   }
   if (PyComplex_Check(value)) {
-    return at::indexing::scalarToTensor(
-        Scalar(THPUtils_unpackComplexDouble(value)), options, device);
+    return at::lift_fresh(at::indexing::scalarToTensor(
+        Scalar(THPUtils_unpackComplexDouble(value)), options, device));
   }
   throw TypeError(
       "can't assign a %s to a %s",
