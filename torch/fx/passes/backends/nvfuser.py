@@ -267,7 +267,7 @@ class NvFuserBackend:
             fused_graph_module = self.partitioner_cache[graph_module]
         else:
             partitioner = CapabilityBasedPartitioner(
-                graph_module, self.supported_ops, allows_single_node_partition = False)
+                graph_module, self.supported_ops, allows_single_node_partition=False)
             fused_graph_module = partitioner.partition_and_fuse()
 
             self.partitioner_cache[graph_module] = fused_graph_module
