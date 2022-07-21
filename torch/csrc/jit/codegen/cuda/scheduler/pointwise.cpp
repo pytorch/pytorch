@@ -389,7 +389,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     }
 
     // If there isn't very much parallelism available, just use 1D scheduler
-    if (true || n_elems * 2 > device_multiprocessor_count * kThreadX) {
+    if (n_elems * 2 > device_multiprocessor_count * kThreadX) {
       int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
 
       for (const auto break_point_i : c10::irange(ref_root.size())) {
