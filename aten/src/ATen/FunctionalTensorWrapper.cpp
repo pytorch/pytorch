@@ -354,7 +354,7 @@ c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optio
   return outputs;
 }
 std::vector<Tensor> to_functional_tensor(ITensorListRef t_list) {
-  std::vector<Tensor> outputs(t_list.size());
+  std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto& tensor : t_list) {
     outputs.push_back(to_functional_tensor(tensor));
