@@ -9,42 +9,30 @@ namespace {
 
 using namespace api::utils;
 
-Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
-  TORCH_CHECK(input_arg.dim() == 4, "Vulkan glu only supports 4-dim input!");
-  TORCH_CHECK(
-      dim == 1,
-      "Vulkan glu only supports GLU for dim = 1, but got dim = ",
-      dim);
-  TORCH_CHECK(
-      channels_size(input_arg) % 2 == 0,
-      "Vulkan glu expects channel dim to be multiple of 2!");
+Tensor select_depth(const Tensor& input_arg, uint32_t index) {
+  api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const IntArrayRef v_input_sizes = v_input.sizes();
 
-  auto output_ch_size = v_input.sizes()[1] / 2;
-
-  api::Context* const context = api::context();
-
   vTensor v_output{
       context,
-      {v_input_sizes[0], output_ch_size, v_input_sizes[2], v_input_sizes[3]},
+      {v_input_sizes[1], v_input_sizes[2]},
       v_input.options(),
   };
 
   const struct Block final {
-    uvec3 extents;
-    int32_t chext;
-  } block{v_output.extents(), safe_downcast<int32_t>(output_ch_size)};
+    uvec3 size; // output texture size
+    uint32_t index;
+  } block{v_output.extents(), index};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
       // shader descriptor
-      output_ch_size % 4 == 0 ? VK_KERNEL(glu_channel_mul4)
-                              : VK_KERNEL(glu_channel),
+      VK_KERNEL(select_depth),
       // pipeline barrier
       pipeline_barrier,
       // global work group size
@@ -65,10 +53,33 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
   return convert(v_output);
 }
 
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  TORCH_CHECK(self.dim() == 3, "Vulkan select only supports 3d tensors!");
+  TORCH_CHECK(dim == 0, "Vulkan select only supports dim = 0!");
+
+  const int64_t size = self.size(dim);
+
+  if (index < -size || index >= size) {
+    TORCH_CHECK_INDEX(
+        false,
+        "select(): index ",
+        index,
+        " out of range for tensor of size ",
+        self.sizes(),
+        " at dimension ",
+        dim);
+  }
+  if (index < 0) {
+    index += size;
+  }
+
+  return select_depth(self, index);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::glu"), TORCH_FN(glu));
+  m.impl(TORCH_SELECTIVE_NAME("aten::select.int"), TORCH_FN(select));
 }
 
 #endif /* USE_VULKAN_API */
