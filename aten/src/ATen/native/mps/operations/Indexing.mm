@@ -55,7 +55,7 @@ void getDataOffsets(const TensorIteratorBase& iter, simd_uint3* data_offsets, ui
 }
 
 static
-bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+bool dispatchIndexKernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, bool index_select, bool accumulate) {
   using namespace mps;
 
   @autoreleasepool {
@@ -71,13 +71,13 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
     MTLResourceOptions options = [inputBuffer resourceOptions];
     int64_t iter_numel = iter.numel();
     int64_t num_indices = index_size.size();
+    NSError* error = nil;
 
     std::string indexFunction;
-    if (!selectIndexFunctionName(inputTensor.scalar_type(), indexFunction)) {
+    if (!getIndexFunctionName(inputTensor.scalar_type(), indexFunction, index_select, accumulate)) {
         TORCH_CHECK(false, "Failed to create indexing library, error: ", inputTensor.scalar_type());
     }
 
-    NSError* error = nil;
     MPSStream* mpsStream = getCurrentMPSStream();
     id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -91,9 +91,7 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
 
     MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
-    int64_t storage_offset = inputTensor.storage_offset();
-    [constantValues setConstantValue: &storage_offset type:MTLDataTypeLong atIndex:0];
-    [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:1];
+    [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
 
     id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalFunction(indexFunction, constantValues);
     id<MTLArgumentEncoder> argumentEncoder = [indexKernelFunction newArgumentEncoderWithBufferIndex:0];
@@ -104,7 +102,7 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
     for (uint32_t idx = 0; idx < num_indices; idx++) {
       const Tensor& indexTensor = iter.tensor(idx+2);
       [argumentEncoder setBuffer: getMTLBufferStorage(indexTensor)
-                          offset: 0
+                          offset: indexTensor.storage_offset() * indexTensor.element_size()
                          atIndex: idx];
       TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for index");
     }
@@ -131,8 +129,8 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
     [computeEncoder setBuffer: indexSize offset:0 atIndex:1];
     [computeEncoder setBuffer: indexStride offset:0 atIndex:2];
     [computeEncoder setBuffer: offsets offset:0 atIndex:3];
-    [computeEncoder setBuffer: inputBuffer offset:0 atIndex:4];
-    [computeEncoder setBuffer: outputBuffer offset:0 atIndex:5];
+    [computeEncoder setBuffer: inputBuffer offset: inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
+    [computeEncoder setBuffer: outputBuffer offset: outputTensor.storage_offset() * outputTensor.element_size() atIndex:5];
 
     MTLSize numOutputElems = MTLSizeMake(iter.numel(), 1, 1);
     NSUInteger threadGroupSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
@@ -151,16 +149,23 @@ bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size,
   return true;
 }
 
-void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
   using namespace mps;
 
-  @autoreleasepool {
-    int64_t num_indices = index_size.size();
+  int64_t num_indices = index_size.size();
+  TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
 
-    AT_ASSERT(num_indices == index_stride.size());
-    AT_ASSERT(num_indices == iter.ntensors() - 2);
-    const Tensor& inputTensor = iter.tensor(1);
+  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(num_indices == iter.ntensors() - 2);
+  const Tensor& inputTensor = iter.tensor(1);
 
+  if (accumulate) {
+    // No atomic support for the rest of dtypes
+    TORCH_CHECK(inputTensor.scalar_type() == ScalarType::Float ||
+                inputTensor.scalar_type() == ScalarType::Int   ||
+                inputTensor.scalar_type() == ScalarType::Bool);
+  }
+  else {
     TORCH_CHECK(inputTensor.scalar_type() == ScalarType::Float ||
                 inputTensor.scalar_type() == ScalarType::Half  ||
                 inputTensor.scalar_type() == ScalarType::Long  ||
@@ -168,9 +173,23 @@ void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
                 inputTensor.scalar_type() == ScalarType::Short ||
                 inputTensor.scalar_type() == ScalarType::Char  ||
                 inputTensor.scalar_type() == ScalarType::Byte  ||
-                inputTensor.scalar_type() == ScalarType::Bool, getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for index.Tensor_out"));
+                inputTensor.scalar_type() == ScalarType::Bool, getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for ") + op);
+  }
+}
 
-    dispatchIndexSelectKernel(iter, index_size, index_stride);
+void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
+  }
+}
+
+void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
   }
 }
 
@@ -646,6 +665,6 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Tensor & valu
 }
 
 REGISTER_DISPATCH(index_stub, &index_kernel_mps);
-
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
 } // native
 } // at

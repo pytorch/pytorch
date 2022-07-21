@@ -391,8 +391,11 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
   return mem_format_key;
 }
 
-bool selectIndexFunctionName(ScalarType scalar_type, std::string& indexFunctionName) {
-    indexFunctionName = "index_select_";
+bool getIndexFunctionName(ScalarType scalar_type, std::string& indexFunctionName, bool index_select, bool accumulate) {
+    // aten::_index_put_impl_(accumulate=true) for 'bool' dtype is the same as 'index_put'
+    indexFunctionName = index_select ? "index_select_" :
+                        (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_" : "index_put_";
+
     switch (scalar_type) {
       case ScalarType::Float:
         indexFunctionName += "float"; return true;
