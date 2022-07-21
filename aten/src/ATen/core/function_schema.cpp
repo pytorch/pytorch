@@ -9,7 +9,7 @@ void FunctionSchema::dump() const {
   std::cout << *this << "\n";
 }
 
-std::vector<Argument> FunctionSchema::getCorrectList(SchemaArgType type) const {
+const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) const {
   if (type == SchemaArgType::input) {
     return arguments();
   } else {
@@ -17,7 +17,7 @@ std::vector<Argument> FunctionSchema::getCorrectList(SchemaArgType type) const {
   }
 }
 
-bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<std::vector<TypePtr>> &lhs, const c10::optional<std::vector<TypePtr>> &rhs) const {
+bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
   if (!lhs || !rhs) {
     return false;
   }
@@ -31,7 +31,7 @@ bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<std::vector<TypeP
   return false;
 }
 
-c10::optional<std::vector<TypePtr>> FunctionSchema::getAliasTypeSetContainedTypes(const c10::optional<std::vector<TypePtr>> &aliasTypeSet) const {
+c10::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const {
   if (!aliasTypeSet) {
     return c10::nullopt;
   }
@@ -56,18 +56,18 @@ c10::optional<std::vector<TypePtr>> FunctionSchema::getAliasTypeSetContainedType
     containedTypes.insert(current);
   }
 
-  return std::vector<TypePtr>(containedTypes.begin(), containedTypes.end());
+  return AliasTypeSet(containedTypes.begin(), containedTypes.end());
 }
 
-c10::optional<std::vector<TypePtr>> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr& type) const {
+c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr& type) const {
   switch(type->kind()) {
     case TypeKind::ListType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
     case TypeKind::TensorType:
-      return std::vector<TypePtr> {c10::unshapedType(type)};
+      return AliasTypeSet {c10::unshapedType(type)};
     case TypeKind::UnionType: {
-      std::vector<TypePtr> mutable_types;
+      AliasTypeSet mutable_types;
       for (const TypePtr& inner :
             type->expectRef<UnionType>().containedTypes()) {
         if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
@@ -83,13 +83,13 @@ c10::optional<std::vector<TypePtr>> FunctionSchema::mapTypeToAliasTypeSet(const 
       return mutable_types;
     }
     case TypeKind::AnyType:
-      return {std::vector<TypePtr>{type}};
+      return {AliasTypeSet{type}};
     case TypeKind::OptionalType: {
       auto inner = type->castRaw<OptionalType>()->getElementType();
       return mapTypeToAliasTypeSet(inner);
     }
     case TypeKind::TupleType: {
-      std::vector<TypePtr> mutable_types;
+      AliasTypeSet mutable_types;
       for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
         if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
           mutable_types.insert(
@@ -101,7 +101,7 @@ c10::optional<std::vector<TypePtr>> FunctionSchema::mapTypeToAliasTypeSet(const 
       if (mutable_types.size() == 0) {
         return c10::nullopt;
       }
-      return {std::vector<TypePtr>{TupleType::create(mutable_types)}};
+      return {AliasTypeSet{TupleType::create(mutable_types)}};
     }
     default:
       return c10::nullopt;
@@ -119,8 +119,8 @@ bool FunctionSchema::may_alias(const SchemaArgument& lhs, const SchemaArgument& 
   const Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
   const Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
 
-  c10::optional<std::vector<TypePtr>> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-  c10::optional<std::vector<TypePtr>> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
+  c10::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
+  c10::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
 
   // Check to see if lhs and rhs have the same alias set
   if (canAliasTypeSetsAlias(lhsTypes, rhsTypes)) {
@@ -146,10 +146,10 @@ bool FunctionSchema::may_contain_alias(const SchemaArgument& lhs, const SchemaAr
 
   const c10::Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
   const c10::Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
-  c10::optional<std::vector<TypePtr>> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-  c10::optional<std::vector<TypePtr>> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
-  c10::optional<std::vector<TypePtr>> lhsContainedTypes = getAliasTypeSetContainedTypes(lhsTypes);
-  c10::optional<std::vector<TypePtr>> rhsContainedTypes = getAliasTypeSetContainedTypes(rhsTypes);
+  c10::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
+  c10::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
+  c10::optional<AliasTypeSet> lhsContainedTypes = getAliasTypeSetContainedTypes(lhsTypes);
+  c10::optional<AliasTypeSet> rhsContainedTypes = getAliasTypeSetContainedTypes(rhsTypes);
 
   // Checks if one side is wildcard and the other side is a container of the same type
   bool lhsWildcard = lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter() && canAliasTypeSetsAlias(lhsTypes, rhsContainedTypes);

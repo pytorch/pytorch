@@ -1,19 +1,34 @@
-from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MemRecordsAcc, MEMORY_EVENT_NAME,
-    _filter_name, _filter_stack_entry, _rewrite_name
-)
-
-from torch.autograd import (
-    DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
-    kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
-    _prepare_profiler, _supported_activities, _kineto_step,
-)
-from torch._C._autograd import _ExperimentalConfig
-import torch
-import torch.cuda
-from torch.futures import Future
 from typing import Any, Dict, List, Optional
 from warnings import warn
+
+import torch
+import torch.cuda
+from torch._C._autograd import _ExperimentalConfig
+
+from torch.autograd import (
+    _disable_profiler,
+    _enable_profiler,
+    _kineto_step,
+    _prepare_profiler,
+    _ProfilerResult,
+    _supported_activities,
+    DeviceType,
+    kineto_available,
+    ProfilerActivity,
+    ProfilerConfig,
+    ProfilerState,
+)
+from torch.autograd.profiler_util import (
+    _filter_name,
+    _filter_stack_entry,
+    _rewrite_name,
+    EventList,
+    FunctionEvent,
+    MEMORY_EVENT_NAME,
+    MemRecordsAcc,
+    OUT_OF_MEMORY_EVENT_NAME,
+)
+from torch.futures import Future
 
 
 try:
@@ -282,6 +297,7 @@ class profile(object):
 
         trace_start_us = result.trace_start_us()
         mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
+        oom_records = [evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME]
         mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
@@ -370,30 +386,40 @@ class profile(object):
                         # parents and children
                         f_evt.thread = fe.thread
 
+
+        def createFunctionEventForMemoryEvents(evt):
+            rel_start_us = evt.start_us() - trace_start_us
+            fe = FunctionEvent(
+                id=max_evt_id,
+                name=evt.name(),
+                trace_name=None,  # not outputting in the trace
+                thread=evt.start_thread_id(),
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
+                fwd_thread=evt.start_thread_id(),
+                input_shapes=[],
+                stack=[],
+                scope=0,  # RecordScope::FUNCTION
+                cpu_memory_usage=_cpu_memory_usage(evt),
+                cuda_memory_usage=_cuda_memory_usage(evt),
+                is_async=False,
+                sequence_nr=-1,
+                device_type=DeviceType.CPU,
+                device_index=0,
+            )
+            return fe
+
         # output top-level memory events
         for mem_record in mem_records:
             if not mem_record[1]:
-                rel_start_us = mem_record[0].start_us() - trace_start_us
                 max_evt_id += 1
-                fe = FunctionEvent(
-                    id=max_evt_id,
-                    name=MEMORY_EVENT_NAME,
-                    trace_name=None,  # not outputting in the trace
-                    thread=mem_record[0].start_thread_id(),
-                    start_us=rel_start_us,
-                    end_us=rel_start_us,  # no duration
-                    fwd_thread=mem_record[0].start_thread_id(),
-                    input_shapes=[],
-                    stack=[],
-                    scope=0,  # RecordScope::FUNCTION
-                    cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
-                    cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
-                    is_async=False,
-                    sequence_nr=-1,
-                    device_type=DeviceType.CPU,
-                    device_index=0,
-                )
+                fe = createFunctionEventForMemoryEvents(mem_record[0])
                 function_events.append(fe)
+
+        for oom_record in oom_records:
+            max_evt_id += 1
+            fe = createFunctionEventForMemoryEvents(oom_record)
+            function_events.append(fe)
 
         function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
         return function_events
