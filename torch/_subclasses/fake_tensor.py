@@ -343,9 +343,6 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
-        if symbolic_shapes.is_symbolic_op(func):
-            return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use

@@ -26,10 +26,6 @@ aten = torch.ops.aten
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 
-def create_meta(e):
-    return torch.empty_strided(e.shape, e.stride(), dtype=e.dtype, layout=e.layout, device='meta')
-
-
 class ProxySymInt(object):
     def __init__(self, sym_int, proxy):
         assert isinstance(sym_int, torch._C.SymbolicIntNode) or isinstance(sym_int, int)
@@ -125,15 +121,6 @@ def proxy_call(func_overload, dispatch_mode, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
-    if func_overload == torch.ops.prim.device.default:
-        return args[0].fake_device
-    if func_overload == aten.sym_size.default:
-        return None
-    if func_overload == aten.size.default:
-        return None
-    if func_overload == aten.dim.default:
-        return len(args[0].shape)
-
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         proxy_mode = enable_torch_dispatch_mode(dispatch_mode) if dispatch_mode else nullcontext()
@@ -158,6 +145,9 @@ def proxy_call(func_overload, dispatch_mode, args, kwargs=None):
         if isinstance(e, torch._C.SymbolicIntNode):
             if isinstance(e.get_pyobj(), ProxySymInt):
                 return e.get_pyobj().sym_int
+            else:
+                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyboj()} into the graph,"
+                                   f"even though it's not a ProxySymInt. This is a bug.")
 
         return e
 
@@ -235,27 +225,46 @@ def proxy_call(func_overload, dispatch_mode, args, kwargs=None):
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
+    has_sym_ints: bool
 
 
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
-        # r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-        #     cls,
-        #     elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
-        #     requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
-        #     storage_offset=elem.storage_offset()
-        # )
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        r = torch.Tensor._make_wrapper_subclass(cls, [create_proxy_symint(elem.shape[i], proxy.size(i)) for i in range(len(elem.shape))], dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=symbolic_shapes.create_contiguous(elem.shape), storage_offset=elem.storage_offset())
+        has_sym_ints = any([isinstance(i, torch._C.SymbolicIntNode) for i in elem.shape])
+        if has_sym_ints:
+            new_shape = []
+            for idx, s in enumerate(elem.shape):
+                if isinstance(s, torch._C.SymbolicIntNode):
+                    new_shape.append(create_proxy_symint(s, proxy.size(idx)))
+                else:
+                    assert isinstance(s, int)
+                    # If it's not an existing SymbolicIntNode, just pass the proxy as the int
+                    # _make_wrapper_subclass requires all inputs to be SymbolicIntNodes
+                    new_shape.append(create_proxy_symint(s, s))
+            # TODO: hack, since we currently don't support symbolic strides
+            new_strides = symbolic_shapes.create_contiguous(new_shape)
+        else:
+            new_shape = elem.shape
+            new_strides = elem.stride()
+
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            new_shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
+            requires_grad=requires_grad if requires_grad is not None else False, strides=new_strides,
+            storage_offset=elem.storage_offset()
+        )
+        r.has_sym_ints = has_sym_ints
         return r
 
     def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
-        # if elem.is_sparse:
-        #     proxy.node.meta['tensor_meta'] = {}
-        # else:
-        #     proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        # TODO: hack since _extract_tensor_metadata currently tries to access stride
+        if elem.is_sparse or self.has_sym_ints:
+            proxy.node.meta['tensor_meta'] = {}
+        else:
+            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
         # This detects situations where you accidentally put a ProxyTensor
         # inside a ProxyTensor for the same trace; this is a layering violation
         assert not (isinstance(elem, ProxyTensor) and elem.proxy.tracer is proxy.tracer)
@@ -365,8 +374,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # We don't want to convert torch.tensor constants into tracing objects.
         if func_overload == aten.lift.default:
             return args[0]
-        if func_overload == torch.ops.prim.device.default:
-            return args[0].device
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, self, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
@@ -475,7 +482,7 @@ a bug if you need this)""")
         fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False) if use_fake else nullcontext()
         proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
 
-        def wrap_fake(x):
+        def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
 
@@ -496,6 +503,8 @@ a bug if you need this)""")
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined] # noqa: B950
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+
+        # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env
         return t
 

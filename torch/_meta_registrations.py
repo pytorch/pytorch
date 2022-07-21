@@ -548,19 +548,6 @@ def meta_nanmedian(input):
     return input.new_empty(output_shape)
 
 
-@register_meta(aten._to_copy.default)
-def meta__to_copy(
-    self,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    non_blocking=False,
-    memory_format=None,
-):
-    return self.new_empty(self.shape, dtype=dtype)
-
-
 @torch.library.impl(meta_lib, "nanmedian.dim_values")
 @torch.library.impl(meta_lib, "nanmedian.dim")
 @out_wrapper("values", "indices")
