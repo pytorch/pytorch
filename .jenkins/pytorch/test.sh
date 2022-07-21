@@ -337,12 +337,12 @@ test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -482,49 +482,32 @@ test_xla() {
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
-# Because this function uninstalls the torch built from branch and installs
-# the torch built on its base commit.
+# Because this function uninstalls the torch built from branch, and install
+# nightly version.
 test_forward_backward_compatibility() {
   set -x
-  REPO_DIR=$(pwd)
-  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
-    echo "On trunk, we should compare schemas with torch built from the parent commit"
-    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
-  else
-    echo "On pull, we should compare schemas with torch built from the merge base"
-    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
-  fi
-  export SHA_TO_COMPARE
-
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
+  REPO_DIR=$(pwd)
+  pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-
-  # build torch at the base commit to generate a base function schema for comparison
-  git reset --hard "${SHA_TO_COMPARE}"
-  echo "::group::Installing Torch From Base Commit"
-  pip install -r requirements.txt
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
-  python -mpip install base_dist/*.whl
-  echo "::endgroup::"
-
-  pushd test/forward_backward_compatibility
+  # install the nightly before the base commit -- fallback to most recent nightly in case of error
+  VERSION=$(cat "${REPO_DIR}/version.txt")
+  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
+  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
+  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
-
-  git reset --hard "${SHA1}"
-  # FC: verify new model can be load with old code.
+  # FC: verify newmodel can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"
       return 1
   fi
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
-  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
+  rm -r venv
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
@@ -602,12 +585,6 @@ test_dynamo() {
   popd
 }
 
-test_functorch() {
-  pushd ../functorch
-  pytest test
-  popd
-}
-
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -680,16 +657,14 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   install_torchdynamo
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
+  # TODO: re-enable vulkan test
+  echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  checkout_install_functorch
-  test_functorch
 else
   install_torchvision
   install_torchdynamo

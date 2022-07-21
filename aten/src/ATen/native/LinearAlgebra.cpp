@@ -40,7 +40,7 @@ namespace detail {
           " for ", isComplexType(self_dtype) ? "complex" : "real", " inputs, but got ", dtype);
       TORCH_CHECK(promoteTypes(self_dtype, dtype) == dtype,
           name, ": the dtype of the input ", "(", self_dtype, ") should be convertible ",
-          "without narrowing to the specified dtype (", dtype, ")");
+          "without narrowing to the specified dtype (", dtype, ").");
     }
   }
 }
@@ -89,14 +89,13 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce the whole tensor
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
-    // dim=None or dim=() reduces the whole tensor
-    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
+    TORCH_CHECK(opt_dim.has_value(),
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
       TORCH_CHECK(self.size(dim_num) != 0,
-        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on the dimension ", dim_num ,
-        "because this dimension is empty and the operation does not have an identity");
+        "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
+        "dimension because the operation does not have an identity");
     }
   }
 
@@ -1252,6 +1251,11 @@ static void addmm_impl_cpu_(
     result.copy_(self);
   }
 
+  if (use_mkldnn_bf16_matmul(m1, m2, result)){
+    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
+    return;
+  }
+
   bool transpose_c = false;
   Tensor c;
 
@@ -2019,19 +2023,6 @@ inline Tensor _blob_to_Tensor(
   return _move_memory_if_cuda_input(tensor, in);
 }
 
-template <typename scalar_t>
-inline Tensor _linear_combination(
-    const Tensor& t,
-    std::initializer_list<scalar_t> blob) {
-  // _blob_to_Tensor converts blob to a 2D tensor for _compute_linear_combination.
-  // If this tensor is of shape (1, *), the result of _compute_linear_combination
-  // is going to be of shape (1, *t.shape) so we squeeze(0) so that
-  // for any t with t.dim() >= 1: t.dim() == _compute_linear_combination(t, ...).dim().
-  return at::native::_compute_linear_combination(
-      t, _blob_to_Tensor<scalar_t>(blob, t))
-    .squeeze(0);
-}
-
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -2063,15 +2054,15 @@ Tensor compute_T4(const Tensor& A) {
     // contains A^2
     As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
-    _linear_combination<scalar_t>(
+    at::native::_compute_linear_combination(
       As.narrow(0, 0, 3),
-      {1 / 2.0, 1 / 6.0, 1 / 24.0}
+      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
     )
   );
 
   // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
-  return _linear_combination<scalar_t>(
-    As, {1.0, 1.0, 0.0, 1.0}
+  return at::native::_compute_linear_combination(
+    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
   );
 }
 
@@ -2098,10 +2089,10 @@ Tensor compute_T8(const Tensor& A) {
     view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
-    _linear_combination<scalar_t>(
+    at::native::_compute_linear_combination(
       // extract {A, A^2} from As
       As.narrow(0, 1, 2),
-      {x1, x2}
+      _blob_to_Tensor<scalar_t>({x1, x2}, A)
     )
   );
 
@@ -2111,19 +2102,20 @@ Tensor compute_T8(const Tensor& A) {
   _matmul_impl(
     view_out,
     // x3 * A2 + A4
-    _linear_combination<scalar_t>(
+    at::native::_compute_linear_combination(
       As.narrow(0, 2, 2),
-      {x3, 1.0}
+      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
     ),
-    _linear_combination<scalar_t>(
+    at::native::_compute_linear_combination(
       As.narrow(0, 0, 4),
-      {x4, x5, x6, x7}
+      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
     )
   );
 
   // return I + A + y2 * A2 + A8;
-  return _linear_combination<scalar_t>(
-    As, {1.0, 1.0, y2, 0.0, 1.0}
+  return at::native::_compute_linear_combination(
+    As,
+    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
   );
 }
 

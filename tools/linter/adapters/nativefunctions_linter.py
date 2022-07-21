@@ -14,14 +14,13 @@ is simply to make sure that there is *some* configuration of ruamel that can rou
 the YAML, not to be prescriptive about it.
 """
 
+import ruamel.yaml  # type: ignore[import]
 import argparse
 import json
 import sys
-from enum import Enum
 from io import StringIO
+from enum import Enum
 from typing import NamedTuple, Optional
-
-import ruamel.yaml  # type: ignore[import]
 
 
 class LintSeverity(str, Enum):

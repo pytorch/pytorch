@@ -70,7 +70,7 @@ Distributions & RNG
 -  Fritz Obermeyer (`fritzo <https://github.com/fritzo>`__)
 -  Neeraj Pradhan (`neerajprad <https://github.com/neerajprad>`__)
 -  Alican Bozkurt (`alicanb <https://github.com/alicanb>`__)
--  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
+-  Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
 Distributed
 ~~~~~~~~~~~
@@ -101,9 +101,9 @@ Linear Algebra (torch.linalg)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
+-  Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 -  Mario Lezcano (`Lezcano <https://github.com/Lezcano>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
--  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

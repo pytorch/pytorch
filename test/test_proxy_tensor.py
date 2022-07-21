@@ -164,43 +164,6 @@ class TestProxyTensor(TestCase):
 
         self._test(f, [])
 
-    def test_constant_proxy_tensor(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def f():
-            val = torch.tensor(float('inf'))
-            return torch.full((100, 100), val)
-
-        g = make_fx(f)()
-        self.assertEqual(g(), f())
-
-    def test_constant_proxy_tensor_mut(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        def f():
-            val = torch.tensor(float(1))
-            val.add_(2)
-            return torch.full((100, 100), val)
-
-        g = make_fx(f)()
-        self.assertEqual(g(), f())
-        # In case we mutated shared state in the g graph!
-        self.assertEqual(g(), f())
-
-        g = make_fx(f, use_fake=True)()
-        self.assertEqual(g(), f())
-        # In case we mutated shared state in the g graph!
-        self.assertEqual(g(), f())
-
-    def test_use_fake_and_tensor(self):
-        def f(x, y):
-            z = torch.tensor([2.0, 3.0])
-            return x + y + z
-
-        g = make_fx(f, use_fake=True)(torch.randn(2), torch.randn(2))
-        x, y = torch.randn(2), torch.randn(2)
-        self.assertEqual(g(x, y), f(x, y))
-
     def test_decomposition_interpreter(self):
         def fn(x):
             return torch.nn.functional.silu(x)
@@ -284,6 +247,28 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+    # Masked failures (creating a scalar tensor just to call `.item` on it)
+    xfail('_masked.amax'),
+    xfail('_masked.amax'),
+    xfail('_masked.amin'),
+    xfail('_masked.argmax'),
+    xfail('_masked.argmin'),
+    xfail('_masked.cumprod'),
+    xfail('_masked.cumsum'),
+    xfail('_masked.log_softmax'),
+    xfail('_masked.logaddexp'),
+    xfail('_masked.logsumexp'),
+    xfail('_masked.mean'),
+    xfail('_masked.median'),
+    xfail('_masked.norm'),
+    xfail('_masked.prod'),
+    xfail('_masked.softmax'),
+    xfail('_masked.softmin'),
+    xfail('_masked.std'),
+    xfail('_masked.sum'),
+    xfail('_masked.var'),
+    # Same as masked failures - preventing torch.tensor constants from turning into proxytensors causes issues with faketensors
+    xfail('__getitem__'),
 }
 
 

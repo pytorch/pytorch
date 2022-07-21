@@ -296,45 +296,26 @@ class ParamExecOrderWrapPolicy:
     (also called non-recursive wrapping policy).
 
     The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
-    and the wrap transfers these parameters into one ``FlattenParameter``. In both forward and the backward passes,
+    and the wrap transfers these parameters into one FlattenParameter. In both forward and the backward passes,
     the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
     These parameters will then be reshaded once they have been used.
 
-    TODO (linjianma): For now, the parameters contained in each wrap of ``ParamExecOrderWrapPolicy``
-    are the parameters in each wrap of the ``init_policy`` (a recursive wrapping policy).
+    TODO (linjianma): For now, the parameters contained in each wrap of ParamExecOrderWrapPolicy
+    are the parameters in each wrap of the init_policy (a recursive wrapping policy).
     Later we will wrap parameters based on bucket size.
 
     Args:
-        init_policy (Callable):
-            The initial recursive wrapping policy used to guide the wrapping of
-            this policy. If tracing_config is none, in the first forward and
-            backward iteration, ``init_policy`` is used to record parameter
-            execution order. Otherwise, init_policy is only used in FSDP
-            constructor for module level wrapping.
+        init_policy (nn.Module):
+            The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
+            forward and backward iteration, init_policy is used. Parameter execution order is also recorded
+            in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
 
-            The default ``always_wrap_policy`` might not be the best choice for every model. For example, for
-            transformer based models, setting ``transformer_auto_wrap_policy`` as the ``init_policy`` will guarantee
+            The default always_wrap_policy might not be the best choice for every model. For example, for
+            transformer based models, setting transformer_auto_wrap_policy as the init_policy will guarantee
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
-
-        tracing_config (Optional[TracingConfig]):
-            The configuration used to perform symbolic tracing at FSDP
-            constructor to get the module and parameter execution order. The
-            type of ``tracing_config`` needs to be either ``None`` or
-            ``TracingConfig``. If set as ``None``, then symbolic tracing is not
-            enabled, and one forward as well as backward iteration are needed to
-            get the parameter execution order.
-
-    ..warning :: Note that not all modules can be successfully traced when
-    ``tracing_config`` is not None and symbolic tracing is enabled. The two
-    cases below may be unable to trace: 1. when there is a data-dependent
-    branch, 2. when the forward pass contains operators that don't support
-    ``torch.fx.Proxy`` as the input type (e.g. ``arange``, ``zeros``, ``ones``,
-    ``full``, ``full_like``, ``eye``, ``empty``, ``tensor``). For those cases,
-    users can set ``tracing_config = None`` to disable symbolic tracing.
     """
     init_policy: Callable = always_wrap_policy
-    tracing_config: Any = None
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:

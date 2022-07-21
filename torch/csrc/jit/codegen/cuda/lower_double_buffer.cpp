@@ -138,6 +138,9 @@ class DoubleBufferFusionInspector : private IterVisitor {
   DoubleBufferInfo& db_info_;
 };
 
+// The type of replicated double-buffer loops
+enum class LoopType { Prologue, Main, Epilogue };
+
 // The epilogue loop is only created when the producer of a double
 // buffer tensor is on smem, in which case it would otherwise require
 // an additional predicate to guard buffer overruns. When it's on
@@ -159,7 +162,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
   static kir::ForLoop* clone(
       kir::ForLoop* double_buffer_loop,
       const std::vector<Expr*>& double_buffer_load_exprs,
-      DoubleBufferLoopStage loop_type) {
+      LoopType loop_type) {
     DoubleBufferLoopCloner cloner(
         double_buffer_loop, double_buffer_load_exprs, loop_type);
     cloner.clone();
@@ -170,7 +173,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
   DoubleBufferLoopCloner(
       kir::ForLoop* double_buffer_loop,
       const std::vector<Expr*>& double_buffer_load_exprs,
-      DoubleBufferLoopStage loop_type)
+      LoopType loop_type)
       : double_buffer_loop_(double_buffer_loop),
         double_buffer_load_exprs_(double_buffer_load_exprs),
         loop_type_(loop_type) {}
@@ -186,20 +189,19 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
     // Main: 0 to (extent-1)
     // Epilogue: (extent-1) to extent
 
-    auto index = GpuLower::current()->caMap()->getIndexVariable(
-        double_buffer_loop_->iter_domain(), loop_type_);
+    auto index = IrBuilder::create<Int>(c10::nullopt);
     auto start = double_buffer_loop_->start();
     auto stop = double_buffer_loop_->stop();
 
-    if (loop_type_ == DoubleBufferLoopStage::Prolog) {
+    if (loop_type_ == LoopType::Prologue) {
       TORCH_INTERNAL_ASSERT(start->isZeroInt());
       stop = gpu_lower->kernel()->oneVal();
     } else if (
-        loop_type_ == DoubleBufferLoopStage::Main &&
+        loop_type_ == LoopType::Main &&
         requireEpilogue(double_buffer_load_exprs_)) {
       stop = IrBuilder::subExpr(
           double_buffer_loop_->stop(), gpu_lower->kernel()->oneVal());
-    } else if (loop_type_ == DoubleBufferLoopStage::Epilog) {
+    } else if (loop_type_ == LoopType::Epilogue) {
       TORCH_INTERNAL_ASSERT(requireEpilogue(double_buffer_load_exprs_));
       start = IrBuilder::subExpr(
           double_buffer_loop_->stop(), gpu_lower->kernel()->oneVal());
@@ -213,8 +215,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
         gpu_lower->kernel()->oneVal(),
         false,
         nullptr,
-        double_buffer_loop_->isUnrollRequired(),
-        loop_type_);
+        double_buffer_loop_->isUnrollRequired());
 
     handle(double_buffer_loop_);
   }
@@ -249,7 +250,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
 
     TORCH_INTERNAL_ASSERT(!cloned_scopes_.empty());
 
-    if (loop_type_ == DoubleBufferLoopStage::Main) {
+    if (loop_type_ == LoopType::Main) {
       cloned_scopes_.back()->push_back(expr);
       return;
     }
@@ -267,10 +268,8 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
           TORCH_INTERNAL_ASSERT(double_buffer_tv != nullptr);
           return out_tv == double_buffer_tv;
         });
-    if ((loop_type_ == DoubleBufferLoopStage::Prolog &&
-         is_double_buffer_load_expr) ||
-        (loop_type_ == DoubleBufferLoopStage::Epilog &&
-         !is_double_buffer_load_expr)) {
+    if ((loop_type_ == LoopType::Prologue && is_double_buffer_load_expr) ||
+        (loop_type_ == LoopType::Epilogue && !is_double_buffer_load_expr)) {
       cloned_scopes_.back()->push_back(expr);
     }
   }
@@ -278,7 +277,7 @@ class DoubleBufferLoopCloner : public kir::IrVisitor {
  private:
   kir::ForLoop* double_buffer_loop_ = nullptr;
   const std::vector<Expr*>& double_buffer_load_exprs_;
-  const DoubleBufferLoopStage loop_type_;
+  const LoopType loop_type_;
 
   kir::ForLoop* cloned_top_level_loop_ = nullptr;
   std::deque<kir::Scope*> cloned_scopes_;
@@ -410,7 +409,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
       kir::ForLoop* double_buffer_loop,
       const std::vector<Expr*>& loads) {
     auto prologue_loop = DoubleBufferLoopCloner::clone(
-        double_buffer_loop, loads, DoubleBufferLoopStage::Prolog);
+        double_buffer_loop, loads, LoopType::Prologue);
     registerInsertBefore(double_buffer_loop, prologue_loop);
 
     auto write_to_smem =
@@ -454,7 +453,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
     }
 
     auto main_loop = DoubleBufferLoopCloner::clone(
-        double_buffer_loop, loads, DoubleBufferLoopStage::Main);
+        double_buffer_loop, loads, LoopType::Main);
 
     registerReplace(double_buffer_loop, main_loop);
 
@@ -490,7 +489,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
 
     if (requireEpilogue(loads)) {
       auto epilogue_loop = DoubleBufferLoopCloner::clone(
-          double_buffer_loop, loads, DoubleBufferLoopStage::Epilog);
+          double_buffer_loop, loads, LoopType::Epilogue);
       registerInsertAfter(double_buffer_loop, epilogue_loop);
     }
   }
@@ -535,24 +534,6 @@ class DoubleBufferInserter : private kir::ExprMutator {
 
 void DoubleBufferInfo::build(Fusion* fusion) {
   DoubleBufferFusionInspector inspector(fusion, *this);
-
-  // Build double buffered loop id's
-  for (auto& info : map_) {
-    auto double_buffer_axis = info.second.double_buffer_axis;
-    // Keeps track of which loop disjoint set has been
-    //  double buffered. In index allocation, one index
-    //  variable would need to be allocated in each
-    //  double buffer stage.
-    concrete_double_buffered_loop_id_.insert(
-        GpuLower::current()->caMap()->getConcreteMappedID(
-            double_buffer_axis, IdMappingMode::LOOP));
-  }
-}
-
-bool DoubleBufferInfo::isDoubleBufferedIterDomain(IterDomain* id) {
-  auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::LOOP);
-  return concrete_double_buffered_loop_id_.count(concrete_loop_id);
 }
 
 DoubleBufferInfo::TvInfo& DoubleBufferInfo::getTvInfo(const TensorView* tv) {

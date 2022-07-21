@@ -36,7 +36,7 @@ void cuda_lazy_init() {
 }
 
 void set_requires_cuda_init(bool value) {
-  is_initialized = !value;
+  is_initialized = value;
 }
 
 } // namespace utils

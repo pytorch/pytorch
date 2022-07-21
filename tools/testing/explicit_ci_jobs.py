@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
+import yaml
+import textwrap
+import subprocess
+import pathlib
 import argparse
 import fnmatch
-import pathlib
-import subprocess
-import textwrap
 
-from typing import Any, Dict, List
-
-import yaml
+from typing import Dict, List, Any
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent.parent

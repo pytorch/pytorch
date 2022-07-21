@@ -1,5 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
-from torch.ao.quantization.quant_type import QuantType
+from typing import Any, Dict, List, Optional, Set, Callable, Tuple, Union
 import torch
 import copy
 import warnings
@@ -319,7 +318,7 @@ def convert_standalone_module(
     """
     # TODO: remove is_reference flag
     if is_reference:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference_fx
+        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference
     else:
         convert_fn = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
@@ -474,7 +473,7 @@ def convert_custom_module(
         node: Node,
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
-        custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
+        custom_module_class_mapping: Dict[Callable, Callable],
         statically_quantized_custom_module_nodes: Set[Node]):
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
@@ -580,6 +579,14 @@ def convert(
 
     node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
+
+    # TODO this should be removed now that gpu support for quantization is being supported.
+    # however in practice, as of 7/22/2021, certain functions that get called by convert expect
+    # only cpu arguments.
+    # As an example, in TestQuantizeFxModels.test_qat_functional_linear when device='cuda',
+    # fold_weight will call quantized::linear_prepack which doesn't support QuantizedCuda backend.
+    if not is_reference:
+        model.cpu()
 
     # mapping from fully qualified module name to module instance
     # for example,

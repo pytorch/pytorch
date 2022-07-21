@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod, op_gt, op_lt
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod
 from torch.fx.tensor_type import TensorType, Dyn
 
 
@@ -127,14 +127,13 @@ class BinConstraintD(BinaryConstraint):
     Binary constraints about dimensions
     """
     def __init__(self, lhs, rhs, op):
-        assert is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)
-        assert is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)
+        assert is_algebraic_expression(lhs) or is_dim(lhs)
+        assert is_algebraic_expression(rhs) or is_dim(rhs)
 
         super().__init__(lhs, rhs, op)
 
     def __eq__(self, other):
         return super().__eq__(other)
-
 
 
 class TGreatestUpperBound(Constraint):
@@ -211,49 +210,6 @@ class CanReshape(Constraint):
             return False
 
 
-
-class IndexSelect(Constraint):
-
-    def __init__(self, tensor_size, input_var, dim_replace, index, output):
-        """
-        Args:
-            input_var: input to index_select
-            tensor_size: tensor size we are considering
-            dim_replace: the dimension of the output at "index"
-            index: location of the dimensiont to replace in the input
-            outut: variable to store the result
-        """
-        assert isinstance(input_var, TVar)
-        assert isinstance(output, TVar)
-        assert isinstance(dim_replace, DVar) or dim_replace == Dyn
-        assert isinstance(index, int)
-
-        self.input_var = input_var
-        self.tensor_size = tensor_size
-        self.dim_replace = dim_replace
-        self.index = index
-        self.output = output
-
-    def __repr__(self):
-
-        return f' {self.output} = ' \
-               f'IndexSelect({self.input_var}, ' \
-               f'tensor_size: {self.tensor_size}, ' \
-               f'{self.dim_replace}, ' \
-               f'{self.index})'
-
-    def __eq__(self, other):
-        if isinstance(other, IndexSelect):
-            return self.tensor_size == other.tensor_size and\
-                self.dim_replace == other.dim_replace and\
-                self.index == other.index and\
-                self.output == other.output and\
-                self.input_var == other.input_var
-        else:
-            return False
-
-
-
 class GetItem(Constraint):
 
     def __init__(self, tensor_size, index, res, input_var):
@@ -261,11 +217,9 @@ class GetItem(Constraint):
         Constraint for getting item given a tensor size
         :param tensor_size: actual number
         :param index: actual number representing the index
-        :param res: dimension variable to carry the item we get
+        :param res: variable to carry the item we get
         :param input_var: a tensor variable from which we will get item
         """
-        assert isinstance(res, DVar)
-
         self.res = res
         self.tensor_size = tensor_size
         self.index = index
@@ -283,36 +237,6 @@ class GetItem(Constraint):
         else:
             return False
 
-class GetItemTensor(Constraint):
-
-    def __init__(self, tensor_size, index_tuple, res, input_var):
-        """
-        Constraint for getting item given a tensor size
-        However, when the argument is a tuple, we will
-        expect a tensor
-        :param tensor_size: actual number representing the rank
-        :param index_tuple: tuple for indexing
-        :param res: tensor variable to carry the item we get
-        :param input_var: a tensor variable from which we will get item
-        """
-        assert isinstance(res, TVar)
-
-        self.res = res
-        self.tensor_size = tensor_size
-        self.index_tuple = index_tuple
-        self.input_var = input_var
-
-    def __repr__(self):
-        return f' {self.res} = GetItemT({self.input_var}, tensor_size: {self.tensor_size}, {self.index_tuple})'
-
-    def __eq__(self, other):
-        if isinstance(other, GetItemTensor):
-            return self.res == other.res and \
-                self.tensor_size == other.tensor_size and \
-                self.index_tuple == other.index_tuple and \
-                self.input_var == other.input_var
-        else:
-            return False
 
 class CalcConv(Constraint):
 
@@ -481,38 +405,12 @@ class DVar:
             return False
 
 
-class BVar:
-    """
-    Boolean variable
-    """
-    def __init__(self, c):
-        """
-        :param c: character or number
-        """
-        self.c = c
-
-    def __repr__(self):
-        return f'BV({self.c})'
-
-    def __eq__(self, other):
-        if isinstance(other, BVar):
-            return self.c == other.c
-        else:
-            return False
-
-
 def is_algebraic_expression(constraint):
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_add, op_sub, op_div, op_mul, op_mod]
     else:
         return isinstance(constraint, Prod)
 
-
-def is_bool_expr(constraint):
-    if isinstance(constraint, BinConstraintD):
-        return constraint.op in [op_gt, op_lt]
-    else:
-        return isinstance(constraint, BVar)
 
 def is_dim(d):
     return isinstance(d, DVar) or isinstance(d, int) or d == Dyn

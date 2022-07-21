@@ -25,7 +25,6 @@ at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
   return t;
 }
 
-#ifdef USE_FBGEMM
 /**
  * Adapted from Fbgemm BCSRMatrix::pack, but with zero points, without tiling,
  * and without determining row_offsets
@@ -94,7 +93,6 @@ ao::sparse::BCSR pack_bcsr(
   return ao::sparse::BCSR(
       std::move(values), std::move(rowBPtr), std::move(colBIdx));
 }
-#endif // USE_FBGEMM
 } // namespace
 
 #ifdef USE_FBGEMM

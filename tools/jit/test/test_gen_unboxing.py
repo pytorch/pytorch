@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from unittest.mock import NonCallableMock, patch
+from unittest.mock import patch, NonCallableMock
 
 import tools.jit.gen_unboxing as gen_unboxing
 

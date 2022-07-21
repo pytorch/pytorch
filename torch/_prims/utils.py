@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -48,7 +48,6 @@ NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
-Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
@@ -56,15 +55,11 @@ torch_function_passthrough = {
     torch.Tensor.numel,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
-    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
 }
 
 
@@ -217,15 +212,14 @@ def check_significant_strides(
     return True, None
 
 
-# This function is equivalent to compute_contiguous() from TensorImpl.cpp
 def is_contiguous(a: TensorLikeType) -> bool:
     """
     Tests whether a tensor is contiguous or not.
 
     Tensors are contiguous when they have no elements,
-    one element, or when they have "nested" strides.
+    or when they have "nested" strides.
     """
-    if a.numel() < 2:
+    if a.numel() == 0:
         return True
 
     expected_stride = 1
@@ -237,140 +231,6 @@ def is_contiguous(a: TensorLikeType) -> bool:
         if y != expected_stride:
             return False
         expected_stride = expected_stride * x
-
-    return True
-
-
-# This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
-def is_channels_last_contiguous_2d(a: Tensor) -> bool:
-    # NHWC or not channels last 2D contiguous
-    if a.ndim != 4:
-        return False
-
-    expected_stride = 1
-    for idx in (1, 3, 2, 0):
-
-        length = a.shape[idx]
-        if length == 1:
-            continue
-
-        stride = a.stride()[idx]
-        if stride != expected_stride:
-            return False
-
-        expected_stride *= length
-
-    return True
-
-
-def is_channels_last_contiguous_3d(a: Tensor) -> bool:
-    # NDHWC or not channels last 3D contiguous
-    if a.ndim != 5:
-        return False
-
-    expected_stride = 1
-    for idx in (1, 4, 3, 2, 0):
-
-        length = a.shape[idx]
-        if length == 1:
-            continue
-
-        stride = a.stride()[idx]
-        if stride != expected_stride:
-            return False
-
-        expected_stride *= length
-
-    return True
-
-
-_memory_formats = set(
-    (
-        torch.contiguous_format,
-        torch.preserve_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    )
-)
-
-
-def validate_memory_format(memory_format: torch.memory_format):
-    check(
-        memory_format in _memory_formats,
-        lambda: f"Received unknown memory format {memory_format}!",
-    )
-
-
-def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format
-) -> bool:
-    validate_memory_format(memory_format)
-
-    if memory_format == torch.contiguous_format:
-        return is_contiguous(a)
-    if memory_format == torch.channels_last:
-        return is_channels_last_contiguous_2d(a)
-    if memory_format == torch.channels_last_3d:
-        return is_channels_last_contiguous_3d(a)
-
-    check(
-        False,
-        lambda: f"is_contiguous received unsupported memory format {memory_format}",
-    )
-
-
-# NOTE: that tensors with no elements and channels last is ???
-def is_channels_last_contiguous(a: Tensor) -> bool:
-    """
-    True when a tensor is channels-last contiguous.
-
-    This requires that:
-
-      - the tensor is conceptually either 4 (NHWC) or 5 (NDHWC) dimensions
-      - if we name the tensor's dimensions NCHW or NCDHW, then the strides are such that the
-        stride of the 'C' dimension (Cs) is 1 and the strides corresponding to
-        each dimension (Xs) can be ordered Cs <= Ws <= Hs <= (Ds) <= Ns and are
-        "nested" -- so Ws = Cs * Cl, where Cl is the length of the 'C' dimension,
-        for example.
-    """
-    return is_channels_last_contiguous_2d(a) or is_channels_last_contiguous_3d(a)
-
-
-def is_non_overlapping_and_dense(a: Tensor) -> bool:
-    """
-    True when a tensor is non-overlapping and dense.
-
-    A tensor is non-overlapping and dense when there exists a permutation of
-    its dimensions that is contiguous.
-    """
-
-    # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if is_contiguous(a) or is_channels_last_contiguous(a):
-        return True
-
-    # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
-
-    # Short-circuits for tensors of rank one, which are
-    # non-overlapping and "dense" if their stride is one
-    if a.ndim == 1:
-        return a.stride()[0] == 1
-
-    # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
-    # Sorts (length, stride) pairs by stride
-    lengths_and_strides = sorted(
-        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
-    )
-
-    expected_stride = 1
-    for length, stride in lengths_and_strides:
-
-        if length == 1:
-            continue
-
-        if stride != expected_stride:
-            return False
-
-        expected_stride *= length
 
     return True
 
@@ -543,17 +403,7 @@ def canonicalize_dim(rank: int, idx: int) -> int:
 
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
-@overload
-def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
-    pass
-
-
-@overload
-def canonicalize_dims(rank: int, indices: int) -> int:
-    pass
-
-
-def canonicalize_dims(rank, indices):
+def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
     if isinstance(indices, int):
         return canonicalize_dim(rank, indices)
 
@@ -627,7 +477,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             raise RuntimeError(msg)
 
 
-def canonicalize_device(device: DeviceLikeType) -> torch.device:
+def canonicalize_device(device: Union[str, torch.device]) -> torch.device:
     if isinstance(device, torch.device):
         return device
 
@@ -670,8 +520,6 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
             raise RuntimeError(msg)
 
 
-# Acquires a common shape, if it exists, from one or more tensor arguments,
-# filtering number arguments
 def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
@@ -717,7 +565,7 @@ def extract_shape_from_varargs(
     """
 
     # Handles tuple unwrapping
-    if len(shape) == 1 and isinstance(shape[0], Sequence):
+    if len(shape) == 1 and isinstance(shape[0], tuple):
         shape = shape[0]
 
     validate_shape(shape)  # type: ignore[arg-type]
@@ -725,7 +573,6 @@ def extract_shape_from_varargs(
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -738,11 +585,6 @@ def is_boolean_dtype(dtype: torch.dtype) -> bool:
 def is_integer_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
     return dtype in _integer_dtypes
-
-
-def is_low_precision_dtype(dtype: torch.dtype) -> bool:
-    assert isinstance(dtype, torch.dtype)
-    return dtype in _low_precision_dtypes
 
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
@@ -823,30 +665,6 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
 
 _ordered_types = (bool, int, float, complex)
-
-
-def check_fp_or_complex(
-    dtype: torch.dtype, fn_name: str, allow_low_precision_dtypes: bool = True
-):
-    """
-    Checks whether the input is floating point or complex.
-    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
-    """
-    check(
-        is_float_dtype(dtype) or is_complex_dtype(dtype),
-        lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
-    )
-    check(
-        allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
-        lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
-    )
-
-
-def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
-    check(
-        len(A.shape) >= 2,
-        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
-    )
 
 
 def get_higher_type(a: type, b: type) -> type:
@@ -1275,14 +1093,21 @@ def reduction_dtypes(
     return computation_dtype, result_dtype
 
 
-def make_contiguous_strides_for(
-    shape: ShapeType, row_major: bool = True
-) -> Tuple[int, ...]:
+def wrap_device(d: Union[str, torch.device]) -> torch.device:
     """
-    Returns the strides of a contriguous tensor if row_major
-    If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
-    This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
+    Wraps strings into torch.device objects.
+
+    Given torch.device objects are returned unmodified.
     """
+
+    assert isinstance(d, (str, torch.device))
+    if isinstance(d, str):
+        return torch.device(d)
+
+    return d
+
+
+def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
@@ -1290,65 +1115,14 @@ def make_contiguous_strides_for(
     multiplier = 1
     strides = []
     for l in reversed(shape):
-        strides.append(multiplier)
         if l != 0:
-            multiplier *= l
+            strides.append(multiplier)
+            multiplier = l * multiplier
+        else:
+            strides.append(multiplier)
 
     result = tuple(reversed(strides))
-
-    if row_major:
-        return result
-    else:
-        if len(shape) < 2:
-            return result
-        return result[:-2] + (1, max(shape[-2], 1))
-
-
-def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
-    check(
-        len(shape) == 4,
-        lambda: "Only tensors of rank 4 can use the channels_last memory format",
-    )
-
-    multiplier = 1
-    strides = [0] * 4
-    for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
-        # This is consistent with eager
-        strides[idx] = multiplier
-        multiplier *= shape[idx]
-
-    return tuple(strides)
-
-
-def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
-        len(shape) == 5,
-        lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
-    )
-
-    multiplier = 1
-    strides = [0] * 5
-    for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
-        # This is consistent with eager
-        strides[idx] = multiplier
-        multiplier *= shape[idx]
-
-    return tuple(strides)
-
-
-def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    ndim = len(shape) if isinstance(shape, Sequence) else 1
-    if ndim == 4:
-        return make_channels_last_2d_strides_for(shape)
-    elif ndim == 5:
-        return make_channels_last_3d_strides_for(shape)
-    else:
-        raise RuntimeError(
-            f"no channels last format strides exist in {ndim} dimensions"
-        )
+    return result
 
 
 def compute_reduction_output_shape(
@@ -1418,46 +1192,3 @@ def check(
     """
     if not b:
         raise exc_type(s())
-
-
-# This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
-# c10/core/MemoryFormat.h into one function
-def are_strides_like_channels_last(
-    shape: Sequence[int], strides: Sequence[int]
-) -> bool:
-    ndim = len(shape)
-
-    if ndim == 4:
-        # Check for channels_last_2d
-        dim_order = [1, 3, 2, 0]
-    elif ndim == 5:
-        # Check for channels_last_3d
-        dim_order = [1, 4, 3, 2, 0]
-    else:
-        return False
-
-    if strides[1] == 0:
-        return False
-
-    min = 0
-    for d in dim_order:
-        if shape[d] == 0:
-            return False
-        if strides[d] < min:
-            return False
-        if d == 0 and min == strides[1]:
-            return False
-        min = strides[d]
-        if strides[d] > 1:
-            min *= shape[d]
-    return True
-
-
-def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
-    if x.layout != torch.strided:
-        return torch.contiguous_format
-
-    if are_strides_like_channels_last(x.shape, x.stride()):
-        return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
-
-    return torch.contiguous_format

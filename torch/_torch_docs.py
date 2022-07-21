@@ -50,9 +50,6 @@ If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
 output tensor having 1 (or ``len(dim)``) fewer dimension(s).
-"""}, {'opt_dim': """
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
-        If ``None``, all dimensions are reduced.
 """})
 
 single_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
@@ -3513,34 +3510,21 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product of two 1D vectors along a dimension.
-
-In symbols, this function computes
-
-.. math::
-
-    \sum_{i=1}^n \overline{x_i}y_i.
-
-where :math:`\overline{x_i}` denotes the conjugate for complex
-vectors, and it is the identity for real vectors.
+Computes the dot product of two 1D tensors. The vdot(a, b) function handles complex numbers
+differently than dot(a, b). If the first argument is complex, the complex conjugate of the
+first argument is used for the calculation of the dot product.
 
 .. note::
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
 
-.. seealso::
-
-        :func:`torch.linalg.vecdot` computes the dot product of two batches of vectors along a dimension.
-
 Args:
     input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
     other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
-""" + fr"""
-.. note:: {common_args["out"]}
-""" + r"""
+    {out}
 
 Example::
 
@@ -3552,7 +3536,7 @@ Example::
     tensor([16.+1.j])
     >>> torch.vdot(b, a)
     tensor([16.-1.j])
-""")
+""".format(**common_args))
 
 add_docstr(torch.eig,
            r"""
@@ -9667,7 +9651,7 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
+    {dim}
     {keepdim}
 
 Keyword args:

@@ -13,10 +13,10 @@ CMAKE_CUDA_COMPILER_LAUNCHER="python;tools/nvcc_fix_deps.py;ccache"
 
 """
 
-import subprocess
 import sys
+import subprocess
 from pathlib import Path
-from typing import List, Optional, TextIO
+from typing import List, TextIO, Optional
 
 
 def resolve_include(path: Path, include_dirs: List[Path]) -> Path:

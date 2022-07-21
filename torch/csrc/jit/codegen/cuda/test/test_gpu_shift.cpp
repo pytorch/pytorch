@@ -1264,8 +1264,7 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge2_CUDA) {
   out->merge(2, 3);
   out->merge(0, 1);
 
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   tv0->computeAt(out, 1);
 
@@ -2325,8 +2324,7 @@ TEST_F(NVFuserTest, FusionHdiffPartialSplitUnswitch_CUDA) {
   out->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
   // out: [NZ/tz, NY/by, NX/bx, tz, by, bx]
 
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   inp->computeAt(out, 4);
 
@@ -2722,8 +2720,7 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   tv0->computeAt(out, 2);
 
@@ -2782,8 +2779,7 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   tv0->computeAt(out, 2);
 
@@ -2883,8 +2879,7 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   tv0->computeAt(out, 2);
 
@@ -3809,8 +3804,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator propagator(tv5);
-  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+  TransformPropagator::from(tv5);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -3866,8 +3860,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv5->reorder({{1, 2}});
   tv5->merge(-2, -1);
 
-  TransformPropagator propagator(tv5);
-  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+  TransformPropagator::from(tv5);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -3927,8 +3920,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv_avg->reorder({{1, 2}});
   tv_avg->merge(-2, -1);
 
-  TransformPropagator propagator(tv_avg);
-  MaxRootDomainInfoSpanningTree(tv_avg).traverse(&propagator);
+  TransformPropagator::from(tv_avg);
 
   tv2->computeAt(tv_avg, -1);
   tv3->computeAt(tv_avg, -1);
@@ -4114,8 +4106,7 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator propagator(tv5);
-  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+  TransformPropagator::from(tv5);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -5323,8 +5314,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   out->split(-2, 4);
   out->split(-1, 32);
   out->reorder({{1, 2}, {2, 1}});
-  TransformPropagator propagator(out);
-  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
+  TransformPropagator::from(out);
 
   tv0->computeAt(out, 2);
 
@@ -5373,8 +5363,7 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   tv5->split(-1, 1024);
   tv5->split(-1, 2);
-  TransformPropagator propagator(tv5);
-  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+  TransformPropagator::from(tv5);
 
   tv0->computeAt(tv5, 1);
 
@@ -5391,46 +5380,6 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
   auto outputs = fe.runFusion(inputs);
 
   auto ref = t0 + shift(t0, {1}) + shift(t0, {-1});
-
-  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
-}
-
-// Test IterType promotion with gather
-TEST_F(NVFuserTest, FusionGatherIterTypePromotion_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  const int s1 = 11;
-  const int s2 = 3;
-
-  auto tv0 = makeConcreteTensor({s1});
-  fusion.addInput(tv0);
-  auto tv1 = makeConcreteTensor({s1, s2});
-  fusion.addInput(tv1);
-
-  const std::vector<int> window_shape = {3};
-  const std::vector<std::vector<int>> padding_width = {{1, 1}};
-
-  auto tv2 = gather(tv0, window_shape, padding_width);
-  auto tv3 = add(tv2, tv1);
-
-  fusion.addOutput(tv3);
-
-  TORCH_CHECK(
-      tv3->axis(1)->getIterType() == IterType::Iteration,
-      "Invalid IterType promotion: ",
-      tv3->axis(1)->toString());
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({s1}, options);
-  at::Tensor t1 = at::randn({s1, s2}, options);
-  std::vector<IValue> inputs = {t0, t1};
-
-  auto ref = gather(t0, window_shape, padding_width) + t1;
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, inputs);
-  auto outputs = fe.runFusion(inputs);
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }

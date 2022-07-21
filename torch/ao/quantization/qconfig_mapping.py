@@ -4,10 +4,7 @@ from typing import Any, Callable, Dict, Tuple, Union
 
 import torch
 
-from .fake_quantize import (
-    default_weight_fake_quant,
-    FixedQParamsFakeQuantize,
-)
+from .fake_quantize import default_weight_fake_quant
 from .observer import (
     _PartialWrapper,
     default_fixed_qparams_range_0to1_observer,
@@ -103,11 +100,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         if observer in fixed_qparams_observer_to_qconfig:
             fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
         else:
-            if is_qat:
-                activation = FixedQParamsFakeQuantize.with_args(observer=observer)
-            else:
-                activation = observer
-            fixed_qparams_qconfig = QConfig(activation=activation, weight=default_weight)
+            fixed_qparams_qconfig = QConfig(activation=observer, weight=default_weight)
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
 

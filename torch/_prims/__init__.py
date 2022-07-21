@@ -3,7 +3,6 @@ from torch import Tensor, _TypedStorage
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
-    check,
     TensorLike,
     TensorLikeType,
     ShapeType,
@@ -58,7 +57,6 @@ __all__ = [
     "bitwise_not",
     "cbrt",
     "ceil",
-    "conj_physical",
     "digamma",
     "erf",
     "erf_inv",
@@ -128,7 +126,6 @@ __all__ = [
     "as_strided",
     "broadcast_in_dim",
     "collapse_view",
-    "conj",
     "expand_dims",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
@@ -150,6 +147,7 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
+    "clone",
     "convert_element_type",
     "device_put",
     "item",
@@ -176,19 +174,9 @@ __all__ = [
     "empty_strided",
     "scalar_tensor",
     #
-    # Linear algebra (linalg) Prims
-    #
-    "svd",
-    #
     # Randomness Prims
     #
     "uniform",
-    #
-    # FFT prims
-    #
-    "fft_r2c",
-    "fft_c2c",
-    "fft_c2r",
 ]
 
 #
@@ -331,7 +319,7 @@ def _wrap_tensor_meta(f):
 def _make_prim(
     *,
     schema: str,
-    return_type: Union[RETURN_TYPE, Tuple[RETURN_TYPE, ...]],
+    return_type: RETURN_TYPE,
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
@@ -653,23 +641,6 @@ ceil = _make_elementwise_unary_prim(
     impl_nvfuser=_ceil_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-
-def _conj_physical_meta(input: TensorLikeType) -> TensorLikeType:
-    if not input.dtype.is_complex:
-        raise RuntimeError("prims.conj_physical is only defined for complex dtypes")
-
-    strides = utils.compute_elementwise_output_strides(input)
-    return TensorMeta(input, strides=strides)
-
-
-conj_physical = _make_prim(
-    schema="conj_physical(Tensor self) -> Tensor",
-    meta=_conj_physical_meta,
-    impl_aten=torch._conj_physical,
-    doc="Returns the physical conjugation of a complex tensor",
-    return_type=RETURN_TYPE.NEW,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -1444,25 +1415,6 @@ collapse_view = _make_prim(
 )
 
 
-def _conj_meta(a: TensorLikeType) -> TensorLikeType:
-    if not a.dtype.is_complex:
-        raise RuntimeError("Expected complex dtype in prims.conj")
-    return TensorMeta(a)
-
-
-_conj_doc = """
-Returns a conjugated view of the original tensor
-"""
-
-conj = _make_prim(
-    schema="conj(Tensor(a) a) -> Tensor(a)",
-    meta=_conj_meta,
-    impl_aten=torch.conj,
-    return_type=RETURN_TYPE.VIEW,
-    doc=_conj_doc,
-)
-
-
 def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
     """
     Creates a view of a with a.ndim + len(dimensions) dimensions, with new
@@ -1762,8 +1714,10 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
-    for idx in reversed(sorted(dimensions)):
-        a = torch.squeeze(a, dim=idx)
+    squeezes = 0
+    for idx in dimensions:
+        a = torch.squeeze(a, dim=(idx - squeezes))
+        squeezes = squeezes + 1
 
     return a
 
@@ -1988,6 +1942,32 @@ where = _make_prim(
 #
 # Type conversions
 #
+# TODO: model memory format on TensorMeta
+# TODO: make clone a reference following its implementation in TensorFactories.cpp
+def _clone_meta(
+    a: TensorLikeType, *, memory_format: torch.memory_format
+) -> TensorLikeType:
+    strides = utils.compute_elementwise_output_strides(a)
+    return TensorMeta(a, strides=strides)
+
+
+def _clone_aten(a: Tensor, *, memory_format: torch.memory_format) -> Tensor:
+    return torch.clone(a, memory_format=memory_format)
+
+
+_clone_doc = """
+    Creates a copy of a tensors.
+"""
+
+clone = _make_prim(
+    schema="clone(Tensor a, *, MemoryFormat memory_format) -> Tensor",
+    meta=_clone_meta,
+    impl_aten=_clone_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_clone_doc,
+)
+
+
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     # Type checks
     assert isinstance(a, TensorLike)
@@ -2042,7 +2022,7 @@ def _device_put_meta(
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
 
-    return TensorMeta(a, device=utils.canonicalize_device(device))
+    return TensorMeta(a, device=utils.wrap_device(device))
 
 
 def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
@@ -2571,66 +2551,6 @@ scalar_tensor = _make_prim(
     doc=_scalar_tensor_doc,
 )
 
-
-#
-# Linear algebra (linalg) prims
-#
-
-
-def _svd_meta(
-    A: TensorLikeType, *, full_matrices: bool
-) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
-    utils.check_is_matrix(A, "linalg.svd")
-    utils.check_fp_or_complex(A.dtype, "linalg.svd", allow_low_precision_dtypes=False)
-
-    A_shape = A.shape
-    batch = A_shape[:-2]
-    m, n = A_shape[-2:]
-    k = min(m, n)
-
-    shape_U = batch + (m, m if full_matrices else k)
-    strides_U = utils.make_contiguous_strides_for(shape_U, row_major=False)
-    U = TensorMeta(shape=shape_U, strides=strides_U, dtype=A.dtype, device=A.device)
-
-    shape_S = batch + (k,)
-    strides_S = utils.make_contiguous_strides_for(shape_S)
-    S = TensorMeta(
-        shape=shape_S,
-        strides=strides_S,
-        dtype=utils.corresponding_real_dtype(A.dtype) if A.is_complex() else A.dtype,
-        device=A.device,
-    )
-
-    shape_Vh = batch + (n if full_matrices else k, n)
-    # The CPU backend returns V, but the cuSolver backend returns V^H
-    # TODO The MAGMA backend returns V, so this is wrong if used with the MAGMA backend
-    is_cuda = A.device.type == "cuda"
-    strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
-    Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
-    return U, S, Vh
-
-
-def _svd_aten(
-    A: TensorLikeType, *, full_matrices: bool
-) -> Tuple[Tensor, Tensor, Tensor]:
-    return torch.linalg.svd(A, full_matrices=full_matrices)
-
-
-_svd_doc = """
-    Returns the SVD of a matrix or batch of matrices.
-
-    The `full_matrices` flag controls whether the full or reduced SVD decomposition is returned.
-"""
-
-svd = _make_prim(
-    schema="svd(Tensor A, *, bool full_matrices) -> (Tensor U, Tensor S, Tensor Vh)",
-    meta=_svd_meta,
-    impl_aten=_svd_aten,
-    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW, RETURN_TYPE.NEW),
-    doc=_svd_doc,
-)
-
-
 #
 # Randomness Prims
 #
@@ -2674,127 +2594,4 @@ uniform = _make_prim(
     meta=_uniform_meta,
     impl_aten=_uniform_aten,
     doc=_uniform_doc,
-)
-
-
-def _fft_r2c_meta(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    onesided: bool,
-) -> TensorLikeType:
-    dim = utils.canonicalize_dims(input.ndim, dim)
-    utils.validate_no_repeating_dims(dim)
-
-    shape = list(input.shape)
-    if onesided:
-        last_dim = dim[-1]
-        shape[last_dim] = shape[last_dim] // 2 + 1
-
-    dtype = utils.corresponding_complex_dtype(input.dtype)
-    strides = utils.make_contiguous_strides_for(shape)
-    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
-
-
-def _fft_r2c_aten(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    onesided: bool,
-) -> TensorLikeType:
-    normalization = 0  # No normalization
-    return torch._fft_r2c(input, dim, normalization, onesided)
-
-
-_fft_r2c_doc = """
-    Performs a real to complex Fast Fourier Transform
-"""
-
-
-fft_r2c = _make_prim(
-    schema="fft_r2c(Tensor self, *, int[] dim, bool onesided) -> Tensor",
-    meta=_fft_r2c_meta,
-    impl_aten=_fft_r2c_aten,
-    return_type=RETURN_TYPE.NEW,
-    doc=_fft_r2c_doc,
-)
-
-
-def _fft_c2c_meta(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    forward: bool,
-) -> TensorLikeType:
-    dim = utils.canonicalize_dims(input.ndim, dim)
-    utils.validate_no_repeating_dims(dim)
-
-    shape = input.shape
-    strides = utils.make_contiguous_strides_for(shape)
-    return TensorMeta(
-        shape=shape, strides=strides, dtype=input.dtype, device=input.device
-    )
-
-
-def _fft_c2c_aten(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    forward: bool,
-) -> TensorLikeType:
-    normalization = 0  # No normalization
-    return torch._fft_c2c(input, dim, normalization, forward)
-
-
-_fft_c2c_doc = """
-    Performs either a Fast Fourier Transform, or its inverse
-"""
-
-
-fft_c2c = _make_prim(
-    schema="fft_c2c(Tensor self, *, int[] dim, bool forward) -> Tensor",
-    meta=_fft_c2c_meta,
-    impl_aten=_fft_c2c_aten,
-    return_type=RETURN_TYPE.NEW,
-    doc=_fft_c2c_doc,
-)
-
-
-def _fft_c2r_meta(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    last_dim_size: int,
-) -> TensorLikeType:
-    dim = utils.canonicalize_dims(input.ndim, dim)
-    utils.validate_no_repeating_dims(dim)
-
-    shape = list(input.shape)
-    shape[dim[-1]] = last_dim_size
-    dtype = utils.corresponding_real_dtype(input.dtype)
-    strides = utils.make_contiguous_strides_for(shape)
-    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
-
-
-def _fft_c2r_aten(
-    input: TensorLike,
-    *,
-    dim: DimsSequenceType,
-    last_dim_size: int,
-) -> TensorLikeType:
-    normalization = 0  # No normalization
-    return torch._fft_c2r(input, dim, normalization, last_dim_size)
-
-
-_fft_c2r_doc = """
-    Performs a complex to real Inverse Fast Fourier Transform
-"""
-
-
-fft_c2r = _make_prim(
-    schema="fft_c2r(Tensor self, *, int[] dim, int last_dim_size) -> Tensor",
-    meta=_fft_c2r_meta,
-    impl_aten=_fft_c2r_aten,
-    return_type=RETURN_TYPE.NEW,
-    doc=_fft_c2r_doc,
 )

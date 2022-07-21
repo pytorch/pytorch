@@ -84,7 +84,7 @@ class DataLoader2:
                 raise Exception(
                     'sampler is not yet supported by DataPipes')
             datapipe = dataset
-            datapipe = torch.utils.data.graph_settings.apply_shuffle_settings(datapipe, shuffle=shuffle)  # type: ignore[assignment]
+            datapipe = torch.utils.data.graph_settings.apply_shuffle_settings(datapipe, shuffle=shuffle)
             if batch_outside_worker and pin_memory:
                 raise Exception(
                     'pin_memory is not yet compatible with batch_outside_worker')

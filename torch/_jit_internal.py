@@ -1083,19 +1083,11 @@ def _get_named_tuple_properties(obj):
                     if field in obj._field_defaults]
     else:
         defaults = []
-    # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
-    # Also, annotations from base class are not inherited so they need to be queried explicitly
-    if sys.version_info[:2] < (3, 10):
-        obj_annotations = getattr(obj, '__annotations__', {})
-    else:
-        obj_annotations = inspect.get_annotations(obj)
-        if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
-            obj_annotations = inspect.get_annotations(obj.__base__)
-
     annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
     for field in obj._fields:
-        if field in obj_annotations:
-            the_type = torch.jit.annotations.ann_to_type(obj_annotations[field], fake_range())
+        if has_annotations and field in obj.__annotations__:
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
-from torchgen.utils import assert_never, NamespaceHelper
+from torchgen.utils import assert_never
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -454,11 +454,12 @@ class NativeFunction:
         funcs = e.pop("func")
         assert isinstance(funcs, str), f"not a str: {funcs}"
         # only support one level of namespace. E.g., aten::add
-        namespace_helper = NamespaceHelper.from_namespaced_entity(
-            namespaced_entity=funcs, max_level=1
-        )
-        namespace = namespace_helper.get_cpp_namespace(default="aten")
-        func = FunctionSchema.parse(namespace_helper.entity_name)
+        namespaced_funcs = funcs.split("::", 1)
+        if len(namespaced_funcs) == 1:
+            namespace = "aten"
+        else:
+            namespace = namespaced_funcs[0]
+        func = FunctionSchema.parse(namespaced_funcs[-1])
 
         cpp_no_default_args_list = e.pop("cpp_no_default_args", [])
         assert isinstance(cpp_no_default_args_list, list)
@@ -578,20 +579,19 @@ class NativeFunction:
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
-                    # We only allow at most 2 levels of namespace for kernels.
+                    # We only allow one level of namespace for kernels and operator.
                     # We will append "native" to a custom kernel namespace.
-                    namespace_helper = NamespaceHelper.from_namespaced_entity(
-                        v, max_level=2
-                    )
-                    kernel_namespace = namespace_helper.get_cpp_namespace(default="at")
+                    tokens = v.split("::", 1)
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
                     dispatch[dispatch_key] = BackendMetadata(
-                        kernel=namespace_helper.entity_name,
+                        kernel=tokens[-1],
                         structured=structured
                         and is_structured_dispatch_key(dispatch_key),
-                        cpp_namespace=(kernel_namespace + "::native"),
+                        cpp_namespace=(tokens[0] + "::native")
+                        if len(tokens) > 1
+                        else DEFAULT_KERNEL_NAMESPACE,
                     )
                     if (
                         dispatch_key is DispatchKey.CompositeImplicitAutograd
@@ -661,11 +661,6 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
-
-            # Delay import ufunc here to avoid circular import issue
-            # See: https://github.com/pytorch/pytorch/issues/81294
-            import torchgen.api.ufunc as ufunc
-
             for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
@@ -2475,3 +2470,6 @@ class Precompute:
             replace_list.append(f"{kernel_param} -> {replacements}")
 
         return replace_list
+
+
+import torchgen.api.ufunc as ufunc

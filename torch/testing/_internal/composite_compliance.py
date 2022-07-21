@@ -8,7 +8,6 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
-from typing import Callable
 import re
 
 
@@ -173,12 +172,6 @@ def generate_cct(enable_recursive_torch_dispatch=False,
 
             def wrap(e):
                 return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
-
-            if func == torch.ops.aten._local_scalar_dense.default:
-                raise RuntimeError(
-                    ".item() is not allowed to be called inside of composite "
-                    "functions in the PyTorch library because not all backends "
-                    "and/or Tensor subclasses (e.g. vmap, ProxyTensor) support them.")
 
             if func.overloadpacket.__name__ in ('set_', 'resize_'):
                 raise RuntimeError(
@@ -405,47 +398,16 @@ def gather_leaf_tensors(args, kwargs):
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
-#
-# NB: it is important that op is accepted as a Callable and not an OpInfo,
-# this means we can apply check_backward_formula to things that aren't OpInfos
-# while debugging.
-def check_backward_formula(op: Callable, args, kwargs,
-                           output_process_fn_grad=None,
-                           gradcheck_wrapper=None):
+def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
+    assert op.supports_autograd
     CCT = generate_cct()
-
-    def compute_expected_grads(args, kwargs):
-        if gradcheck_wrapper is None:
-            results = op(*args, **kwargs)
-        else:
-            results = gradcheck_wrapper(op, *args, **kwargs)
-
-        if output_process_fn_grad is not None:
-            results = output_process_fn_grad(results)
-
-        flat_results, _ = tree_flatten(results)
-        flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
-
-        grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
-                 for r in flat_diff_results]
-        leaf_tensors = gather_leaf_tensors(args, kwargs)
-        assert len(leaf_tensors) > 0
-        return torch.autograd.grad(flat_diff_results, leaf_tensors,
-                                   grads, allow_unused=True, retain_graph=True)
-
-    expected = compute_expected_grads(args, kwargs)
-
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
         leaf_tensors = gather_leaf_tensors(new_args, new_kwargs)
         assert len(leaf_tensors) > 0
 
         try:
-            if gradcheck_wrapper is None:
-                results = op(*new_args, **new_kwargs)
-            else:
-                results = gradcheck_wrapper(op, *new_args, **new_kwargs)
+            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
             if output_process_fn_grad is not None:
                 results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
@@ -456,6 +418,11 @@ def check_backward_formula(op: Callable, args, kwargs,
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
+        # Hack: tree_flatten doesn't handle torch.return_types yet,
+        # so we're gonna convert them to tuple.
+        # TODO: https://github.com/pytorch/pytorch/issues/74624
+        if isinstance(results, tuple):
+            results = tuple(results)
         flat_results, _ = tree_flatten(results)
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
@@ -465,8 +432,8 @@ def check_backward_formula(op: Callable, args, kwargs,
                  for r in flat_diff_results]
         for flat_new_grads, which_grad_is_batched in generate_subclass_choices(grads, CCT):
             try:
-                actual = torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
-                                             allow_unused=True, retain_graph=True)
+                torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
+                                    allow_unused=True, retain_graph=True)
             # see NOTE: [What errors are Composite Compiance trying to catch?]
             except RuntimeError as err:
                 raise_composite_compliance_error(
@@ -476,19 +443,12 @@ def check_backward_formula(op: Callable, args, kwargs,
                     f"- wrapped_grads: {which_grad_is_batched}\n"
                 )
 
-            def unwrap(e):
-                return e.elem if isinstance(e, CCT) else e
-
-            torch.testing.assert_close(tuple(map(unwrap, actual)), expected, equal_nan=True)
-
 # Checks if the forward AD formula is composite compliant by testing
 # all possible permutations of {primals, tangents} being
 # CompositeCompliantTensor or regular Tensors.
-#
-# NB: it is important that op is accepted as a Callable and not an OpInfo,
-# this means we can apply check_forward_ad_formula to things that aren't OpInfos
-# while debugging.
-def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None):
+def check_forward_ad_formula(op, args, kwargs):
+    assert op.supports_forward_ad
+
     CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
     # Permutations of arg and kwargs in CCT.
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
@@ -530,10 +490,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None)
                 op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
 
                 try:
-                    if gradcheck_wrapper is None:
-                        op(*op_args, **op_kwargs)
-                    else:
-                        gradcheck_wrapper(op, *op_args, **op_kwargs)
+                    op.gradcheck_wrapper(op.get_op(), *op_args, **op_kwargs)
                 # see NOTE: [What errors are Composite Compiance trying to catch?]
                 except RuntimeError as err:
                     raise_composite_compliance_error(

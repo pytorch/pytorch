@@ -1,5 +1,5 @@
-import re
 import sys
+import re
 
 QUOTE_INCLUDE_RE = re.compile(r'^#include "(.*)"')
 ANGLE_INCLUDE_RE = re.compile(r"^#include <(.*)>")

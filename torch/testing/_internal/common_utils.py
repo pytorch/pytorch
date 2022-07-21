@@ -825,7 +825,10 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+# TODO - Remove this in next PR to have easy revert strategy in case of unstable
+# CI
+# TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+TEST_WITH_TORCHDYNAMO = False
 if TEST_WITH_TORCHDYNAMO:
     import torchdynamo
     # torchdynamo.config.trace = True
@@ -1228,7 +1231,7 @@ def freeze_rng_state():
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
+    with no_dispatch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()

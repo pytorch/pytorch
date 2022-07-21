@@ -23,7 +23,6 @@ except ImportError:
     from common import PackageTestCase
 
 
-@skipIf(True, "Does not work with recent torchvision, see https://github.com/pytorch/pytorch/issues/81115")
 @skipIfNoTorchVision
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""

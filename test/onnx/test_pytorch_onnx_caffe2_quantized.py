@@ -1,18 +1,17 @@
 # Owner(s): ["module: unknown"]
 
 import io
-
-import caffe2.python.onnx.backend as c2
-
 import numpy as np
 import onnx
+
+import caffe2.python.onnx.backend as c2
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.onnx
-from torch.testing._internal import common_utils
+from test_pytorch_common import TestCase, run_tests
 
 
-class TestQuantizedOps(common_utils.TestCase):
+class TestQuantizedOps(TestCase):
     def generic_test(
         self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False
     ):
@@ -378,4 +377,4 @@ class TestQuantizedOps(common_utils.TestCase):
 
 
 if __name__ == "__main__":
-    common_utils.run_tests()
+    run_tests()

@@ -289,7 +289,6 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   doubleBufferInfo().build(fusion_);
 
-  compute_at_map_->allocateIndexVariables();
   // Run our passes keeping the lowered expressions and forwarding
   // them
 

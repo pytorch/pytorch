@@ -509,7 +509,7 @@ def convert_fx(
     )
 
 
-def convert_to_reference_fx(
+def convert_to_reference(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
@@ -541,10 +541,10 @@ def convert_to_reference_fx(
     Example::
 
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
-        reference_model = convert_to_reference_fx(prepared_model)
+        reference_model = convert_to_reference(prepared_model)
 
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_to_reference_fx")
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_to_reference")
     return _convert_fx(
         graph_module,
         is_reference=True,

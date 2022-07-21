@@ -54,8 +54,7 @@
       "name": "CI Pinned Hashes",
       "patterns": [
          ".github/ci_commit_pins/vision.txt",
-         ".github/ci_commit_pins/torchdynamo.txt",
-         ".github/ci_commit_pins/functorch.txt"
+         ".github/ci_commit_pins/torchdynamo.txt"
       ],
       "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
@@ -167,7 +166,6 @@
       "name": "MPS",
       "patterns": [
          "test/test_mps.py",
-         "aten/src/ATen/native/native_functions.yaml",
          "aten/src/ATen/mps/**",
          "aten/src/ATen/native/mps/**"
       ],

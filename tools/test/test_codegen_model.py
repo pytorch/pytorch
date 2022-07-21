@@ -1,15 +1,14 @@
 # Owner(s): ["module: codegen"]
 
-import textwrap
-import unittest
-
 import expecttest
+import unittest
+import yaml
+import textwrap
+
+from torchgen.model import NativeFunctionsGroup, DispatchKey
 import torchgen.dest as dest
 import torchgen.gen as gen
-import yaml
 from torchgen.gen import LineLoader, parse_native_yaml_struct
-
-from torchgen.model import DispatchKey, NativeFunctionsGroup
 
 
 class TestCodegenModel(expecttest.TestCase):

@@ -1323,7 +1323,8 @@ class TestTorchFunctionMode(TestCase):
         class A(TorchFunctionMode):
             pass
 
-        with A() as x:
+        x = A()
+        with x:
             pass
 
         with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):

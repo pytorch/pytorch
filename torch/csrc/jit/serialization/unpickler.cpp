@@ -685,12 +685,7 @@ void Unpickler::readGlobal(
         class_name,
         "'");
   } else {
-    TORCH_CHECK(
-        type_resolver_,
-        "Unpickler found unknown type ",
-        module_name,
-        ".",
-        class_name);
+    AT_ASSERT(type_resolver_);
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
     if (auto enum_type = type.type_->cast<c10::EnumType>()) {

@@ -409,11 +409,6 @@ std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
 }
 
-IterDomain* caMapExactConcreteId(IterDomain* id) {
-  return GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-}
-
 } // namespace ir_utils
 
 namespace loop_utils {
