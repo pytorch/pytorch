@@ -146,7 +146,7 @@ class ActivationSparsifier:
                 # compute aggregate over each feature
                 for feature_idx in range(len(features)):
                     # each feature is either a list or scalar, convert it to torch tensor
-                    feature_tensor = torch.Tensor([features[feature_idx]], device=input_data.device).long()
+                    feature_tensor = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
                     data_feature = torch.index_select(input_data, feature_dim, feature_tensor)
                     if data is None:
                         curr_data = torch.zeros_like(data_feature)
@@ -193,6 +193,8 @@ class ActivationSparsifier:
 
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self._aggregate_hook(name=name))
+
+        self.state[name]['mask'] = None  # mask will be created when model forward is called.
 
         # attach agg hook
         self.data_groups[name]['hook'] = agg_hook
@@ -290,7 +292,7 @@ class ActivationSparsifier:
             else:
                 # apply per feature, feature_dim
                 for feature_idx in range(0, len(features)):
-                    feature = torch.Tensor([features[feature_idx]], device=input_data.device).long()
+                    feature = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
                     sparsified = torch.index_select(input_data, feature_dim, feature) * mask[feature_idx]
                     input_data.index_copy_(feature_dim, feature, sparsified)
                 return input_data
