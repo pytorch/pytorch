@@ -62,7 +62,15 @@ jobs:
           command: |
             sh scripts/buck_setup.sh
 
-      - name: Build C10
+      - name: Build tools
+        run: |
+          buck build tools: --keep-going
+
+      - name: Run tools tests
+        run: |
+          buck test tools:selective_build_test tools:gen_oplist_test tools:gen_operators_yaml_test
+
+      - name: Build c10
         run: |
           buck build c10:c10
 
@@ -73,6 +81,10 @@ jobs:
       - name: Build QNNPACK
         run: |
           buck build aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack
+
+      - name: Test QNNPACK
+        run: |
+          buck test aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack_test
 
       - name: Build aten_cpu
         run: |

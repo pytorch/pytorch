@@ -23,8 +23,7 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes,
             false),
-        strides_(strides.vec()) {
-  }
+        strides_(strides.vec()) {}
 
   IntArrayRef strides_custom() const override {
     return strides_;
