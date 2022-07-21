@@ -467,15 +467,16 @@ class FakeTensorMode(TorchDispatchMode):
                 return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
 
 
-        constructors = [torch.ops.aten.empty.SymInt]
-        if 'prims' not in func.overloadpacket._qualified_op_name and func not in constructors:
-            raise RuntimeError(f"Couldn't find meta function/decomposition, {func}")
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
 
         if "prims::" in func._schema.name:
             with no_dispatch():
                 return func(*args, **kwargs)
+
+        constructors = [torch.ops.aten.empty.SymInt]
+        if func not in constructors:
+            raise RuntimeError(f"Couldn't find symbolic meta function/decomposition, {func}")
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator

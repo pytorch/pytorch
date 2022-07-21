@@ -42,7 +42,7 @@ def f(x, y):
         out = out.cos()
     return out.expand(out.shape)
 
-fx_g = make_fx(f)(torch.randn(5, 1), torch.randn(1, 5))
+fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5, 1), torch.randn(1, 5))
 fx_g.graph.eliminate_dead_code()
 fx_g.recompile()
 print(fx_g.code)

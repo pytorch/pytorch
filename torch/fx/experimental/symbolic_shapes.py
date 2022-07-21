@@ -8,6 +8,11 @@ except ImportError:
 
 aten = torch.ops.aten
 
+__all__ = ["has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv"]
+
+def has_symbolic_sizes_strides(elem):
+    return any([isinstance(i, torch._C.SymbolicIntNode) for i in elem.shape])
+
 def create_contiguous(shape):
     strides = [1]
     for dim in reversed(shape[:-1]):

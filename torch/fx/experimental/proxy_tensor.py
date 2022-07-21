@@ -39,7 +39,8 @@ class ProxySymInt(object):
         return f"ProxySymInt({self.sym_int})"
 
     def __int__(self):
-        return int(self.sym_int)
+        # Not sure how to make mypy support this lol
+        return int(self.sym_int)  # type: ignore[arg-type]
 
     def __bool__(self):
         return bool(self.sym_int)
@@ -147,7 +148,7 @@ def proxy_call(func_overload, dispatch_mode, args, kwargs=None):
             if isinstance(e.get_pyobj(), ProxySymInt):
                 return e.get_pyobj().sym_int
             else:
-                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyboj()} into the graph,"
+                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
                                    f"even though it's not a ProxySymInt. This is a bug.")
 
         return e
@@ -234,7 +235,7 @@ class ProxyTensor(torch.Tensor):
         def create_proxy_symint(sym_int, new_proxy):
             return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
 
-        has_sym_ints = any([isinstance(i, torch._C.SymbolicIntNode) for i in elem.shape])
+        has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
         if has_sym_ints:
             new_shape = []
             for idx, s in enumerate(elem.shape):
@@ -323,7 +324,6 @@ class PythonKeyTracer(Tracer):
             return py_symint.proxy.node
         return super().create_arg(a)
 
-print(torch._C.MobileOptimizerTypee)
 
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
@@ -523,7 +523,7 @@ a bug if you need this)""")
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
-        t.shape_env = shape_env
+        t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
