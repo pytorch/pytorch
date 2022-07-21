@@ -49,10 +49,11 @@ TorchName = Literal[
 ]
 
 
-class ScalarType(enum.Enum):
-    """A human-readable name for a key into scalar_type_to_pytorch_type."""
+class ScalarType(enum.IntEnum):
+    """Scalar types defined in torch."""
 
-    UINT8 = enum.auto()
+    # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
+    UINT8 = 0
     INT8 = enum.auto()
     INT16 = enum.auto()
     INT = enum.auto()
