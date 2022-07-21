@@ -364,10 +364,14 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
 
 
 def get_alloc_free_events() -> list:
-    r"""Gets allocation/free events sequence for each device
+    r"""Gets allocation/free events sequence for each device.
+
+    Args:
+        None.
+
     Returns:
-        List containing alloc/free events for each device
-        alloc/free events of each device is a list of AllocFreeEvent
+        list: containing alloc/free events for each device alloc/free events
+            of each device is a list of AllocFreeEvent
     """
     _lazy_init()  # will define _get_alloc_free_events()
     return _get_alloc_free_events()  # type: ignore[name-defined]
