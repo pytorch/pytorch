@@ -10,16 +10,13 @@ C10_DEFINE_bool(
 namespace torch {
 namespace lazy {
 
-Shape::Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes)
-    : scalar_type_(scalar_type), sizes_(sizes.begin(), sizes.end()) {}
-
 Shape::Shape(
     at::ScalarType scalar_type,
     c10::ArrayRef<int64_t> sizes,
-    c10::optional<std::vector<bool>>& is_symbolic)
+    c10::optional<std::vector<bool>> is_symbolic)
     : scalar_type_(scalar_type),
-      is_symbolic_(std::move(is_symbolic)),
-      sizes_(sizes.begin(), sizes.end()) {}
+      sizes_(sizes.begin(), sizes.end()),
+      is_symbolic_(std::move(is_symbolic)) {}
 
 std::string Shape::to_string() const {
   return c10::str(toString(scalar_type_), "[", c10::Join(",", sizes_), "]");
