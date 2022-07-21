@@ -3146,7 +3146,6 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
-@register_decomposition(torch.ops.aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,
@@ -3184,3 +3183,4 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.fft
+import torch._refs.linalg
