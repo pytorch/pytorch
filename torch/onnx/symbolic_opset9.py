@@ -1924,7 +1924,8 @@ def log_softmax(g, input, dim, dtype=None):
 
 @symbolic_helper.parse_args("v", "i", "i")
 def _log_softmax(g, input, dim, half_to_float):
-    # TODO: Handle half_to_float.
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
     return log_softmax(g, input, dim)
 
 
