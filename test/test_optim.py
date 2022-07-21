@@ -501,7 +501,8 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0) 
+                self.assertEqual(st_p, mt_p, atol=5e-5, rtol=0)
+
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
                 mt_p_state = mt_state[mt_p]
@@ -509,8 +510,8 @@ class TestOptim(TestCase):
                 for k in st_p_state:
                     try:
                         self.assertEqual(st_p_state[k], mt_p_state[k])
-                    except:
-                        print(optimizers, k)    
+                    except AssertionError:
+                        print(optimizers, k)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
