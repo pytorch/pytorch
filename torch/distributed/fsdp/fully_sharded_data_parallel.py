@@ -3143,7 +3143,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         self._assert_state(TrainingState_.BACKWARD_POST)
         if (
-            not self._low_precision_hook_enabled() and (
+            not self._low_precision_hook_enabled()
+            and (
                 self._mixed_precision_enabled_for_params()
                 or self._mixed_precision_enabled_for_reduce()
             )
