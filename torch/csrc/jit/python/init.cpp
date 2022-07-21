@@ -244,6 +244,12 @@ bool loadPythonClasses() {
 
   return true;
 }
+
+bool isEmptyContainer(const py::handle self) {
+  bool is_empty_list =
+      PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr());
+  return is_empty_list;
+}
 } // anonymous namespace
 
 #if !defined(USE_ROCM)
@@ -1701,8 +1707,7 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
-            if (PySequence_Check(value.ptr()) &&
-                !PySequence_Size(value.ptr())) {
+            if (isEmptyContainer(value)) {
               return;
             }
             // For normalization purposes there is an inconsistency within
@@ -1718,8 +1723,7 @@ void initJITBindings(PyObject* module) {
         std::unordered_map<std::string, IValue> value_map;
         for (const auto& key_pair : values) {
           IValue key = toTypeInferredIValue(key_pair.first);
-          if (PySequence_Check(key_pair.second.ptr()) &&
-              !PySequence_Size(key_pair.second.ptr())) {
+          if (isEmptyContainer(key_pair.second)) {
             continue;
           }
           IValue value = toTypeInferredIValue(key_pair.second);
@@ -1906,16 +1910,14 @@ void initJITBindings(PyObject* module) {
               }),
           py::call_guard<py::gil_scoped_release>());
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
-    if ((PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr())) ||
-        (PySequence_Check(other.ptr()) && !PySequence_Size(other.ptr()))) {
+    if (isEmptyContainer(self) || isEmptyContainer(other)) {
       return false;
     }
     return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
   });
   m.def("_overlaps", [](const py::object& self, const py::object& other) {
-    if ((PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr())) ||
-        (PySequence_Check(other.ptr()) && !PySequence_Size(other.ptr()))) {
-      return false;
+    if (isEmptyContainer(self) || isEmptyContainer(other)) {
+      return true;
     }
     return toTypeInferredIValue(self).overlaps(toTypeInferredIValue(other));
   });
