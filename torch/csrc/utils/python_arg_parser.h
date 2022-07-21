@@ -78,6 +78,8 @@
 
 namespace torch {
 
+bool should_allow_numbers_as_tensors(const std::string& name);
+
 enum class ParameterType {
   TENSOR,
   SCALAR,
@@ -671,10 +673,15 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
+inline at::Layout toLayout(PyObject* obj) {
+  const auto layout = reinterpret_cast<THPLayout*>(obj);
+  return layout->layout;
+}
+
 inline at::Layout PythonArgs::layout(int i) {
   if (!args[i])
     return signature.params[i].default_layout;
-  return reinterpret_cast<THPLayout*>(args[i])->layout;
+  return toLayout(args[i]);
 }
 
 inline at::Layout PythonArgs::layoutWithDefault(

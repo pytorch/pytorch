@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -62,21 +62,14 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
-
-  libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
-    name: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-      build-generates-artifacts: false
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
@@ -127,6 +120,7 @@ jobs:
         ]}
 
   ios-12-5-1-x86-64:
+    if: false
     name: ios-12-5-1-x86-64
     uses: ./.github/workflows/_ios-build-test.yml
     with:
@@ -197,13 +191,13 @@ jobs:
     with:
       build-environment: macos-10-15-py3-arm64
 
-  # please ensure that this and its corresponding job in pull.yml are in sync
   win-vs2019-cuda11_6-py3-build:
     name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.6-py3
       cuda-version: "11.6"
+      sync-tag: win-cuda-build
 
   win-vs2019-cuda11_6-py3-test:
     name: win-vs2019-cuda11.6-py3
@@ -222,21 +216,21 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-  # please ensure that this and its corresponding job in pull.yml are in sync
-  linux-bionic-rocm5_1-py3_7-build:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-focal-rocm5_1-py3_7-build:
+    name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      build-environment: linux-focal-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
+      sync-tag: rocm-build
 
-  linux-bionic-rocm5_1-py3_7-test:
-    name: linux-bionic-rocm5.1-py3.7
+  linux-focal-rocm5_1-py3_7-test:
+    name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm5_1-py3_7-build
+    needs: linux-focal-rocm5_1-py3_7-build
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.1-py3.7
+      docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
