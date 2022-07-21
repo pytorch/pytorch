@@ -877,15 +877,19 @@ Tensor& intersection_binary_op_sparse_dense_out(
     auto res_indices = at::empty({res_sparse_dim, res_nnz}, s_indices.options());
     // fill in indices corresponding to the "batch" dimensions of d.
     int64_t n_repeat_interleave = res_nnz;
+    int n_repeat = 1;
     for (const auto dim : c10::irange(d_batch_len)) {
       const auto dim_size = d_batch_shape[dim];
       n_repeat_interleave /= dim_size;
+      const std::initializer_list<int64_t> dim_index_expanded_shape = {n_repeat, dim_size, n_repeat_interleave};
       const auto dim_index = index_buffer.slice(-1, 0, dim_size);
-      const auto dim_index_repeat_interleaved = at::repeat_interleave(dim_index, n_repeat_interleave);
-      res_indices[dim].view({-1, dim_index_repeat_interleaved.numel()}).copy_(dim_index_repeat_interleaved);
+      const auto dim_index_expanded = dim_index.unsqueeze(0).unsqueeze_(-1).expand(dim_index_expanded_shape);
+      // NOTE: res_indices is contiguous, so view is safe
+      res_indices[dim].view(dim_index_expanded_shape).copy_(dim_index_expanded);
+      n_repeat *= dim_size;
     }
     // fill in indices corresponding to s_indices.
-    int64_t n_repeat = res_nnz / s._nnz();
+    n_repeat = res_nnz / s._nnz();
     auto res_indices_sparse = res_indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
     res_indices_sparse.copy_(s_indices.repeat({1, n_repeat}));
 
