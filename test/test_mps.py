@@ -1490,6 +1490,58 @@ class TestMPS(TestCase):
         z = y.as_strided(size=(32, 3), stride=(1, 0)).to("cpu")
         self.assertEqual(x.to("cpu").as_strided(size=(32, 3), stride=(1, 0)), z)
 
+    def test_type_casting(self):
+        # https://github.com/pytorch/pytorch/issues/81567
+        def helper(data, to_dtype):
+            a_cpu = torch.tensor(data)
+            a_mps = a_cpu.to(torch.device('mps'))
+
+            res_cpu = a_cpu.type(to_dtype)
+            res_mps = a_mps.type(to_dtype)
+            self.assertEqual(res_cpu, res_mps)
+
+        helper([9.0, 3.0, 5.0, 4.0], torch.LongTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.FloatTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.IntTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.ShortTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.HalfTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.CharTensor)
+        helper([9.0, 3.0, 5.0, 4.0], torch.ByteTensor)
+
+    def test_to_casting(self):
+        # https://github.com/pytorch/pytorch/issues/81567
+        def helper(data, to_dtype):
+            a_cpu = torch.tensor(data)
+            a_mps = a_cpu.to(torch.device('mps'))
+
+            res_cpu = a_cpu.to(to_dtype)
+            res_mps = a_mps.to(to_dtype)
+            self.assertEqual(res_cpu, res_mps)
+
+        helper([9.0, 3.0, 5.0, 4.0], torch.int64)
+        helper([9.0, 3.0, 5.0, 4.0], torch.float)
+        helper([9.0, 3.0, 5.0, 4.0], torch.int32)
+        helper([9.0, 3.0, 5.0, 4.0], torch.short)
+        helper([9.0, 3.0, 5.0, 4.0], torch.half)
+        helper([9.0, 3.0, 5.0, 4.0], torch.int8)
+        helper([9.0, 3.0, 5.0, 4.0], torch.uint8)
+
+    def test_storage_offset_greater_than_src_nbytes(self):
+        # https://github.com/pytorch/pytorch/issues/80844
+        n_tensors = 100
+        n_tensor_elems = 784
+        elems = torch.arange(n_tensors * n_tensor_elems, dtype=torch.float32)
+
+        tensor_list = []
+        for i in range(0, n_tensors - 1):
+            # create a list of contiguous view tensors (view tensor created by the slice op)
+            t = elems[n_tensor_elems * i : n_tensor_elems * (i + 1)]
+            tensor_list.append(t)
+
+        for i in range(0, n_tensors - 1):
+            t = tensor_list[i].view(1, 784)
+            t_mps = t.to("mps")
+            self.assertEqual(t, t_mps.cpu())
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -3332,8 +3384,14 @@ class TestNLLLoss(TestCase):
             self.assertEqual(cat, cat_cpu)
 
         helper([2, 2, 4, 5], [2, 3, 4, 5], [2, 5, 4, 5])
-        # Empty test - Currently failing! Empty tensor not handled!
-        # helper([0, 2, 4, 5], [2, 0, 4, 5], [2, 5, 0, 5])
+        helper([2, 2, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([0, 2, 4, 5], [0, 3, 4, 5], [0, 5, 4, 5])
+        helper([2, 2, 6, 5], [0], [2, 5, 6, 5])
+        helper([0], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([2, 3, 4, 5], [2, 5, 4, 5], [0])
+        helper([2, 2, 6, 5], [2, 0, 6, 5], [2, 5, 6, 5])
+        helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
+        helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 0, 6, 5])
 
     def test_constant_pad(self):
         m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
@@ -6242,7 +6300,8 @@ class TestConsistency(TestCase):
                                 'torch.uint8'],
         'nn.functional.selu': ['torch.float32'],
         'nn.functional.silu': ['torch.float32'],
-        'nn.functional.smooth_l1_loss': ['torch.float32'],
+        'nn.functional.smooth_l1_loss': ['torch.float32',
+                                         'torch.float16'],
         'nn.functional.softmin': ['torch.float32'],
         'nn.functional.threshold': ['torch.float32',
                                     'torch.int16',
@@ -6272,6 +6331,12 @@ class TestConsistency(TestCase):
                  'torch.int32',
                  'torch.int64',
                  'torch.uint8'],
+        'repeat': ['torch.float16',
+                   'torch.float32',
+                   'torch.int16',
+                   'torch.int32',
+                   'torch.int64',
+                   'torch.uint8'],
         'repeat_interleave': ['torch.bool',
                               'torch.float16',
                               'torch.float32',
@@ -6435,13 +6500,12 @@ class TestConsistency(TestCase):
         'nn.functional.kl_div': [torch.int16, torch.int32, torch.int64],
         'nn.functional.nll_loss': [torch.float32],
         'nn.functional.padreflect': [torch.float32], 'nn.functional.padreplicate': [torch.float32],
-        'nn.functional.smooth_l1_loss': [torch.float16], 'std': [torch.float16],
+        'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
         'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        'repeat': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         '__radd__': ['torch.bool', 'torch.uint8'],
         '__rmul__': ['torch.uint8'],
         'add': ['torch.bool', 'torch.uint8'],
