@@ -3545,6 +3545,19 @@ class TestSparse(TestCase):
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_dense_mul(self, device, dtype, coalesced):
+        skipTestIfUncoalesced = False
+        # This case always coalesce inputs and that could lead to loss of precision,
+        # hence it is inhibited for float16/bfloat16 by providing already coalesced tensors.
+        if not coalesced and dtype in {torch.float16, torch.bfloat16}:
+            skipTestIfUncoalesced = True
+        # to_dense is problematic for boolean non-coalesced CUDA tensors
+        # see https://github.com/pytorch/pytorch/issues/81648
+        if not coalesced and dtype == torch.bool and torch.device(device).type == "cuda":
+            skipTestIfUncoalesced = True
+
+        if skipTestIfUncoalesced:
+            self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
+
         shape = (2, 3, 4, 10)
         nnz = 10
 
@@ -3552,7 +3565,7 @@ class TestSparse(TestCase):
             res = d * s
 
             # check commutativity
-            self.assertEqual(res, d * s)
+            self.assertEqual(res, s * d)
 
             # check correctness
             self.assertEqual(res.to_dense(), s.to_dense() * d)
@@ -3581,28 +3594,17 @@ class TestSparse(TestCase):
                     d = make_tensor(empty_dense_shape, dtype=dtype, device=device)
                     check(self, s, d)
 
-
-            coalesce_sparse = coalesced
-            # This case always coalesce inputs and that could lead to loss of precision,
-            # hence it is inhibited for float16/bfloat16 by providing already coalesced tensors.
-            if dtype in {torch.float16, torch.bfloat16}:
-                coalesce_sparse = True
-            # to_dense is problematic for boolean non-coalesced CUDA tensors
-            # see https://github.com/pytorch/pytorch/issues/81648
-            if dtype == torch.bool and torch.device(device).type == "cuda":
-                coalesce_sparse = True
-
             # Case 1: sparse broadcasts over dense
-            s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesce_sparse)[0]
+            s = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             d = make_tensor(shape, dtype=dtype, device=device)
             check(self, s, d)
-            check_empty(sub_shape, nnz, shape, coalesce_sparse)
+            check_empty(sub_shape, nnz, shape, coalesced)
 
             # Case 2: dense broadcasts over sparse
-            s = self._gen_sparse(3, nnz, shape, dtype, device, coalesce_sparse)[0]
+            s = self._gen_sparse(3, nnz, shape, dtype, device, coalesced)[0]
             d = make_tensor(sub_shape, dtype=dtype, device=device)
             check(self, s, d)
-            check_empty(shape, nnz, sub_shape, coalesce_sparse)
+            check_empty(shape, nnz, sub_shape, coalesced)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy is not availible")
     @onlyCPU
