@@ -25,71 +25,73 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .context import with_native_function_with_differentiability_info
-from .gen_trace_type import (
-    MANUAL_BACKEND,
-    MANUAL_AUTOGRAD_AND_TRACER,
-    declare_returned_variables,
-    tie_return_values,
-    get_return_value,
-    type_wrapper_name,
-)
-from .gen_inplace_or_view_type import (
-    get_view_info,
-    is_tensor_type,
-    is_tensor_list_type,
-    unpack_args,
-    get_base_name,
-    use_derived,
-    modifies_arguments,
-    WRAPPER_REGISTRATION,
-    TMP_VAR,
-    METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE,
-    gen_formals,
-    ALL_VIEW_FUNCTIONS,
-    unpacked_name,
-    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
-)
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from torchgen.api.types import (
-    Binding,
-    DispatcherSignature,
-    BaseCType,
-    intArrayRefT,
-    tensorT,
-    tensorListT,
-    MutRefCType,
-    OptionalCType,
-    ListCType,
-    SpecialArgName,
-    scalarT,
-    stringT,
-    TupleCType,
-    VectorCType,
-)
+from torchgen.api import cpp
 from torchgen.api.autograd import (
     DifferentiableInput,
-    NativeFunctionWithDifferentiabilityInfo,
-    SavedAttribute,
     dispatch_strategy,
     gen_differentiable_outputs,
     is_differentiable,
+    NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute,
 )
-from torchgen.api import cpp
+
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    DispatcherSignature,
+    intArrayRefT,
+    ListCType,
+    MutRefCType,
+    OptionalCType,
+    scalarT,
+    SpecialArgName,
+    stringT,
+    tensorListT,
+    tensorT,
+    TupleCType,
+    VectorCType,
+)
 from torchgen.code_template import CodeTemplate
 from torchgen.context import native_function_manager, with_native_function
-from torchgen.utils import mapMaybe, FileManager
 from torchgen.model import (
     Argument,
+    BaseType,
+    ListType,
     NativeFunction,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    ListType,
 )
-from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
+from torchgen.utils import FileManager, mapMaybe
+
+from .context import with_native_function_with_differentiability_info
+from .gen_inplace_or_view_type import (
+    ALL_VIEW_FUNCTIONS,
+    ASSIGN_RETURN_VALUE,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
+    gen_formals,
+    get_base_name,
+    get_view_info,
+    is_tensor_list_type,
+    is_tensor_type,
+    METHOD_DEFINITION,
+    modifies_arguments,
+    TMP_VAR,
+    unpack_args,
+    unpacked_name,
+    use_derived,
+    WRAPPER_REGISTRATION,
+)
+from .gen_trace_type import (
+    declare_returned_variables,
+    get_return_value,
+    MANUAL_AUTOGRAD_AND_TRACER,
+    MANUAL_BACKEND,
+    tie_return_values,
+    type_wrapper_name,
+)
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -149,6 +151,7 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    "fill",
     "t",
     "view",
     "reshape",
@@ -324,7 +327,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_det_lu_based_helper",
+    "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -340,7 +343,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pixel_shuffle",
     "pixel_unshuffle",
     "linalg_lu_solve",
-    "_linalg_solve",
+    "_linalg_slogdet",
+    "_linalg_solve_ex",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -513,6 +517,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    "lift_fresh",
+    "lift_fresh_copy",
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
@@ -638,7 +644,7 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate(
     """\
-if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined() && ${out_arg}.defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
   ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
@@ -647,7 +653,8 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate(
     """\
-if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()) {
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()
+    && ${out_arg}.defined()) {
   ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
 }
 """
@@ -659,7 +666,7 @@ if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
-    if (${out_arg}_new_fw_grad[i].defined()) {
+    if (${out_arg}_new_fw_grad[i].defined() && ${out_arg}[i].defined()) {
       // The hardcoded 0 here will need to be updated once we support multiple levels.
       ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
     }
@@ -1406,6 +1413,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 is_inplace_str = "false"
 
+            requires_fw_grad = get_any_has_forward_grad_name(derivative.var_names)
+
             if all(
                 (isinstance(var_type, BaseType) and var_type.is_tensor_like())
                 for var_type in derivative.var_types
@@ -1418,6 +1427,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                             out_arg=res[0], is_inplace=is_inplace_str
                         )
                     )
+                    requires_fw_grad += f" && ({derivative.var_names[0]}.defined())"
                 else:
                     tuple_type = TupleCType(
                         [BaseCType(tensorT)] * len(derivative.var_types)
@@ -1455,9 +1465,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             content.append(
                 FW_DERIVATIVE_TEMPLATE.substitute(
                     fw_grad_opt_definition=fw_grad_opt_definition,
-                    requires_fw_grad=get_any_has_forward_grad_name(
-                        derivative.var_names
-                    ),
+                    requires_fw_grad=requires_fw_grad,
                     formula=derivative.formula,
                     out_arg="_".join(res),
                     unpacked_arguments=unpacked_arguments,

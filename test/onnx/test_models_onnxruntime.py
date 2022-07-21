@@ -3,16 +3,18 @@
 import os
 import unittest
 from collections import OrderedDict
-from typing import Any, List, Mapping, Tuple, Type
+from typing import List, Mapping, Tuple
 
+import onnx_test_common
 import parameterized
 import PIL
-import test_onnx_common
+
+import torch
 import torchvision
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from test_models import TestModels
-from test_pytorch_common import TestCase, run_tests, skipIfUnsupportedMinOpsetVersion
-from test_pytorch_common import skipScriptTest_New as skipScriptTest
-from test_pytorch_onnx_onnxruntime import run_model_test
+from torch import nn
+from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -24,9 +26,6 @@ from torchvision.models.detection import (
     transform,
 )
 
-import torch
-from torch import nn
-
 
 def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
     opset_versions = opset_versions if opset_versions else [7, 8, 9, 10, 11, 12, 13, 14]
@@ -34,36 +33,41 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
     for opset_version in opset_versions:
         self.opset_version = opset_version
         self.onnx_shape_inference = True
-        run_model_test(self, model, input_args=inputs, rtol=rtol, atol=atol)
+        onnx_test_common.run_model_test(
+            self, model, input_args=inputs, rtol=rtol, atol=atol
+        )
 
         if self.is_script_test_enabled and opset_version > 11:
             script_model = torch.jit.script(model)
-            run_model_test(self, script_model, input_args=inputs, rtol=rtol, atol=atol)
+            onnx_test_common.run_model_test(
+                self, script_model, input_args=inputs, rtol=rtol, atol=atol
+            )
 
 
 TestModels = type(
     "TestModels",
-    (TestCase,),
-    dict(TestModels.__dict__, is_script_test_enabled=False, exportTest=exportTest),
+    (common_utils.TestCase,),
+    dict(
+        TestModels.__dict__,
+        is_script_test_enabled=False,
+        is_script=False,
+        exportTest=exportTest,
+    ),
 )
 
 
 # model tests for scripting with new JIT APIs and shape inference
 TestModels_new_jit_API = type(
     "TestModels_new_jit_API",
-    (TestCase,),
+    (common_utils.TestCase,),
     dict(
         TestModels.__dict__,
         exportTest=exportTest,
         is_script_test_enabled=True,
+        is_script=True,
         onnx_shape_inference=True,
     ),
 )
-
-
-def class_name_func(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
-    suffix = "_".join(f"{k}_{v}" for k, v in input_dicts.items())
-    return f"{cls.__name__}_{suffix}"
 
 
 def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
@@ -177,9 +181,9 @@ def _init_test_roi_heads_faster_rcnn():
 @parameterized.parameterized_class(
     ("is_script",),
     ([True, False],),
-    class_name_func=class_name_func,
+    class_name_func=onnx_test_common.parameterize_class_name,
 )
-class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
+class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
@@ -414,4 +418,4 @@ class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

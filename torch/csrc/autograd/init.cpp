@@ -21,13 +21,27 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/execution_graph_observer.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
 #include <set>
 #include <unordered_set>
+
+namespace {
+
+struct DisableFuncTorch {
+  DisableFuncTorch()
+      : front_guard_(c10::DispatchKey::FuncTorchDynamicLayerFrontMode),
+        back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
+  c10::impl::ExcludeDispatchKeyGuard front_guard_;
+  c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+} // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
@@ -71,6 +85,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
+      .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
@@ -255,13 +270,37 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   {
+    using torch::profiler::impl::PyFrameState;
     using torch::profiler::impl::Result;
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::enum_<EventType>(m, "_EventType")
+        .value("TorchOp", EventType::TorchOp)
+        .value("Backend", EventType::Backend)
+        .value("Allocation", EventType::Allocation)
+        .value("PyCall", EventType::PyCall)
+        .value("PyCCall", EventType::PyCCall);
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
+        .def_readonly(
+            "allow_tf32_cublas",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
+    py::class_<Inputs>(m, "_Inputs")
+        .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("dtypes", &Inputs::dtypes_);
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
     py::class_<ExtraFields<EventType::Allocation>>(
         m, "_ExtraFields_Allocation");
-    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall");
-    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall");
+    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
+        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+    py::class_<PyFrameState>(m, "_PyFrameState")
+        .def_readonly("line_number", &PyFrameState::line_no_)
+        .def_property_readonly(
+            "file_name",
+            [](const PyFrameState& s) { return s.filename_.str(); })
+        .def_property_readonly("function_name", [](const PyFrameState& s) {
+          return s.funcname_.str();
+        });
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
@@ -275,6 +314,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             "parent", [](const Result& r) { return r.parent_.lock(); })
         .def_readonly("children", &Result::children_)
         .def_readonly("start_time_ns", &Result::start_time_ns_)
+        .def_readonly("start_tid", &Result::start_tid_)
         .def_property_readonly("correlation_id", &Result::correlationID)
         .def_property_readonly("end_time_ns", &Result::endTimeNS)
         .def_property_readonly("duration_time_ns", [](const Result& r) {
@@ -416,6 +456,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {

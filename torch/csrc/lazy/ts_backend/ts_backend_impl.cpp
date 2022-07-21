@@ -7,6 +7,7 @@
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <memory>
 
 namespace at {
 // This function is defined in the codegenerated RegisterDispatchKey.cpp file.
@@ -39,17 +40,21 @@ struct TSBackendDeviceType : public BackendDeviceType {
 
 class TSBackendImpl : public torch::lazy::BackendImplInterface {
  public:
-  TSBackendImpl() : default_device_type_(at::kCPU) {
+  TSBackendImpl() {
     // TODO(whc) unify how all our flags are set and parsed as envs
     static bool env_use_cuda = std::getenv("LTC_TS_CUDA") != nullptr;
     auto type =
         (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
-    default_device_type_ = TSBackendDeviceType(type);
+    default_device_type_ = std::make_shared<TSBackendDeviceType>(type);
   }
 
   const IrBuilder* GetIrBuilder() const override {
     static const IrBuilder* builder = new TorchScriptIrBuilder();
     return builder;
+  }
+
+  std::string CreateMetricReport() const override {
+    return "TSBackendImpl: N/A";
   }
 
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
@@ -85,9 +90,9 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(
-        default_device_type_.c10Type(), device.ordinal());
-    if (tensor.device().type() == default_device_type_.c10Type() &&
-        default_device_type_.c10Type() == at::kCUDA) {
+        default_device_type_->c10Type(), device.ordinal());
+    if (tensor.device().type() == default_device_type_->c10Type() &&
+        default_device_type_->c10Type() == at::kCUDA) {
       return std::make_shared<TSData>(
           tensor.to(options, /*non_blocking=*/true), shape, device);
     } else if (tensor.device().type() == at::kCPU && tensor.numel() == 1) {
@@ -133,26 +138,28 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
-      torch::lazy::Computation& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
   std::shared_ptr<torch::lazy::BackendDeviceType> GetDefaultDeviceType()
       const override {
-    return std::make_shared<BackendDeviceType>(default_device_type_);
+    return default_device_type_;
   }
 
   at::DeviceType EagerFallbackDeviceType() const override;
 
-  void SetDefaultDeviceType(std::string type) override {
-    default_device_type_ = TSBackendDeviceType(c10::Device(type).type());
-    // The first CUDA usage could happen via lazy tensors. Initialize CUDA here
-    // to account for that, at::scalar_tensor constructor triggers everything we
-    // need.
-    static auto init_cuda = default_device_type_.c10Type() == at::kCUDA
-        ? c10::optional<at::Tensor>(
-              at::scalar_tensor(0, at::TensorOptions().device(at::kCUDA)))
-        : c10::nullopt;
+  void SetDefaultDeviceType(int8_t type) override {
+    default_device_type_ = std::make_shared<TSBackendDeviceType>(
+        static_cast<c10::DeviceType>(type));
+  }
+
+  int64_t GetDefaultDeviceOrdinal() const {
+    return default_device_ordinal_;
+  }
+
+  virtual void SetDefaultDeviceOrdinal(int64_t ordinal) {
+    default_device_ordinal_ = ordinal;
   }
 
   std::vector<torch::lazy::BackendDevice> GetBackendDevices() const override;
@@ -173,7 +180,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   void PrepareToExit() const override;
 
  private:
-  TSBackendDeviceType default_device_type_;
+  std::shared_ptr<TSBackendDeviceType> default_device_type_;
+  int64_t default_device_ordinal_{0};
 };
 
 torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
@@ -195,11 +203,13 @@ std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
 }
 
 std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    torch::lazy::Computation& computation,
+    torch::lazy::ComputationPtr computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
-  torch::jit::GraphExecutor& graph_executor =
-      static_cast<torch::lazy::TSComputation&>(computation).graph_executor();
+  auto ts_computation =
+      std::dynamic_pointer_cast<torch::lazy::TSComputation>(computation);
+  TORCH_CHECK(ts_computation, "Computation isn't TSComputation");
+  torch::jit::GraphExecutor& graph_executor = ts_computation->graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (const auto& argument : arguments) {
     const auto ts_data = std::static_pointer_cast<TSData>(argument);
@@ -209,7 +219,8 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
       // TODO(whc) should this check be made more general? it's written somewhat
       // oddly
       CHECK(
-          (c10::DeviceType)default_device_type_.type != at::kCUDA ||
+          static_cast<c10::DeviceType>(default_device_type_->type) !=
+              at::kCUDA ||
           ts_data->data().device().type() == at::kCUDA);
       stack.emplace_back(ts_data->data());
     }

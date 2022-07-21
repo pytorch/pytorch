@@ -6,6 +6,8 @@ from torch.nn.functional import normalize
 from typing import Any, Optional, TypeVar
 from ..modules import Module
 
+__all__ = ['SpectralNorm', 'SpectralNormLoadStateDictPreHook', 'SpectralNormStateDictHook',
+           'spectral_norm', 'remove_spectral_norm']
 
 class SpectralNorm:
     # Invariant before and after each forward call:

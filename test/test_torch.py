@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    TEST_WITH_CROSSREF,
+    TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -56,7 +56,7 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types, integral_types,
+    all_types_and, floating_types, floating_and_complex_types,
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -365,6 +365,14 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
+
+    @onlyCUDA
+    def test_module_share_memory(self):
+        # Test fix for issue #80733
+        # See https://github.com/pytorch/pytorch/issues/80733
+        model = torch.nn.Linear(3, 1)
+        model_cuda = model.to('cuda')
+        model.share_memory()
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
@@ -730,6 +738,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     # Uses mismatched arange out size to trigger a warning
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
@@ -2728,6 +2737,7 @@ else:
         x[2::3] = .5
         self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
 
+    @skipIfTorchDynamo("Torchdynamo fails with unknown reason")
     @skipIfMps
     def test_discontiguous_out_cumsum(self, device):
         x = torch.randn(4, 8, device=device)
@@ -2934,27 +2944,25 @@ else:
 
     # FIXME: move to indexing test suite
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
-    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
         include_selfs = [True, False]
-        reduction_init = {'prod': 1, 'mean': 0, 'amin': float('inf'), 'amax': -float('inf')}
+        amin_init = float('inf') if dtype.is_floating_point else torch.iinfo(dtype).max
+        amax_init = -float('inf') if dtype.is_floating_point else torch.iinfo(dtype).min
+        reduction_init = {'prod': 1, 'mean': 0, 'amin': amin_init, 'amax': amax_init}
 
-        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+        for dest_noncontig, src_noncontig, index_noncontig in product([True, False], repeat=3):
             for idx_dtype, include_self in product(index_dtypes, include_selfs):
                 for dim in range(len(size)):
                     num_src = np.random.randint(10)
                     num_dest = size[dim]
-                    dest = torch.randn(size, dtype=dtype, device=device)
-                    if not dest_contig:
-                        dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
-                    src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
-                    if not src_contig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        src = torch.testing.make_non_contiguous(src)
+                    dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
+                    src_size = size[:dim] + (num_src,) + size[dim + 1:]
+                    src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
                     idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if not index_contig:
+                    if index_noncontig:
                         # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
                         idx = torch.testing.make_non_contiguous(idx)
                     expected = dest.clone()
@@ -2977,7 +2985,10 @@ else:
                         counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
                         counts.index_add_(0, idx, torch.ones_like(src))
                         counts.masked_fill_(counts == 0, 1)
-                        expected /= counts
+                        if (dtype.is_floating_point):
+                            expected.div_(counts)
+                        else:
+                            expected.div_(counts, rounding_mode="floor")
                     expected = expected.transpose(0, dim)
 
                     self.assertEqual(dest, expected)
@@ -3434,7 +3445,7 @@ else:
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
     @onlyCUDA
-    @dtypes(*integral_types(), *complex_types())
+    @dtypes(*complex_types())
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
@@ -3902,62 +3913,6 @@ else:
                 torch.index_select(w, 1, ind_05)
 
     # FIXME: find a test suite for the pdist operator
-    def _brute_pdist(self, inp, p=2):
-        """Computes the same as torch.pdist using primitives"""
-        n = inp.shape[-2]
-        k = n * (n - 1) // 2
-        if k == 0:
-            # torch complains about empty indices
-            return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-        square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
-        unroll = square.view(square.shape[:-2] + (n * n,))
-        inds = torch.ones(k, dtype=torch.int)
-        inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
-        return unroll[..., inds.cumsum(0)]
-
-    # FIXME: find a test suite for the pdist operator
-    def _pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
-        x = torch.randn(shape, dtype=dtype, device=device)
-        if trans:
-            x.transpose_(-2, -1)
-        if grad_check:
-            x.requires_grad_()
-            y = x.detach().clone().requires_grad_()
-        else:
-            y = x
-        actual = torch.pdist(x, p=p)
-        expected = self._brute_pdist(y, p=p)
-        self.assertEqual(expected.shape, actual.shape)
-        self.assertEqual(expected, actual)
-        if grad_check and expected.size() != torch.Size([0]):
-            g0 = torch.rand_like(actual)
-            actual.backward(g0)
-            expected.backward(g0)
-            self.assertEqual(x.grad, y.grad)
-
-    # FIXME: find a test suite for the pdist operator
-    @slowTest
-    def test_pdist_norm_forward(self, device):
-        for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                for trans in [False, True]:
-                    for dtype in [torch.float32, torch.float64]:
-                        self._pdist_single(shape, device, p, dtype, trans, grad_check=False)
-
-        # do a simplified comparison with big inputs, see:
-        # https://github.com/pytorch/pytorch/issues/15511
-        for dtype in [torch.float32, torch.float64]:
-            self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
-
-    # FIXME: find a test suite for the pdist operator
-    @slowTest
-    def test_pdist_norm_backward(self, device):
-        for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                for trans in [False, True]:
-                    self._pdist_single(shape, device, p, torch.float64, trans, grad_check=True)
-
-    # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
     @onlyCUDA
@@ -3966,7 +3921,7 @@ else:
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
         # https://github.com/pytorch/pytorch/issues/30583
-        # Compare output using GPU with the CPU implementation, as brute_pdist uses too much memory
+        # Compare output using GPU with the CPU implementation
         x = torch.randn(50000, 1, dtype=torch.float32)      # 50k * 4 bytes = 200 KB
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
@@ -4600,32 +4555,32 @@ else:
                 _unsqueeze_op_add,
                 _unsqueeze_op_clone,
             ]
+            x_c = x.contiguous()
+            y_c = y.contiguous()
+            b_c = bias.contiguous()
             for fn in fns:
-                x_c = x.contiguous()
-                y_c = y.contiguous()
-                result_c = fn(x_c, y_c)
-                result = fn(x, y)
-                self.assertEqual(result, result_c)
+                is_inplace = '_(' in inspect.getsource(fn)
+                x_clone = x.clone() if is_inplace else x
+                x_c_clone = x_c.clone() if is_inplace else x_c
+                result_c = fn(x_c_clone, y_c)
+                result = fn(x_clone, y)
+                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
             for fn in bias_fns:
-                x_c = x.contiguous()
-                b_c = bias.contiguous()
                 result_c = fn(x_c, b_c)
                 result = fn(x, bias)
-                self.assertEqual(result, result_c)
+                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
             for fn in return_contig_fns:
-                x_c = x.contiguous()
-                y_c = y.contiguous()
                 result_c = fn(x_c, y_c)
                 result = fn(x, y)
-                self.assertEqual(result, result_c)
+                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
@@ -4642,6 +4597,7 @@ else:
             torch.channels_last_3d)
 
     # FIXME: make this a elementwise unary and elementwise binary OpInfo test
+    @skipIfTorchDynamo("Torchdynamo fails with unknown reason")
     def test_strides_propagation(self, device):
         def _test_helper(x, op, unary=False):
             def compare_strides(s1, s2, div):
@@ -5244,8 +5200,9 @@ else:
         def test(probs):
             with self.assertRaisesRegex(RuntimeError,
                                         'probability tensor contains either `inf`, `nan` or element < 0'):
-                torch.multinomial(probs.to(device), 2)
-                torch.cuda.synchronize()
+                out = torch.multinomial(probs.to(device), 2)
+                if out.is_cuda:
+                    torch.cuda.synchronize()
 
         test(torch.tensor([1., -1., 1.]))
         test(torch.tensor([1., inf, 1.]))
@@ -5258,8 +5215,9 @@ else:
         def test(probs, replacement):
             with self.assertRaisesRegex(RuntimeError,
                                         r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
-                torch.multinomial(probs, 2, replacement)
-                torch.cuda.synchronize()
+                out = torch.multinomial(probs, 2, replacement)
+                if out.is_cuda:
+                    torch.cuda.synchronize()
 
         x = torch.zeros(3, device=device)
         y = torch.zeros(3, 3, device=device)
@@ -6099,6 +6057,7 @@ class TestTorch(TestCase):
         self.assertEqual(perm, new)
         self.assertEqual(x.size(), orig)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_reversed(self):
         val = torch.arange(0, 10)
         self.assertEqual(reversed(val), torch.arange(9, -1, -1))
@@ -6147,6 +6106,7 @@ class TestTorch(TestCase):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_pickle_parameter(self):
         import pickle
         a = torch.nn.Parameter(torch.randn(5, 5))
@@ -6156,6 +6116,7 @@ class TestTorch(TestCase):
         self.assertEqual(a.requires_grad, b.requires_grad)
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_pickle_parameter_no_requires_grad(self):
         import pickle
         a = torch.nn.Parameter(torch.randn(5, 5), requires_grad=False)
@@ -8129,19 +8090,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for dtype, alias in type_alias_map.items():
             self.assertIs(alias, dtype)
 
-    # FIXME: Describe this test
     def test_doc_template(self) -> None:
+        """
+        Test that all public API doc strings use the same standard template for
+        all common arguments such as tensor or dim
+        """
         from torch._torch_docs import __file__ as doc_file
         from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
         with open(doc_file, "r", encoding="utf-8") as f:
             doc_strs = f.read()
 
-        for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
+        matches = re.findall(
+            r'add_docstr\(([^,]+?),[^"\']*?(?:"""|\'\'\')(.*?)(?:"""|\'\'\')(?:\.|,?[^,\)]*?\))',
+            doc_strs,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertTrue(matches)
+
+        for m in matches:
+            func = m[0].strip()
+            desc = m[1].strip()
+
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, doc_str[2], 'The argument description "{}" in {} can be '
-                                                    'replaced by {{{}}}'.format(v, doc_str[0], k))
+                    self.assertNotIn(v, desc, 'The argument description "{}" in {} can be '
+                                              'replaced by {{{}}}'.format(v, func, k))
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
@@ -8297,6 +8271,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_dict_dealloc(self):
         m, t = Tracker.make()
         x = torch.empty(2)
@@ -8318,6 +8293,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_weakref_dealloc(self):
 
         x = torch.empty(2)
@@ -8331,6 +8307,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m[0])
         self.assertEqual(wref(), None)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_cycle_via_dict(self):
         m1, t1 = Tracker.make()
         x = torch.empty(2)
@@ -8406,6 +8383,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m2[0])
 
     # FIXME: move to test_autograd?
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_backward_hooks_traverse(self):
         m1, t1 = Tracker.make()
         m2, t2 = Tracker.make()
@@ -8431,6 +8409,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
