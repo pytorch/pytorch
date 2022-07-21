@@ -90,11 +90,11 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override;
 
-   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override;
 
-   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     copy_tensor_metadata(
         /*src_impl=*/impl.get(),
         /*dest_impl=*/this,
@@ -134,7 +134,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
 };
-
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(
     const at::Tensor& tensor) {

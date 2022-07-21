@@ -730,7 +730,7 @@ Tensor softmax_nested(
   auto input_ptr = get_nested_tensor_impl(input);
   int64_t ntensors = input_ptr->size(0);
   if (ntensors == 0) {
-    return input;
+    return input.clone();
   }
   int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
   TORCH_CHECK(

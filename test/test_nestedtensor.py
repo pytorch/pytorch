@@ -240,7 +240,6 @@ class TestNestedTensor(TestCase):
         nt = torch.nested_tensor([])
         empty = nt.to_padded_tensor(4)
         self.assertEqual(empty, torch.tensor([]))
-
 class TestNestedTensorDeviceType(TestCase):
     # Helper function to assert 2 nested tensors are equal
     def nt_equal(self, nt1, nt2):
@@ -728,7 +727,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_softmax(self, device, dtype):
         # normal nested tensor
         ntensors = 4
@@ -1473,6 +1471,21 @@ class TestNestedTensorAutograd(TestCase):
 
         # Test linear with no bias added
         data = (a, b, c, weight)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_softmax(self):
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, dim):
+            nt = torch.nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.softmax(nt, dim=dim)
+            return d.to_padded_tensor(0)
+
+        # softmax over last dim
+        data = (a, b, c, -1)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
     def test_nested_tensor_linear_backward(self):
