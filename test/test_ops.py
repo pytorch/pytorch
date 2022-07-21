@@ -1460,7 +1460,8 @@ def test_nondeterministic_seeded(func, args, kwargs):
     try:
         TestCase.assertEqual(TestCase(), results[0], results[1], atol=0, rtol=0)
     except AssertionError:
-        assert torch.Tag.nondeterministic_bitwise in func.tags or torch.Tag.nondeterministic_seeded in func.tags, f'{func} should be nondeterministic_bitwise'
+        has_nondeterminism_tag = torch.Tag.nondeterministic_bitwise in func.tags or torch.Tag.nondeterministic_seeded in func.tags
+        assert has_nondeterminism_tag, f'{func} should be nondeterministic_bitwise'
 
 
 # input strides and size may have been altered due to the result of an inplace op
