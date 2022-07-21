@@ -1497,12 +1497,13 @@ class TestLinalg(TestCase):
         S = 10
         error_test_cases = [
             # input size, p settings, dim, error type, error regex
-            ((S, ), ['fro', 'nuc'], None, RuntimeError, r'input tensor must be a matrix or a batch of matrices'),
+            ((S, ), ['fro', 'nuc'], None, RuntimeError, r'A must have at least 2 dimensions'),
             ((S, S), [3.5], None, RuntimeError, r'matrix_norm: Order 3.5 not supported'),
             ((S, S), [0], None, RuntimeError, r'matrix_norm: Order 0 not supported'),
             ((S, S), ['fail'], None, RuntimeError, r'matrix_norm: Order fail not supported'),
-            ((S, S), ['fro', 'nuc'], 0, RuntimeError, r'matrix_norm: dim must be a 2-tuple of ints'),
-            ((S, S), ['fro', 'nuc', 2], (0, 0), RuntimeError, r'Expected dims to be different'),
+            ((S, S), ['fro', 'nuc'], 0, RuntimeError, r'matrix_norm: dim must be a 2-tuple'),
+            ((S, S), ['fro', 'nuc', 2], (0, 0), RuntimeError, r'dims must be different'),
+            ((S, S), ['fro', 'nuc', 2], (-1, 1), RuntimeError, r'dims must be different'),
             ((S, S), ['fro', 'nuc', 2], (0, 4), IndexError, r'Dimension out of range'),
             ((S, ), [0], (4, ), IndexError, r'Dimension out of range'),
             ((S, ), [None], (0, 0), RuntimeError, r'dim 0 appears multiple times'),
@@ -1584,7 +1585,7 @@ class TestLinalg(TestCase):
         # Test only inputs for which torch.linalg.matrix_norm diverges from torch.linalg.norm
         A = make_tensor((2, 2, 2), dtype=dtype, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must be a matrix.*'):
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must have at least 2 dimensions.*'):
             torch.linalg.matrix_norm(make_tensor((2,), dtype=dtype, device=device))
         with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must be a 2-tuple.*'):
             torch.linalg.matrix_norm(A, dim=(0,))
