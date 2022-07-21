@@ -18,6 +18,8 @@
 
 namespace c10 {
 
+TORCH_API bool show_dispatch_trace();
+
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
 
@@ -557,6 +559,11 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
@@ -572,6 +579,11 @@ template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
@@ -580,6 +592,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
@@ -606,6 +623,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const auto& kernel = entry.lookup(dispatchKeySet);
   return kernel.callBoxed(op, dispatchKeySet, stack);
 }
