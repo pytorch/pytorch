@@ -145,6 +145,12 @@ function install_functorch() {
   popd
 }
 
+function test_functorch() {
+  pushd functorch
+  pytest test
+  popd
+}
+
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
   sccache --show-stats
