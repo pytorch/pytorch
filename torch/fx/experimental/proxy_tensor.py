@@ -425,14 +425,10 @@ def get_isolated_graphmodule(func, args, kwargs):
     """
     # make_fx doesn't support kwargs, so we need to do this flattening
     # and then unflatten the args before calling func
-    nargs = len(args)
-    flat_kwargs = list(kwargs.values())
-    all_args = list(args) + flat_kwargs
+    all_args, spec = pytree.tree_flatten((args, kwargs))
 
     def wrapped(args):
-        fn_args = args[:nargs]
-        kwargs_keys = list(kwargs.keys())
-        fn_kwargs = dict(zip(kwargs_keys, args[nargs:]))
+        fn_args, fn_kwargs = pytree.tree_unflatten(args, spec)
         return func(*fn_args, **fn_kwargs)
 
     # extract old tracer object
