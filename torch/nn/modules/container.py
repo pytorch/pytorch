@@ -159,7 +159,7 @@ class Sequential(Module):
             return combined
 
     def __rmul__(self, other: int) -> 'Sequential':
-        return self.mul(other)
+        return self.__mul__(other)
 
     def __imul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):
@@ -172,7 +172,7 @@ class Sequential(Module):
             for _ in range(other-1):
                 for i in range(len_original):
                     self.add_module(str(i + offset), self._modules[str(i)])
-                    offset += 1
+                offset += len_original
             return self
 
     @_copy_to_script_wrapper
