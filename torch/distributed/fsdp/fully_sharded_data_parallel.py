@@ -28,6 +28,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -38,7 +39,10 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     init_from_local_shards,
 )
-from torch.distributed.algorithms._comm_hooks import allreduce_hook
+from torch.distributed.algorithms._comm_hooks import (
+    LOW_PRECISION_HOOKS,
+    default_hooks
+)
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -70,6 +74,7 @@ from .flatten_params_wrapper import (
     FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
+    ParamInfo,
 )
 from .wrap import (
     _or_policy,
@@ -83,6 +88,12 @@ try:
     from torchdistx import deferred_init, fake
 except ImportError:
     _TORCHDISTX_AVAIL = False
+
+_TORCH_FX_AVAIL = True
+if not hasattr(torch, "fx"):
+    _TORCH_FX_AVAIL = False
+if _TORCH_FX_AVAIL:
+    from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 
 
 __all__ = [
@@ -649,7 +660,7 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
-                auto_wrap_policy=auto_wrap_policy.init_policy,
+                auto_wrap_policy=auto_wrap_policy,
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
                 ignored_modules=ignored_modules,
@@ -933,21 +944,74 @@ class FullyShardedDataParallel(nn.Module):
         self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
+        auto_wrap_policy = kwargs["auto_wrap_policy"]
+        module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            tracer = auto_wrap_policy.tracing_config.tracer
+            execution_info = _init_execution_info(module)
+
+            for m in module.modules():
+                assert not isinstance(
+                    m, FullyShardedDataParallel
+                ), "The input module of _patch_tracer should not contain FSDP modules"
+
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
+        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
         self._param_exec_order_policy: bool = True
-        # self._param_exec_order_prep_stage is set to True in the first forward and backward iteration,
-        # and set to False otherwise.
+        # self._param_exec_order_prep_stage is set to True before we get the execution order
         self._param_exec_order_prep_stage: bool = True
         # A list that stores the flatten parameters and its name based on the parameter execution order
         self._fsdp_params_exec_order: List[FlatParameter] = []
+        if _TORCH_FX_AVAIL and isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            for wrap in self.fsdp_modules(self):
+                module_to_fsdp[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
+            for m in execution_info.module_forward_order:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
+                        self._fsdp_params_exec_order.append(flat_param)
+            self._param_exec_order_prep_stage = False
+
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
                 # Assignment by reference, so each children FSDP wrap has access to
                 # the _fsdp_params_exec_order of the root module
                 m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                m._param_exec_order_policy = True
-                m._param_exec_order_prep_stage = True
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
 
     def _move_module_if_needed(self, module) -> None:
         """
@@ -1268,6 +1332,15 @@ class FullyShardedDataParallel(nn.Module):
         return (
             self.mixed_precision is not None
             and self.mixed_precision.reduce_dtype is not None
+        )
+
+    def _low_precision_hook_enabled(self) -> bool:
+        """
+        Wether a low precision hook is registered or not.
+        """
+        return (
+            self.communication_hook is not None
+            and self.communication_hook in LOW_PRECISION_HOOKS
         )
 
     def _cast_fp_inputs_to_precision(
@@ -1871,48 +1944,90 @@ class FullyShardedDataParallel(nn.Module):
         back to sharded version after _summon_full_params ends, and also remove
         "_fsdp_wrapped_module" prefix.
         """
+        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
         # state_dict is empty for nonzero ranks if `rank0_only` was enabled.
         if not state_dict:
             return state_dict
 
+        if self._fsdp_wrapped_module.no_params:
+            return state_dict
+
+        # This can happen when rank0_only is enabled and self.rank != 0.
+        if self._fsdp_wrapped_module.orig_flat_param[0] is None:
+            assert self._fsdp_wrapped_module.flat_param is not None, (
+                "When no_params is False, one of flat_param and orig_flat_param "
+                "should have value."
+            )
+            return state_dict
+
         offload_to_cpu = self._state_dict_config.offload_to_cpu
         cpu_device = torch.device("cpu")
-        for key in state_dict:
-            clean_key = clean_tensor_name(key)
+
+        # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
+        # processing buffers.
+        sharded_param_info = [
+            ParamInfo(info[0], info[2], info[3])
+            for info in self._fsdp_wrapped_module.orig_flat_param[0]._shared_param_infos
+        ]
+        for module_name, _, param_name in (
+            self._fsdp_wrapped_module.orig_flat_param[0].param_info + sharded_param_info
+        ):
+            module_name = module_name.replace(f"{FPW_MODULE}.", "")
+            module_name = module_name.replace(f"{FPW_MODULE}", "")
+            if module_name:
+                module_name = f"{module_name}."
+            # Activation checkpoint adds a prefix that has to be
+            # removed as well.
+            module_name = module_name.replace(
+                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+            )
+            fqn = f"{prefix}{module_name}{param_name}"
+
+            clean_key = fqn
             clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
             # do not have prefix considered as they are not computed in `state_dict`
             # call.
             if clean_key.startswith(clean_prefix):
                 clean_key = clean_key[len(clean_prefix):]
-            # Do not need to clone buffers since they are not sharded
-            if clean_key in self._buffer_names:
-                # Offload the buffer to CPU if needed -- we do not do this in
-                # `_summon_full_params()` since without care, that would free
-                # the original buffer's GPU memory and require reallocating
-                # that memory later; this only affects the state dict's buffer
-                # variable and leaves the original buffer's GPU memory intact
-                if offload_to_cpu and state_dict[key].device != cpu_device:
-                    state_dict[key] = state_dict[key].to(cpu_device)
-                continue
+
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
+            assert fqn in state_dict, (
+                f"FSDP assumes {fqn} is in the state_dict but the state_dict "
+                f"only has {state_dict.keys()}. prefix={prefix}, "
+                f"module_name={module_name} param_name={param_name}."
+            )
             if clean_key not in self._ignored_param_names and \
-                    not getattr(state_dict[key], "_has_been_cloned", False):
+                    not getattr(state_dict[fqn], "_has_been_cloned", False):
                 try:
-                    state_dict[key] = state_dict[key].clone().detach()
-                    state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+                    state_dict[fqn] = state_dict[fqn].clone().detach()
+                    state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:
                     warnings.warn(
-                        f"Failed to clone() tensor with name {key}. This may mean "
+                        f"Failed to clone() tensor with name {fqn}. This may mean "
                         "that this state_dict entry could point to invalid memory "
                         "regions after returning from state_dict() call if this "
                         "parameter is managed by FSDP. Please check clone "
-                        f"implementation of {key}. Error: {str(e)}"
+                        f"implementation of {fqn}. Error: {str(e)}"
                     )
 
-        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
+        # Offload the buffer to CPU if needed -- we do not do this in
+        # `_summon_full_params()` since without care, that would free
+        # the original buffer's GPU memory and require reallocating
+        # that memory later; this only affects the state dict's buffer
+        # variable and leaves the original buffer's GPU memory intact
+        if offload_to_cpu:
+            for clean_key in self._buffer_names:
+                # This is a hack to support activation checkpoint.
+                clean_key = clean_key.replace(
+                    f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+                )
+                fqn = f"{prefix}{clean_key}"
+                if state_dict[fqn].device != cpu_device:
+                    state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
 
     def _local_post_state_dict_hook(
@@ -2906,9 +3021,12 @@ class FullyShardedDataParallel(nn.Module):
             with torch.cuda.stream(self._streams["post_backward"]):
                 orig_grad_data = param.grad.data
                 if (
-                    self._mixed_precision_enabled_for_reduce()
+                    self._mixed_precision_enabled_for_reduce() and not self._low_precision_hook_enabled()
                 ):
                     # Cast gradient to precision in which it should be communicated.
+                    # If a low precision hook is registered and reduce_dtype is specified
+                    # in `MixedPrecision`, communication hook will take care of
+                    # casting to lower precision and back.
                     # TODO: Make this a communication hook when communication hooks
                     # are implemented for FSDP. Note that this is a noop if the
                     # reduce_dtype matches the param dtype.
@@ -3004,8 +3122,13 @@ class FullyShardedDataParallel(nn.Module):
                     # would thus be in this reduced precision, or
                     # 2) parameters did not have precision reduced, but grads
                     # had reduced precision for communication.
+                    # If a lower precision hook is registered, gradients are casted
+                    # back by the hook.
+                    # However, if a low precision hook is attached to the model.
+                    # casting happens inside the hook.
                     if (
-                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                        not self._low_precision_hook_enabled() and
+                        (self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce())
                     ):
                         # Cast gradients back to the full parameter precision so that
                         # optimizer.step() happens in full precision.
@@ -4068,7 +4191,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.allreduce_hook
+            return default_hooks.allreduce_hook
 
     def _get_default_comm_hook_state(self) -> Any:
         r"""
@@ -4077,7 +4200,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.AllReduceState(process_group=self.process_group)
+            return default_hooks.DefaultState(process_group=self.process_group)
 
     def register_comm_hook(self, state: object, hook: callable):
         """

@@ -1116,6 +1116,7 @@ API Reference
 .. rendered doc.
 .. py:module:: torch.fx.passes
 .. py:module:: torch.fx.passes.infra
+.. py:module:: torch.fx.passes.backends
 .. py:module:: torch.fx.passes.utils
 .. py:module:: torch.fx.passes.tests
 .. py:module:: torch.fx.experimental

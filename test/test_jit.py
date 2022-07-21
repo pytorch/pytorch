@@ -5368,7 +5368,7 @@ a")
         def func2(x):
             return x.sum(dim=4)
 
-        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
+        # test that shape analysis is written correctly for sum with OptionalIntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)

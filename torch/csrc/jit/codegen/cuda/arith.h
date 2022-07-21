@@ -262,13 +262,14 @@ TORCH_CUDA_CU_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
 
-// Expands input based on provided sizes. expand_sizes should be the same size
-// as the input's root domain (really rfactor), and should be -1 for any
-// dimension that should remain a symbolic size. For dimensions that remain
-// broadcast after the expand should be set to 1, any dimension being expanded
-// must be marked as a braodcast in the input and will be expanded to the
-// provided constant size. Any dimension that's symbolic in the input but
-// specified as a non -1 value will be set to that constant value.
+// Expands input based on provided sizes. expand_sizes should be larger than
+// the input's root domain (really rfactor) and will broadcast on inner
+// dimensions. expand_sizes should be -1 for any dimension that should remain a
+// symbolic size. For dimensions that remain broadcast after the expand should
+// be set to 1, any dimension being expanded must be marked as a broadcast in
+// the input and will be expanded to the provided constant size. Any dimension
+// that's symbolic in the input but specified as a non -1 value will be set to
+// that constant value.
 TORCH_CUDA_CU_API TensorView* expand(
     TensorView* inp,
     const std::vector<Val*>& expanded_sizes);
