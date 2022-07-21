@@ -1601,16 +1601,8 @@ class FullyShardedDataParallel(nn.Module):
                 for param in fsdp_module.params:
                     fsdp_module._init_param_attributes(param)
 
-            # Set a flag on every FlatParameter to track whether its post
-            # backward hook has been called, mainly for validation purpose
-            # in wait_for_post_backward.
-            if self._exec_order_data.is_first_iter:
-                for m in self.fsdp_modules(self):
-                    for p in m.params:
-                        p._post_backward_called = False
-
     @torch.no_grad()
-    def _init_param_attributes(self, p: Parameter) -> None:
+    def _init_param_attributes(self, p: FlatParameter) -> None:
         """
         We manage several attributes on each Parameter instance. The first is
         set by :func:`_shard_parameters`:
@@ -1707,6 +1699,10 @@ class FullyShardedDataParallel(nn.Module):
                 dtype=full_param_dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
+
+        # Track whether the `FlatParameter`'s post-backward hook has been
+        # called for validation in `_wait_for_post_backward()`
+        p._post_backward_called = False
 
     def _init_streams(self) -> None:
         """Initializes CUDA streams for overlapping data transfer and
