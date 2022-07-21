@@ -1,4 +1,4 @@
-from typing import Any, List, Union, Callable, Tuple, Optional
+from typing import List, Callable, Tuple, Optional, Union, TypeVar, cast
 import torch.distributed as dist
 from .api import CheckpointException
 import torch
@@ -7,6 +7,9 @@ def tensor_narrow_n(tensor: torch.Tensor, offsets: Tuple[int, ...], lengths: Tup
     for dim, (start, length) in enumerate(zip(offsets, lengths)):
         tensor = torch.narrow(tensor, dim, start, length)
     return tensor
+
+T = TypeVar('T')
+R = TypeVar('R')
 
 class _DistWrapper:
     """
@@ -36,7 +39,7 @@ class _DistWrapper:
             return dist.get_world_size(self.group)
         return 1
 
-    def broadcast_object(self, object: Any) -> Any:
+    def broadcast_object(self, object: Optional[T]) -> T:
         """
         Same as c10d::broadcast_object_list but works without distributed enabled.
         """
@@ -46,14 +49,14 @@ class _DistWrapper:
                 object_list=object_list,
                 group=self.group,
                 src=self.coordinator_rank)
-        return object_list[0]
+        return cast(T, object_list[0])
 
-    def gather_object(self, object: Any) -> Union[List[Any], None]:
+    def gather_object(self, object: T) -> Optional[List[T]]:
         """
         Same as c10d::gather_object but works without distributed enabled.
         """
         if self.use_dist:
-            gather_objs = [None] * dist.get_world_size(self.group) if self.is_coordinator else None
+            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group)) if self.is_coordinator else None
 
             dist.gather_object(
                 obj=object,
@@ -61,17 +64,18 @@ class _DistWrapper:
                 dst=self.coordinator_rank,
                 group=self.group
             )
+            # technically the type is shou
             result = gather_objs
         else:
             result = [object]
         return result
 
-    def all_gather_object(self, object: Any) -> List[Any]:
+    def all_gather_object(self, object: T) -> List[T]:
         """
         Same as c10d::all_gather_object but works without distributed enabled.
         """
         if self.use_dist:
-            gather_objs = [None] * dist.get_world_size(self.group)
+            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group))
 
             dist.all_gather_object(
                 object_list=gather_objs,
@@ -82,12 +86,12 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: Optional[List[Any]]) -> Any:
+    def scatter_object(self, object_list: Optional[List[T]]) -> T:
         """
         Same as c10d::scatter_object but works without distributed enabled.
         """
         if self.use_dist:
-            gather_result = [None]
+            gather_result = cast(List[T], [None])
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
@@ -104,9 +108,9 @@ class _DistWrapper:
     def reduce_scatter(
         self,
         step: str,
-        map_fun: Callable[[], Any],
-        reduce_fun: Callable[[List[Any]], List[Any]]
-    ) -> Any:
+        map_fun: Callable[[], T],
+        reduce_fun: Callable[[List[T]], List[R]]
+    ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
 
@@ -116,20 +120,22 @@ class _DistWrapper:
             Call ``reduce_cb`` on all those values
             Scatter to each rank part of the result.
         """
+        local_data: Union[BaseException, T]
         try:
             local_data = map_fun()
         except BaseException as e:
             local_data = e
 
         all_data = self.gather_object(local_data)
-        all_results = None
+        all_results: Optional[List[Union[R, CheckpointException]]] = None
         if self.is_coordinator:
             assert all_data is not None
             node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
 
             if len(node_failures) == 0:
                 try:
-                    all_results = reduce_fun(all_data)
+                    # N.B. why can't mypy cast List[R] to List[Union[R, CheckpointException]]?
+                    all_results = cast(List[Union[R, CheckpointException]], reduce_fun(cast(List[T], all_data)))
                 except BaseException as e:
                     node_failures[self.rank] = e
 
@@ -144,9 +150,9 @@ class _DistWrapper:
     def all_reduce(
         self,
         step: str,
-        map_cb: Callable[[], Any],
-        reduce_cb: Callable[[List[Any]], Any]
-    ) -> Tuple[Any, Any]:
+        map_cb: Callable[[], T],
+        reduce_cb: Callable[[List[T]], R]
+    ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
 
@@ -156,36 +162,36 @@ class _DistWrapper:
             Call ``reduce_cb`` on all those values
             Broadcast the reduced value to all ranks
         """
+        local_data: Union[T, BaseException]
         try:
             local_data = map_cb()
         except BaseException as e:
             local_data = e
 
         all_data = self.gather_object(local_data)
-        result = None
+        result: Optional[Union[R, CheckpointException]] = None
         if self.is_coordinator:
             assert all_data is not None
             node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
-
             if len(node_failures) == 0:
                 try:
-                    result = reduce_cb(all_data)
+                    result = reduce_cb(cast(List[T], all_data))
                 except BaseException as e:
                     node_failures[self.rank] = e
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
-        result = self.broadcast_object(result)
-        if isinstance(result, CheckpointException):
-            raise result
-        return result
+        final_result = self.broadcast_object(result)
+        if isinstance(final_result, CheckpointException):
+            raise final_result
+        return cast(R, final_result)
 
     def all_gather(
         self,
         step: str,
-        map_fun: Callable[[], Any],
-    ) -> List[Any]:
+        map_fun: Callable[[], T],
+    ) -> List[T]:
         """
         Compute a value on each rank, then all_gather them.
 
@@ -193,6 +199,7 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
+        result: Union[T, BaseException]
         try:
             result = map_fun()
         except BaseException as e:
@@ -203,13 +210,13 @@ class _DistWrapper:
         node_failures = {i: err for i, err in enumerate(all_results) if isinstance(err, BaseException)}
         if len(node_failures) > 0:
             raise CheckpointException(step, node_failures)
-        return all_results
+        return cast(List[T], all_results)
 
     def broadcast(
         self,
         step: str,
-        map_cb: Callable[[], Any],
-    ) -> Any:
+        map_cb: Callable[[], T],
+    ) -> T:
         """
         Compute a value on rank 0 and broadcast it.
 
@@ -217,13 +224,13 @@ class _DistWrapper:
             Run ``map_cp`` on rank 0
             broadcast the value
         """
-        result = None
+        result: Optional[Union[T, CheckpointException]] = None
         if self.is_coordinator:
             try:
                 result = map_cb()
             except BaseException as e:
                 result = CheckpointException(step, {self.rank: e})
-        result = self.broadcast_object(result)
-        if isinstance(result, CheckpointException):
-            raise result
-        return result
+        final_result = self.broadcast_object(result)
+        if isinstance(final_result, CheckpointException):
+            raise final_result
+        return cast(T, final_result)
