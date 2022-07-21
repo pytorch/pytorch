@@ -227,7 +227,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
