@@ -1,14 +1,13 @@
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+from __future__ import annotations
 
-from typing import Dict
-
-import torch
 import enum
-from torch._C import _onnx as _C_onnx
+from typing import Dict, Union
 
 from typing_extensions import Literal
-from typing import Union
 
+import torch
+from torch._C import _onnx as _C_onnx
 
 ScalarName = Literal[
     "Byte",
@@ -49,6 +48,7 @@ TorchName = Literal[
     "bfloat16",
 ]
 
+
 class ScalarType(enum.Enum):
     """A human-readable name for a key into scalar_type_to_pytorch_type."""
 
@@ -70,67 +70,91 @@ class ScalarType(enum.Enum):
     BFLOAT16 = enum.auto()
     UNDEFINED = enum.auto()
 
-    
+    @classmethod
+    def from_scalar_name(cls, scalar_name: Union[ScalarName, str]) -> ScalarType:
+        """Convert a JIT scalar type name to ScalarType."""
+        if scalar_name not in _SCALAR_NAME_TO_TYPE:
+            raise ValueError(f"Unknown scalar type: {scalar_name}")
+        return _SCALAR_NAME_TO_TYPE[scalar_name]
+
+    @classmethod
+    def from_torch_name(cls, torch_name: Union[TorchName, str]) -> ScalarType:
+        """Convert a torch scalar type name to ScalarType."""
+        if torch_name not in _TORCH_NAME_TO_SCALAR_TYPE:
+            raise ValueError(f"Unknown torch type: {torch_name}")
+        return _TORCH_NAME_TO_SCALAR_TYPE[torch_name]
 
     def to_scalar_name(self) -> ScalarName:
+        """Convert a ScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
 
     def to_torch_name(self) -> TorchName:
+        """Convert a ScalarType to a torch type name."""
         return _SCALAR_TYPE_TO_TORCH_NAME[self]
 
     def to_dtype(self) -> torch.dtype:
+        """Convert a ScalarType to a torch dtype."""
         return _SCALAR_TYPE_TO_DTYPE[self]
 
+    def to_onnx_type(self) -> _C_onnx.TensorProtoDataType:
+        """Convert a ScalarType to an ONNX data type."""
+        return _SCALAR_TYPE_TO_ONNX[self]
+
     def onnx_compatible(self) -> bool:
-        return self in SCALAR_TYPE_TO_ONNX
+        """Returns whether this ScalarType is compatible with ONNX."""
+        return self in _SCALAR_TYPE_TO_ONNX
 
 
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
 _SCALAR_TYPE_TO_NAME: Dict[ScalarType, ScalarName] = {
-    ScalarType.BOOL : "Bool",
+    ScalarType.BOOL: "Bool",
     ScalarType.UINT8: "Byte",
-    ScalarType.INT8 : "Char",
-    ScalarType.INT16 : "Short",
-    ScalarType.INT : "Int",
-    ScalarType.INT64 : "Int64",
-    ScalarType.HALF : "Half",
-    ScalarType.FLOAT : "Float",
-    ScalarType.DOUBLE : "Double",
-    ScalarType.COMPLEX32 : "ComplexHalf",
-    ScalarType.COMPLEX64 : "ComplexFloat",
-    ScalarType.COMPLEX128 : "ComplexDouble",
-    ScalarType.QINT8 : "QInt8",
-    ScalarType.QUINT8 : "QUInt8",
-    ScalarType.QINT32 : "QInt32",
-    ScalarType.BFLOAT16 : "BFloat16",
+    ScalarType.INT8: "Char",
+    ScalarType.INT16: "Short",
+    ScalarType.INT: "Int",
+    ScalarType.INT64: "Long",
+    ScalarType.HALF: "Half",
+    ScalarType.FLOAT: "Float",
+    ScalarType.DOUBLE: "Double",
+    ScalarType.COMPLEX32: "ComplexHalf",
+    ScalarType.COMPLEX64: "ComplexFloat",
+    ScalarType.COMPLEX128: "ComplexDouble",
+    ScalarType.QINT8: "QInt8",
+    ScalarType.QUINT8: "QUInt8",
+    ScalarType.QINT32: "QInt32",
+    ScalarType.BFLOAT16: "BFloat16",
     ScalarType.UNDEFINED: "Undefined",
 }
 
-_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = dict(map(reversed, _SCALAR_TYPE_TO_NAME.items()))
+_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = dict(
+    map(reversed, _SCALAR_TYPE_TO_NAME.items())
+)
 
 _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
-    ScalarType.BOOL : "bool",
+    ScalarType.BOOL: "bool",
     ScalarType.UINT8: "uint8_t",
-    ScalarType.INT8 : "int8_t",
-    ScalarType.INT16 : "int16_t",
-    ScalarType.INT : "int",
-    ScalarType.INT64 : "int64_t",
-    ScalarType.HALF : "half",
-    ScalarType.FLOAT : "float",
-    ScalarType.DOUBLE : "double",
-    ScalarType.COMPLEX32 : "complex32",
-    ScalarType.COMPLEX64 : "complex64",
-    ScalarType.COMPLEX128 : "complex128",
-    ScalarType.QINT8 : "qint8",
-    ScalarType.QUINT8 : "quint8",
-    ScalarType.QINT32 : "qint32",
-    ScalarType.BFLOAT16 : "bfloat16",
+    ScalarType.INT8: "int8_t",
+    ScalarType.INT16: "int16_t",
+    ScalarType.INT: "int",
+    ScalarType.INT64: "int64_t",
+    ScalarType.HALF: "half",
+    ScalarType.FLOAT: "float",
+    ScalarType.DOUBLE: "double",
+    ScalarType.COMPLEX32: "complex32",
+    ScalarType.COMPLEX64: "complex64",
+    ScalarType.COMPLEX128: "complex128",
+    ScalarType.QINT8: "qint8",
+    ScalarType.QUINT8: "quint8",
+    ScalarType.QINT32: "qint32",
+    ScalarType.BFLOAT16: "bfloat16",
 }
 
-TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = dict(map(reversed, _SCALAR_TYPE_TO_TORCH_NAME.items()))
+_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = dict(
+    map(reversed, _SCALAR_TYPE_TO_TORCH_NAME.items())
+)
 
 
-SCALAR_TYPE_TO_ONNX = {
+_SCALAR_TYPE_TO_ONNX = {
     ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
     ScalarType.UINT8: _C_onnx.TensorProtoDataType.UINT8,
     ScalarType.INT8: _C_onnx.TensorProtoDataType.INT8,
@@ -161,8 +185,8 @@ _SCALAR_TYPE_TO_DTYPE = {
     ScalarType.COMPLEX32: torch.complex32,
     ScalarType.COMPLEX64: torch.complex64,
     ScalarType.COMPLEX128: torch.complex128,
-    ScalarType.QINT8 : torch.qint8,
-    ScalarType.QUINT8 : torch.quint8,
-    ScalarType.QINT32 : torch.qint32,
+    ScalarType.QINT8: torch.qint8,
+    ScalarType.QUINT8: torch.quint8,
+    ScalarType.QINT32: torch.qint32,
     ScalarType.BFLOAT16: torch.bfloat16,
 }
