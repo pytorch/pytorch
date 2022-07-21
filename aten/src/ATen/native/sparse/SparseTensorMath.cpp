@@ -884,6 +884,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
       const std::initializer_list<int64_t> dim_index_expanded_shape = {n_repeat, dim_size, n_repeat_interleave};
       const auto dim_index = index_buffer.slice(-1, 0, dim_size);
       const auto dim_index_expanded = dim_index.unsqueeze(0).unsqueeze_(-1).expand(dim_index_expanded_shape);
+      // equivalent to res_indices[dim].copy_(repeat_interleave(dim_index, n_repeat_interleave).repeat(n_repeat))
       // NOTE: res_indices is contiguous, so view is safe
       res_indices[dim].view(dim_index_expanded_shape).copy_(dim_index_expanded);
       n_repeat *= dim_size;
