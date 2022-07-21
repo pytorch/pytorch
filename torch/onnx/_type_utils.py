@@ -84,19 +84,19 @@ class ScalarType(enum.Enum):
             raise ValueError(f"Unknown torch type: {torch_name}")
         return _TORCH_NAME_TO_SCALAR_TYPE[torch_name]
 
-    def to_scalar_name(self) -> ScalarName:
+    def scalar_name(self) -> ScalarName:
         """Convert a ScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
 
-    def to_torch_name(self) -> TorchName:
+    def torch_name(self) -> TorchName:
         """Convert a ScalarType to a torch type name."""
         return _SCALAR_TYPE_TO_TORCH_NAME[self]
 
-    def to_dtype(self) -> torch.dtype:
+    def dtype(self) -> torch.dtype:
         """Convert a ScalarType to a torch dtype."""
         return _SCALAR_TYPE_TO_DTYPE[self]
 
-    def to_onnx_type(self) -> _C_onnx.TensorProtoDataType:
+    def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a ScalarType to an ONNX data type."""
         return _SCALAR_TYPE_TO_ONNX[self]
 
