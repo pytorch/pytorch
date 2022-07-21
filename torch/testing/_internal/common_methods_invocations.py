@@ -6043,6 +6043,8 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((), (),),
         ((), (0,),),
         ((), (0, True,),),
+        # Non-fused mode kernel on CUDA
+        ((3000,), ()),
     )
     inputs = list((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
                                            low=None, high=None,
