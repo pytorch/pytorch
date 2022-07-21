@@ -1,7 +1,7 @@
 import pathlib
 import sys
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TEST_TIMES_FILE = ".pytorch-test-times.json"
 
 try:
