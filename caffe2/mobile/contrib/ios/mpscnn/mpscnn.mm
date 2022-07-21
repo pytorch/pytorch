@@ -284,7 +284,7 @@ constexpr int computeMPSAlignOffset(int kernel, int pad) {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.dim());
+  TORCH_DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   for (int i = 0; i < index.size(); i++) {
@@ -299,7 +299,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
+  TORCH_DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
 
   if (tensor.size() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -1490,7 +1490,7 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
       caffe2::Timer consT;
       std::vector<float> refilter(kH * kW * output_channels * input_channels);
       refilter.assign(kH * kW * output_channels * input_channels, 0.0f);
-      DCHECK_EQ(refilter.size(), filter.size());
+      TORCH_DCHECK_EQ(refilter.size(), filter.size());
       auto* filter_ = filter.template data<float>();
       // For iOS11+ Reformat weights from WT[IC][OC][kH][kW] to
       // W[OC][kH][kW][IC]; For previous versions, reformat weights
@@ -1519,7 +1519,7 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
           }
         }
       }
-      DCHECK_EQ(filter.size(), input_channels * output_channels * kH * kW);
+      TORCH_DCHECK_EQ(filter.size(), input_channels * output_channels * kH * kW);
       // initialize data structures
       if (runtimeAtLeastIOS11) {
         MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor

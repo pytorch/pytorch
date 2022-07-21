@@ -156,13 +156,13 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     // number of outputs.
     int N = U.dim32(0);
     int middle = U.dim32(1);
-    DCHECK_EQ(K, V.dim32(0));
+    TORCH_DCHECK_EQ(K, V.dim32(0));
     if (dY.dim() > 1) {
-      DCHECK_EQ(M, dY.dim32(0));
-      DCHECK_EQ(N, dY.dim32(1));
+      TORCH_DCHECK_EQ(M, dY.dim32(0));
+      TORCH_DCHECK_EQ(N, dY.dim32(1));
     } else {
-      DCHECK_EQ(X.dim(), 1);
-      DCHECK_EQ(N, dY.numel());
+      TORCH_DCHECK_EQ(X.dim(), 1);
+      TORCH_DCHECK_EQ(N, dY.numel());
     }
 
     auto* dU = Output(0, U.sizes(), at::dtype<T>());

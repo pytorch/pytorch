@@ -92,7 +92,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       auto dict_type = n->output()->type()->expect<DictType>();
       const auto num_inputs = n->inputs().size();
-      DCHECK_EQ(num_inputs % 2, 0);
+      TORCH_DCHECK_EQ(num_inputs % 2, 0);
       return [dict_type = std::move(dict_type),
               num_inputs,
               dict_size = num_inputs / 2](ProcessedNode* p_node) {
@@ -853,7 +853,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::If,
     prim_If,
     [](Node* node) -> SROperator {
-      DCHECK_EQ(node->blocks().size(), 2);
+      TORCH_DCHECK_EQ(node->blocks().size(), 2);
       const Block* true_block = node->blocks().at(0);
       const Block* false_block = node->blocks().at(1);
 
@@ -886,7 +886,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
@@ -895,7 +895,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
               return;
             }
             auto& elems = output.toTupleRef().elements();
-            DCHECK_EQ(elems.size(), p_node->num_outputs());
+            TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
             for (const auto i : c10::irange(elems.size())) {
               p_node->Output(i) = elems[i];
             }
@@ -906,7 +906,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             if (condition) {
               auto output = block_runners.front()({});
               DCHECK(output.isNone());
@@ -918,7 +918,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             if (!condition) {
               auto output = block_runners.back()({});
               DCHECK(output.isNone());
@@ -1078,7 +1078,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           return;
         }
         auto& elems = future->value().toTupleRef().elements();
-        DCHECK_EQ(elems.size(), p_node->num_outputs());
+        TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
         for (const auto i : c10::irange(elems.size())) {
           p_node->Output(i) = elems[i];
         }
@@ -1096,7 +1096,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto* metadata = p_node->metadata();
         DCHECK(metadata);
         auto& block_runners = metadata->block_runners();
-        DCHECK_EQ(block_runners.size(), 1);
+        TORCH_DCHECK_EQ(block_runners.size(), 1);
         auto& runner = block_runners[0];
 
         auto args = collectLoopSubBlockInputs(*p_node);
@@ -1119,7 +1119,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         }
 
         const auto num_outputs = p_node->num_outputs();
-        DCHECK_EQ(args.size(), num_outputs + 1);
+        TORCH_DCHECK_EQ(args.size(), num_outputs + 1);
         for (const auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = std::move(args[i + 1]);
         }
@@ -1184,7 +1184,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
         format(stack, num_inputs);
-        DCHECK_EQ(stack.size(), 1);
+        TORCH_DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
       };
     });
@@ -1272,7 +1272,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto elem_type = pnode->Input(2).toInt();
         std::vector<IValue> stack{input, dim, elem_type};
         toList(stack);
-        DCHECK_EQ(stack.size(), 1);
+        TORCH_DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
       };
     });

@@ -153,7 +153,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
       auto& comm = comms[i];
       auto& stream = streams[i];
 
-      DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
+      TORCH_DCHECK_EQ(ctx.device, GetGPUIDForPointer(ctx.src->raw_data()));
       CUDA_ENFORCE(cudaStreamWaitEvent(stream, context->master_event_, 0));
       f(ctx, comm, stream);
     }

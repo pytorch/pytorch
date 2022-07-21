@@ -51,7 +51,7 @@ class ProcessedNodeWrapperBase {
     friend bool operator==(
         ProcessedNodeWrapperBaseIter lhs,
         ProcessedNodeWrapperBaseIter rhs) {
-      DCHECK_EQ(lhs.container_, rhs.container_);
+      TORCH_DCHECK_EQ(lhs.container_, rhs.container_);
       return lhs.idx_ == rhs.idx_;
     }
 
