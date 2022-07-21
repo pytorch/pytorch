@@ -38,6 +38,10 @@ class C10_API SymbolicIntNode
       const std::shared_ptr<SymbolicIntNode>& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual std::shared_ptr<SymbolicIntNode> ne(
+      const std::shared_ptr<SymbolicIntNode>& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual std::shared_ptr<SymbolicIntNode> gt(
       const std::shared_ptr<SymbolicIntNode>& other) {
     TORCH_CHECK(false, "NYI");

@@ -697,7 +697,7 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             },
         ),
-        # replace self.sym_sizes() with self_sizes
+        # replace self.sym_sizes() with self_sym_sizes
         (
             r"{}.sym_sizes\(\)",
             {

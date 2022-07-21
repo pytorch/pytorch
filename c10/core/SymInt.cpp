@@ -25,6 +25,31 @@ SymInt SymInt::operator+(SymInt sci) const {
   return SymInt(data_ + sci.data_);
 }
 
+bool SymInt::operator!=(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ != sci.data_;
+  }
+  // TODO: This is way to much boilerplate
+  std::shared_ptr<SymbolicIntNode> a =
+      is_symbolic() ? toSymbolicIntNode() : nullptr;
+  std::shared_ptr<SymbolicIntNode> b =
+      sci.is_symbolic() ? sci.toSymbolicIntNode() : nullptr;
+
+  SymbolicIntNode* common = a ? a.get() : b.get();
+  // TODO: technically we need to check that the classes match
+  if (!a) {
+    a = common->wrap(data_);
+    toSymInt(a); //
+  }
+  if (!b) {
+    b = common->wrap(sci.data_);
+    toSymInt(b);
+  }
+
+  auto c = a->ne(b);
+  return c->bool_();
+}
+
 bool SymInt::operator==(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ == sci.data_;
@@ -97,7 +122,7 @@ bool SymInt::operator==(int64_t sci) const {
 }
 
 bool SymInt::operator!=(int64_t sci) const {
-  return !(*this == sci);
+  return *this != c10::SymInt(sci);
 }
 
 SymInt SymInt::operator*(int64_t sci) const {
