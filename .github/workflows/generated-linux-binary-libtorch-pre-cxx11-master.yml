@@ -33,7 +33,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_linux-binary-build.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -53,7 +53,7 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
-    uses: ./.github/workflows/_linux-binary-test.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
