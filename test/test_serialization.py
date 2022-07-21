@@ -850,23 +850,6 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state.weight.size(), big_model.weight.size())
 
-    def test_serialization_python_attr(self):
-        def _test_save_load_attr(t):
-            t.foo = 'foo'
-            t.pi = 3.14
-
-            with BytesIOContext() as f:
-                torch.save(t, f)
-                f.seek(0)
-                loaded_t = torch.load(f)
-
-            self.assertEqual(t, loaded_t)
-            self.assertEqual(t.foo, loaded_t.foo)
-            self.assertEqual(t.pi, loaded_t.pi)
-
-        t = torch.zeros(3, 3)
-        _test_save_load_attr(t)
-        _test_save_load_attr(torch.nn.Parameter(t))
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
