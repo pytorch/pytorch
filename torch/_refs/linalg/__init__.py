@@ -1,28 +1,27 @@
-from functools import partial
-
-from typing import List, Optional, Tuple
-
 import torch
+from torch import Tensor
 
 import torch._prims as prims
 import torch._refs as refs
-import torch._refs.linalg as linalg
-from torch import Tensor
+from torch._prims_common.wrappers import out_wrapper
 
-from torch._prims.utils import (
+from torch._prims_common import (
     check,
     check_fp_or_complex,
     DimsType,
+    TensorLikeType,
+    NumberType,
+    is_float_dtype,
+    is_complex_dtype,
     get_computation_dtype,
     get_higher_dtype,
-    is_complex_dtype,
-    is_float_dtype,
-    NumberType,
     reduction_dtypes,
     REDUCTION_OUTPUT_TYPE_KIND,
-    TensorLikeType,
 )
-from torch._prims.wrappers import out_wrapper
+import torch._refs.linalg as linalg
+
+from typing import Optional, List, Tuple
+from functools import partial
 
 __all__ = [
     "svd",
