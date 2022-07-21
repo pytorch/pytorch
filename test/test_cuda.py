@@ -26,7 +26,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -3747,7 +3747,10 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_make_graphed_callables(self):
+    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), (True, True)],
+                 name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
+                                                    {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
+    def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
 
@@ -3778,9 +3781,10 @@ torch.cuda.synchronize()
         relu_control = torch.nn.functional.relu
 
         # This is a good stress test. It graphs four callables: two Modules and two python functions.
-        model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
-            torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
-                                              ((x,), (h,), (y_pred,), (y_pred, y)))
+        with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+            model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
+                torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                                                  ((x,), (h,), (y_pred,), (y_pred, y)))
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
@@ -3795,10 +3799,11 @@ torch.cuda.synchronize()
             torch.cuda.manual_seed(5)
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
-                y_pred = m(data)
-                y_pred = relu(y_pred)
-                loss = loss_fn(y_pred, target)
-                loss.backward()
+                with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+                    y_pred = m(data)
+                    y_pred = relu(y_pred)
+                    loss = loss_fn(y_pred, target)
+                    loss.backward()
                 opt.step()
 
         for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
@@ -4397,6 +4402,8 @@ class TestCudaComm(TestCase):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
             self.assertTrue(torch.equal(x, cat))
+
+instantiate_parametrized_tests(TestCuda)
 
 if __name__ == '__main__':
     run_tests()
