@@ -6038,6 +6038,8 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((), (),),
         ((), (0,),),
         ((), (0, True,),),
+        # Non-fused more kernel on CUDA
+        ((3000,), ()),
     )
     inputs = list((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
                                            low=None, high=None,
@@ -15210,8 +15212,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',

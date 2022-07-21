@@ -108,7 +108,7 @@ void calculate_mode(
   AT_CUDA_CHECK(cudaMemcpyAsync(
       values_data, &mode, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
   //memcpy_and_sync will synchronize results
-  at::cuda::memcpy_and_sync(indices_data, &index, sizeof(scalar_t), cudaMemcpyHostToDevice, stream);
+  at::cuda::memcpy_and_sync(indices_data, &index, sizeof(int64_t), cudaMemcpyHostToDevice, stream);
 }
 
 template <typename scalar_t>
