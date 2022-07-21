@@ -4,7 +4,7 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch._C._onnx as _C_onnx
-from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_helper, _type_utils
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset11 as opset11
 from torch.onnx import utils
@@ -16,7 +16,7 @@ def softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", softmax, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
         )
 
     return softmax
@@ -28,7 +28,7 @@ def log_softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", return_op, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
         )
     return return_op
 
@@ -356,7 +356,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -367,7 +367,7 @@ def _reduce_with_dtype(onnx_op, name):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")

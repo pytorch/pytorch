@@ -6,7 +6,7 @@ from typing import Tuple, Union
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_helper, _type_utils
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
 from torch.onnx import utils
@@ -91,21 +91,19 @@ __all__ = [
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(
-            min_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            min_val, dtype=scalar_type.dtype()
         ),
     )
     max_val = g.op(
         "Constant",
         value_t=torch.tensor(
-            max_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            max_val, dtype=scalar_type.dtype()
         ),
     )
     return opset9.op_with_optional_float_cast(
@@ -171,27 +169,25 @@ def clamp_max(g, self, max):
 
 
 def relu6(g, input):
-    relu = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    relu_ = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(
-            0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            0, dtype=scalar_type.dtype()
         ),
     )
     max_val = g.op(
         "Constant",
         value_t=torch.tensor(
-            6, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            6, dtype=scalar_type.dtype()
         ),
     )
-    return clamp(g, relu, min_val, max_val)
+    return clamp(g, relu_, min_val, max_val)
 
 
 # Opset 11 gather accepts negative indices
@@ -293,16 +289,13 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
         values = g.op("Cast", values, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+    scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
 
     if accumulate:
         zeros = g.op(
             "ConstantOfShape",
             g.op("Shape", self),
-            value_t=torch.tensor([0], dtype=dtype),
+            value_t=torch.tensor([0], dtype=scalar_type.dtype()),
         )
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
@@ -387,7 +380,7 @@ def cumsum(g, self, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         cast = g.op(
-            "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", self, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
         )
     else:
         cast = self
@@ -755,19 +748,19 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[1])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, end=args[0], dtype=dtype
         )
         start_default = g.op(
             "Constant",
             value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
+                0, dtype=type_.dtype()
             ),
         )
         delta_default = g.op(
             "Constant",
             value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
+                1, dtype=type_.dtype()
             ),
         )
         arange_tensor = g.op("Range", start_default, end, delta_default)
@@ -778,20 +771,20 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[3])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
         arange_tensor = g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], dtype=dtype
         )
         delta_default = g.op(
             "Constant",
             value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
+                1, dtype=type_.dtype()
             ),
         )
         arange_tensor = g.op("Range", start, end, delta_default)

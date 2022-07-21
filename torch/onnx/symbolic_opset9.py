@@ -18,7 +18,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_helper, _type_utils
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -556,10 +556,8 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return v is not None and v != u
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
-        dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        dtype = scalar_type.dtype()
 
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
@@ -702,7 +700,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -715,7 +713,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
@@ -1237,7 +1235,7 @@ def softmax(g, input, dim, dtype=None):
         if dtype and dtype.node().kind() != "prim::Constant":
             parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
             softmax = g.op(
-                "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+                "Cast", softmax, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
             )
 
         if is_transpose_required:
@@ -1253,7 +1251,7 @@ def softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", softmax, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
         )
     return softmax
 
@@ -1910,7 +1908,7 @@ def log_softmax(g, input, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", return_op, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
         )
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
@@ -2750,9 +2748,7 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2760,7 +2756,7 @@ def scalar_tensor(g, scalar, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
-    scalar = g.op("Cast", scalar, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+    scalar = g.op("Cast", scalar, to_i=_type_utils.ScalarType(dtype).onnx_type())
     return scalar
 
 
@@ -2768,30 +2764,26 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            dtype = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
+            scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
             # TODO(justinchuby): Remove type ignore after #81112 is checked in.
-            dtype = symbolic_helper.scalar_type_to_onnx.index(
-                symbolic_helper.cast_pytorch_to_onnx[dtype]
-            )
+            dtype = _type_utils.ScalarType.from_scalar_name(scalar_name)
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
-            t = g.op("Cast", t, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+            t = g.op("Cast", t, to_i=_type_utils.ScalarType(dtype).onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            dtype = data.type().scalarType()
-            dtype = symbolic_helper.scalar_type_to_onnx.index(
-                symbolic_helper.cast_pytorch_to_onnx[dtype]
-            )
+            scalar_name = data.type().scalarType()
+            dtype = _type_utils.ScalarType.from_scalar_name(scalar_name)
         if symbolic_helper._is_list(data) and (
             symbolic_helper._is_tensor_list(data)
             or symbolic_helper._is_scalar_list(data)
         ):
             data = g.op("ConcatFromSequence", data, axis_i=0, new_axis_i=1)
-    return g.op("Cast", data, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+    return g.op("Cast", data, to_i=_type_utils.ScalarType(dtype).onnx_type())
 
 
 def as_tensor(g, data, dtype=None, device=None):
@@ -2821,23 +2813,20 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.ScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.ScalarType(dtype)
     return g.op(
         "ConstantOfShape",
         shape,
-        value_t=torch.tensor(
-            [0], dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
 
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
-        dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(self_dtype)
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2877,9 +2866,7 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2920,7 +2907,7 @@ def full_like(
     if symbolic_helper._is_value(fill_value):
         tmp = zeros_like(g, input, dtype, layout, device)
         fill_value = g.op(
-            "Cast", fill_value, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", fill_value, to_i=_type_utils.ScalarType(dtype).onnx_type()
         )
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
@@ -2938,9 +2925,7 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
@@ -3069,9 +3054,7 @@ def hardshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(
@@ -3098,9 +3081,7 @@ def softshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(
@@ -3248,22 +3229,22 @@ def to(g, self, *args):
         else:
             # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             # memory_format is ignored
-            return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+            return g.op("Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type())
     elif len(args) == 5:
         # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
         dtype = symbolic_helper._get_const(args[1], "i", "dtype")
         # memory_format is ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type())
     elif len(args) == 6:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = symbolic_helper._get_const(args[0], "i", "dtype")
         # Layout, device and memory_format are ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type())
     elif len(args) == 7:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
         dtype = symbolic_helper._get_const(args[0], "i", "dtype")
         # Layout, device and memory_format are ignored
-        return g.op("Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=_type_utils.ScalarType(dtype).onnx_type())
     else:
         return symbolic_helper._onnx_unsupported("Unknown aten::to signature")
 
@@ -3964,12 +3945,12 @@ def randn(g, shapes, dtype, *options):
         return g.op(
             "RandomNormalLike",
             shape_const,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=_type_utils.ScalarType(dtype).onnx_type(),
         )
     return g.op(
         "RandomNormal",
         shape_i=shape,
-        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        dtype_i=_type_utils.ScalarType(dtype).onnx_type(),
     )
 
 
@@ -3989,12 +3970,12 @@ def rand(g, shapes, dtype, *options):
         return g.op(
             "RandomUniformLike",
             shape_const,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=_type_utils.ScalarType(dtype).onnx_type(),
         )
     return g.op(
         "RandomUniform",
         shape_i=shape,
-        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        dtype_i=_type_utils.ScalarType(dtype).onnx_type(),
     )
 
 
@@ -4005,7 +3986,7 @@ def randn_like(
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
-        "RandomNormalLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
+        "RandomNormalLike", self, dtype_i=_type_utils.ScalarType(dtype).onnx_type()
     )
 
 
@@ -4016,7 +3997,7 @@ def rand_like(
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     return g.op(
-        "RandomUniformLike", self, dtype_i=symbolic_helper.scalar_type_to_onnx[dtype]
+        "RandomUniformLike", self, dtype_i=_type_utils.ScalarType(dtype).onnx_type()
     )
 
 
@@ -4179,21 +4160,17 @@ def scatter(g, self, dim, index, src):
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
 def scatter_add(g, self, dim, index, src):
-    dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None:
+    scalar_name = symbolic_helper._try_get_scalar_type(self)
+    if scalar_name is None:
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible"
         )
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+    scalar_type = _type_utils.ScalarType.from_scalar_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
-        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=scalar_type.dtype()))
     else:
-        dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
-        to_add = zeros_like(g, self, dtype)
+        to_add = zeros_like(g, self, scalar_type)
     to_add = symbolic_helper._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -4330,7 +4307,7 @@ def arange(g, *args):
             range_tensor = g.op(
                 "Cast",
                 g.op("Ceil", range_tensor),
-                to_i=symbolic_helper.scalar_type_to_onnx[4],
+                to_i=_type_utils.ScalarType.INT64.onnx_type(),
             )
         return range_tensor
 
@@ -4350,7 +4327,7 @@ def arange(g, *args):
             g, nonzero(g, ones(g, range_tensor, dtype, None, None)), [1]
         )
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.ScalarType(dtype).onnx_type()
         )
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
@@ -4371,7 +4348,7 @@ def arange(g, *args):
         )
         arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.ScalarType(dtype).onnx_type()
         )
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
@@ -4390,7 +4367,7 @@ def arange(g, *args):
             start,
         )
         return g.op(
-            "Cast", arange_tensor, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+            "Cast", arange_tensor, to_i=_type_utils.ScalarType(dtype).onnx_type()
         )
     else:
         raise NotImplementedError(
@@ -5083,7 +5060,7 @@ def hann_window(
     output = g.op(
         "Cast",
         square(g, sin(g, output)),
-        to_i=symbolic_helper.scalar_type_to_onnx[dtype],
+        to_i=_type_utils.ScalarType(dtype).onnx_type(),
     )
 
     return output
@@ -5135,9 +5112,7 @@ def fill(g, self, value):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
 
     return full_like(g, self, value, dtype)
 
@@ -5378,9 +5353,7 @@ class Prim:
         dtype = symbolic_helper._try_get_scalar_type(self)
         if dtype is None:
             dtype = "Float"
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
         return g.op("Constant", value_t=torch.tensor(dtype))
 
     # tolist is currently supported only for 1D input tensors.

@@ -13,6 +13,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
+from torch.onnx import _type_utils
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -72,7 +73,6 @@ __all__ = [
     "scalar_name_to_pytorch",
     "scalar_type_to_onnx",
     "scalar_type_to_pytorch_type",
-    "ScalarType",
 ]
 
 # ---------------------------------------------------------------------------------
@@ -403,8 +403,8 @@ def _is_scalar_list(x):
     element_type = str(x.type().getElementType())
     return (
         _is_list(x)
-        and element_type in scalar_name_to_pytorch.keys()
-        and (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
+        and _type_utils.valid_torch_name(element_type)
+        and _type_utils.ScalarType.from_torch_name(element_type).onnx_compatible()
     )
 
 
@@ -496,7 +496,7 @@ def _block_list_in_opset(name):
     return symbolic_fn
 
 
-def _try_get_scalar_type(*args):
+def _try_get_scalar_type(*args) -> Optional[str]:
     for arg in args:
         try:
             return arg.type().scalarType()
@@ -990,7 +990,9 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
     return split_out if reps > 1 else [split_out]
 
 
-def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
+def _arange_cast_helper(
+    g, end, start=None, step=None, dtype=None
+) -> Tuple[_type_utils.ScalarType, Optional[_C.Value], Optional[_C.Value], Optional[_C.Value]]:
     def _is_all_integral(scalars):
         for scalar in scalars:
             try:
@@ -1006,16 +1008,18 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     # Otherwise, the dtype is inferred to be torch.int64.
     if dtype is None or (_is_value(dtype) and _is_none(dtype)):
         if _is_all_integral([start, end, step]):
-            type = scalar_type_to_pytorch_type.index(torch.int64)
+            type_ = _type_utils.ScalarType.INT64
         else:
-            type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())
+            type_ = _type_utils.ScalarType.from_dtype(torch.get_default_dtype())
     else:
-        type = dtype
+        assert isinstance(dtype, int)
+        # TODO(justinchuby): Check if dtype is indeed a int.
+        type_ = _type_utils.ScalarType(dtype)
 
-    start = g.op("Cast", start, to_i=scalar_type_to_onnx[type]) if start else None
-    end = g.op("Cast", end, to_i=scalar_type_to_onnx[type]) if end else None
-    step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
-    return type, end, start, step
+    start = g.op("Cast", start, to_i=type_.onnx_type()) if start else None
+    end = g.op("Cast", end, to_i=type_.onnx_type()) if end else None
+    step = g.op("Cast", step, to_i=type_.onnx_type()) if step else None
+    return type_, end, start, step
 
 
 def _arange_helper(g, *args):
@@ -1091,8 +1095,11 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             raise RuntimeError(
                 "Unsupported: ONNX export of batch_norm for unknown " "channel size."
             )
-        weight_value = torch.tensor([1.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        weight_value = torch.tensor(
+            [1.0] * channel_size,
+            dtype=_type_utils.ScalarType.from_scalar_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
@@ -1100,8 +1107,11 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             raise RuntimeError(
                 "Unsupported: ONNX export of batch_norm for unknown " "channel size."
             )
-        bias_value = torch.tensor([0.0] * channel_size).type(
-            "torch." + input.type().scalarType() + "Tensor"
+        bias_value = torch.tensor(
+            [0.0] * channel_size,
+            dtype=_type_utils.ScalarType.from_scalar_name(
+                input.type().scalarType()
+            ).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
@@ -1377,6 +1387,7 @@ cast_pytorch_to_onnx = {
     "Undefined": _C_onnx.TensorProtoDataType.UNDEFINED,
 }
 
+# Deprecated. Internally use _type_utils.ScalarType
 scalar_name_to_pytorch = {
     "uint8_t": "Byte",
     "int8_t": "Char",
@@ -1396,27 +1407,7 @@ scalar_name_to_pytorch = {
 }
 
 
-class ScalarType(enum.IntEnum):
-    """A human-readable name for a key into scalar_type_to_pytorch_type."""
-
-    UINT8 = 0
-    INT8 = enum.auto()
-    SHORT = enum.auto()
-    INT = enum.auto()
-    INT64 = enum.auto()
-    HALF = enum.auto()
-    FLOAT = enum.auto()
-    DOUBLE = enum.auto()
-    COMPLEX32 = enum.auto()
-    COMPLEX64 = enum.auto()
-    COMPLEX128 = enum.auto()
-    BOOL = enum.auto()
-    QINT8 = enum.auto()
-    QUINT8 = enum.auto()
-    QINT32 = enum.auto()
-    BFLOAT16 = enum.auto()
-
-
+# Deprecated. Internally use _type_utils.ScalarType
 # This indicates each scalar type's corresponding
 # torch type. Related source:
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
@@ -1439,6 +1430,7 @@ scalar_type_to_pytorch_type = [
     torch.bfloat16,  # 15
 ]
 
+# Deprecated. Internally use _type_utils.ScalarType
 # source of truth is
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
 pytorch_name_to_type = {
@@ -1464,6 +1456,7 @@ def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
+# Deprecated. Internally use _type_utils.ScalarType
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],  # 0
     cast_pytorch_to_onnx["Char"],  # 1
