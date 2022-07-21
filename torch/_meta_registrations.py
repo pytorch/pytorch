@@ -56,11 +56,6 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@torch.library.impl(meta_lib, "conj_physical.out")
-def meta_conj_physical_out(self, out):
-    return torch._resize_output_(out, self.size(), self.device)
-
-
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @torch.library.impl(meta_lib, "index_select")
 def meta_index_select(self, dim, index):
@@ -178,15 +173,6 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@torch.library.impl(meta_lib, "var_mean.correction")
-def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
-    dim = utils.reduction_dims(self.shape, dim)
-    output_shape = _compute_reduction_shape(self, dim, keepdim)
-    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
-    result2 = self.new_empty(output_shape)
-    return result1, result2
-
-
 @torch.library.impl(meta_lib, "inverse")
 def meta_inverse(self):
     # Bug: https://github.com/pytorch/pytorch/issues/77498
@@ -228,16 +214,15 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@out_wrapper
+@torch.library.impl(meta_lib, "complex")
+@torch.library.impl(meta_lib, "complex.out")
+@out_wrapper()
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
     assert imag.dtype.is_floating_point
     out_shape = _broadcast_shapes(real.shape, imag.shape)
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
-
-torch.library.impl(meta_lib, "complex")(meta_complex)
-torch.library.impl(meta_lib, "complex.out")(meta_complex)
 
 
 @torch.library.impl(meta_lib, "vdot")
