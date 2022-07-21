@@ -21650,6 +21650,19 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
+    PythonRefInfo(
+        "_refs.new_empty",
+        torch_opinfo_name="new_empty",
+        skips=(
+            # Empty tensor data is garbage so it's hard to make comparisons with it.
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref'),
+        )
+    ),
     #
     # Conditional Reference OpInfos
     #

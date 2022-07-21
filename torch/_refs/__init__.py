@@ -2924,6 +2924,27 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
+# TODO: layout and pin_memory are not supported by refs, but are expected as
+# arguments
+@register_decomposition(torch.ops.aten.new_empty)
+def new_empty(
+    self: TensorLikeType,
+    size: Union[torch.Size, List[int], Tuple[int, ...]],
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,  # unused
+    pin_memory: Optional[bool] = None,  # unused
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.Tensor.new_empty
+    """
+    dtype = self.dtype if dtype is None else dtype
+    device = self.device if device is None else device
+
+    return torch.empty(size, dtype=dtype, device=device, requires_grad=requires_grad)
+
+
 @out_wrapper()
 def empty(
     *shape,
