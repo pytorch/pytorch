@@ -160,6 +160,14 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_normalize_device(self):
+        with FakeTensorMode.push():
+            x = torch.empty(1, device="cuda")
+            y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
+            out = x + y
+        self.checkType(out, "cuda", [1])
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cudnn_rnn(self):
