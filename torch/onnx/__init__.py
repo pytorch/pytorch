@@ -11,6 +11,7 @@ from torch._C._onnx import (
 )
 
 from . import (
+    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -26,7 +27,6 @@ from . import (
     symbolic_opset16,
     symbolic_registry,
     utils,
-    _deprecation,
 )
 from ._exporter_states import ExportTypes, SymbolicContext
 from .errors import CheckerError  # Backwards compatibility
