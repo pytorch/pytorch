@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 
@@ -80,8 +81,6 @@ struct TORCH_API SchemaInfo {
   bool mayContainAliasImpl(
       const c10::SchemaArgument& lhs,
       const c10::SchemaArgument& rhs);
-
-  static std::vector<c10::FunctionSchema> getNonDeterministicOps();
 
   static std::vector<c10::FunctionSchema> getTrainingOps();
 

@@ -40,12 +40,15 @@ class SchemaCheckMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         def has_mutated(before, after, md):
-            if type(before) == torch.Tensor and type(after) == torch.Tensor:
-                return not (
-                    torch.equal(before, after) and
-                    md[0] == after.stride() and
-                    md[1] == after.storage()._cdata
-                )
+            try:
+                if type(before) == torch.Tensor and type(after) == torch.Tensor:
+                    return not (
+                        torch.equal(before, after) and
+                        md[0] == after.stride() and
+                        md[1] == after.storage()._cdata
+                    )
+            except RuntimeError as r:
+                return False
             return False
 
         def has_aliased(lhs, rhs):
@@ -77,18 +80,25 @@ class SchemaCheckMode(TorchDispatchMode):
                     except AttributeError as t:
                         return None
                 else:
-                    return (deepcopy(e.stride()), e.storage()._cdata)
+                    try:
+                        return (deepcopy(e.stride()), e.storage()._cdata)
+                    except RuntimeError as r:
+                        return None
             return None
 
         self.ops.append(func._schema.name)
 
         # Clone and process arguments and outputs
-        pre_arguments = normalize_function(
-            func,
-            args,
-            kwargs,
-            normalize_to_only_use_kwargs=True
-        ).kwargs
+        try:
+            pre_arguments = normalize_function(
+                func,
+                args,
+                kwargs,
+                normalize_to_only_use_kwargs=True
+            ).kwargs
+        except NameError as n:
+            return func(*args, **kwargs)
+
 
         c_p_args = dict(zip(pre_arguments.keys(), clone_inputs(pre_arguments.values())))
         cloned_arguments = {name : tree_map(unwrap, c_p_args.get(name)) for name in c_p_args}
