@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     first_sample,
     parametrize,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -97,8 +98,7 @@ _ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -1258,8 +1258,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper)
 
 
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1469,8 +1468,7 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1483,8 +1481,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1504,8 +1501,7 @@ class TestTags(TestCase):
                 test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
@@ -1667,8 +1663,7 @@ sometimes_dynamic_output_op_test = (
 )
 
 
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)

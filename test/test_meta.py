@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -64,8 +65,7 @@ dtype_abbrs = {
 }
 
 
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -825,8 +825,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
