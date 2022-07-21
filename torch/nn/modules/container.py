@@ -136,13 +136,15 @@ class Sequential(Module):
                                  str(type(other))))
 
     def __iadd__(self, other: 'Sequential') -> 'Sequential':
-        if isinstance(other, __class__):
+        if isinstance(other, Sequential):
             offset = len(self)
             for i, module in enumerate(other):
-                self.add_module(str(i+offset), module)
+                self.add_module(str(i + offset), module)
             return self
         else:
-            raise ValueError(f"unsupported operand type(s) for +=: {type(self)} and {type(other)}")
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
 
     def __mul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):
@@ -169,7 +171,7 @@ class Sequential(Module):
         else:
             len_original = len(self)
             offset = len(self)
-            for _ in range(other-1):
+            for _ in range(other - 1):
                 for i in range(len_original):
                     self.add_module(str(i + offset), self._modules[str(i)])
                 offset += len_original
