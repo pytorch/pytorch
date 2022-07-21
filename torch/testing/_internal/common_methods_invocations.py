@@ -1644,10 +1644,15 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
     return result
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
+    low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     sizes = ((2, 2), (2, 3, 2))
-    ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
+    if dtype in low_precision_dtypes:
+        # svdvals not supported for low precision dtypes
+        ords = ('fro', inf, -inf, 1, -1)
+    else:
+        ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
     dims = ((-2, -1), (-1, 0))
 
     for size, ord, dim, keepdim in product(sizes, ords, dims, [True, False]):
@@ -12784,7 +12789,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,
@@ -16862,8 +16867,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16878,8 +16881,6 @@ op_db: List[OpInfo] = [
                # 76571
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
                             dtypes=(torch.float16, torch.float32, torch.float64)),
-               DecorateInfo(unittest.skip("memory access error on some platforms"),
-                            'TestCommon', 'test_non_standard_bool_values', device_type='cuda'),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16894,11 +16895,6 @@ op_db: List[OpInfo] = [
                # 76571
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
                             dtypes=(torch.float16, torch.float32, torch.float64)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
-               DecorateInfo(unittest.skip("memory access error on ROCm"), 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cuda',
-                            active_if=TEST_WITH_ROCM),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -21381,6 +21377,26 @@ python_ref_db = [
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
         supports_nvfuser=False,  # clone_default
+    ),
+    PythonRefInfo(
+        "_refs.linalg.matrix_norm",
+        torch_opinfo_name="linalg.matrix_norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.norm",
+        torch_opinfo_name="linalg.norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
