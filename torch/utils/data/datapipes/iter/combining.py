@@ -150,7 +150,10 @@ class _ForkerIterDataPipe(IterDataPipe):
             self._datapipe_iterator = None
 
     def is_every_instance_exhausted(self) -> bool:
-        return all(self.end_ptr == ptr for ptr in self.child_pointers)
+        # Due to the implementation of `get_next_element_by_instance`, `self.end_ptr` will end up
+        # equaling to `len(main_datapipe) + 1`, hence the check for `self.end_ptr - 1 == ptr` below.
+        return self.end_ptr is not None and\
+            all(self.end_ptr == ptr or self.end_ptr - 1 == ptr for ptr in self.child_pointers)
 
     def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
@@ -519,7 +522,10 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         finally:
             unused = []
             for iterator in iterators:
-                unused += list(iterator)
+                try:
+                    unused += list(iterator)
+                except RuntimeError:  # Some iterators may have been invalidated by single iterator constraints
+                    pass
 
             # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
             for item in unused:
