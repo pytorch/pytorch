@@ -11,7 +11,8 @@ include templates. That is, there is one ``Tensor`` type. It can hold a CPU or
 CUDA Tensor, and the tensor may have Doubles, Float, Ints, etc. This design
 makes it easy to write generic code without templating everything.
 
-Example functions:
+See https://pytorch.org/cppdocs/api/namespace_at.html#functions for the provided
+API. Excerpt:
 
 .. code-block:: cpp
 
