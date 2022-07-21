@@ -3,9 +3,11 @@ Tensor CUDA Stream API
 
 A `CUDA Stream`_ is a linear sequence of execution that belongs to a specific CUDA device.
 The PyTorch C++ API supports CUDA streams with the CUDAStream class and useful helper functions to make streaming operations easy.
-This note provides details on how to use Pytorch C++ CUDA Stream APIs.
+You can find them in `CUDAStream.h`_. This note provides more details on how to use Pytorch C++ CUDA Stream APIs.
 
 .. _CUDA Stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
+.. _CUDAStream.h: https://pytorch.org/cppdocs/api/file_c10_cuda_CUDAStream.h.html#file-c10-cuda-cudastream-h
+.. _CUDAStreamGuard.h: https://pytorch.org/cppdocs/api/structc10_1_1cuda_1_1_c_u_d_a_stream_guard.html
 
 Acquiring CUDA stream
 *********************
@@ -63,7 +65,7 @@ Pytorch's C++ API provides the following ways to set CUDA stream:
   We recommend using ``CUDAStreamGuard``, instead, since it switches to the stream's device and makes it the current stream on that device.
   ``CUDAStreamGuard`` will also restore the current device and stream when it's destroyed
 
-2. Use ``CUDAStreamGuard`` to switch to a CUDA stream within a scope.
+2. Use ``CUDAStreamGuard`` to switch to a CUDA stream within a scope, it is defined in `CUDAStreamGuard.h`_
 
 .. tip::
 
