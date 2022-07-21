@@ -16,6 +16,7 @@ import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
 from torchgen.api import cpp
+from torchgen.api import types
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,
@@ -2477,6 +2478,18 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+    parser.add_argument(
+        "--tensor_namespace_override",
+        type=str,
+        default="at",
+        help="Namespace for tensor, e.g., at for at::Tensor",
+    )
+    parser.add_argument(
+        "--container_namespace_override",
+        type=str,
+        default="c10",
+        help="Namespace for container, e.g., c10 for c10::List",
+    )
 
     options = parser.parse_args()
 
@@ -2559,7 +2572,10 @@ def main() -> None:
             for k in dispatch_keys
             if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
         ]
-
+    if options.tensor_namespace_override:
+        types.tensorNamespace.update(options.tensor_namespace_override)
+    if options.container_namespace_override:
+        types.containerNamespace.update(options.container_namespace_override)
     static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
         static_dispatch_idx = [
