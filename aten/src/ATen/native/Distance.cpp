@@ -294,15 +294,12 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   Tensor cos_sim_value = at::sum(x1_normalized * x2_normalized, dim);
 
   // The code above is resistant to over +/-1 overshoots.
-  // However, if this happens and if it is critical, uncommenting
-  // the lines below will solve the issue.
-  // We keep these lines commented as to reduce the number of kernel
-  // launches for better runtime performance.
-  //{
-  //  at::NoGradGuard guard;
-  //  cos_sim_value.clamp_min_(-1.0);
-  //  cos_sim_value.clamp_max_(1.0);
-  //}
+  // However, these might still happen for inputs with small norms,
+  // hence, we explicitly clamp values.
+  {
+    at::NoGradGuard guard;
+    cos_sim_value.clamp_(/*min=*/-1.0, /*max=*/1.0);
+  }
 
   return cos_sim_value;
 }
