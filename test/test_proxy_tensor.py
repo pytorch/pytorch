@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: ProxyTensor"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
@@ -230,6 +230,23 @@ class TestProxyTensor(TestCase):
             self.assertTrue(n.target != torch.ops.aten.silu.default)
 
         self.assertEqual(fx_module(x), decomposed_module(x))
+
+    def test_make_fx_reentrant_dispatch(self):
+        def f(x):
+            return torch.ops.aten.norm.Scalar(x, 2.0)
+
+        def norm_decomp(x, p=2.0):
+            if p != 2.0:
+                raise RuntimeError("can't handle with p != 2")
+            return torch.sqrt(torch.sum(torch.square(x)))
+
+        decomp = {torch.ops.aten.norm.Scalar: norm_decomp}
+
+        traced = make_fx(f, decomposition_table=decomp)(torch.rand(3))
+
+        for n in traced.graph.nodes:
+            self.assertTrue("square" not in str(n.target))
+            self.assertTrue("norm" not in str(n.target))
 
 make_fx_failures = {
     # unknown
