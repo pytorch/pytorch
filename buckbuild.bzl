@@ -134,6 +134,7 @@ THIRD_PARTY_LIBS = {
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
+    "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
@@ -1022,7 +1023,7 @@ def define_buck_targets(
             "0",
             "--replace",
             "@AT_POCKETFFT_ENABLED@",
-            "0",
+            "1",
             "--replace",
             "@AT_NNPACK_ENABLED@",
             "ATEN_NNPACK_ENABLED_FBXPLAT",
@@ -1191,7 +1192,7 @@ def define_buck_targets(
         exported_headers = [
         ],
         compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],
         },
@@ -1880,6 +1881,7 @@ def define_buck_targets(
                 third_party("cpuinfo"),
                 third_party("glog"),
                 third_party("XNNPACK"),
+                third_party("pocketfft"),
             ],
             compiler_flags = get_aten_compiler_flags(),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
