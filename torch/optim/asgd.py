@@ -23,26 +23,29 @@ class ASGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0,
-                 foreach: Optional[bool] = None):
+                 foreach: Optional[bool] = None, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
-                        weight_decay=weight_decay, foreach=foreach)
+                        weight_decay=weight_decay, foreach=foreach, maximize=maximize)
         super(ASGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+            group.setdefault('maximize', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -109,7 +112,8 @@ class ASGD(Optimizer):
                  t0=group['t0'],
                  alpha=group['alpha'],
                  weight_decay=group['weight_decay'],
-                 foreach=group['foreach'])
+                 foreach=group['foreach'],
+                 maximize=group['maximize'])
 
         return loss
 
@@ -123,6 +127,7 @@ def asgd(params: List[Tensor],
          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
          foreach: bool = None,
+         maximize: bool = False,
          *,
          lambd: float,
          lr: float,
@@ -156,7 +161,8 @@ def asgd(params: List[Tensor],
          lr=lr,
          t0=t0,
          alpha=alpha,
-         weight_decay=weight_decay)
+         weight_decay=weight_decay,
+         maximize=maximize)
 
 
 def _single_tensor_asgd(params: List[Tensor],
@@ -170,10 +176,12 @@ def _single_tensor_asgd(params: List[Tensor],
                         lr: float,
                         t0: float,
                         alpha: float,
-                        weight_decay: float):
+                        weight_decay: float,
+                        maximize: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         mu = mus[i]
         ax = axs[i]
         eta = etas[i]
@@ -215,10 +223,14 @@ def _multi_tensor_asgd(params: List[Tensor],
                        lr: float,
                        t0: float,
                        alpha: float,
-                       weight_decay: float):
+                       weight_decay: float,
+                       maximize: bool):
 
     if len(params) == 0:
         return
+
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
     # update step
     torch._foreach_add_(state_steps, 1)
