@@ -1585,17 +1585,21 @@ class THCCachingAllocator {
     return &cuda_free_mutex;
   }
 
-  void append_alloc_free_event(intptr_t ptr, size_t size, bool type, int device) {
+  void append_alloc_free_event(
+      intptr_t ptr,
+      size_t size,
+      bool type,
+      int device) {
     std::lock_guard<std::mutex> lock(mutex);
     if (num_alloc_events[device] >= alloc_free_events[device].size()) {
       alloc_free_events[device].resize(alloc_free_events[device].size() * 2);
     }
     alloc_free_events[device][num_alloc_events[device]] = {
-                          ptr, // ptr
-                          size, // size: of allocation in bytes
-                          type, // type: 1 = allocation; 0 = free
-                          device // allocation device
-                      };
+        ptr, // ptr
+        size, // size: of allocation in bytes
+        type, // type: 1 = allocation; 0 = free
+        device // allocation device
+    };
     num_alloc_events[device] += 1;
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
@@ -1641,8 +1645,8 @@ class THCCachingAllocator {
         device,
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
-        append_alloc_free_event(
-      reinterpret_cast<intptr_t>(block->ptr), // ptr
+    append_alloc_free_event(
+        reinterpret_cast<intptr_t>(block->ptr), // ptr
         size, // size: of allocation in bytes
         1, // type: 1 = allocation; 0 = free
         device // allocation device
