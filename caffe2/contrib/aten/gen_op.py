@@ -233,7 +233,7 @@ def emit_assignments(o, env):
 
 
 if __name__ == '__main__':
-    decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
+    decls = yaml.safe_load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
     factory_methods = find_factory_methods(decls)
     filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded, factory_methods)]
     top_env: Dict[str, List] = {
