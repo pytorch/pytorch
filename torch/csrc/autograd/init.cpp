@@ -278,7 +278,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         .value("PyCall", EventType::PyCall)
         .value("PyCCall", EventType::PyCCall);
     py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
-        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_);
+        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
+        .def_readonly(
+            "allow_tf32_cublas",
+            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
         .def_readonly("dtypes", &Inputs::dtypes_);

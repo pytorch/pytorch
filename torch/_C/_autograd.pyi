@@ -114,6 +114,8 @@ class _EventType(Enum):
     TorchOp = ...
 
 class _ExtraFields_TorchOp:
+    inputs: List[List[int]]
+    allow_tf32_cublas: bool
     ...
 
 class _ExtraFields_Backend:
