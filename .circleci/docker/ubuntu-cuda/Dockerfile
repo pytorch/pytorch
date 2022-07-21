@@ -13,7 +13,8 @@ ENV DEBIAN_FRONTEND noninteractive
 # inside /usr/local/cuda, which causes issues in Bazel:
 # ERROR: circular symlinks detected
 # /usr/local/cuda-11.6/cuda-11.6
-RUN rm -f "/usr/local/cuda/cuda-${CUDA_VERSION}"
+RUN echo "/usr/local/cuda-${CUDA_VERSION}/cuda-${CUDA_VERSION}"
+RUN rm -f "/usr/local/cuda-${CUDA_VERSION}/cuda-${CUDA_VERSION}"
 
 
 # Install common dependencies (so that this step can be cached separately)
