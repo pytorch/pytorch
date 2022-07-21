@@ -4,7 +4,7 @@ import functools
 import warnings
 
 
-def deprecated(since: str, removed_in: str, alternative: str):
+def deprecated(since: str, removed_in: str, instructions: str):
     """Marks functions as deprecated.
 
     It will result in a warning when the function is called.
@@ -12,7 +12,7 @@ def deprecated(since: str, removed_in: str, alternative: str):
     Args:
         since: The version when the function was first deprecated.
         removed_in: The version when the function will be removed.
-        alternative: The alternative action users should take.
+        instructions: The action users should take.
     """
 
     def decorator(function):
@@ -20,8 +20,8 @@ def deprecated(since: str, removed_in: str, alternative: str):
         def wrapper(*args, **kwargs):
             warnings.warn(
                 f"`{function.__name__}` is deprecated in version {since} and will be "
-                f"removed in version {removed_in}. Please {alternative} instead.",
-                category=DeprecationWarning,
+                f"removed in version {removed_in}. Please {instructions}.",
+                category=FutureWarning,
                 stacklevel=3,
             )
             return function(*args, **kwargs)
