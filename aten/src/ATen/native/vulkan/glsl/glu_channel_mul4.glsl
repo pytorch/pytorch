@@ -10,7 +10,7 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
 layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2)         uniform PRECISION restrict           Block {
   ivec3 size;  // output size
-  int chext;   // channel extent of the output
+  int ch;      // channel size of the output
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -19,8 +19,9 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    const int z0 = 2 * (pos.z / uBlock.chext) * uBlock.chext + (pos.z % uBlock.chext);
-    const int z1 = z0 + uBlock.chext;
+    const int chext = uBlock.ch / 4;
+    const int z0 = 2 * (pos.z / chext) * chext + (pos.z % chext);
+    const int z1 = z0 + chext;
     imageStore(
         uOutput,
         pos,

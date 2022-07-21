@@ -28,7 +28,10 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
+from torch.profiler._pattern_matcher import (Pattern, NamePattern,
+                                             ExtraCUDACopyPattern,
+                                             ForLoopIndexingPattern,
+                                             FP32MatMulPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -647,6 +650,46 @@ class TestProfiler(TestCase):
                     "[memory]"
                 ]
             )
+
+    def test_oom_tracing(self):
+        def run_profiler(tensor_creation_fn):
+            with _profile(profile_memory=True, record_shapes=True) as prof:
+                with self.assertRaisesRegex(RuntimeError, ".*[tT]ried to allocate.*"):
+                    x = tensor_creation_fn()
+                return prof
+
+        def create_cuda_tensor_oom():
+            device = torch.device("cuda:0")
+            return torch.empty(1024, 1024, 1024, 20, dtype=torch.float32, device=device)
+
+        def check_trace(fname):
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                self.assertTrue("traceEvents" in trace)
+                events = trace["traceEvents"]
+                found_out_of_memory_events = False
+                for evt in events:
+                    self.assertTrue("name" in evt)
+                    if evt["name"] == "[OutOfMemory]":
+                        found_out_of_memory_events = True
+                        self.assertTrue("args" in evt)
+                        self.assertTrue("Device Type" in evt["args"])
+                        self.assertTrue("Device Id" in evt["args"])
+                        self.assertTrue("Bytes" in evt["args"])
+
+                        # Memory should be an instantaneous event.
+                        self.assertTrue("dur" not in evt["args"])
+                        self.assertTrue("cat" not in evt["args"])
+                self.assertTrue(found_out_of_memory_events)
+
+        if torch.cuda.is_available():
+            with TemporaryFileName(mode="w+") as fname:
+                prof = run_profiler(create_cuda_tensor_oom)
+                check_trace(fname)
+
+
+
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
@@ -1498,6 +1541,7 @@ aten::mm""")
         self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
         self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern(self):
         cases = (
@@ -1519,6 +1563,54 @@ aten::mm""")
             pattern = ExtraCUDACopyPattern(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
+
+    @unittest.skipIf(TEST_WITH_CROSSREF,
+                     "crossref intercepts calls and changes the callsite.")
+    def test_profiler_for_loop_indexing_pattern(self):
+        x = torch.ones((100, 100))
+
+        def case1():
+            for i in range(100):
+                x[i] = i
+
+        def case2():
+            y = 0
+            for i in range(100):
+                y += x[i]
+
+        def case3():
+            y = 1
+            for i in range(100):
+                y *= x[i]
+
+        def case4():
+            y = x
+            for _ in range(100):
+                y = y @ x
+
+        def case5():
+            for i in range(100):
+                x[i, :] = torch.arange(100) + i
+
+        cases = ((1, case1), (1, case2), (1, case3), (0, case4), (1, case5))
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ForLoopIndexingPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_fp32_matmul_pattern(self):
+        x = torch.ones((100, 100), device="cuda")
+        with profile(with_stack=True) as prof:
+            x = x @ x
+        pattern = FP32MatMulPattern(prof)
+        has_tf32 = 0 if pattern.skip else 1
+        num_matched = len(pattern.matched_events())
+        self.assertEqual(num_matched, has_tf32)
 
 
 if __name__ == '__main__':
