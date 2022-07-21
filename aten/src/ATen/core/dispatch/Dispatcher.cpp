@@ -4,6 +4,11 @@
 
 namespace c10 {
 
+bool show_dispatch_trace() {
+    char const* temp = getenv("SHOW_DISPATCH_TRACE");
+    return temp != nullptr;
+}
+
 namespace detail {
 
 class RegistrationListenerList final {
