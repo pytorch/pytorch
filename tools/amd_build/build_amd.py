@@ -157,7 +157,7 @@ if os.path.exists(gloo_cmake_file):
     do_write = False
     with open(gloo_cmake_file, "r") as sources:
         lines = sources.readlines()
-    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIBRARY_PATH") for line in lines]
+    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIB_PATH") for line in lines]
     if lines == newlines:
         print("%s skipped" % gloo_cmake_file)
     else:
