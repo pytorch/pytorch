@@ -282,7 +282,7 @@ class MultiheadAttention(nn.MultiheadAttention):
           E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
         - attn_output_weights: If ``average_attn_weights=True``, returns attention weights averaged
           across heads of shape :math:`(N, L, S)`, where N is the batch size, L is the target sequence length,
-          S is the source sequence length. If ``average_weights=False``, returns attention weights per
+          S is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
