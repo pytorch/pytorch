@@ -417,6 +417,114 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, conv2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{2, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 1};
+  // TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, 3, 8, 8};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{1, input.channels, 3, 3};
+
+  float r1 = 0.1;
+  float r2 = 0.7;
+  const auto input_cpu = (r1 - r2) *
+          at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat)) +
+      r2;
+  const auto weights_cpu = (r1 - r2) *
+          at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat)) +
+      r2;
+  const auto bias_cpu = (r1 - r2) *
+          at::rand({weights.output_channels},
+                   at::device(at::kCPU).dtype(at::kFloat)) +
+      r2;
+
+  const double w_scale = 0.1;
+  const int w_zero_point = 10;
+
+  const double b_scale = 0.1;
+  const int b_zero_point = 10;
+
+  const auto weight_q = at::quantize_per_tensor(
+      weights_cpu, w_scale, w_zero_point, c10::ScalarType::QUInt8);
+  const auto bias_q = at::quantize_per_tensor(
+      bias_cpu, b_scale, b_zero_point, c10::ScalarType::QUInt8);
+
+  const auto output_cpu = at::conv2d(
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
+
+  const double scale = 0.10;
+  const int zero_point = 10;
+  const auto shape_match =
+      at::rand({1, 1, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  const auto in_vulkan = input_cpu.vulkan();
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  const auto output_vulkan = at::native::vulkan::ops::conv2d(
+      out_vulkan,
+      weight_q,
+      bias_q,
+      stride,
+      padding,
+      dilation,
+      groups,
+      scale2,
+      zero_point2);
+
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(output_vulkan);
+  auto output_for_dequantized_vulkan =
+      vulkan_to_cpu(out_vulkan_deq, shape_match);
+
+  float rtol = 0;
+  float atol = 1;
+  const auto check =
+      at::allclose(output_cpu, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */
