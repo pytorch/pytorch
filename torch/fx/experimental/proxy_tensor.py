@@ -435,9 +435,8 @@ def get_isolated_graphmodule(func, args, kwargs):
 
     # extract old tracer object
     proxy_tensor = _find_proxy_tensor(*all_args)
-    if proxy_tensor is None:
-        raise ValueError("get_isolated_graphmodule must be called in the context of a ProxyTensor")
-    old_tracer = proxy_tensor.proxy.tracer
+    if proxy_tensor is not None:
+        old_tracer = proxy_tensor.proxy.tracer
 
     # create a new tracer object
     graph = torch.fx.Graph()
