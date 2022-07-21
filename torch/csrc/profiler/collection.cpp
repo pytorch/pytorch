@@ -48,7 +48,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tensor_metadata_.emplace_back(
         /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
         /*dtype_=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim);
+        /*dim_=*/(uint32_t)dim,
+        /*layout_=*/t.layout());
 
     for (const auto i : sizes) {
       tensor_sizes_.emplace_back(i);
@@ -75,6 +76,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             (void)_; // Suppress unused variable warning
             out.shapes_.back().push_back(*tensor_size_it++);
           }
+          out.tensor_metadata_.emplace_back(md);
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -83,15 +85,18 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.dtypes_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::TERMINATOR:
