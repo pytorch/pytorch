@@ -1663,13 +1663,13 @@ class THCCachingAllocator {
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
-    device_allocator[block->device]->free(block);
     append_alloc_free_event(
         reinterpret_cast<intptr_t>(block->ptr), // ptr
         block->size, // size: of allocation in bytes
         0, // type: 1 = allocation; 0 = free
         block->device // allocation device
     );
+    device_allocator[block->device]->free(block);
   }
 
   void setMemoryFraction(double fraction, int device) {
