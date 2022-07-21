@@ -696,8 +696,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = os.path.join(test_report_path, test_filename)
         if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
             "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
-        ):
+        ) and "dynamo" not in os.environ["TEST_CONFIG"]:
             # exclude linux cuda tests because we run into memory issues when running in parallel
+            # exclude dynamo because flaky: https://github.com/pytorch/pytorch/issues/81768
             import pytest
             os.environ["NO_COLOR"] = "1"
             os.environ["USING_PYTEST"] = "1"
