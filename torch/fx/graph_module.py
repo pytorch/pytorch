@@ -706,7 +706,8 @@ class {module_name}(torch.nn.Module):
     def __copy__(self):
         return GraphModule(self, self.graph)
 
-    def __nested_code(self) -> str:
+    @compatibility(is_backward_compatible=False)
+    def nested_str(self) -> str:
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
@@ -726,7 +727,7 @@ class {module_name}(torch.nn.Module):
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self.__nested_code()])
+        return '\n'.join([orig_str, self._code])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()
