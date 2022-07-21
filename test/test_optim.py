@@ -41,7 +41,7 @@ class TestOptim(TestCase):
     exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
-                                sparse_only=False):
+                                sparse_only=False, maximize=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
         params_t = torch.tensor([1.5, 1.5])
@@ -96,7 +96,10 @@ class TestOptim(TestCase):
                 optimizer_c.step(functools.partial(eval, params_c, False, w))
                 self.assertEqual(params.data, params_c.data)
 
-        self.assertLessEqual(params.data.dist(solution), initial_dist)
+        if not maximize:
+            self.assertLessEqual(params.data.dist(solution), initial_dist)
+        else:
+            self.assertGreaterEqual(rosenbrock(params.data), rosenbrock(params_t))
 
     def _test_basic_cases_template(self, weight, bias, input, constructor,
                                    scheduler_constructors, constructor_accepts_maximize=True):
@@ -612,6 +615,12 @@ class TestOptim(TestCase):
             [],
             True
         )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2, maximize=True),
+            [],
+            True,
+            True
+        )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
@@ -792,32 +801,38 @@ class TestOptim(TestCase):
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-2)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2)
+                    lr=1e-2, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True)
+                    lr=1e-2, centered=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True, momentum=0.1)
+                    lr=1e-2, centered=True, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1)
+                    lr=1e-2, momentum=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1, weight_decay=1)
+                    lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)

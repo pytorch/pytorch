@@ -380,6 +380,13 @@ You can then build the documentation by running `make <format>` from the
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
+> Note: if you installed `nodejs` with a different package manager (e.g.,
+`conda`) then `npm` will probably install a version of `katex` that is not
+compatible with your version of `nodejs` and doc builds will fail.
+A combination of versions that is known to work is `node@6.13.1` and
+`katex@0.13.18`. To install the latter with `npm` you can run
+```npm install -g katex@0.13.18```
+
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found

@@ -4,7 +4,7 @@
 
 import argparse
 import os
-from typing import Dict, Tuple, cast
+from typing import cast, Dict, Tuple
 
 Version = Tuple[int, int, int]
 
