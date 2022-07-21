@@ -33,7 +33,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
-    from tools.stats.import_test_stats import get_test_times
+    from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         get_reordered_tests,
         get_test_case_configs,
@@ -269,9 +269,6 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch"
 ]
-
-# the JSON file to store the S3 test stats
-TEST_TIMES_FILE = ".pytorch-test-times.json"
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -726,13 +723,6 @@ def parse_args():
         action="store_true",
         help="Only list the test that will run.",
     )
-    parser.add_argument(
-        "--export-past-test-times",
-        nargs="?",
-        type=str,
-        const=TEST_TIMES_FILE,
-        help="dumps test times from previous S3 stats into a file, format JSON",
-    )
     return parser.parse_args()
 
 
@@ -924,15 +914,6 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
 def main():
     options = parse_args()
-
-    # TODO: move this export & download function in tools/ folder
-    test_times_filename = options.export_past_test_times
-    if test_times_filename:
-        print(
-            f"Exporting test times from test-infra to {test_times_filename}, no tests will be run."
-        )
-        get_test_times(str(REPO_ROOT), filename=TEST_TIMES_FILE)
-        return
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
