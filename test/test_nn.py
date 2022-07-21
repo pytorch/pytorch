@@ -11771,9 +11771,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv1d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_autograd, grad_weight_autograd = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        grad_weight_functional = torch.nn.grad.conv1d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
 
         # Conv 2D
         input = torch.randn(1, 1, 5, 5, requires_grad=True)
@@ -11781,9 +11785,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv2d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        grad_weight_functional = torch.nn.grad.conv2d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
 
         # Conv 3D
         input = torch.randn(1, 1, 5, 5, 5, requires_grad=True)
@@ -11791,14 +11799,49 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv3d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv3d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
 
-        # Warning for _grad_input_padding
-        with warnings.catch_warnings(record=True) as w:
-            torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
-        self.assertEqual(len(w), 1)
+        grad_weight_functional = torch.nn.grad.conv3d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
+
+    def test_functional_grad_conv2d(self):
+        BATCH_SIZE = 4
+        IN_CH = 8
+        OUT_CH = 16
+        SPATIAL = 32
+
+        def _test_conv2d(stride, kernel_size, groups, dilation):
+            padding = kernel_size // 2
+
+            input = torch.empty(BATCH_SIZE, IN_CH, SPATIAL, SPATIAL).uniform_(-8.0, 8.0).requires_grad_(True)
+
+            weight = torch.empty(OUT_CH, IN_CH // groups, kernel_size, kernel_size).uniform_(-4.0, 4.0).requires_grad_(True)
+
+            output = F.conv2d(input, weight,
+                              stride=stride, padding=padding, dilation=dilation, groups=groups)
+
+            grad_output = torch.randn(output.shape)
+
+            (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
+            grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output,
+                                                               stride=stride, padding=padding, dilation=dilation, groups=groups)
+            self.assertEqual(grad_input_functional, grad_input_autograd)
+
+            grad_weight_functional = torch.nn.grad.conv2d_weight(input, weight.shape, grad_output,
+                                                                 stride=stride, padding=padding, dilation=dilation, groups=groups)
+            self.assertEqual(grad_weight_functional, grad_weight_autograd)
+
+        strides = [1, 2]
+        kernel_sizes = [1, 3, 5]
+        groups = [1, 2, 4]
+        dilates = [1, 2]
+
+        for s, k, g, d in product(strides, kernel_sizes, groups, dilates):
+            _test_conv2d(s, k, g, d)
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
