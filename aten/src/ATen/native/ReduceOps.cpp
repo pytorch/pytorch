@@ -1797,17 +1797,17 @@ Tensor& var_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim
 
 Tensor std(const Tensor& self, bool unbiased) {
   return at::std(
-      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
+      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
-Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std(self, /*dim=*/at::OptionalIntArrayRef(dim),
-                 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  return at::std(self, dim,
+                 /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
 }
 
-Tensor& std_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::std_out(result, self, /*dim=*/at::OptionalIntArrayRef(dim),
-                     /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
+  return at::std_out(result, self, opt_dim,
+                     /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,
