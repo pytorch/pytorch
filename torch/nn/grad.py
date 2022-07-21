@@ -2,7 +2,6 @@
 
 import torch
 from .modules.utils import _single, _pair, _triple
-import warnings
 
 
 def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
