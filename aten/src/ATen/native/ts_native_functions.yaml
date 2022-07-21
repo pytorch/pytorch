@@ -182,6 +182,7 @@ supported:
   - _to_copy
   - _unsafe_view
   - lift
+  - lift_fresh
   # Below are all operators that are "composite" in core,
   # but require us to explicitly re-enable functionalization in order to use them.
   # Why? These operators are all CompositeExplicitAutograd, which mean that they run
