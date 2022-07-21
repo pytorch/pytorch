@@ -190,8 +190,7 @@ TORCH_API bool isFunctionalTensor(IOptTensorListRef list);
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> to_functional_tensor(
     const c10::optional<Tensor>& tensor);
-TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
-    const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(IOptTensorListRef t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
 TORCH_API Tensor

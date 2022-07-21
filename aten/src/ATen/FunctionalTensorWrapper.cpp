@@ -331,6 +331,10 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 namespace functionalization {
 namespace impl {
 
+c10::optional<Tensor> to_optional_tensor(OptionalTensorRef ref) {
+  return ref.has_value() ? c10::optional<Tensor>(*ref) : c10::nullopt;
+}
+
 Tensor to_functional_tensor(const Tensor& tensor) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
@@ -345,16 +349,16 @@ c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) 
   }
   return c10::nullopt;
 }
-c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
+c10::List<c10::optional<Tensor>> to_functional_tensor(IOptTensorListRef t_list) {
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_functional_tensor(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_functional_tensor(to_optional_tensor(tensor)));
   }
   return outputs;
 }
 std::vector<Tensor> to_functional_tensor(ITensorListRef t_list) {
-  std::vector<Tensor> outputs(t_list.size());
+  std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto& tensor : t_list) {
     outputs.push_back(to_functional_tensor(tensor));
@@ -449,7 +453,7 @@ void replace_(const Tensor& functional_tensor, const Tensor& other) {
   unsafeGetFunctionalWrapper(functional_tensor)->replace_(other);
 }
 
-void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
+void replace_(ITensorListRef functional_tensor, ITensorListRef other) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
@@ -483,11 +487,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 }
 
 bool isFunctionalTensor(OptionalTensorRef t) {
-  if (t.has_value()) {
-    return isFunctionalTensor(*t);
-  } else {
-    return false;
-  }
+  return isFunctionalTensor(to_optional_tensor(t));
 }
 
 template <typename T, typename F>
