@@ -1059,14 +1059,13 @@ std::vector<Shape> compute_shape_narrow_copy_symint(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_hardswish(
-  const at::Tensor & self) {
+std::vector<Shape> compute_shape_hardswish(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_hardswish_backward(
-  const at::Tensor & grad_output,
-  const at::Tensor & self) {
+    const at::Tensor& grad_output,
+    const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
