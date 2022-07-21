@@ -445,6 +445,26 @@ void OptOutMutator::mutate(Merge* m) {
   C10_UNUSED auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
 }
 
+void OptOutMutator::mutate(Swizzle2D* m) {
+  IterDomain* outx = maybeMutated(m->outX())->as<IterDomain>();
+  IterDomain* outy = maybeMutated(m->outY())->as<IterDomain>();
+
+  IterDomain* inx = maybeMutated(m->inX())->as<IterDomain>();
+  IterDomain* iny = maybeMutated(m->inY())->as<IterDomain>();
+
+  auto swizzle_type = m->swizzleType();
+
+  if (outx->sameAs(m->outX()) && outy->sameAs(m->outY()) &&
+      inx->sameAs(m->inX()) && iny->sameAs(m->inY())) {
+    return;
+  }
+  auto container = m->container();
+  container->removeExpr(m);
+  FusionGuard::getCurFusion()->removeExpr(m);
+  C10_UNUSED auto new_node = IrBuilder::create<Swizzle2D>(
+      container, outx, outy, inx, iny, swizzle_type);
+}
+
 void OptOutMutator::mutate(kir::Allocate*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
@@ -482,6 +502,15 @@ void OptOutMutator::mutate(kir::GridWelford*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::AllocateFusedReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::Swizzle2DInt*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::PairSelect*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::IntPair*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 

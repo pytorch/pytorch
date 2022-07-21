@@ -47,6 +47,13 @@ class TVDomainGuard {
  public:
   explicit TVDomainGuard(TensorView* _tv, TensorDomain* td);
 
+  //! An utility to access the tensordomain before the temporary
+  //!  view. This is used to retrieve information, like swizzle
+  //!  information that can only be reliably kept at the original domain.
+  const TensorDomain* prevDomain() const {
+    return prev_domain;
+  }
+
   ~TVDomainGuard();
 };
 
@@ -64,13 +71,13 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& order);
 
 // Returns if Val is a TensorView or TensorIndex
-bool isTV(const Val* const);
+TORCH_CUDA_CU_API bool isTV(const Val* const);
 
 // Returns if Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
-TensorView* getTvOutput(const Expr*);
+TORCH_CUDA_CU_API TensorView* getTvOutput(const Expr*);
 
 // Returns if Expr is a reduction op
 TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
@@ -149,6 +156,12 @@ TORCH_CUDA_CU_API std::vector<Expr*> flattenScopedExprs(
 //! Returns the concretized iterdomain according to
 //!  the exact compute at map.
 IterDomain* caMapExactConcreteId(IterDomain* id);
+
+//! Returns all swizzle ops between the set of iterdomains
+//!  in `from` and `to`.
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to);
 
 } // namespace ir_utils
 

@@ -40,6 +40,9 @@ MmaBuilder& MmaBuilder::operand(MmaOptions::Operand a_or_b) {
 
 // TODO: validate op config
 MmaOptions MmaBuilder::build() const {
+  TORCH_CHECK(
+      option_.mma_op != nullptr,
+      "Please configure accumulator tv before using swizzle options.")
   return option_;
 }
 
@@ -51,6 +54,15 @@ void MmaBuilder::configureMma(TensorView* mma_output) const {
   auto mma = dynamic_cast<MmaOp*>(mma_output->definition());
   TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", mma_output);
   mma->configureOptions(option_);
+}
+
+void MmaBuilder::accumulatorTv(TensorView* tv) {
+  TORCH_CHECK(
+      tv->getMemoryType() == MemoryType::Local, "Mma only outputs to register");
+  TORCH_CHECK(tv->definition(), "Input cannot be accumulator tv");
+  auto mma = dynamic_cast<MmaOp*>(tv->definition());
+  TORCH_CHECK(mma, "Requires mma op output for reduction tv");
+  option_.mma_op = mma;
 }
 
 namespace {

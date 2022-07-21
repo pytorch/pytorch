@@ -30,6 +30,7 @@
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
@@ -101,6 +102,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -1007,6 +1009,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");
