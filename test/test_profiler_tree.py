@@ -10,11 +10,14 @@ import expecttest
 
 import torch
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    skipIfRocm, TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
 
-# Devservers will return True for `torch.has_cuda` but don't actually run CUDA.
-FORCE_RUN_PROFILER_PYTHON = bool(os.getenv("FORCE_RUN_PROFILER_PYTHON"))
-
+# There is a bunch of noise from profiler startup and shutdown that distracts
+# from the test and varies based on CUDA so we prune it.
+PRUNE_FUNCTIONS = {
+    "torch/profiler/profiler.py(...): start",
+    "torch/profiler/profiler.py(...): stop_trace",
+}
 
 class ProfilerTree:
 
@@ -47,8 +50,12 @@ class ProfilerTree:
                 out = []
 
             for node in nodes:
-                out.append((depth, cls.fmt_name(node.name())))
-                flatten(node.children, depth + 1, out)
+                name = cls.fmt_name(node.name())
+                if name.strip() not in PRUNE_FUNCTIONS:
+                    out.append((depth, name))
+                    flatten(node.children, depth + 1, out)
+                else:
+                    out.append((depth, "..."))
 
             return out
 
@@ -83,7 +90,10 @@ class ProfilerTree:
             filename = filename.replace(os.sep, "/")
 
             # We don't want to have to update this test every time PyTorch changes.
-            lineno = lineno if os.path.split(filename.strip())[1] == "test_profiler_tree" else "..."
+            # At some point we should test some line numbers, but for now it's
+            # too brittle.
+            lineno = "..."
+
             return f"{filename}.py({lineno}): {fn}"
 
         for kernel_pattern in (
@@ -325,7 +335,6 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(torch.has_cuda and not FORCE_RUN_PROFILER_PYTHON, "CUDA invokes extra Python functions.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -338,17 +347,9 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(332): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
-                torch/profiler/profiler.py(...): start
-                  torch/profiler/profiler.py(...): _transit_action
-                    torch/profiler/profiler.py(...): start_trace
-                      torch/autograd/profiler.py(...): _start_trace
-                      <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX>
-                      torch/profiler/profiler.py(...): _get_distributed_info
-                        torch/distributed/__init__.py(...): is_available
-                          <built-in function hasattr>
-                        torch/distributed/distributed_c10d.py(...): is_initialized
+                ...
               <built-in method add of type object at 0xXXXXXXXXXXXX>
                 aten::add
                   [memory]
@@ -429,13 +430,10 @@ class TestProfilerTree(TestCase):
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    torch/profiler/profiler.py(...): stop_trace
-                      torch/autograd/profiler.py(...): __exit__
-                        <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""
+                    ..."""
         )
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(torch.has_cuda and not FORCE_RUN_PROFILER_PYTHON, "CUDA invokes extra Python functions.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
@@ -460,24 +458,16 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(456): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(...): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
-                torch/profiler/profiler.py(...): start
-                  torch/profiler/profiler.py(...): _transit_action
-                    torch/profiler/profiler.py(...): start_trace
-                      torch/autograd/profiler.py(...): _start_trace
-                      <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX>
-                      torch/profiler/profiler.py(...): _get_distributed_info
-                        torch/distributed/__init__.py(...): is_available
-                          <built-in function hasattr>
-                        torch/distributed/distributed_c10d.py(...): is_initialized
+                ...
               <built-in method ones of type object at 0xXXXXXXXXXXXX>
                 aten::ones
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(450): forward
+                test_profiler_tree.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -518,7 +508,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(450): forward
+                test_profiler_tree.py(...): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -559,12 +549,11 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    torch/profiler/profiler.py(...): stop_trace
-                      torch/autograd/profiler.py(...): __exit__
-                        <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""
+                    ..."""
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda(self):
         with torch.profiler.profile(profile_memory=True) as p:
@@ -660,6 +649,7 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_with_stream(self):
         streams = [torch.cuda.Stream() for _ in range(3)]
@@ -717,69 +707,6 @@ class TestProfilerTree(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_with_graph(self):
-        g = torch.cuda.CUDAGraph()
-        static_input = torch.ones((5,), device="cuda")
-        with torch.cuda.graph(g):
-            static_output = (static_input * 2) + 1
-
-        x = torch.full_like(static_output, 2)
-        with torch.profiler.profile(profile_memory=True) as p:
-            static_input.copy_(torch.full((5,), 3, device="cuda"))
-            for _ in range(3):
-                g.replay()
-                static_output += x
-
-        self.assertTreesMatch(
-            ProfilerTree.format(p.profiler, 12),
-            """\
-            aten::full
-              aten::empty
-                [memory]
-              aten::fill_
-                cudaLaunchKernel
-                  void at::native::vectorized_elementwise_kernel<...>(...)
-            aten::copy_
-              cudaLaunchKernel
-                void at::native::unrolled_elementwise_kernel<...>(...)
-            [memory]
-            cudaStreamIsCapturing
-            aten::fill_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaGraphLaunch
-              void at::native::vectorized_elementwise_kernel<...>(...)
-              void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaDriverGetVersion
-            aten::add_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaStreamIsCapturing
-            aten::fill_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaGraphLaunch
-              void at::native::vectorized_elementwise_kernel<...>(...)
-              void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaDriverGetVersion
-            aten::add_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaStreamIsCapturing
-            aten::fill_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaGraphLaunch
-              void at::native::vectorized_elementwise_kernel<...>(...)
-              void at::native::vectorized_elementwise_kernel<...>(...)
-            cudaDriverGetVersion
-            aten::add_
-              cudaLaunchKernel
-                void at::native::vectorized_elementwise_kernel<...>(...)"""
-        )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
@@ -801,18 +728,10 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(798): test_profiler_experimental_tree_cuda_detailed
+            test_profiler_tree.py(...): test_profiler_experimental_tree_cuda_detailed
               torch/profiler/profiler.py(...): __enter__
-                torch/profiler/profiler.py(...): start
-                  torch/profiler/profiler.py(...): _transit_action
-                    torch/profiler/profiler.py(...): start_trace
-                      torch/autograd/profiler.py(...): _start_trace
-                      <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX>
-                      torch/profiler/profiler.py(...): _get_distributed_info
-                        torch/distributed/__init__.py(...): is_available
-                          <built-in function hasattr>
-                        torch/distributed/distributed_c10d.py(...): is_initialized
-              test_profiler_tree.py(788): step
+                ...
+              test_profiler_tree.py(...): step
                 <built-in method ones of type object at 0xXXXXXXXXXXXX>
                   aten::ones
                     aten::empty
@@ -984,50 +903,7 @@ class TestProfilerTree(TestCase):
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    torch/profiler/profiler.py(...): stop_trace
-                      torch/autograd/profiler.py(...): __exit__
-                        torch/cuda/__init__.py(...): synchronize
-                          torch/cuda/__init__.py(...): _lazy_init
-                            torch/cuda/__init__.py(...): is_initialized
-                              <built-in function _cuda_isInBadFork>
-                          torch/cuda/__init__.py(...): __init__
-                            torch/cuda/_utils.py(...): _get_device_index
-                              <built-in function isinstance>
-                              <built-in function isinstance>
-                              torch/_jit_internal.py(...): is_scripting
-                              <built-in function isinstance>
-                              torch/_utils.py(...): _get_device_index
-                                <built-in function isinstance>
-                                <built-in function isinstance>
-                                <built-in function isinstance>
-                                torch/_jit_internal.py(...): is_scripting
-                                torch/_utils.py(...): _get_current_device_index
-                                  torch/_utils.py(...): _get_device_attr
-                                    torch/_utils.py(...): _get_available_device_type
-                                      torch/cuda/__init__.py(...): is_available
-                                        <built-in function hasattr>
-                                        <built-in function _cuda_getDeviceCount>
-                                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                                    torch/_utils.py(...): <lambda>
-                                      torch/cuda/__init__.py(...): current_device
-                                        torch/cuda/__init__.py(...): _lazy_init
-                                          torch/cuda/__init__.py(...): is_initialized
-                                            <built-in function _cuda_isInBadFork>
-                                        <built-in function _cuda_getDevice>
-                          torch/cuda/__init__.py(...): __enter__
-                            torch/cuda/__init__.py(...): current_device
-                              torch/cuda/__init__.py(...): _lazy_init
-                                torch/cuda/__init__.py(...): is_initialized
-                                  <built-in function _cuda_isInBadFork>
-                              <built-in function _cuda_getDevice>
-                            torch/_jit_internal.py(...): is_scripting
-                            torch/cuda/__init__.py(...): _lazy_init
-                              torch/cuda/__init__.py(...): is_initialized
-                                <built-in function _cuda_isInBadFork>
-                          <built-in function _cuda_synchronize>
-                            cudaDeviceSynchronize
-                          torch/cuda/__init__.py(...): __exit__
-                            <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""  # noqa: B950
+                    ..."""  # noqa: B950
         )
 
 

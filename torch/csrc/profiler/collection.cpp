@@ -13,6 +13,7 @@
 #include <libkineto.h>
 #endif
 
+#include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/Exception.h>
@@ -394,6 +395,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
   return out;
 }
 
@@ -696,8 +698,8 @@ class TransferEvents {
       auto f = [&](const ExtraFields<EventType::Kineto>& i) {
         // Flow takes priority over linked event.
         const auto it = flow_map.find(i.flow.id);
-        if (it != flow_map.end() && i.flow.type == libkineto::kLinkAsyncCpuGpu &&
-            !i.flow.start) {
+        if (it != flow_map.end() &&
+            i.flow.type == libkineto::kLinkAsyncCpuGpu && !i.flow.start) {
           e->parent_ = it->second;
         }
 
@@ -935,7 +937,8 @@ RecordQueue::getRecords(
               steal_or_default(jit_stack_it),
               steal_or_default(jit_module_it),
               steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it))));
+              steal_or_default(gpu_fallback_it),
+              i.allow_tf32_cublas_)));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();

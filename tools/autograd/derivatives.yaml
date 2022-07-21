@@ -538,7 +538,7 @@
   result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
+  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
   result: self_t / other
 
 - name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
@@ -547,7 +547,7 @@
   result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other_p - other_t * (self_p / other_p) / other_p"
 
 - name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
-  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
+  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type(), rounding_mode)
   result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other"
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -1113,7 +1113,7 @@
   result: other_t * self_p + self_t * other_p
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
+  self: mul_tensor_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
   result: self_t * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
@@ -1678,7 +1678,12 @@
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
-  self: not_implemented("lift")
+  self: grad
+  result: auto_linear
+
+- name: lift_fresh(Tensor(a) self) -> Tensor(a)
+  self: grad
+  result: auto_linear
 
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
