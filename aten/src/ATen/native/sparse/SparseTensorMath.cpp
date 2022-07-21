@@ -868,7 +868,8 @@ Tensor& intersection_binary_op_sparse_dense_out(
 
   const auto res_sparse_dim = static_cast<int64_t>(d_batch_shape.size()) + sparse_dim;
   const auto res_dense_dim = dense_dim;
-  const auto res_nnz = batch_count * s._nnz();
+  const auto s_nnz = s._nnz();
+  const auto res_nnz = batch_count * s_nnz;
   auto res_values_shape = s_values.sizes().vec();
   res_values_shape[0] = res_nnz;
   const auto res_values = op(d_filtered, s_values).reshape(res_values_shape);
@@ -890,7 +891,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
       n_repeat *= dim_size;
     }
     // fill in indices corresponding to s_indices.
-    n_repeat = res_nnz / s._nnz();
+    n_repeat = res_nnz / s_nnz;
     auto res_indices_sparse = res_indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
     res_indices_sparse.copy_(s_indices.repeat({1, n_repeat}));
 
