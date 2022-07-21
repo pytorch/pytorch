@@ -327,7 +327,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   auto scheduler_entry = schedulers()[group_id].get();
 
   // Check that the heuristics are matched, in the case of segmented fusion
-  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristc() == sg->heuristic());
+  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristic() == sg->heuristic());
 
   if (!executors_[group_id].compiled()) {
     FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::Compile");

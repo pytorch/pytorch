@@ -16523,7 +16523,7 @@ TEST_F(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
   TORCH_CHECK(!runtime->isSegmented());
 }
 
-TEST_F(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordOuterPersistence_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);

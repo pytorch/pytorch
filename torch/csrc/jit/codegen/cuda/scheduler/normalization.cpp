@@ -86,10 +86,9 @@ ReductionParams innerPersistentHeuristic(
   const int64_t warp_size_based_on_l1 = std::min(
       ceilDiv(
           total_reduction_numel,
-          std::max(
-              l1_cache /
-                  (n_tensor_inputs * max_input_dtype_size * active_threads),
-              (int64_t)1)),
+          scheduler_utils::safeDiv(
+              l1_cache,
+              n_tensor_inputs * max_input_dtype_size * active_threads)),
       (int64_t)16);
 
   // Take the smaller
@@ -105,7 +104,7 @@ ReductionParams innerPersistentHeuristic(
   // communication is slow so it shouldn't be done for every element in the
   // reduction.
   int64_t min_target_iterations =
-      std::max((int64_t)32 / (int64_t)max_input_dtype_size, (int64_t)1);
+      scheduler_utils::safeDiv(32, max_input_dtype_size);
 
   // Start trying to break parallelization up across threads,
   // unrolling/iterations, and blocks.
@@ -121,8 +120,8 @@ ReductionParams innerPersistentHeuristic(
   // If we have more than a wave of blocks, put parallelism into unrolling and
   // target iterations
   if (target_blocks > device_multiprocessor_count) {
-    auto available_unroll = std::max(
-        n_elems / (warp_size * device_multiprocessor_count), (int64_t)1);
+    auto available_unroll = scheduler_utils::safeDiv(
+        n_elems, warp_size * device_multiprocessor_count);
 
     // Spread across unrolling and iterations, want a balance of the two so flip
     // back and forth to alternate adding to them.
@@ -140,12 +139,10 @@ ReductionParams innerPersistentHeuristic(
         target_iterations *= 2;
       }
 
-      available_unroll = std::max(
-          n_elems /
-              (warp_size * device_multiprocessor_count * target_unroll *
-               target_iterations),
-          (int64_t)1);
-
+      available_unroll = scheduler_utils::safeDiv(
+          n_elems,
+          warp_size * device_multiprocessor_count * target_unroll *
+              target_iterations);
       flip = !flip;
     }
 
@@ -171,9 +168,8 @@ ReductionParams innerPersistentHeuristic(
 
   // Compute maximum number of reductions we could do in the same kernel based
   // on persistent buffer size
-  const int64_t max_multi_reduction_factor = std::max(
-      scheduler_utils::register_file_size / max_persistent_buffer_size,
-      (int64_t)1);
+  const int64_t max_multi_reduction_factor = scheduler_utils::safeDiv(
+      scheduler_utils::register_file_size, max_persistent_buffer_size);
 
   // To get to target threads:
   // Prioritize
@@ -226,18 +222,18 @@ ReductionParams innerPersistentHeuristic(
 
   // Put everything else in bdimy for now
   bdimy = std::min(
-      std::max(warp_size / bdimx, (int64_t)1), max_multi_reduction_factor);
+      scheduler_utils::safeDiv(warp_size, bdimx), max_multi_reduction_factor);
 
   // If 3D fill the rest of the threads into bdimz
   bdimz = std::min(
       std::min(
-          std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
+          scheduler_utils::safeDiv(max_threads_in_block, bdimx * bdimy),
           outer_reduction_numel),
       scheduler_utils::z_block_limit);
 
   // If 3D doesn't fill out the threads, adjust to add to bdimy
   bdimy = std::min(
-      std::max(max_threads_in_block / (bdimx * bdimz), (int64_t)1),
+      scheduler_utils::safeDiv(max_threads_in_block, bdimx * bdimz),
       max_multi_reduction_factor);
 
   // If we don't have a full warp and have an unroll factor, move unroll into
@@ -251,14 +247,14 @@ ReductionParams innerPersistentHeuristic(
 
     // Readjust bdimy and bdimz
     bdimy = std::min(
-        std::max(warp_size / bdimx, (int64_t)1), max_multi_reduction_factor);
+        scheduler_utils::safeDiv(warp_size, bdimx), max_multi_reduction_factor);
 
     bdimz = std::min(
-        std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
+        scheduler_utils::safeDiv(max_threads_in_block, bdimx * bdimy),
         outer_reduction_numel);
 
     bdimy = std::min(
-        std::max(max_threads_in_block / (bdimx * bdimz), (int64_t)1),
+        scheduler_utils::safeDiv(max_threads_in_block, bdimx * bdimz),
         max_multi_reduction_factor);
   }
 
@@ -313,14 +309,13 @@ ReductionParams innerPersistentHeuristic(
   // iteration domain
   if (inner_reduction_unroll_factor * outer_reduction_unroll_factor <
           max_unroll &&
-      std::max(max_multi_reduction_factor / bdimy, (int64_t)1) > 2) {
+      scheduler_utils::safeDiv(max_multi_reduction_factor, bdimy) > 2) {
     // Don't go over a combined inner/outer unroll of max_unroll
     auto unroll_available = std::min(
-        std::max(
-            max_unroll /
-                (inner_reduction_unroll_factor * outer_reduction_unroll_factor),
-            (int64_t)1),
-        std::max(max_multi_reduction_factor / bdimy, (int64_t)1));
+        scheduler_utils::safeDiv(
+            max_unroll,
+            inner_reduction_unroll_factor * outer_reduction_unroll_factor),
+        scheduler_utils::safeDiv(max_multi_reduction_factor, bdimy));
     if (unroll_available > 1 && godim > 2 * device_multiprocessor_count) {
       unroll_available = std::min(
           unroll_available, ceilDiv(godim, 2 * device_multiprocessor_count));
@@ -492,7 +487,7 @@ ReductionParams innerPersistentHeuristic(
 // Copied from reduction scheduler, should generalize. Simply needed to take out
 // grid reductions.
 // TODO: Check adding iteration domain unrolling
-ReductionParams OuterPersistentHeuristic(
+ReductionParams outerPersistentHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
     const int64_t n_tensor_inputs,
@@ -762,7 +757,7 @@ ReductionParams OuterPersistentHeuristic(
 
 } // namespace
 
-ReductionParams PersistentHeuristic(
+ReductionParams persistentHeuristic(
     const int64_t total_reduction_numel,
     const int64_t total_iteration_numel,
     const int64_t inner_most_dimension_numel,
@@ -783,7 +778,7 @@ ReductionParams PersistentHeuristic(
         max_persistent_buffer_size,
         vectorize_factor);
   } else {
-    rparams = OuterPersistentHeuristic(
+    rparams = outerPersistentHeuristic(
         total_reduction_numel,
         total_iteration_numel,
         n_tensor_inputs,
@@ -939,7 +934,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
     n_tensor_inputs++;
   }
 
-  return PersistentHeuristic(
+  return persistentHeuristic(
       properties.total_reduction_numel,
       properties.total_iteration_numel,
       properties.inner_most_dimension_numel,

@@ -40,11 +40,6 @@ int64_t roundDownPow2OrMultipleOf(const int64_t x, const int64_t multiple) {
   return std::max(std::max(round_down_multiple, round_down_pow2), (int64_t)1);
 }
 
-// Div x by y, but min at 1
-int64_t safeDiv(const int64_t x, const int64_t y) {
-  return std::max(x / y, (int64_t)1);
-}
-
 int64_t clamp(const int64_t val, const int64_t min_val, const int64_t max_val) {
   return std::min(std::max(val, min_val), max_val);
 }
@@ -54,13 +49,13 @@ int64_t clamp(const int64_t val, const int64_t min_val, const int64_t max_val) {
 void reduceProductTo(int64_t& z, int64_t& y, int64_t& x, const int64_t max) {
   TORCH_INTERNAL_ASSERT(max > 1);
   if (z * y * x > max) {
-    z = safeDiv(z, 2);
+    z = scheduler_utils::safeDiv(z, 2);
   }
   if (z * y * x > max) {
-    y = safeDiv(y, 2);
+    y = scheduler_utils::safeDiv(y, 2);
   }
   if (z * y * x > max) {
-    x = safeDiv(x, 2);
+    x = scheduler_utils::safeDiv(x, 2);
   }
   if (z * y * x > max) {
     reduceProductTo(x, y, z, max);
@@ -684,16 +679,17 @@ ReductionParams OuterReductionHeuristic(
   bdimx = roundUpPow2OrMultipleOf(bdimx, 8);
 
   // Fill bdimy with left over threads
-  bdimy =
-      std::min(safeDiv(target_threads_in_block, bdimx), total_reduction_numel);
+  bdimy = std::min(
+      scheduler_utils::safeDiv(target_threads_in_block, bdimx),
+      total_reduction_numel);
 
   bdimy = roundDownPow2OrMultipleOf(bdimy, 8);
 
   // Move parallelization into unrolling the reduction dimension if
   // parallelizing iteration dimension didn't take the available unroll factor.
   if (iter_unroll_factor < max_unroll && rDimAvail() > 2) {
-    inner_reduction_unroll_factor =
-        std::min(rDimAvail(), safeDiv(max_unroll, iter_unroll_factor));
+    inner_reduction_unroll_factor = std::min(
+        rDimAvail(), scheduler_utils::safeDiv(max_unroll, iter_unroll_factor));
 
     inner_reduction_unroll_factor =
         scheduler_utils::lastPow2(inner_reduction_unroll_factor);
@@ -731,7 +727,8 @@ ReductionParams OuterReductionHeuristic(
     // Empiercally found stride shouldn't exceed 256kiB boundaries in a block
     int64_t kMaxStride = 128 * 1024;
 
-    int64_t max_remainder_size = safeDiv(kMaxStride, bytes_stride_remainder);
+    int64_t max_remainder_size =
+        scheduler_utils::safeDiv(kMaxStride, bytes_stride_remainder);
 
     int64_t grdim_for_stride = ceilDiv(
         total_reduction_numel,

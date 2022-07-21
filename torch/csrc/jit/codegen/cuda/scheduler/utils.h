@@ -37,6 +37,11 @@ constexpr int64_t lastPow2(int64_t n) {
   return std::max((int64_t)1, n - (n >> 1));
 }
 
+// Div x by y, but min at 1
+inline int64_t safeDiv(const int64_t x, const int64_t y) {
+  return std::max(x / y, (int64_t)1);
+}
+
 // Merge all reduction to the right side and returns total number of
 // reduction axes. Don't merge is typically used for trivial reductions.
 size_t mergeReduction(
@@ -202,13 +207,14 @@ void clearMemorySpace(Fusion* fusion);
 
 // Returns cached after tensors of the fusion inputs if unrolled. Otherwise
 // return empty vector.
-std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll);
+TORCH_CUDA_CU_API std::vector<TensorView*> cacheInputs(
+    Fusion* fusion,
+    bool unroll);
 
 // Returns the pairs of <cache of each fusion output, corresponding output> for
 // all outputs.
-std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
-    Fusion* fusion,
-    bool unroll);
+TORCH_CUDA_CU_API std::vector<std::pair<TensorView*, TensorView*>>
+cacheAndForkOutputs(Fusion* fusion, bool unroll);
 
 // Ignores broadcast and reduction, returns iter domain in root domain that's
 // "inner most". If this is an rfactored reduction domain, actually check the
