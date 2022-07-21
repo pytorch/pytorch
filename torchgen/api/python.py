@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+
+from torchgen.api import cpp
 
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
-from torchgen.api import cpp
 from torchgen.gen import pythonify_default
 from torchgen.model import (
     Argument,
@@ -520,6 +521,35 @@ class PythonSignatureGroup:
     # The out variant (e.g. conv2d_out)
     outplace: Optional[NativeFunction]
 
+    @classmethod
+    def from_pairs(
+        cls,
+        functional: PythonSignatureNativeFunctionPair,
+        out: Optional[PythonSignatureNativeFunctionPair],
+    ) -> "PythonSignatureGroup":
+        if out is None:
+            return PythonSignatureGroup(
+                signature=functional.signature,
+                base=functional.function,
+                outplace=None,
+            )
+
+        # prefer the signature with optional out=... arguments because it's the
+        # superset that can be used to parse input for both base and outplace.
+        signature_kwargs = out.signature.__dict__.copy()
+
+        # Out overloads in C++ don't have TensorOptions arguments,
+        # so take these from the functional variant
+        signature_kwargs[
+            "tensor_options_args"
+        ] = functional.signature.tensor_options_args
+
+        return PythonSignatureGroup(
+            signature=type(out.signature)(**signature_kwargs),
+            base=functional.function,
+            outplace=out.function,
+        )
+
 
 # C++ function dispatch is wrapped in a lambda function. The lambda function
 # has almost the same signature as the C++ function, only with some small
@@ -749,20 +779,38 @@ def signature(
 
     tensor_options_args: List[PythonArgument] = []
     if is_factory_function or is_like_or_new_function:
+
+        def topt_default_init(name: str) -> Optional[str]:
+            topt_args = f.func.arguments.tensor_options
+            if topt_args is None:
+                return None
+            a = getattr(topt_args, name)
+            if a.default is None or a.default == "None":
+                return None
+            return cpp.default_expr(a.default, a.type)
+
         tensor_options_args.append(
             PythonArgument(
                 name="dtype",
                 type=BaseType(BaseTy.ScalarType),
-                default="None" if pyi else _dtype_default_type_hack(name),
-                default_init="self.scalar_type()" if is_like_or_new_function else None,
+                default="None",
+                default_init=(
+                    "self.scalar_type()"
+                    if is_like_or_new_function
+                    else topt_default_init("dtype")
+                ),
             )
         )
         tensor_options_args.append(
             PythonArgument(
                 name="layout",
                 type=OptionalType(BaseType(BaseTy.Layout)),
-                default="strided" if pyi else "torch.strided",
-                default_init="self.layout()" if is_like_or_new_function else None,
+                default="None",
+                default_init=(
+                    "self.layout()"
+                    if is_like_or_new_function
+                    else topt_default_init("layout")
+                ),
             )
         )
         tensor_options_args.append(
@@ -770,7 +818,11 @@ def signature(
                 name="device",
                 type=BaseType(BaseTy.Device),
                 default="None",
-                default_init="self.device()" if is_like_or_new_function else None,
+                default_init=(
+                    "self.device()"
+                    if is_like_or_new_function
+                    else topt_default_init("device")
+                ),
             )
         )
         tensor_options_args.append(
@@ -801,16 +853,6 @@ def signature(
         returns=returns,
         method=method,
     )
-
-
-# TODO blowtorch
-# note: removing this will be BC-breaking. A quick test shows that
-# randperm will otherwise default its dtype to torch.float64
-def _dtype_default_type_hack(name: str) -> str:
-    if name.startswith("randperm") or name == "tril_indices" or name == "triu_indices":
-        return "torch.int64"
-    else:
-        return "None"
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
