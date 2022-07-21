@@ -661,6 +661,11 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
+
+            # Delay import ufunc here to avoid circular import issue
+            # See: https://github.com/pytorch/pytorch/issues/81294
+            import torchgen.api.ufunc as ufunc
+
             for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert (
                     dispatch_key not in dispatch
@@ -2470,6 +2475,3 @@ class Precompute:
             replace_list.append(f"{kernel_param} -> {replacements}")
 
         return replace_list
-
-
-import torchgen.api.ufunc as ufunc
