@@ -43,7 +43,7 @@ bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(1);
 
   DCHECK_GT(Y.numel(), 0);
-  DCHECK_EQ(dY.numel(), Y.numel());
+  TORCH_DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   SoftplusGradientKernel<float>
       <<<CAFFE_GET_BLOCKS(Y.numel()),

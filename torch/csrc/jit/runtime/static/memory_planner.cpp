@@ -282,7 +282,7 @@ void MemoryPlanner::allocateOutputTensors() {
     tensor->storage().set_nbytes(tensor_size);
     offset += tensor_size;
   }
-  DCHECK_EQ(offset, output_buffer_bytes_);
+  TORCH_DCHECK_EQ(offset, output_buffer_bytes_);
 }
 
 void MemoryPlanner::allocate() {
@@ -380,9 +380,9 @@ void StandardMemoryPlanner::allocateManagedTensors() {
     void* src = static_cast<void*>(start + offset);
 
 #ifndef NDEBUG
-    DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
+    TORCH_DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
     for (auto* tensor : managed_tensors_[group_idx].group()) {
-      DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
+      TORCH_DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
 #endif
     DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
@@ -394,7 +394,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
     offset += tensor_size;
     group_idx++;
   }
-  DCHECK_EQ(offset, managed_bytes_);
+  TORCH_DCHECK_EQ(offset, managed_bytes_);
 }
 
 void StandardMemoryPlanner::deallocateManagedTensors() {
@@ -457,7 +457,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
                     &managed_tensor_storage_impls_[group_idx].second,
                     tensors.size())));
       }
-      DCHECK_EQ(
+      TORCH_DCHECK_EQ(
           tensor->storage().unsafeGetStorageImpl(),
           &managed_tensor_storage_impls_[group_idx].second);
       max = std::max(max, current_size);
@@ -472,7 +472,8 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
     managed_bytes_ += max;
   }
 
-  DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
+  TORCH_DCHECK_EQ(
+      managed_tensor_storage_impls_.size(), managed_tensors_.size());
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 

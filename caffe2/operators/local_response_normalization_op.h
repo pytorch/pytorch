@@ -23,7 +23,7 @@ class LRNOpBase : public Operator<Context> {
             this->template GetSingleArgument<string>("order", "NCHW"))),
         pre_pad_((size_ - 1) / 2) {
     DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
     DCHECK_GT(alpha_, 0);
     DCHECK_GT(beta_, 0);
   }

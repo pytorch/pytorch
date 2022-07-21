@@ -178,7 +178,7 @@ class BlockingCounter {
   // decrementing events that the Wait() call will be waiting for.
   void Reset(std::size_t initial_count) {
     std::lock_guard<std::mutex> g(mutex_);
-    DCHECK_EQ(count_, 0);
+    TORCH_DCHECK_EQ(count_, 0);
     count_ = initial_count;
   }
 

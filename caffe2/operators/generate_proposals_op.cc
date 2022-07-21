@@ -11,7 +11,7 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.dim());
+  TORCH_DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -27,7 +27,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
+  TORCH_DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
