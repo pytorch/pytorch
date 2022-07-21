@@ -75,9 +75,9 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
             url=url
         )
         if rank != -1:
-            query_dict["rank"] = rank
+            query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
-            query_dict["world_size"] = world_size
+            query_dict["world_size"] = str(world_size)
         result = result._replace(
             query="{}".format(
                 "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
