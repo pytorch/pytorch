@@ -280,6 +280,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
     py::class_<TensorMetadata>(m, "_TensorMetadata")
         .def_property_readonly(
+            "ivalues",
+            [](const Inputs& inputs) {
+              py::list list;
+              for (auto& v : inputs.ivalues_) {
+                list.append(torch::jit::toPyObject(v));
+              }
+              return list;
+            })
+        .def_property_readonly(
             "layout",
             [](const TensorMetadata& metadata) {
               PyObject* layout_obj =

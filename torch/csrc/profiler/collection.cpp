@@ -23,6 +23,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
+      // Scalars are small enough that they are stored in ivalues without an
+      // extra memory alloc
+      ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       // TODO: Skip TensorList for now.
@@ -52,7 +55,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
-          tensor_metadata_it = tensor_metadata_.begin()]() mutable {
+          tensor_metadata_it = tensor_metadata_.begin(),
+          ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
@@ -68,17 +72,20 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.ivalues_.emplace_back(*ivals_it++);
           out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.dtypes_.emplace_back();
+          out.ivalues_.emplace_back();
           out.tensor_metadata_.emplace_back();
           break;
 
@@ -99,6 +106,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
+  ivalues_.clear();
 }
 
 namespace {
