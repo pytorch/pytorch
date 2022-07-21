@@ -5,12 +5,12 @@ Any job with a specific `sync-tag` must match all other jobs with the same `sync
 import argparse
 import itertools
 import json
-from collections import defaultdict
-from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, NamedTuple, Optional
+from typing import Iterable, Any, Optional, NamedTuple, Dict
+from enum import Enum
+from collections import defaultdict
 
-from yaml import CSafeLoader, dump, load
+from yaml import load, CSafeLoader, dump
 
 
 class LintSeverity(str, Enum):

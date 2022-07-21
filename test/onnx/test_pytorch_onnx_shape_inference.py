@@ -1,11 +1,11 @@
 # Owner(s): ["module: onnx"]
 
 import numpy as np
+from test_pytorch_common import run_tests, skipIfUnsupportedMinOpsetVersion, TestCase
 
 import torch
-from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
-from torch.onnx import _constants, symbolic_helper
-from torch.testing._internal import common_utils
+from torch.onnx import _constants
+from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -19,11 +19,12 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(common_utils.TestCase):
-    def setUp(self):
+class TestONNXShapeInference(TestCase):
+    def __init__(self, *args, **kwargs):
+        TestCase.__init__(self, *args, **kwargs)
         self.opset_version = _constants.onnx_main_opset
-        symbolic_helper._set_onnx_shape_inference(True)
-        symbolic_helper._set_opset_version(self.opset_version)
+        _set_onnx_shape_inference(True)
+        _set_opset_version(self.opset_version)
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
@@ -270,4 +271,4 @@ class TestONNXShapeInference(common_utils.TestCase):
 
 
 if __name__ == "__main__":
-    common_utils.run_tests()
+    run_tests()

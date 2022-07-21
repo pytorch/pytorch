@@ -1523,15 +1523,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto sync_buffer =
         grouped_grop->sync_buffer()->buffer()->as<TensorView>();
 
-    if (grouped_grop->isAllreduce()) {
-      generateGroupedGridAllreduce(grouped_grop);
-      return;
-    }
-
     TORCH_INTERNAL_ASSERT(
         grouped_grop->numReductions() == 2,
         "Only grouping of 2 reductions is supported. ",
         grouped_grop->toString());
+
+    if (grouped_grop->isAllreduce()) {
+      generateGridAllreduce(grouped_grop);
+      return;
+    }
 
     const std::string flags_str = generateGridReduceTemplateFlags2(
         grouped_grop, grouped_grop->threadPredicate());
@@ -1547,7 +1547,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
 
-    // Append arguments for each reduction
+    // Apped arguments for each reduction
     for (const auto i : c10::irange(grouped_grop->numReductions())) {
       TORCH_INTERNAL_ASSERT(
           grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
@@ -1590,76 +1590,40 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << func_args << ");\n";
   }
 
-  void generateGroupedGridAllreduce(
-      const kir::GroupedGridReduction* grouped_grop) {
+  void generateGridAllreduce(const kir::GroupedGridReduction* grouped_grop) {
     TORCH_INTERNAL_ASSERT(grouped_grop->isAllreduce());
 
-    constexpr int max_num_reductions = 8;
-    TORCH_INTERNAL_ASSERT(
-        grouped_grop->numReductions() <= max_num_reductions,
-        "Too many grouped reductions: ",
-        grouped_grop->toString(),
-        ". Up to ",
-        max_num_reductions,
-        " reductions are allowed.");
-
-    ArgumentBuilder types;
-    ArgumentBuilder outputs;
-    ArgumentBuilder inputs;
-    ArgumentBuilder work_bufs;
-    ArgumentBuilder init_vals;
-    ArgumentBuilder reduction_ops;
-
-    ArgumentBuilder bool_types;
-    ArgumentBuilder read_preds;
-    ArgumentBuilder write_preds;
+    // First, build a list of function arguments
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
 
     for (const auto i : c10::irange(grouped_grop->numReductions())) {
       const auto data_type = grouped_grop->outputs().at(i)->dtype();
       TORCH_INTERNAL_ASSERT(
           grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
 
-      types.arg(data_type);
-
       // out
-      outputs.arg(gen(grouped_grop->outputs().at(i)));
+      func_args.arg(
+          genCall("RefTuple", data_type, gen(grouped_grop->outputs().at(i))));
 
       // inp
-      inputs.arg(gen(grouped_grop->inputs().at(i)));
+      func_args.arg(genCall(
+          "ConstRefTuple", data_type, gen(grouped_grop->inputs().at(i))));
 
       // global_work_buffer
       const auto work_buffer =
           grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
-      work_bufs.arg("&").append(varName(work_buffer)).append("[0]");
+      func_args.arg(genCall(
+          "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
 
-      init_vals.arg(genInline(grouped_grop->initVal(i)));
+      // init
+      func_args.arg(genCall(
+          "LocalTuple", data_type, genInline(grouped_grop->initVal(i))));
 
-      reduction_ops.arg(genReductionOp(
+      // reduction op
+      func_args.arg(genReductionOp(
           grouped_grop->getReductionOpType(i),
           grouped_grop->output(i)->dtype()));
-
-      // read and write predicates
-      bool_types.arg("bool");
-      // Same argument for all inputs. Different predicates would be
-      // used when grouping is done across iterations
-      TORCH_INTERNAL_ASSERT(
-          grouped_grop->predicate() != nullptr &&
-          grouped_grop->predicate()->hasValue());
-      const auto read_pred = genInline(grouped_grop->predicate());
-      read_preds.arg(read_pred);
-      if (grouped_grop->writePredicate() != nullptr) {
-        TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
-        write_preds.arg(genInline(grouped_grop->writePredicate()));
-      } else {
-        write_preds.arg(read_pred);
-      }
     }
-
-    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
-    func_args.arg(genCall("RefTuple", types, outputs));
-    func_args.arg(genCall("ConstRefTuple", types, inputs));
-    func_args.arg(genCall("VolatilePtrTuple", types, work_bufs));
-    func_args.arg(genCall("LocalTuple", types, init_vals));
 
     // global_sync_buffer
     const auto sync_buffer =
@@ -1669,12 +1633,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // shared_buf
     func_args.arg("shared_mem");
 
-    func_args.arg(genCall("LocalTuple", bool_types, read_preds));
-    func_args.arg(genCall("LocalTuple", bool_types, write_preds));
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->predicate() != nullptr &&
+        grouped_grop->predicate()->hasValue());
+    const auto read_pred = genInline(grouped_grop->predicate());
+    func_args.arg(read_pred);
+    if (grouped_grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grouped_grop->writePredicate()));
+    } else {
+      func_args.arg(read_pred);
+    }
 
     addProfileArguments(func_args, grouped_grop);
-
-    func_args.arg(reduction_ops);
 
     indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
              << ".reduceGroup(\n";

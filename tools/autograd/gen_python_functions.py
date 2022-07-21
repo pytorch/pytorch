@@ -30,15 +30,22 @@
 #   message, but use what's there
 #
 
+from collections import defaultdict
 import itertools
 import re
-from collections import defaultdict
-
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
-
 import yaml
+
+from .gen_trace_type import should_trace
+
+from torchgen.code_template import CodeTemplate
 from torchgen.api import cpp
+from torchgen.api.types import CppSignatureGroup
 from torchgen.api.python import (
+    PythonArgument,
+    PythonSignature,
+    PythonSignatureDeprecated,
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair,
     arg_parser_output_exprs,
     argument_type_str,
     cpp_dispatch_exprs,
@@ -48,22 +55,20 @@ from torchgen.api.python import (
     dispatch_lambda_return_str,
     has_tensor_options,
     namedtuple_fieldnames,
-    PythonArgument,
-    PythonSignature,
-    PythonSignatureDeprecated,
-    PythonSignatureGroup,
-    PythonSignatureNativeFunctionPair,
     signature,
 )
-from torchgen.api.types import CppSignatureGroup
-
-from torchgen.code_template import CodeTemplate
-from torchgen.context import with_native_function
 from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
-from torchgen.model import Argument, BaseOperatorName, NativeFunction, Type, Variant
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.context import with_native_function
+from torchgen.model import (
+    Argument,
+    BaseOperatorName,
+    NativeFunction,
+    Type,
+    Variant,
+)
+from torchgen.utils import split_name_params, YamlLoader, FileManager
 
-from .gen_trace_type import should_trace
+from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
 #
 # declarations blocklist
@@ -150,7 +155,7 @@ _SKIP_PYTHON_BINDINGS = [
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
-    "lift.*",
+    "lift",
     "normal_functional",  # only used by the functionalization pas
 ]
 

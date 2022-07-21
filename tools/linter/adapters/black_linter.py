@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, BinaryIO, List, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional, BinaryIO
 
 
 IS_WINDOWS: bool = os.name == "nt"

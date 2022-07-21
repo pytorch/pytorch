@@ -17,8 +17,7 @@ from functools import reduce, partial, wraps
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
-     make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state)
+     make_fullrank_matrices_with_distinct_singular_values)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -6189,19 +6188,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test([5, 3], [100, 100])
         run_test([3, 4], [3, 3, 3])
         run_test([3, 4], [3, 3, 3, 3])
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64)
-    def test_linalg_matrix_exp_no_warnings(self, device, dtype):
-        # this tests https://github.com/pytorch/pytorch/issues/80948
-        with freeze_rng_state():
-            torch.manual_seed(42)
-            tens = 0.5 * torch.randn(10, 3, 3, dtype=dtype, device=device)
-            tens = (0.5 * (tens.transpose(-1, -2) + tens))
-            with warnings.catch_warnings(record=True) as w:
-                tens.imag = torch.matrix_exp(tens.imag)
-                self.assertFalse(len(w))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

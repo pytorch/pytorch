@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import enum
 import functools
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -155,7 +153,7 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
-def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
+def _unpack_list(list_value):
     list_node = list_value.node()
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
@@ -1131,17 +1129,13 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     return weight, bias, running_mean, running_var
 
 
-def _avgpool_helper(
-    tuple_fn: Callable[[Any], Sequence[int]],
-    padding: Union[int, Sequence[int]],
-    kernel_size,
-    stride,
-    divisor_override,
-    name,
-) -> Tuple[int, ...]:
+def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
-        _unimplemented(name, "divisor_override")
-    return tuple(tuple_fn(padding))
+        return _unimplemented(name, "divisor_override")
+    if not stride:
+        stride = kernel_size
+    padding = tuple(tuple_fn(padding))
+    return padding
 
 
 def check_training_mode(op_train_mode: int, op_name: str) -> None:
@@ -1217,11 +1211,7 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
-def dequantize_helper(
-    g,
-    qtensor: _C.Value,
-    qdtype: Optional[torch.onnx.TensorProtoDataType] = None,
-) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
+def dequantize_helper(g, qtensor, qdtype=None):
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
@@ -1262,13 +1252,7 @@ def dequantize_helper(
     )
 
 
-def quantize_helper(
-    g,
-    tensor: _C.Value,
-    scale: _C.Value,
-    zero_point: _C.Value,
-    axis: Optional[_C.Value] = None,
-) -> _C.Value:
+def quantize_helper(g, tensor, scale, zero_point, axis=None):
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
     Args:
@@ -1292,13 +1276,11 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",

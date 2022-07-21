@@ -30,7 +30,7 @@ env:
   CROSS_COMPILE_ARM64: 1
 
 concurrency:
-  group: macos-arm64-binary-conda-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-arm64-binary-conda-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:

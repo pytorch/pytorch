@@ -11,7 +11,6 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
-#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -63,6 +62,7 @@ using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
 using torch::profiler::impl::kineto::annotation_t;
+using torch::profiler::impl::kineto::KinetoActivityType;
 
 struct EventFieldsVisitor {
   EventFieldsVisitor(
@@ -341,7 +341,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         int64_t start_us = e->start_time_ns_ / 1000;
         int64_t end_us = e->endTimeNS() / 1000;
         kineto_events_.emplace_back(
-            e->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION);
+            e->kinetoType() == KinetoActivityType::PYTHON_FUNCTION);
         kineto_events_.back()
             .name(e->name())
             .startUs(start_us)
@@ -626,8 +626,7 @@ void reportBackendEventToActiveKinetoProfiler(
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (config.state == ProfilerState::NVTX ||
-      config.state == ProfilerState::ITT) {
+  if (config.state == ProfilerState::NVTX) {
     return;
   }
   TORCH_CHECK(
@@ -646,9 +645,6 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
-  TORCH_CHECK(
-      config.state != ProfilerState::ITT,
-      "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
       GlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
@@ -665,9 +661,6 @@ void enableProfiler(
   TORCH_CHECK(!profilerEnabled(), "Profiler is already enabled on this thread");
   if (config.state == ProfilerState::NVTX) {
     torch::profiler::impl::pushNVTXCallbacks(config, scopes);
-    return;
-  } else if (config.state == ProfilerState::ITT) {
-    torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
   }
 
@@ -712,8 +705,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT),
+           config.state == ProfilerState::NVTX),
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {

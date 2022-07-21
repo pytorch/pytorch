@@ -28,17 +28,6 @@ PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
   return THPUtils_packString(self->name);
 }
 
-PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
-  auto* self = (THPMemoryFormat*)_self;
-  return THPUtils_packString(self->name);
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPMemoryFormat_methods[] = {
-    {"__reduce__", THPMemoryFormat_reduce, METH_NOARGS, nullptr},
-    {nullptr} /* Sentinel */
-};
-
 PyTypeObject THPMemoryFormatType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch.memory_format", /* tp_name */
     sizeof(THPMemoryFormat), /* tp_basicsize */
@@ -66,7 +55,7 @@ PyTypeObject THPMemoryFormatType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPMemoryFormat_methods, /* tp_methods */
+    nullptr, /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */

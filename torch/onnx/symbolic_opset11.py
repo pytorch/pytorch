@@ -2,10 +2,8 @@
 
 import sys
 import warnings
-from typing import Tuple, Union
 
 import torch
-from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
@@ -14,77 +12,6 @@ from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
-
-__all__ = [
-    "add",
-    "append",
-    "arange",
-    "argsort",
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
-    "cat",
-    "chunk",
-    "clamp_max",
-    "clamp_min",
-    "clamp",
-    "constant_pad_nd",
-    "cumsum",
-    "Delete",
-    "embedding_bag",
-    "embedding_renorm",
-    "flatten",
-    "gather",
-    "hardtanh",
-    "im2col",
-    "index_fill",
-    "index",
-    "index_copy",
-    "index_put",
-    "insert",
-    "linalg_det",
-    "linalg_vector_norm",
-    "logdet",
-    "masked_scatter",
-    "masked_select",
-    "mm",
-    "narrow",
-    "normal",
-    "pad",
-    "pixel_shuffle",
-    "pop",
-    "Prim",
-    "reflection_pad",
-    "reflection_pad1d",
-    "reflection_pad2d",
-    "reflection_pad3d",
-    "relu6",
-    "remainder",
-    "replication_pad",
-    "replication_pad1d",
-    "replication_pad2d",
-    "replication_pad3d",
-    "round",
-    "scatter",
-    "select",
-    "size",
-    "sort",
-    "split_with_sizes",
-    "split",
-    "squeeze",
-    "stack",
-    "topk",
-    "unbind",
-    "unique_dim",
-    "unsqueeze",
-    "upsample_bicubic2d",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
-]
 
 
 @symbolic_helper.parse_args("v", "f", "f")
@@ -216,8 +143,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":  # type: ignore[attr-defined]
-                # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+            if indices_list[idx_].type().scalarType() == "Bool":
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -272,8 +198,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":  # type: ignore[attr-defined]
-            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -503,12 +428,12 @@ def _avg_pool(name, tuple_fn):
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input: _C.Value,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Union[int, Tuple[int, ...]],
-        ceil_mode: int,
-        count_include_pad: int,
+        input,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(

@@ -13,7 +13,7 @@
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 {%- endmacro -%}
 

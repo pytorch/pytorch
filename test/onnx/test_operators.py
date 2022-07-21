@@ -8,27 +8,34 @@ import os
 import shutil
 import tempfile
 
+from test_pytorch_common import (
+    BATCH_SIZE,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+    TestCase,
+    flatten,
+    run_tests,
+    skipIfCaffe2,
+    skipIfNoLapack,
+)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx
-
-from pytorch_test_common import (
-    BATCH_SIZE,
-    flatten,
-    RNN_HIDDEN_SIZE,
-    RNN_INPUT_SIZE,
-    RNN_SEQUENCE_LENGTH,
-)
+import torch.testing._internal.common_utils as common
 from torch.autograd import Function, Variable
-from torch.nn import functional, Module
+from torch.nn import Module, functional
+from torch.onnx import (
+    register_custom_op_symbolic,
+    unregister_custom_op_symbolic,
+)
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,
     parse_args,
 )
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -70,7 +77,7 @@ class FuncModule(Module):
         return self.f(*itertools.chain(args, self.params))
 
 
-class TestOperators(common_utils.TestCase):
+class TestOperators(TestCase):
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
@@ -87,7 +94,7 @@ class TestOperators(common_utils.TestCase):
             import onnx
             import onnx.checker
             import onnx.numpy_helper
-            import onnx_test_common
+            import test_onnx_common
 
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
@@ -95,7 +102,7 @@ class TestOperators(common_utils.TestCase):
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
                 output_dir = os.path.join(
-                    onnx_test_common.pytorch_operator_dir, test_name
+                    test_onnx_common.pytorch_operator_dir, test_name
                 )
                 # Assume:
                 #     1) the old test should be delete before the test.
@@ -1152,9 +1159,7 @@ class TestOperators(common_utils.TestCase):
             )
             return output
 
-        torch.onnx.register_custom_op_symbolic(
-            "::embedding", embedding, _onnx_opset_version
-        )
+        register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1171,7 +1176,7 @@ class TestOperators(common_utils.TestCase):
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version)
 
-        torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
+        unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
     @skipIfCaffe2
@@ -1203,9 +1208,7 @@ class TestOperators(common_utils.TestCase):
                 output.setType(output_type)
             return output
 
-        torch.onnx.register_custom_op_symbolic(
-            "::embedding", embedding, _onnx_opset_version
-        )
+        register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1230,7 +1233,7 @@ class TestOperators(common_utils.TestCase):
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
 
-        torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
+        unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # Without shapeValueMap, the onnx graph looks like:
     # graph(%0 : Float(*, 1, 128, 1, strides=[128, 128, 1, 1], requires_grad=0, device=cpu)):
@@ -1274,19 +1277,19 @@ class TestOperators(common_utils.TestCase):
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"
-    _onnx_dep = no_onnx_dep_flag not in common_utils.UNITTEST_ARGS
-    if no_onnx_dep_flag in common_utils.UNITTEST_ARGS:
-        common_utils.UNITTEST_ARGS.remove(no_onnx_dep_flag)
+    _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
+    if no_onnx_dep_flag in common.UNITTEST_ARGS:
+        common.UNITTEST_ARGS.remove(no_onnx_dep_flag)
     onnx_test_flag = "--produce-onnx-test-data"
-    _onnx_test = onnx_test_flag in common_utils.UNITTEST_ARGS
-    if onnx_test_flag in common_utils.UNITTEST_ARGS:
-        common_utils.UNITTEST_ARGS.remove(onnx_test_flag)
+    _onnx_test = onnx_test_flag in common.UNITTEST_ARGS
+    if onnx_test_flag in common.UNITTEST_ARGS:
+        common.UNITTEST_ARGS.remove(onnx_test_flag)
     if _onnx_test:
         _onnx_dep = True
-        import onnx_test_common
+        import test_onnx_common
 
         for d in glob.glob(
-            os.path.join(onnx_test_common.pytorch_operator_dir, "test_operator_*")
+            os.path.join(test_onnx_common.pytorch_operator_dir, "test_operator_*")
         ):
             shutil.rmtree(d)
-    common_utils.run_tests()
+    run_tests()

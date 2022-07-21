@@ -7,27 +7,25 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload, FlatParameter
+from torch.distributed.fsdp import CPUOffload, MixedPrecision
+from torch.distributed.fsdp import FlatParameter
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel,
-)
-from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
+from torch.distributed.fsdp.wrap import wrap, enable_wrap
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
-    DeterministicModel,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
+    DeterministicModel,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -140,7 +138,7 @@ class TestSummonFullParams(FSDPTest):
         model = FSDP(raw_model.cuda(self.rank), mixed_precision=mixed_precision)
         self.assertEqual(expected_shard_size, self.get_model_param_count(model))
 
-        # we're assuming a single flattened param
+        # we're assuming a single flatenned param
         self.assertEqual(1, len(list(model.parameters())))
 
         my_shard = torch.clone(next(model.parameters()))
@@ -474,36 +472,35 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("rank0_only", [True, False])
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("mixed_precision", [True, False])
-    def test_params_count_and_value(
-        self,
-        rank0_only: bool,
-        offload_to_cpu: bool,
-        mixed_precision: bool,
-    ):
+    def test_params_count_and_value(self, rank0_only, offload_to_cpu, mixed_precision):
         mixed_precision = MixedPrecision() if mixed_precision else None
-        model = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+                mixed_precision=mixed_precision,
+            ),
+            mixed_precision=mixed_precision,
         )
-        fsdp_model = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
         )
+
         dev = (
             torch.device("cpu")
             if offload_to_cpu
             else torch.device("cuda", torch.cuda.current_device())
         )
+
         params_to_compare = (
             [p.to(dev) for p in model.module.parameters()]
             if not rank0_only or self.rank == 0
             else list(p.clone() for p in fsdp_model.parameters())
         )
-        with FSDP.summon_full_params(
+        with fsdp_model.summon_full_params(
             fsdp_model, rank0_only=rank0_only, writeback=not rank0_only
         ):
             for p1, p2 in itertools.zip_longest(
@@ -519,16 +516,17 @@ class TestSummonFullParams(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_raises_rank0_with_writeback(self):
-        """Tests that ``summon_full_params()`` with both ``rank0_only=True``
-        and ``writeback=True`` raises an error."""
-        nested_wrapped_module = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
         )
+
         with self.assertRaisesRegex(ValueError, "is not supported"):
-            with FSDP.summon_full_params(
-                nested_wrapped_module, rank0_only=True, writeback=True
+            with fsdp_model.summon_full_params(
+                fsdp_model, rank0_only=True, writeback=True
             ):
                 pass
 
@@ -536,29 +534,21 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("prefix", ["", "test_prefix"])
     @parametrize("recurse", [False, True])
     def test_named_parameters_buffers(self, prefix: str, recurse: bool):
-        """Tests that ``named_parameters()`` and ``named_buffers()`` for a
-        top-level FSDP-wrapped model matches their behavior for the equivalent
-        non-wrapped model."""
-        model = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
-        )
-        model.register_buffer("buffer", torch.ones(1))
-        # `named_parameters()` and `named_buffers` will contain FSDP prefixes
-        # if called on a non-FSDP root module
         fsdp_model = FSDP(
-            NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
-                deterministic=True,
-            ),
-            self.process_group,
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
         )
         fsdp_model.register_buffer("buffer", torch.ones(1))
-        with FSDP.summon_full_params(fsdp_model):
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+        )
+        model.register_buffer("buffer", torch.ones(1))
+        with fsdp_model.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(
                     getattr(fsdp_model, call)(prefix=prefix, recurse=recurse),

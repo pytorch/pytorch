@@ -2183,7 +2183,7 @@ class DistributedDataParallelTest(
             process_group, allreduce_with_then_hook
         )
 
-        # check whether the grads are equal to what allreduce returns multiplied by 5.
+        # check whether the grads are equal to what allreduce returns multuplied by 5.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
 

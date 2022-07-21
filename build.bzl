@@ -14,7 +14,6 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        copts = ["-fexceptions"],
         tags = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",

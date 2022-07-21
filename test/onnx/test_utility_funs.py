@@ -4,21 +4,24 @@ import copy
 import io
 
 import onnx
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
-from pytorch_test_common import (
+from test_pytorch_common import (
+    TestCase,
+    run_tests,
     skipIfNoCuda,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+from verify import verify
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import (
     OperatorExportTypes,
-    register_custom_op_symbolic,
     TrainingMode,
+    register_custom_op_symbolic,
     unregister_custom_op_symbolic,
     utils,
 )
@@ -29,11 +32,9 @@ from torch.onnx.symbolic_helper import (
     _unpack_list,
     parse_args,
 )
-from torch.testing._internal import common_utils
-from verify import verify
 
 
-class _BaseTestCase(common_utils.TestCase):
+class _BaseTestCase(TestCase):
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
@@ -1675,4 +1676,4 @@ class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
 
 
 if __name__ == "__main__":
-    common_utils.run_tests()
+    run_tests()

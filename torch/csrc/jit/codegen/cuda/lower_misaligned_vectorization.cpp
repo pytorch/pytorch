@@ -367,8 +367,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
           GpuLower::current()->kernel()->oneVal(),
           vectorize && has_vectorize_op,
           vectorize_shift,
-          fl->isUnrollRequired(),
-          fl->doubleBufferLoopStage());
+          fl->isUnrollRequired());
 
       auto body = &new_loop->body();
 

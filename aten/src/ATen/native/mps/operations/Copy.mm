@@ -136,8 +136,27 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_CHECK(destOffset % 4 == 0, "Unaligned blit request");
 
-    stream->copy_and_sync(sourceBuffer, destBuffer, src_size, storage_byte_offset, destOffset, non_blocking);
-    [destBuffer release];
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder =
+            [commandBuffer blitCommandEncoder];
+
+        [blitEncoder copyFromBuffer:sourceBuffer
+                       sourceOffset:(NSUInteger)storage_byte_offset
+                           toBuffer:destBuffer
+                  destinationOffset:(NSUInteger)destOffset
+                               size:(NSUInteger)src_size];
+        [blitEncoder endEncoding];
+
+        if (non_blocking) {
+          stream->commit(true);
+        } else {
+          stream->commitAndWait();
+        }
+        [destBuffer release];
+      }
+    });
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
@@ -183,7 +202,25 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     if (src_.is_view() || !src_.is_contiguous())
       sourceOffset += src_.storage_offset() * src_.itemsize();
 
-    stream->copy_and_sync(sourceBuffer, destBuffer, size, sourceOffset, dst_byte_offset, non_blocking);
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder =
+            [commandBuffer blitCommandEncoder];
+
+        [blitEncoder copyFromBuffer:sourceBuffer
+                       sourceOffset:(NSUInteger)sourceOffset
+                           toBuffer:destBuffer
+                  destinationOffset:(NSUInteger)dst_byte_offset
+                               size:(NSUInteger)size];
+        [blitEncoder endEncoding];
+        if (non_blocking) {
+          stream->commit(true);
+        } else {
+          stream->commitAndWait();
+        }
+      }
+    });
     [sourceBuffer release];
   }
 
@@ -192,7 +229,23 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
   MPSStream* stream = getCurrentMPSStream();
-  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true);
+  id<MTLBuffer> sourceBuffer = (id<MTLBuffer>)(src);
+  id<MTLBuffer> destBuffer = (id<MTLBuffer>)(dst);
+  dispatch_sync(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+      id<MTLBlitCommandEncoder> blitEncoder =
+          [commandBuffer blitCommandEncoder];
+
+      [blitEncoder copyFromBuffer:sourceBuffer
+                     sourceOffset:0
+                         toBuffer:destBuffer
+                destinationOffset:0
+                             size:size];
+      [blitEncoder endEncoding];
+      stream->commitAndWait();
+    }
+  });
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
@@ -233,10 +286,23 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const size_t src_size = src.nbytes();
+
   if (src.dtype() == dst_.dtype()) {
     MPSStream* stream = getCurrentMPSStream();
-    // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+        [blitEncoder copyFromBuffer:sourceBuffer
+                       sourceOffset:src_byte_offset
+                           toBuffer:destBuffer
+                  destinationOffset:dst_byte_offset
+                               size:src_size];
+        [blitEncoder endEncoding];
+        // GPU to GPU copy needs flushing only, and no synchronization with CPU is necessary
+        stream->commit(true);
+      }
+    });
   } else {
     copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
   }

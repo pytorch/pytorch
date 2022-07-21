@@ -6,12 +6,11 @@ for how to configure them.
 """
 
 import argparse
-import hashlib
-import json
-import logging
-import os
-
 import boto3  # type: ignore[import]
+import json
+import hashlib
+import os
+import logging
 
 
 def compute_file_sha256(path: str) -> str:

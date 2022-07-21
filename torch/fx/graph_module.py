@@ -419,11 +419,8 @@ class GraphModule(torch.nn.Module):
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
-        custom_builtins = '\n'.join([v.import_str for v in _custom_builtins.values()])
         model_str = f"""
 import torch
-{custom_builtins}
-
 from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):

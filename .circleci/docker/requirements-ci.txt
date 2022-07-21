@@ -86,11 +86,11 @@ mypy==0.960
 #Pinned versions: 0.960
 #test that import: test_typing.py, test_type_hints.py
 
-networkx==2.6.3
+#networkx
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
-#Pinned versions: 2.6.3 (latest version that works with Python 3.7+)
-#test that import: functorch
+#Pinned versions: 2.0
+#test that import:
 
 #ninja
 #Description: build system.  Note that it install from

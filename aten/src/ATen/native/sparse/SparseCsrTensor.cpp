@@ -34,7 +34,6 @@
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/crow_indices_native.h>
-#include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
@@ -47,9 +46,7 @@
 #include <ATen/ops/sparse_csc_tensor_native.h>
 #include <ATen/ops/sparse_bsr_tensor_native.h>
 #include <ATen/ops/sparse_bsc_tensor_native.h>
-#include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/values_native.h>
-#include <ATen/ops/_validate_compressed_sparse_indices.h>
 #endif
 
 namespace at {
@@ -193,16 +190,52 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       compressed_indices_type);
 
   // Indices invariants
-  if (plain_indices.numel() > 0) {
-    at::_validate_compressed_sparse_indices(
-        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
-        compressed_indices,
-        plain_indices,
-        ncompressed_dims,
-        nplain_dims,
-        values_nnz
-    );
-  }
+  AT_DISPATCH_INDEX_TYPES(compressed_indices_type, "validate_sparse_compressed_tensor_args",
+    [&] {
+      if (plain_indices.numel() > 0) {
+        Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
+        Tensor plain_indices_cpu = plain_indices.to(kCPU);
+        int64_t batch_compressed_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
+        int64_t batch_plain_stride = plain_indices_cpu.dim() >= 2 ? plain_indices_cpu.stride(-2) : 0;
+        auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
+        auto plain_indices_data_ptr = plain_indices_cpu.data_ptr<index_t>();
+        for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
+          int64_t start = compressed_indices_data_ptr[batch_id*batch_compressed_stride];
+          const std::string at_batch_id = (batch_ndim > 0 ? " at batch id " + std::to_string(batch_id) : "");
+          const std::string batch_indices = (batch_ndim > 0 ? "..., " : "");
+          // 5.1
+          TORCH_CHECK(start == 0, compressed_indices_name, "[", batch_indices, "0] (=", start, ") == 0 is unsatisfied", at_batch_id);
+          for (int i = 1; i <= ncompressed_dims; i++) {
+            int64_t end = compressed_indices_data_ptr[batch_id*batch_compressed_stride + i];
+            // 5.2
+            TORCH_CHECK(end <= values_nnz,
+                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") ",
+                        "<= nnz (=", values_nnz, ") is unsatisfied", at_batch_id);
+            // 5.3
+            TORCH_CHECK(start <= end, compressed_indices_name, " must be ordered sequence but ",
+                        compressed_indices_name, "[", batch_indices, i - 1, "] (=", start, ") <= ",
+                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") is unsatisfied", at_batch_id);
+            TORCH_CHECK(end - start <= nplain_dims,
+                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") - ",
+                        compressed_indices_name, "[", batch_indices, i - 1, "] (=", start, ") <= number of ",
+                        plain_dim_name, "s (=", nplain_dims, ") is unsatisfied", at_batch_id);
+            int64_t last_plain_index = -1;
+            for (int n = start; n < end; n++) {
+              int64_t plain_index = plain_indices_data_ptr[batch_id*batch_plain_stride + n];
+              // 5.4, 5.5
+              TORCH_CHECK(0 <= plain_index && plain_index < nplain_dims,
+                          plain_indices_name, "[", batch_indices, n, "] (=", plain_index, ") is out of range (0, ", nplain_dims, ")", at_batch_id);
+              // 5.6
+              TORCH_CHECK(plain_index > last_plain_index, plain_indices_name, " must be ordered sequence of distinct integers but ",
+                          plain_indices_name, "[", batch_indices, n - 1, "] (=", last_plain_index, ") < ",
+                          plain_indices_name, "[", batch_indices, n, "] (=", plain_index, ") is unsatisfied", at_batch_id);
+              last_plain_index = plain_index;
+            }
+            start = end;
+          }
+        }
+      }
+    });
 
   // Device Invariants
   // 4.1
@@ -633,14 +666,6 @@ Tensor row_indices_sparse_csr(const Tensor& self) {
   return AT_DISPATCH_SPARSE_COL_COMPRESSED_LAYOUTS(self.layout(),
                                                    "row_indices",
                                                    [&]{ return get_sparse_csr_impl(self)->plain_indices().alias(); });
-}
-
-int64_t sparse_dim_sparse_csr(const SparseCsrTensor& self) {
-  return get_sparse_csr_impl(self)->sparse_dim();
-}
-
-int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
-  return get_sparse_csr_impl(self)->dense_dim();
 }
 
 bool _is_same_size_as_sparse_csr(

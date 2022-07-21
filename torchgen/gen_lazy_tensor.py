@@ -22,6 +22,7 @@ from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
 from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
+    NamespaceHelper,
 )
 
 from torchgen.api.lazy import setValueT
@@ -32,7 +33,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, YamlLoader, FileManager, NamespaceHelper
+from torchgen.utils import concatMap, YamlLoader, FileManager
 import torchgen.dest as dest
 from .gen_backend_stubs import (
     parse_backend_yaml,

@@ -371,15 +371,6 @@ class ProcessGroupNCCL(ProcessGroup):
     def _group_end() -> None: ...
     ...
 
-class ProcessGroupUCC(ProcessGroup):
-    def __init__(
-        self,
-        store: Store,
-        rank: int,
-        size: int,
-        timeout: timedelta,
-    ): ...
-
 class ProcessGroupMPI(ProcessGroup):
     def __init__(
         self,

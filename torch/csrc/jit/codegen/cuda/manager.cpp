@@ -64,8 +64,6 @@ void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_set<Symbol> alias_copy_op(
       {prim::view_copy,
        prim::reshape_copy,
-       prim::expand_copy,
-       prim::expand_as_copy,
        prim::squeeze_copy,
        prim::unsqueeze_copy});
 

@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/mma_type.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -159,7 +158,6 @@ class TransformPropagator;
 class TransformIter;
 class TransformReplay;
 class OptOutMutator;
-class TensorDomain;
 
 namespace ir_utils {
 class TVDomainGuard;

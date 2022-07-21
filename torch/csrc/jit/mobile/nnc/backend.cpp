@@ -51,8 +51,7 @@ class NNCBackend : public PyTorchBackendInterface {
 };
 
 namespace {
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
-// static const auto cls = torch::jit::backend<NNCBackend>("nnc");
+static const auto cls = torch::jit::backend<NNCBackend>("nnc");
 } // namespace
 
 } // namespace nnc

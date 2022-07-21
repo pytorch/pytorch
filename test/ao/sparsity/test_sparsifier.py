@@ -258,8 +258,7 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.prepare(model, config=[{'tensor_fqn': 'linear.weight'}])
         sparsifier.step()
         # make sure the sparsity level is approximately 50%
-        mask = model.linear.parametrizations['weight'][0].mask.to(torch.float)  # mean works on float only
-        self.assertAlmostEqual(mask.mean().item(), 0.5, places=2)
+        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
         # Make sure each block has exactly 50% zeros
         module = sparsifier.groups[0]['module']
         mask = module.parametrizations['weight'][0].mask
