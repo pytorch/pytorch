@@ -535,7 +535,7 @@ Here are a few key attributes for quantized Tensor:
 
     * scale (float)
     * zero_point (int)
-  * torch.per_tensor_affine would have quantization parameters of
+  * torch.per_channel_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
     * per_channel_zero_points (list of int)
