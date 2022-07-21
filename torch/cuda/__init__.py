@@ -363,7 +363,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     return _get_device_properties(device)  # type: ignore[name-defined]
 
 
-def GetAllocFreeEvents() -> list:
+def get_alloc_free_events() -> list:
     r"""Gets allocation/free events sequence for each device.
 
     Args:
