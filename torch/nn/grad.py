@@ -29,7 +29,7 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         >>> F.grad.conv1d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(input_size)
+    input = grad_output.new_empty(1).expand(input_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _single(stride), _single(padding), _single(dilation),
@@ -59,7 +59,7 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         >>> F.grad.conv1d_weight(input, weight.shape, grad_output)
 
     """
-    weight = grad_output.new_empty(weight_size)
+    weight = grad_output.new_empty(1).expand(weight_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _single(stride), _single(padding), _single(dilation),
@@ -91,7 +91,7 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         >>> F.grad.conv2d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(input_size)
+    input = grad_output.new_empty(1).expand(input_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _pair(stride), _pair(padding), _pair(dilation),
@@ -121,7 +121,7 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         >>> F.grad.conv2d_weight(input, weight.shape, grad_output)
 
     """
-    weight = grad_output.new_empty(weight_size)
+    weight = grad_output.new_empty(1).expand(weight_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _pair(stride), _pair(padding), _pair(dilation),
@@ -153,7 +153,7 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         >>> F.grad.conv3d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(input_size)
+    input = grad_output.new_empty(1).expand(input_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _triple(stride), _triple(padding), _triple(dilation),
@@ -183,7 +183,7 @@ def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         >>> F.grad.conv3d_weight(input, weight.shape, grad_output)
 
     """
-    weight = grad_output.new_empty(weight_size)
+    weight = grad_output.new_empty(1).expand(weight_size)
 
     return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
                                                _triple(stride), _triple(padding), _triple(dilation),
