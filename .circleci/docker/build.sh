@@ -394,9 +394,10 @@ function drun() {
 
 if [[ "$OS" == "ubuntu" ]]; then
 
-  if !(drun lsb_release -a 2>&1 | grep -qF Ubuntu); then
+  # should fail!
+  if !(drun echo "XXX" 2>&1 | grep -qF Ubuntu); then
     echo "OS=ubuntu, but:"
-    drun lsb_release -a
+    drun echo "XXX"
     exit 1
   fi
   if !(drun lsb_release -a 2>&1 | grep -qF "$UBUNTU_VERSION"); then
