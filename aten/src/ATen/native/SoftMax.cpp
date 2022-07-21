@@ -131,7 +131,10 @@ void host_softmax(
     Tensor output,
     const Tensor& input,
     const int64_t dim,
-    bool* mask = nullptr) {
+    bool* mask = nullptr,
+    const c10::optional<int64_t> mask_type = NULL) {
+  TORCH_CHECK(!mask || mask_type,
+    "expected `mask_type` when `mask` supplied");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
@@ -560,7 +563,7 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
+Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
   TORCH_CHECK(
       input_.sizes() == mask_.sizes(), "Mask shape should match input shape");
   TORCH_CHECK(
@@ -583,7 +586,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>());
+            output, input, dim, mask.data_ptr<bool>(), mask_type_);
       });
   return output;
 }

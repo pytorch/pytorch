@@ -20781,6 +20781,17 @@ torch.cuda.synchronize()
         key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
 
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_transformerencoderlayer_fast_path(self, device, dtype):
+        model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
+        src = torch.rand(32, 10, 512)
+        src_mask = torch.zeros(10, 10).to(torch.bool)
+
+        model.eval()
+        with torch.no_grad():
+            model(src, src_mask)
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     def test_transformerencoderlayer_gelu(self, device, dtype):
