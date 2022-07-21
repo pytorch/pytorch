@@ -165,6 +165,9 @@ class Future(object):
 
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
 
+class SymbolicIntNode(object):
+    ...
+
 # Defined in torch/csrc/jit/passes/xnnpack_rewrite.h
 class MobileOptimizerType:
     ...

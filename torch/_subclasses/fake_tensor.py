@@ -308,10 +308,11 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
 
-    def new_empty(self, shape, dtype=None):
-        return torch.empty(shape, dtype=dtype)
-
     def stride(self):
+        # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
+        # The reason this needs to be here instead of __torch_dispatch__ is that
+        # when aten.stride goes into __torch_dispatch__, it expects a list of
+        # concrete ints to be returned. So we need to short-circuit that entirely
         return symbolic_shapes.create_contiguous(self.shape)
 
     def new(self, *args, **kwargs):

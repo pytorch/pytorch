@@ -51,6 +51,7 @@ def create_magic_impl(op):
         def unwrap_proxy(x):
             return x.proxy if isinstance(x, ProxySymInt) else x
         out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
+
         def unwrap_proxyint(x):
             return x.sym_int if isinstance(x, ProxySymInt) else x
         out_sym_int = op(unwrap_proxyint(self), unwrap_proxyint(other))
@@ -322,6 +323,7 @@ class PythonKeyTracer(Tracer):
             return py_symint.proxy.node
         return super().create_arg(a)
 
+print(torch._C.MobileOptimizerTypee)
 
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
@@ -462,8 +464,8 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=True):
-    if use_fake and not trace_factory_functions:
+def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
+    if tracing_mode != "real" and not trace_factory_functions:
         raise ValueError("""\
 use_fake and not trace_factory_functions is not currently supported; if
 proxy tensor is not executed as a mode, fake tensors must not be executed
@@ -472,6 +474,8 @@ the traced graph module.)  However, non-mode execution of fake tensors
 is not currently supported (although, in principle, it could be; file
 a bug if you need this)""")
 
+    assert tracing_mode in ["real", "fake", "symbolic"]
+
     if decomposition_table is None:
         decomposition_table = {}
 
@@ -479,7 +483,16 @@ a bug if you need this)""")
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False) if use_fake else nullcontext()
+        fake_tensor_mode: Any = nullcontext()
+        if tracing_mode == "real":
+            fake_tensor_mode = nullcontext()
+        elif tracing_mode == "fake":
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+        elif tracing_mode == "symbolic":
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+        else:
+            raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
+
         proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
 
         def wrap_fake_concrete(x):
@@ -490,6 +503,7 @@ a bug if you need this)""")
 
         shape_env = ShapeEnv()
         arg_cnt = 0
+
         def wrap_fake_symbolic(x):
             nonlocal arg_cnt
             if isinstance(x, torch.Tensor):
@@ -498,8 +512,12 @@ a bug if you need this)""")
                 return val
             return x
 
-        if use_fake:  # type: ignore[attr-defined]
-            args = pytree.tree_map(wrap_fake_symbolic, args)
+        wrap_fn_map = {
+            "real": lambda x: x,
+            "fake": wrap_fake_concrete,
+            "symbolic": wrap_fake_symbolic,
+        }
+        args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined] # noqa: B950
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))

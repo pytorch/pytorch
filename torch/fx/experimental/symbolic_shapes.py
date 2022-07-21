@@ -25,7 +25,7 @@ def handle_symbolic_op(func, args, kwargs):
         return None
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
-    # TODO: hack, need to make is_contiguous calls symbolic (probably through symbolic strides)
+    # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
     # TODO: hack, we don't currently support symbolic strides properly

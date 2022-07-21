@@ -48,12 +48,3 @@ fx_g.recompile()
 print(fx_g.code)
 print(fx_g.shape_env.guards)
 exit(0)
-
-foo = torch.empty(shape_env.create_symint("foo", 3), device='meta')
-fake_tensor_mode = FakeTensorMode()
-test = FakeTensor(fake_tensor_mode, foo, 'cuda')
-with fake_tensor_mode:
-    print(torch.ops.aten.expand.SymInt(test, [test.shape[0], test.shape[0]]))
-    # print(torch.empty(test.shape, device='meta'))
-    # print(torch.cat([test, test]).shape)
-print(shape_env.guards)
