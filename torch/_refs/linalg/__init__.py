@@ -23,6 +23,7 @@ __all__ = [
     "svd",
     "vector_norm",
     "matrix_norm",
+    "norm",
 ]
 
 
@@ -198,6 +199,40 @@ def matrix_norm(
             return max_min(
                 vector_norm(A, 1.0, dim=dim0, keepdim=keepdim, dtype=dtype), dim1
             )
+
+
+@out_wrapper(exact_dtype=True)
+def norm(
+    A: TensorLikeType,
+    ord: Optional[Union[float, str]] = None,
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    if dim is not None:
+        if isinstance(dim, int):
+            dim = (dim,)  # type: ignore[assignment]
+        check(
+            len(dim) in (1, 2),
+            lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
+        )
+    elif ord is not None:
+        check(
+            A.ndim in (1, 2),
+            lambda: "linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
+        )
+
+    if ord is not None and (
+        (dim is not None and len(dim) == 2) or (dim is None and A.ndim == 2)
+    ):
+        if dim is None:
+            dim = (0, 1)
+        return matrix_norm(A, ord, dim, keepdim, dtype=dtype)
+    else:
+        if ord is None:
+            ord = 2.0
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
 
 
 @out_wrapper("U", "S", "Vh", exact_dtype=True)
