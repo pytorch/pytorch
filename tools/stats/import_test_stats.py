@@ -5,7 +5,7 @@ import json
 import os
 import pathlib
 import re
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, cast, Dict, List, Optional
 from urllib.request import urlopen
 
 

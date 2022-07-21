@@ -3,7 +3,7 @@ import platform
 import struct
 import sys
 from itertools import chain
-from typing import Iterable, List, Optional, cast
+from typing import cast, Iterable, List, Optional
 
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -62,7 +62,7 @@ class BuildType(object):
         cmake_cache_txt = os.path.join(BUILD_DIR, "CMakeCache.txt")
         if os.path.isfile(cmake_cache_txt):
             # Found CMakeCache.txt. Use the build type specified in it.
-            from .cmake import get_cmake_cache_variables_from_file
+            from .cmake_utils import get_cmake_cache_variables_from_file
 
             with open(cmake_cache_txt) as f:
                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)
