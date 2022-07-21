@@ -381,20 +381,26 @@ def translate_args_dispatcher_to_cpp(
 def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
-    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
+    backend_metadata = backend_index.get_kernel(f)
+    kernel_ns = (
+        backend_metadata.cpp_namespace
+        if backend_metadata and backend_metadata.cpp_namespace
+        else DEFAULT_KERNEL_NAMESPACE
+    )
+    ns = kernel_ns.replace("::native", "")
     return f"return {ns}::{backend_index.dispatch_key.lower()}::{name}({exprs});"
 
 
 def generate_static_dispatch_fallback_call(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
-    ns: str = "at",
 ) -> str:
     name = DispatcherSignature.from_schema(f.func).name()
     exprs = translate_args_dispatcher_to_cpp(f)
+    ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
     elif f.has_composite_explicit_autograd_non_functional_kernel:
@@ -409,7 +415,6 @@ def generate_static_dispatch_fallback_call(
 def static_dispatch(
     f: NativeFunction,
     backend_indices: List[BackendIndex],
-    namespace: str = "at",
 ) -> str:
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return ""
@@ -424,9 +429,9 @@ def static_dispatch(
         )
     ]
     if len(keys) == 1:
-        return generate_static_dispatch_backend_call(f, keys[0], namespace)
+        return generate_static_dispatch_backend_call(f, keys[0])
     elif len(keys) == 0:
-        return generate_static_dispatch_fallback_call(f, backend_indices, namespace)
+        return generate_static_dispatch_fallback_call(f, backend_indices)
 
     sig = DispatcherSignature.from_schema(f.func)
     native_tensor_args = [
@@ -454,10 +459,10 @@ def static_dispatch(
     for index in keys:
         dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
         dispatch_code.append(
-            f"""\t{generate_static_dispatch_backend_call(f, index, namespace)};"""
+            f"""\t{generate_static_dispatch_backend_call(f, index)};"""
         )
 
-    fallback = generate_static_dispatch_fallback_call(f, backend_indices, namespace)
+    fallback = generate_static_dispatch_fallback_call(f, backend_indices)
     connector = "\n\t\t"
 
     return f"""
