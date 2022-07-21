@@ -1588,11 +1588,14 @@ class THCCachingAllocator {
 
   void append_alloc_free_event() {
     std::lock_guard<std::mutex> lock(mutex);
-    if (num_alloc_events[current_alloc_free_event.device] >= alloc_free_events[current_alloc_free_event.device].size()) {
+    if (num_alloc_events[current_alloc_free_event.device] >=
+        alloc_free_events[current_alloc_free_event.device].size()) {
       alloc_free_events[current_alloc_free_event.device].resize(
           alloc_free_events[current_alloc_free_event.device].size() * 2);
     }
-    alloc_free_events[current_alloc_free_event.device][num_alloc_events[current_alloc_free_event.device]] = current_alloc_free_event;
+    alloc_free_events[current_alloc_free_event.device]
+                     [num_alloc_events[current_alloc_free_event.device]] =
+                         current_alloc_free_event;
     num_alloc_events[current_alloc_free_event.device] += 1;
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
@@ -1638,8 +1641,9 @@ class THCCachingAllocator {
         1, // type: 1 = allocation; 0 = free
         device // allocation device
     };
-    append_alloc_free_event(); // if allocation fails we still record the event with a nullptr
-            // ptr is modified if allocation succeeds
+    append_alloc_free_event(); // if allocation fails we still record the event
+                               // with a nullptr. ptr is modified if allocation
+                               // succeeds
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
