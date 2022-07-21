@@ -877,17 +877,15 @@ Tensor& intersection_binary_op_sparse_dense_out(
     auto res_indices = at::empty({res_sparse_dim, res_nnz}, s_indices.options());
     // fill in indices corresponding to the "batch" dimensions of d.
     int64_t n_repeat_interleave = res_nnz;
-    int64_t n_repeat = 1;
     for (const auto dim : c10::irange(d_batch_len)) {
       const auto dim_size = d_batch_shape[dim];
       n_repeat_interleave /= dim_size;
       const auto dim_index = index_buffer.slice(-1, 0, dim_size);
-      const auto dim_index_expanded = at::repeat_interleave(dim_index, n_repeat_interleave).repeat(n_repeat);
-      res_indices[dim].copy_(dim_index_expanded);
-      n_repeat *= dim_size;
+      const auto dim_index_repeat_interleaved = at::repeat_interleave(dim_index, n_repeat_interleave);
+      res_indices[dim].view({-1, dim_index_repeat_interleaved.numel()}).copy_(dim_index_repeat_interleaved);
     }
     // fill in indices corresponding to s_indices.
-    n_repeat = res_nnz / s._nnz();
+    int64_t n_repeat = res_nnz / s._nnz();
     auto res_indices_sparse = res_indices.narrow(0, d_batch_len, res_sparse_dim - d_batch_len);
     res_indices_sparse.copy_(s_indices.repeat({1, n_repeat}));
 
