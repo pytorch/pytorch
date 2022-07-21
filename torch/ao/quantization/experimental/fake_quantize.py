@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
+from torch.ao.quantization.experimental.fake_quantize_function import fake_quantize_function
 
 class APoTFakeQuantize(FakeQuantizeBase):
     alpha: Tensor
@@ -28,7 +28,6 @@ class APoTFakeQuantize(FakeQuantizeBase):
                     and self.quantization_levels is not None
                     and self.level_indices is not None), "Must set qparams for fake quant"
 
-            X = quantize_APoT(X, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
-            X = dequantize_APoT(X)
+            X = fake_quantize_function.apply(X, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
 
         return X
