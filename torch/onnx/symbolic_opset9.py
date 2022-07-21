@@ -2205,11 +2205,10 @@ def batch_norm(
         return res
 
 
-def _layer_norm_shared(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    if (
-        GLOBALS.operator_export_type
-        == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-    ):
+def _layer_norm_shared(
+    g, input, normalized_shape, weight, bias, eps, cudnn_enable, return_mean_rstd
+):
+    if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
             input,
@@ -2228,27 +2227,33 @@ def _layer_norm_shared(g, input, normalized_shape, weight, bias, eps, cudnn_enab
     numerator = sub(g, input, mean)
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    rdenominator = rsqrt(g, add(g, variance, eps_cst))
+    denominator = sqrt(g, add(g, variance, eps_cst))
 
-    normalized = g.op("Mul", numerator, rdenominator)
+    normalized = g.op("Div", numerator, denominator)
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
     if not (bias is None or symbolic_helper._is_none(bias)):
         normalized = add(g, normalized, bias)
 
-    return normalized, mean, rdenominator
+    if return_mean_rstd:
+        rdenominator = reciprocal(g, denominator)
+        return normalized, mean, rdenominator
+    else:
+        return normalized, None, None
 
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
 def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
-    return _layer_norm_shared(g, input, normalized_shape, weight, bias, eps, False)
+    return _layer_norm_shared(
+        g, input, normalized_shape, weight, bias, eps, False, True
+    )
 
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    normalized, mean, rdenominator = _layer_norm_shared(
-        g, input, normalized_shape, weight, bias, eps, cudnn_enable
+    normalized, mean, rstd = _layer_norm_shared(
+        g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
     )
     return normalized
 
