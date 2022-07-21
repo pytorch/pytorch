@@ -297,7 +297,6 @@ Tensor quantized_convolution(
     return conv2d_transpose_context_run(
         input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
   }
-  const vTensor& v_input = convert(input);
   VulkanOpContext vulkan_context = conv2d_context_create_q(
       weight,
       bias,
