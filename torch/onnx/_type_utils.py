@@ -84,6 +84,13 @@ class ScalarType(enum.Enum):
             raise ValueError(f"Unknown torch type: {torch_name}")
         return _TORCH_NAME_TO_SCALAR_TYPE[torch_name]
 
+    @classmethod
+    def from_dtype(cls, dtype: torch.dtype) -> ScalarType:
+        """Convert a torch dtype to a ScalarType."""
+        if dtype not in _DTYPE_TO_SCALAR_TYPE:
+            raise ValueError(f"Unknown dtype: {dtype}")
+        return _DTYPE_TO_SCALAR_TYPE[dtype]
+
     def scalar_name(self) -> ScalarName:
         """Convert a ScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
@@ -101,8 +108,18 @@ class ScalarType(enum.Enum):
         return _SCALAR_TYPE_TO_ONNX[self]
 
     def onnx_compatible(self) -> bool:
-        """Returns whether this ScalarType is compatible with ONNX."""
+        """Return whether this ScalarType is compatible with ONNX."""
         return self in _SCALAR_TYPE_TO_ONNX
+
+
+def valid_scalar_name(scalar_name: Union[ScalarName, str]) -> bool:
+    """Return whether the given scalar name is a valid JIT scalar type name."""
+    return scalar_name in _SCALAR_NAME_TO_TYPE
+
+
+def valid_torch_name(torch_name: Union[TorchName, str]) -> bool:
+    """Return whether the given torch name is a valid torch type name."""
+    return torch_name in _TORCH_NAME_TO_SCALAR_TYPE
 
 
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
@@ -126,9 +143,7 @@ _SCALAR_TYPE_TO_NAME: Dict[ScalarType, ScalarName] = {
     ScalarType.UNDEFINED: "Undefined",
 }
 
-_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = dict(
-    map(reversed, _SCALAR_TYPE_TO_NAME.items())
-)
+_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = {v: k for k, v in _SCALAR_TYPE_TO_NAME.items()}
 
 _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
     ScalarType.BOOL: "bool",
@@ -149,10 +164,7 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
     ScalarType.BFLOAT16: "bfloat16",
 }
 
-_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = dict(
-    map(reversed, _SCALAR_TYPE_TO_TORCH_NAME.items())
-)
-
+_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()}
 
 _SCALAR_TYPE_TO_ONNX = {
     ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
@@ -190,3 +202,5 @@ _SCALAR_TYPE_TO_DTYPE = {
     ScalarType.QINT32: torch.qint32,
     ScalarType.BFLOAT16: torch.bfloat16,
 }
+
+_DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
