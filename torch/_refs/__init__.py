@@ -235,6 +235,8 @@ __all__ = [
     "zeros",
     "zeros_like",
     "arange",
+    "linspace",
+    "logspace",
     #
     # Randomness References
     #
@@ -3049,6 +3051,34 @@ def linspace(
         res = prims.to_dtype(tmp, dtype)
 
     return res
+
+
+@register_decomposition(torch.ops.aten.logspace)
+@out_wrapper()
+def logspace(
+    start: NumberType,
+    end: NumberType,
+    steps: NumberType,
+    base: NumberType = 10,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    assert not isinstance(start, complex)
+    ret = torch.linspace(
+        start,
+        end,
+        steps,
+        dtype=torch.float64,
+        device=device,
+        layout=layout,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+    return prims.to_dtype(torch.pow(base, ret), dtype)
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
