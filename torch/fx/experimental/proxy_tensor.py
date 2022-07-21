@@ -16,7 +16,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
-from torch.utils._python_dispatch import TorchDispatchMode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -49,15 +48,15 @@ class ProxySymInt(object):
     def __bool__(self):
         return bool(self.sym_int)
 
-from torch.fx.proxy import Proxy
-
 import operator
 
 def create_magic_impl(op):
     def magic_impl(self, other):
-        def unwrap_proxy(x): return x.proxy if isinstance(x, ProxySymInt) else x
+        def unwrap_proxy(x):
+            return x.proxy if isinstance(x, ProxySymInt) else x
         out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
-        def unwrap_proxyint(x): return x.sym_int if isinstance(x, ProxySymInt) else x
+        def unwrap_proxyint(x):
+            return x.sym_int if isinstance(x, ProxySymInt) else x
         out_sym_int = op(unwrap_proxyint(self), unwrap_proxyint(other))
         return ProxySymInt(out_sym_int, out_proxy)
     return magic_impl
