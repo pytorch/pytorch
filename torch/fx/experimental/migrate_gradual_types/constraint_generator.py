@@ -5,7 +5,7 @@ from typing import Callable, Dict, Iterable
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
-    TVar, DVar, GetItemTensor, IndexSelect, Transpose
+    TVar, DVar, GetItemTensor, IndexSelect, Transpose, DGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add, op_mul
 from torch.fx.node import Target, Node
@@ -56,6 +56,48 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
         return [BinConstraintT(input, output, op_eq)], counter
     else:
         raise NotImplementedError('Not yet implemented')
+
+@register_inference_rule(torch.bmm)
+def bmm_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    Constraints that match the input to a size 3 tensor
+    and switch the dimensions according to the rules
+    of batch multiplication
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+
+    bmm_output, counter = gen_tvar(counter)
+    symbols[n] = bmm_output
+
+    bmm_input1 = symbols[n.args[0]]
+    bmm_input2 = symbols[n.args[1]]
+
+    dims_input1, counter = gen_tensor_dims(3, counter)
+    dims_input2, counter = gen_tensor_dims(3, counter)
+
+    inputs_dyn = Conj([BinConstraintT(bmm_input1, Dyn, op_eq),
+                      BinConstraintT(bmm_input2, Dyn, op_eq),
+                       BinConstraintT(bmm_output, Dyn, op_eq)])
+
+    input1_dyn = Conj([BinConstraintT(bmm_input1, Dyn, op_eq),
+                       BinConstraintT(bmm_input2, TensorType(dims_input2), op_eq),
+                       BinConstraintT(bmm_output, TensorType([dims_input2[0], Dyn, dims_input2[2]]), op_eq)])
+
+    input2_dyn = Conj([BinConstraintT(bmm_input2, Dyn, op_eq),
+                       BinConstraintT(bmm_input1, TensorType(dims_input1), op_eq),
+                       BinConstraintT(bmm_output, TensorType([dims_input1[0], dims_input1[1], Dyn]), op_eq)])
+
+    consistency_constraints = [BinConstraintD(dims_input1[0], dims_input2[0], op_consistency)]
+
+    batch_size, counter = gen_dvar(counter)
+
+    inputs_are_tensors = Conj([BinConstraintT(bmm_input1, TensorType(dims_input1), op_eq),
+                               BinConstraintT(bmm_input2, TensorType(dims_input2), op_eq),
+                               BinConstraintT(bmm_output, TensorType([batch_size, dims_input1[1], dims_input2[2]]), op_eq),
+                               *consistency_constraints, DGreatestUpperBound(batch_size, dims_input1[0], dims_input2[0])])
+
+    return [Disj([inputs_dyn, input1_dyn, input2_dyn, inputs_are_tensors])], counter
 
 
 @register_inference_rule("index_select")
@@ -131,6 +173,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule("to")
 @register_inference_rule("int")
 @register_inference_rule("long")
+@register_inference_rule("contiguous")
 def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
