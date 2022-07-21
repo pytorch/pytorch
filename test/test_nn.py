@@ -11771,7 +11771,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv1d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+        grad_input_autograd, grad_weight_autograd = torch.autograd.grad(output, (input, weight), grad_output)
 
         grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
