@@ -771,12 +771,12 @@ void smooth_l1_loss_impl(
           MPSGraphTensor *mpsGraphOneTensor = [mpsGraph constantWithScalar: 1.0
                                                                   dataType: inputTensor.dataType];
           MPSGraphTensor *mpsGraphHalfTensor = [mpsGraph constantWithScalar: 0.5
-                                                                   dataType: inputTensor.dataType];
+                                                                   dataType: MPSDataTypeFloat32];
           MPSGraphTensor *betaTensor = [mpsGraph constantWithScalar: beta
-                                                           dataType: inputTensor.dataType];
+                                                           dataType: MPSDataTypeFloat32];
           // 0.5 * beta
           MPSGraphTensor *halfTensorMulBetaTensor = [mpsGraph constantWithScalar: beta * 0.5
-                                                                        dataType: inputTensor.dataType];
+                                                                        dataType: MPSDataTypeFloat32];
           // Calculating first part of the equation:
           // ln = 0.5(xn - yn)^2/beta, if |xn - yn| < beta
 
