@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import os
 from collections.abc import Sequence
 from functools import partial
 import warnings

@@ -1,8 +1,6 @@
 # Owner(s): ["module: unknown"]
 
-import os
 from functools import partial
-import unittest
 
 import torch
 
@@ -31,8 +29,7 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
 #   functionality with original test_jit.py method operator tests
-@unittest.skipIf(os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1",
-                 "Tests that don't use gradcheck don't need to run on slow_gradcheck CI")
+@skipIfSlowGradcheckEnv
 class TestJit(JitCommonTestCase):
     exact_dtype = True
 
