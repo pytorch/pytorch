@@ -225,6 +225,7 @@ jobs:
       sync-tag: rocm-build
 
   linux-focal-rocm5_1-py3_7-test:
+    if: false # Disabling temporarily due to network upgrade to ROCm CI machines.
     name: linux-focal-rocm5.1-py3.7
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_1-py3_7-build
