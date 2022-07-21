@@ -10,6 +10,12 @@
 
 namespace {
 
+#ifdef USE_VULKAN_FP16_INFERENCE
+  constexpr float kTolerance = 1e-2;
+#else
+  constexpr float kTolerance = 1e-5;
+#endif
+
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   float maxValue = 0.0f;
 
@@ -17,13 +23,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
 
-#ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float tolerance = 1e-2;
-#else
-  constexpr float tolerance = 1e-5;
-#endif
-
-  return diff.abs().max().item<float>() <= (tolerance * maxValue);
+  return diff.abs().max().item<float>() <= (kTolerance * maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -34,13 +34,6 @@ bool checkHardShrink(
     const at::Tensor& ref, const at::Tensor& out, const float clamp_thresh) {
   float* ref_ptr = ref.data_ptr<float>();
   float* out_ptr = out.data_ptr<float>();
-
-#ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float tolerance = 1e-2;
-#else
-  constexpr float tolerance = 1e-5;
-#endif
-
   float ref_max = ref.abs().max().item<float>();
   float out_max = out.abs().max().item<float>();
   float max_val = std::fmax(ref_max, out_max);
@@ -55,9 +48,9 @@ bool checkHardShrink(
 
     // For values near the clamp threshold, results may be ambiguous.
     float distance_from_thresh = std::abs(std::abs(ref_val) - abs_clamp_thresh);
-    if (distance_from_thresh < tolerance * abs_clamp_thresh) {
+    if (distance_from_thresh < kTolerance * abs_clamp_thresh) {
       if (out_val != 0.0f) {
-        if (abs_diff >= tolerance * max_val) {
+        if (abs_diff >= kTolerance * max_val) {
           return false;
         }
       }
@@ -67,7 +60,7 @@ bool checkHardShrink(
         return false;
       }
     }
-    else if (abs_diff >= tolerance * max_val) {
+    else if (abs_diff >= kTolerance * max_val) {
       return false;
     }
   }
@@ -81,13 +74,6 @@ bool checkThreshold(
     const float value) {
   float* ref_ptr = ref.data_ptr<float>();
   float* out_ptr = out.data_ptr<float>();
-
-#ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float tolerance = 1e-2;
-#else
-  constexpr float tolerance = 1e-5;
-#endif
-
   float ref_max = ref.abs().max().item<float>();
   float out_max = out.abs().max().item<float>();
   float max_val = std::fmax(ref_max, out_max);
@@ -101,19 +87,19 @@ bool checkThreshold(
 
     // For values near the clamp threshold, results may be ambiguous.
     float distance_from_thresh = std::abs(std::abs(ref_val) - clamp_thresh);
-    if (distance_from_thresh < tolerance * clamp_thresh) {
-      if (val_diff >= tolerance * value) {
-        if (abs_diff >= tolerance * max_val) {
+    if (distance_from_thresh < kTolerance * clamp_thresh) {
+      if (val_diff >= kTolerance * value) {
+        if (abs_diff >= kTolerance * max_val) {
           return false;
         }
       }
     }
     else if (std::abs(ref_val) < std::abs(clamp_thresh)) {
-      if (val_diff >= tolerance * value) {
+      if (val_diff >= kTolerance * value) {
         return false;
       }
     }
-    else if (abs_diff >= tolerance * max_val) {
+    else if (abs_diff >= kTolerance * max_val) {
       return false;
     }
   }
@@ -126,13 +112,7 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   float maxValue = a.abs().max().item<float>();
   maxValue = fmax(b.abs().max().item<float>(), maxValue);
 
-#ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float tolerance = 1e-2;
-#else
-  constexpr float tolerance = 1e-5;
-#endif
-
-  const float maxDiff = maxValue * tolerance;
+  const float maxDiff = maxValue * kTolerance;
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
     for (const auto y : c10::irange(diff.sizes()[0])) {
