@@ -79,7 +79,6 @@ Tensor nested_softmax_backward(
   if (ntensors == 0) {
     return grad.clone();
   }
-
   int64_t positive_dim = at::maybe_wrap_dim(dim, output_ptr->dim());
 
   //  Get the info about the output
@@ -87,34 +86,30 @@ Tensor nested_softmax_backward(
                &output_sizemat = output_ptr->get_nested_size_tensor();
 
   //  Get the info about the grad
-  const Tensor &grad_buffer = grad_ptr->get_buffer(),
-               &grad_sizemat = grad_ptr->get_nested_size_tensor();
+  const Tensor &grad_sizemat = grad_ptr->get_nested_size_tensor();
 
   TORCH_INTERNAL_ASSERT(output_sizemat.equal(grad_sizemat));
+  Tensor grad_output =
+      wrap_buffer(at::empty_like(output_buffer), output_sizemat.clone());
 
-  Tensor grad_output_buffer = at::empty_like(output_buffer);
   // split buffer into original tensors
   std::vector<int64_t> offsets = NestedTensor_get_offsets(output_ptr);
   std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(output_ptr);
 
-  for(const int64_t i: c10::irange(ntensors)){
-    auto grad_ouput_buffer_slice =
-        grad_output_buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
-    auto grad_buffer_slice =
-        grad_buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
-    auto output_buffer_slice =
-        output_buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
+  // switch to unbind
+  std::vector<Tensor> grad_output_unbind{grad_output.unbind()},
+      grad_unbind{grad.unbind()}, output_unbind{output.unbind()};
+
+  for (const int64_t i: c10::irange(ntensors)) {
     at::_softmax_backward_data_out(
-        grad_ouput_buffer_slice,
-        grad_buffer_slice,
-        output_buffer_slice,
+        grad_output_unbind[i],
+        grad_unbind[i],
+        output_unbind[i],
         positive_dim - 1,
         input_dtype);
   }
-  return wrap_buffer(grad_output_buffer, grad_sizemat.clone());
+  return grad_output;
 }
-
-
 
 } // namespace native
 } // namespace at

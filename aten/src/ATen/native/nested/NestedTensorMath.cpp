@@ -1097,7 +1097,7 @@ inline void NestedTensor_reshape_copy(
           buffer.as_strided(sizes[i], strides[i], offsets[i]).reshape(sizes_reshaped[i]));
     }
 }
-}
+} // namespace
 
 // Special rules for reshape(nested tensor):
 // 1. Only 1 regular dimension can be collapsed with
