@@ -543,22 +543,13 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
   at::assert_no_internal_overlap(out);
 
-  // Indices of tensors to be skipped because they're empty
-  std::vector<int64_t> skipped_tensor_indices;
-  // Tensors to be read
-  std::vector<const Tensor*> input_tensors;
-  int tensor_idx = 0;
   for(const Tensor& t : materialized_inputs) {
-    if(t.numel() == 0 || should_skip(t)) {
-      skipped_tensor_indices.push_back(tensor_idx);
-      tensor_idx++;
+    if (should_skip(t)) {
       continue;
     }
-    input_tensors.push_back(&t);
     nDims = t.dim();
     // TODO: Is this OK?
     notSkippedTensor = &t;
-    tensor_idx++;
   }
 
   // If all inputs are empty tensors, return an empty tensor
@@ -632,19 +623,9 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
   MPSGraphCache *cache_ = MPSGraphCache::getInstance();
 
-  // Make string out of skipped tensor indices
-  string skipped_indices_string = "";
-  for(int idx : skipped_tensor_indices)
-    skipped_indices_string += (std::to_string(idx)+",");
-  string input_types = "";
-  for(const Tensor& tensor : materialized_inputs)
-    input_types += (getMPSTypeString(tensor.scalar_type())+",");
-
   @autoreleasepool {
     string key = "cat_out_mps:" + getMPSTypeString(result_type(inputs))
                                 + ":" + to_string(inputs.size())
-                                + ":" + skipped_indices_string
-                                + ":" + input_types
                                 + ":" + to_string(dimension);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -657,39 +638,29 @@ TORCH_IMPL_FUNC(cat_out_mps)
           newCachedGraph = new CachedGraph(mpsGraph);
 
           // Create placeholders
-          auto len_tensor_array = inputs.size() - skipped_tensor_indices.size();
-          MPSGraphTensor* inputMPSGraphTensors[len_tensor_array];
-          MPSGraphTensor* castInputMPSGraphTensors[len_tensor_array];
+          MPSGraphTensor* inputMPSGraphTensors[inputs.size()];
+          MPSGraphTensor* castInputMPSGraphTensors[inputs.size()];
 
-          int graph_tensor_idx = 0;
-          for(const Tensor* tensor : input_tensors) {
-            inputMPSGraphTensors[graph_tensor_idx] = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(tensor->scalar_type()) );
-            if(getMPSDataType(result_type(inputs)) == MPSDataTypeBool) {
-              castInputMPSGraphTensors[graph_tensor_idx] = [mpsGraph castTensor:inputMPSGraphTensors[graph_tensor_idx]
-                                                                           toType:MPSDataTypeFloat32
-                                                                             name:[NSString stringWithFormat:@"castInput%@", [NSNumber numberWithInt:graph_tensor_idx]]];
-            }
-            else {
-              if(tensor->scalar_type() != result_type(inputs))
-                castInputMPSGraphTensors[graph_tensor_idx] = [mpsGraph castTensor:inputMPSGraphTensors[graph_tensor_idx]
-                                                                           toType:getMPSDataType(result_type(inputs))
-                                                                             name:[NSString stringWithFormat:@"castInput%@", [NSNumber numberWithInt:graph_tensor_idx]]];
-              else
-                castInputMPSGraphTensors[graph_tensor_idx] = inputMPSGraphTensors[graph_tensor_idx];
-            }
-            graph_tensor_idx++;
+          for(int i = 0; i < inputs.size(); i++) {
+            inputMPSGraphTensors[i] = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(result_type(inputs)));
+            if(getMPSDataType(result_type(inputs)) == MPSDataTypeBool)
+              castInputMPSGraphTensors[i] = [mpsGraph castTensor:inputMPSGraphTensors[i]
+                                                      toType:MPSDataTypeInt32
+                                                        name:[NSString stringWithFormat:@"inputTensor_%@", [NSNumber numberWithInt:i]]];
+            else
+              castInputMPSGraphTensors[i] = inputMPSGraphTensors[i];
           }
 
           auto inputTensorsArray = [NSArray arrayWithObjects:castInputMPSGraphTensors
-                                                       count:len_tensor_array];
+                                                       count:inputs.size()];
           // Use concatTensors to concatenate
           MPSGraphTensor* outputTensor = [mpsGraph concatTensors:inputTensorsArray
                                                        dimension:dimension // Maybe convert this from int64_t -> int32
                                                             name:nil];
 
-          newCachedGraph->inputMPSGraphTensors_ = (MPSGraphTensor**)malloc(len_tensor_array * sizeof(MPSGraphTensor*));
+          newCachedGraph->inputMPSGraphTensors_ = (MPSGraphTensor**)malloc(inputs.size() * sizeof(MPSGraphTensor*));
 
-          for(int i = 0; i < len_tensor_array; i++)
+          for(int i = 0; i < inputs.size(); i++)
             newCachedGraph->inputMPSGraphTensors_[i] = inputMPSGraphTensors[i];
           if(getMPSDataType(result_type(inputs)) == MPSDataTypeBool)
             outputTensor = [mpsGraph castTensor:outputTensor
@@ -704,20 +675,16 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
     std::vector<Placeholder> inputPlaceholders;
     int i = 0;
-    int t_idx = 0;
     for(const Tensor& tensor : materialized_inputs) {
-      if(std::find(skipped_tensor_indices.begin(), skipped_tensor_indices.end(), i) == skipped_tensor_indices.end()) {
-        Placeholder currentInputPlaceholder = Placeholder(cachedGraph->inputMPSGraphTensors_[t_idx], tensor);
-        inputPlaceholders.push_back(currentInputPlaceholder);
-        t_idx++;
-      }
+      Placeholder currentInputPlaceholder = Placeholder(cachedGraph->inputMPSGraphTensors_[i], tensor);
+      inputPlaceholders.push_back(currentInputPlaceholder);
       i++;
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
-    for (int i = 0; i < inputPlaceholders.size(); i++) {
+    for (int i = 0; i < inputs.size(); i++) {
       feeds[(inputPlaceholders[i]).getMPSGraphTensor()] = (inputPlaceholders[i]).getMPSGraphTensorData();
     }
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
