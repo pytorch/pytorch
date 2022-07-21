@@ -19,10 +19,10 @@ def deprecated(since: str, removed_in: str, instructions: str):
         @functools.wraps(function)
         def wrapper(*args, **kwargs):
             warnings.warn(
-                f"`{function.__name__}` is deprecated in version {since} and will be "
+                f"`{function.__module__}.{function.__name__}` is deprecated in version {since} and will be "
                 f"removed in version {removed_in}. Please {instructions}.",
                 category=FutureWarning,
-                stacklevel=3,
+                stacklevel=2,
             )
             return function(*args, **kwargs)
 
