@@ -1,5 +1,7 @@
 # coding=utf-8
 
+from typing import cast
+
 import torch
 import torch.distributed as dist
 from ._common import (
@@ -156,7 +158,7 @@ def _validate_embedding_param(args, kwargs):
         raise TypeError("input need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    weight_size = weight.size()
+    weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
