@@ -1,28 +1,28 @@
+from typing import Optional, Union
+
 import torch
 
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+import torch._refs as refs
+from torch._decomp import register_decomposition
+from torch._prims_common import (
     check,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    NumberType,
     ShapeType,
     TensorLike,
     TensorLikeType,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._refs as refs
-from torch._decomp import register_decomposition
-from torch._prims.wrappers import (
+from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
 from torch._refs import (
-    _make_elementwise_unary_reference,
     _make_elementwise_binary_reference,
+    _make_elementwise_unary_reference,
 )
-
-from typing import Optional, Union
 
 __all__ = [
     "celu",
@@ -35,7 +35,9 @@ __all__ = [
     "margin_ranking_loss",
     "mish",
     "mse_loss",
+    "prelu",
     "relu",
+    "relu6",
     "selu",
     "softplus",
     "softshrink",
@@ -506,6 +508,7 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+@register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -544,6 +547,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     return refs.where(a > 0, a, a * weight)
 
 
+@register_decomposition(torch.ops.aten.relu6)
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.relu6
