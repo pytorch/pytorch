@@ -142,7 +142,8 @@ class CallTypeHelper final {
 //
 // To add a new event type to the cache:
 //   1) Add an entry to the `CallType` enum.
-//   2) Add a specialization of Config which defined key_t, ephemeral_t and cache_t.
+//   2) Add a specialization of Config which defined key_t, ephemeral_t and
+//      cache_t.
 //   3) Add a specialization of ValueCache::store and ValueCache::load.
 //
 // -------------------------
@@ -216,9 +217,7 @@ class Callsite {
 class ValueCache {
  public:
   template <CallType C>
-  void store(
-      const typename Config<C>::key_t&,
-      typename Config<C>::ephemeral_t);
+  void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
 
   template <CallType C>
   auto load(const Callsite<C>& callsite, size_t python_tid) const {
