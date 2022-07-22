@@ -317,6 +317,19 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 
+
+def discover_functorch_tests():
+    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
+    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
+    result = discover_tests(pathlib.Path(functorch_test_dir))
+    result = [os.path.join(functorch_test_dir, r) for r in result]
+
+    # Sanity check
+    assert len(result) >= 8
+    return result
+
+FUNCTORCH_TESTS = discover_functorch_tests()
+
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
     "distributions/test_distributions",
@@ -591,6 +604,16 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "--functorch",
+        "--functorch",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run functorch tests. "
+            "If this flag is not present, we will not run any functorch tests. "
+            "This requires functorch to already be installed."
+        )
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -770,6 +793,9 @@ def get_selected_tests(options):
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
+
+    if options.functorch:
+        selected_tests = FUNCTORCH_TESTS
 
     # process reordering
     if options.bring_to_front:
