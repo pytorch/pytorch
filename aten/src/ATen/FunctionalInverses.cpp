@@ -299,6 +299,14 @@ Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& m
     }
 }
 
+Tensor FunctionalInverses::view_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size) {
+    if (reapply_views) {
+      return mutated_view.view_symint(base.sym_sizes());
+    } else {
+      return at::view_copy_symint(mutated_view, base.sym_sizes());
+    }
+}
+
 Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::ScalarType dtype) {
     if (reapply_views) {
       return mutated_view.view(base.scalar_type());
