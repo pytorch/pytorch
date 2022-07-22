@@ -1,16 +1,24 @@
 from collections import deque
 import re
-from typing import Dict, List
+from typing import Dict, List, Set
 
+import torch
 from torch.profiler import profile
-from torch._C._autograd import _ProfilerEvent
+from torch.profiler._utils import index_of_first_match
+from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
+                                _ExtraFields_Backend, _ExtraFields_Allocation,
+                                _ExtraFields_PyCCall, _ExtraFields_PyCall,
+                                _EventType)
 
 
 class Pattern:
     '''
     Base class for all patterns, subclass this class and implement match()
     to define custom patterns.
+
+    In subclass, define description and skip property.
     '''
+
     def __init__(self, prof: profile):
         self.prof = prof
         self.description = "Please specify a description for pattern"
@@ -21,9 +29,25 @@ class Pattern:
         for event in self.event_tree:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 
+    @property
+    def skip(self):
+        return False
+
     def report(self, event: _ProfilerEvent):
-        msg = f"{self.description}\n{source_code_location(event)}"
+        msg = f"{event.name()}\n{self.description}\n{source_code_location(event)}"
         return msg
+
+    def eventTreeTraversal(self):
+        '''
+        Standard DFS traversal of the event tree.
+        Override this method to customize the traversal order.
+        '''
+        stack = deque(self.event_tree)
+        while stack:
+            curr_event = stack.pop()
+            yield curr_event
+            for child_event in curr_event.children:
+                stack.append(child_event)
 
     def match(self, event: _ProfilerEvent):
         '''
@@ -33,8 +57,10 @@ class Pattern:
         raise NotImplementedError
 
     def matched_events(self):
+        if self.skip:
+            return []
         matched_events = []
-        for event in eventTreeDFS(self.event_tree):
+        for event in self.eventTreeTraversal():
             if self.match(event):
                 matched_events.append(event)
         return matched_events
@@ -91,11 +117,17 @@ class ExtraCUDACopyPattern(Pattern):
     We always select the last child in the children list when we go down the tree.
     If at any step we failed, it is not a match.
     '''
+
     def __init__(self, prof: profile):
-        assert prof.with_stack
         super().__init__(prof)
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
-        self.init_ops = {"aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"}
+        self.init_ops = {
+            "aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"
+        }
+
+    @property
+    def skip(self):
+        return self.prof.with_stack is False
 
     def match(self, event):
         # TODO: We should also check tensor identities
@@ -115,29 +147,144 @@ class ExtraCUDACopyPattern(Pattern):
             if event.name() in self.init_ops:
                 return True
         return event.name() in self.init_ops
+        # TODO: Check if tensor is reused
 
 
-def eventTreeDFS(event_tree):
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.pop()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
+class ForLoopIndexingPattern(Pattern):
+    '''
+    This pattern identifies if we use a for loop to index a tensor that
+    can be vectorized.
+    example:
+    tensor = torch.empty((100, 100))
+    for i in range(100):
+        tensor[i] = i
+
+    Pattern:
+    aten::select | ... | aten::select | ... (Repeat)
+
+    Algorithm:
+    We start at node aten::select, and we check if we can find this alternating patterns.
+    We also keep a dictionary to avoid duplicate match in the for loop.
+    '''
+
+    def __init__(self, prof: profile):
+        super().__init__(prof)
+        self.description = "For loop indexing detected. Vectorization recommended."
+        self.visited: Set[int] = set()
+
+    def eventTreeTraversal(self):
+        '''
+        We need to use BFS traversal order to avoid duplicate match.
+        '''
+        stack = deque(self.event_tree)
+        while stack:
+            curr_event = stack.popleft()
+            yield curr_event
+            for child_event in curr_event.children:
+                stack.append(child_event)
+
+    def match(self, event: _ProfilerEvent):
+        if event.name() != "aten::select":
+            return False
+        if event.id in self.visited:
+            return False
+        repeat_count = 1
+        _, next = self.siblings_of(event)
+        if len(next) <= 1:
+            return False
+
+        # Custom event list matching
+        def same_ops(list1, list2):
+            if len(list1) != len(list2):
+                return False
+            for op1, op2 in zip(list1, list2):
+                if op1.name() != op2.name():
+                    return False
+            return True
+
+        # Record the ops between two aten::select
+        next_select_idx = index_of_first_match(
+            next, lambda e: e.name() == "aten::select")
+        if next_select_idx is None:
+            return False
+        indexing_ops = [event] + next[:next_select_idx]
+        next = next[len(indexing_ops) - 1:]
+        for i in range(0, len(next), len(indexing_ops)):
+            if same_ops(indexing_ops, next[i:i + len(indexing_ops)]):
+                repeat_count += 1
+                self.visited.add(next[i].id)
+            else:
+                break
+        return repeat_count >= 10
+
+
+class FP32MatMulPattern(Pattern):
+
+    def __init__(self, prof: profile):
+        super().__init__(prof)
+        self.description = (
+            "You are currently using GPU that supports TF32. "
+            "Please enable TF32 by setting 'torch.backends.cuda.matmul.allow_tf32 = True'"
+        )
+
+    @property
+    def skip(self):
+        has_tf32 = all(
+            int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
+        return has_tf32 is False
+
+    def match(self, event: _ProfilerEvent):
+        # If we saw this pattern once, we don't need to match it again
+        if event_type(event) != _EventType.TorchOp:
+            return False
+        assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+        if event.name() == "aten::mm":
+            if event.extra_fields.allow_tf32_cublas is False:
+                return True
+        return False
+
+    def report(self, event: _ProfilerEvent):
+        return self.description
 
 
 def source_code_location(event: _ProfilerEvent):
-    while (event is not None):
-        match = re.search(r"\.py\(.*\)", event.name())
-        if (match is None):
-            event = event.parent
-            continue
-        return event.name()
+    while event:
+        if event_type(event) == _EventType.PyCall or event_type(
+                event) == _EventType.PyCCall:
+            assert isinstance(event.extra_fields,
+                              _ExtraFields_PyCall) or isinstance(
+                                  event.extra_fields, _ExtraFields_PyCCall)
+            return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
+        event = event.parent
     return "No source code location found"
 
 
 def report_all_anti_patterns(prof):
-    anti_patterns = [ExtraCUDACopyPattern(prof)]
+    anti_patterns = [
+        ExtraCUDACopyPattern(prof),
+        ForLoopIndexingPattern(prof),
+        FP32MatMulPattern(prof)
+    ]
+    reported = set()
+    print(f"{'-'*40}TorchTidy Report{'-'*40}")
     for anti_pattern in anti_patterns:
         for event in anti_pattern.matched_events():
-            print(anti_pattern.report(event))
+            report_msg = anti_pattern.report(event)
+            if report_msg not in reported:
+                print(report_msg)
+                reported.add(report_msg)
+
+
+def event_type(event: _ProfilerEvent):
+    if isinstance(event.extra_fields, _ExtraFields_TorchOp):
+        return _EventType.TorchOp
+    elif isinstance(event.extra_fields, _ExtraFields_Backend):
+        return _EventType.Backend
+    elif isinstance(event.extra_fields, _ExtraFields_Allocation):
+        return _EventType.Allocation
+    elif isinstance(event.extra_fields, _ExtraFields_PyCall):
+        return _EventType.PyCall
+    elif isinstance(event.extra_fields, _ExtraFields_PyCCall):
+        return _EventType.PyCCall
+    else:
+        raise Exception("Unknown event type")
