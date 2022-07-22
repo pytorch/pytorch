@@ -47,7 +47,8 @@ OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 @dataclass
 class DTypeConfig:
     """
-    Data type config for patterns defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
+    Config for the set of supported input/output activation, weight, and bias data types for the
+    patterns defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
     input_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
