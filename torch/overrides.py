@@ -1859,6 +1859,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)

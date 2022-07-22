@@ -187,6 +187,18 @@ overload names, at most one overload is allowed to have an empty overload name.
 
 The declarations also support the following attributes.
 
+**Namespaces.** User can register operators in different namespaces than `aten`, by simply putting custom namespaces before the function name. Currently nested namespace is not supported for function name. If not specified, all the functions will be registered in `aten` namespace.
+
+For example, suppose we are registering `my_op` into `custom` namespace, we can have:
+```
+- func: custom::my_op(Tensor(a) self, ...) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CPU: my_op_cpu
+    CUDA: my_op_cuda
+```
+
+Note that we have a one-off `TORCH_LIBRARY` APIs to achieve the same goal of registering an operator in a custom namespace. Comparing with that API, having custom namespace in `native_functions.yaml` is useful in cases where the function does not really belong to ATen but is also widely used and it is preferred to have a shared place to register it.
 
 ### `variants`
 
@@ -270,7 +282,14 @@ dispatch:
 
 This specifies the actual name of the function you want to dispatch to, so you
 can dispatch to different functions depending on which backend the passed tensors
-belong to.  If the dispatch table is omitted, we assume a default dispatch
+belong to.  Notice that custom namespaces is supported on these names, it's useful when the native function listed lives in a namespace other than the default `at::native`. Currently we support nested namespace with maximum level of 2. For example:
+```
+dispatch:
+    CPU: custom::ns::func_cpu
+```
+The example above hinted the native function can be found under `custom::ns::native` namespace (the trailing `::native` is added automatically).
+
+If the dispatch table is omitted, we assume a default dispatch
 table:
 
 ```

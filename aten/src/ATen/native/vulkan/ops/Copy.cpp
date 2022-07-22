@@ -15,9 +15,7 @@ void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
       // pipeline barrier
       pipeline_barrier,
       // images
-      src.image(
-          pipeline_barrier,
-          api::PipelineStage::TRANSFER),
+      src.image(pipeline_barrier, api::PipelineStage::TRANSFER),
       dst.image(
           pipeline_barrier,
           api::PipelineStage::TRANSFER,
@@ -37,12 +35,19 @@ void copy_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-    float* data_ptr = mapping.template data<float>();
-
-    memcpy(
-      data_ptr,
-      src.contiguous().data_ptr<float>(),
-      std::min(src.nbytes(), src.nbytes()));
+    if (src.dtype() == c10::kQUInt8) {
+      c10::quint8* data_ptr = mapping.template data<c10::quint8>();
+      memcpy(
+          data_ptr,
+          src.contiguous().data_ptr<c10::quint8>(),
+          std::min(src.nbytes(), src.nbytes()));
+    } else {
+      float* data_ptr = mapping.template data<float>();
+      memcpy(
+          data_ptr,
+          src.contiguous().data_ptr<float>(),
+          std::min(src.nbytes(), src.nbytes()));
+    }
   }
   utils::pack_staging_to_vtensor(staging.buffer(), dst);
 }
@@ -75,12 +80,19 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::READ);
     mapping.invalidate();
 
-    float* data_ptr = mapping.template data<float>();
-
-    memcpy(
-        dst.data_ptr<float>(),
-        data_ptr,
-        std::min(src.nbytes(), dst.nbytes()));
+    if (dst.is_quantized()) {
+      c10::quint8* data_ptr = mapping.template data<c10::quint8>();
+      memcpy(
+          dst.data_ptr<c10::quint8>(),
+          data_ptr,
+          std::min(src.nbytes(), dst.nbytes()));
+    } else {
+      float* data_ptr = mapping.template data<float>();
+      memcpy(
+          dst.data_ptr<float>(),
+          data_ptr,
+          std::min(src.nbytes(), dst.nbytes()));
+    }
   }
 
   context->fences().return_fence(fence);
@@ -103,6 +115,10 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     }
     // CPU -> Vulkan
     else {
+      TORCH_CHECK(
+          src.dtype() == c10::kQUInt8 || src.dtype() == at::kFloat,
+          "Invalid Data Type: expected QUint8 or Float but got ",
+          src.dtype());
       copy_cpu_to_vulkan(src, v_self);
     }
   }
@@ -112,13 +128,15 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
     // Vulkan -> CPU
     if (self.device().is_cpu()) {
+      TORCH_CHECK(
+          self.dtype() == c10::kQUInt8 || self.dtype() == at::kFloat,
+          "Invalid Data Type: expected QUint8 or Float but got ",
+          self.dtype());
       copy_vulkan_to_cpu(v_src, self);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Unsupported!");
     }
-  }
-  else {
+  } else {
     TORCH_INTERNAL_ASSERT(
         false,
         "Invalid code path taken! Either the source or the destination tensor "

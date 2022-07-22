@@ -3407,6 +3407,11 @@ at::Tensor lift(const at::Tensor& self) {
     return self;
 }
 
+// See notes in native_functions.yaml
+at::Tensor lift_fresh(const at::Tensor& self) {
+    return self;
+}
+
 at::Tensor& _fw_primal_copy_out(const at::Tensor & self, int64_t level, at::Tensor & out) {
   auto tmp = self._fw_primal(level);
   out.copy_(tmp);

@@ -499,16 +499,6 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_kl_div_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  // Based on definition of aten/src/ATen/native/Loss.cpp::kl_div_backward_cpu.
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   // TODO(whc) support cat in codegen and move this to compute_*_cat functions
   std::vector<int64_t> out_shape(
@@ -1066,6 +1056,16 @@ std::vector<Shape> compute_shape_narrow_copy_symint(
     int64_t dim,
     int64_t start,
     c10::SymInt length) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_hardswish(const at::Tensor& self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_hardswish_backward(
+    const at::Tensor& grad_output,
+    const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
