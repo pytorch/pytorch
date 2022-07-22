@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
@@ -645,182 +646,28 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   return replayCasP(consumer, producer, compute_at_axis, root_map);
 }
 
-namespace {
-
-std::deque<TensorView*> deduplicate(const std::deque<TensorView*>& tv_deuqe) {
-  std::deque<TensorView*> deduplicated;
-  std::unordered_set<TensorView*> inserted;
-  for (auto tv_entry : tv_deuqe) {
-    if (inserted.find(tv_entry) == inserted.end()) {
-      deduplicated.emplace_back(tv_entry);
-      inserted.emplace(tv_entry);
-    }
-  }
-  return deduplicated;
+void TransformPropagator::propagateTvPasC(TensorView* from, TensorView* to) {
+  int pos = replayed_pos_.at(from);
+  auto replay = TransformReplay::replayPasC(to, from, pos);
+  to->setDomain(replay.first);
+  replayed_pos_[to] = replay.second;
 }
 
-std::deque<TensorView*> tvInputs(Expr* expr) {
-  auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
-  return std::deque<TensorView*>(tv_inputs.begin(), tv_inputs.end());
+void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
+  int pos = replayed_pos_.at(from);
+  auto replay = TransformReplay::replayCasP(to, from, pos);
+  to->setDomain(replay.first);
+  replayed_pos_[to] = replay.second;
 }
 
-std::deque<TensorView*> tvOutputs(Expr* expr) {
-  auto tv_outputs = ir_utils::filterByType<TensorView>(expr->outputs());
-  return std::deque<TensorView*>(tv_outputs.begin(), tv_outputs.end());
-}
-
-std::deque<TensorView*> consumersOf(TensorView* tv) {
-  std::deque<TensorView*> consumer_tvs;
-  for (auto def : tv->uses()) {
-    auto outs = tvOutputs(def);
-    consumer_tvs.insert(consumer_tvs.end(), outs.begin(), outs.end());
+TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {
+  if (pos < 0) {
+    pos += int64_t(from->nDims()) + 1;
   }
-  return deduplicate(consumer_tvs);
-}
-
-std::deque<TensorView*> producersFor(TensorView* tv) {
-  auto def = tv->definition();
-  if (def == nullptr) {
-    return {};
-  }
-
-  return deduplicate(tvInputs(def));
-}
-
-}; // namespace
-
-bool TransformPropagator::replayPasC(
-    TensorView* producer_tv,
-    TensorView* consumer_tv) {
-  if (producer_tv == starting_tv) {
-    return false;
-  }
-
-  auto consumer_pos_it = replayed_pos.find(consumer_tv);
-  if (consumer_pos_it == replayed_pos.end()) {
-    return false;
-  }
-
-  auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto replayed_producer = TransformReplay::replayPasC(
-      producer_tv, consumer_tv, consumer_pos_it->second, pairwiseMap);
-
-  auto producer_root = producer_tv->getMaybeRFactorDomain();
-  auto replayed_domain = replayed_producer.first->domain();
-
-  // Find the number of root IDs involved in the transformation
-  auto dep_vals = DependencyCheck::getAllValsBetween(
-      {producer_root.begin(), producer_root.end()},
-      {replayed_domain.begin(),
-       replayed_domain.begin() + replayed_producer.second});
-
-  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
-
-  auto n_transformed_root_dims = std::count_if(
-      producer_root.begin(),
-      producer_root.end(),
-      [&dep_vals_set](IterDomain* root_id) {
-        return dep_vals_set.find(root_id) != dep_vals_set.end();
-      });
-
-  if (replayed_pos.find(producer_tv) != replayed_pos.end()) {
-    if (n_transformed_root_dims < n_replayed_root_dims.at(producer_tv) ||
-        (n_transformed_root_dims == n_replayed_root_dims.at(producer_tv) &&
-         replayed_producer.second <= replayed_pos.at(producer_tv))) {
-      return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    }
-  }
-
-  producer_tv->setDomain(replayed_producer.first);
-  replayed_pos[producer_tv] = replayed_producer.second;
-  n_replayed_root_dims[producer_tv] = n_transformed_root_dims;
-
-  return true;
-}
-
-bool TransformPropagator::replayCasP(
-    TensorView* consumer_tv,
-    TensorView* producer_tv) {
-  if (consumer_tv == starting_tv) {
-    return false;
-  }
-
-  auto producer_pos_it = replayed_pos.find(producer_tv);
-  if (producer_pos_it == replayed_pos.end()) {
-    return false;
-  }
-
-  auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto replayed_consumer = TransformReplay::replayCasP(
-      consumer_tv, producer_tv, producer_pos_it->second, pairwiseMap);
-
-  auto consumer_root = consumer_tv->getRootDomain();
-  auto replayed_domain = replayed_consumer.first->domain();
-
-  // Find the number of root IDs involved in the transformation
-  auto dep_vals = DependencyCheck::getAllValsBetween(
-      {consumer_root.begin(), consumer_root.end()},
-      {replayed_domain.begin(),
-       replayed_domain.begin() + replayed_consumer.second});
-
-  std::unordered_set<Val*> dep_vals_set{dep_vals.begin(), dep_vals.end()};
-
-  auto n_transformed_root_dims = std::count_if(
-      consumer_root.begin(),
-      consumer_root.end(),
-      [&dep_vals_set](IterDomain* root_id) {
-        return dep_vals_set.find(root_id) != dep_vals_set.end();
-      });
-
-  if (replayed_pos.find(consumer_tv) != replayed_pos.end()) {
-    if (n_transformed_root_dims < n_replayed_root_dims.at(consumer_tv) ||
-        (n_transformed_root_dims == n_replayed_root_dims.at(consumer_tv) &&
-         replayed_consumer.second <= replayed_pos.at(consumer_tv))) {
-      return false; // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    }
-  }
-
-  consumer_tv->setDomain(replayed_consumer.first);
-  replayed_pos[consumer_tv] = replayed_consumer.second;
-  n_replayed_root_dims[consumer_tv] = n_transformed_root_dims;
-
-  return true;
-}
-
-TransformPropagator::TransformPropagator(TensorView* from) : starting_tv(from) {
-  VectorOfUniqueEntries<TensorView*> propagation{starting_tv};
-
-  // Seed position with local tv
-  replayed_pos[from] = from->nDims();
-
-  // While tensor views are being replayed, if they're modified, make sure we
-  // propagate back to all producers as well as consumers. This is definitely
-  // not the most efficient implementation as what we do is any time a tv is
-  // changed we propagate both forward and backward.
-  while (!propagation.empty()) {
-    auto tv = propagation.popBack();
-
-    // Replay tv forward to its consumers.
-    for (auto consumer_tv : consumersOf(tv)) {
-      auto replayed = replayCasP(consumer_tv, tv);
-      // If consumer has changed, mark we should propagate
-      if (replayed) {
-        propagation.pushBack(consumer_tv);
-      }
-    }
-
-    for (auto producer_tv : producersFor(tv)) {
-      // If producer has changed, mark we should propagate
-      auto replayed = replayPasC(producer_tv, tv);
-      if (replayed) {
-        propagation.pushBack(producer_tv);
-      }
-    }
-  }
-}
-
-void TransformPropagator::from(TensorView* tv) {
-  TransformPropagator propagate(tv);
+  TORCH_CHECK(
+      pos >= 0 && pos <= from->nDims(),
+      "TransformPropagator called on an pos outside valid range.");
+  replayed_pos_[from] = pos;
 }
 
 } // namespace cuda
