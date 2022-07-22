@@ -127,7 +127,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.21.6',
     'expecttest==0.1.3',
-    'mypy==0.950',
+    'mypy==0.960',
     'types-requests==2.27.25',
     'types-six==1.16.15',
     'types-PyYAML==6.0.7',
@@ -593,6 +593,7 @@ include_patterns = [
     'torch/_meta_registrations.py',
     'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
@@ -689,6 +690,13 @@ code = 'UFMT'
 include_patterns = [
     'test/onnx/**/*.py',
     'tools/**/*.py',
+    'torch/_decomp/**/*.py',
+    'torch/_lazy/**/*.py',
+    'torch/_masked/**/*.py',
+    'torch/_prims/**/*.py',
+    'torch/_refs/**/*.py',
+    'torch/_subclasses/**/*.py',
+    'torch/_*.py',
     'torchgen/**/*.py',
 ]
 command = [
@@ -699,6 +707,7 @@ command = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
+    'torch/__init__.py',  # Skip this file to format because it's part of the public API
 ]
 init_command = [
     'python3',
