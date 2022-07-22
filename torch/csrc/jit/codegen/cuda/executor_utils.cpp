@@ -917,9 +917,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   {
     std::stringstream ss;
     ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), ss.str().c_str(), 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
