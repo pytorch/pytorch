@@ -2491,9 +2491,9 @@ def _arange_meta(
     end: NumberType,
     step: NumberType,
     *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
 ) -> TensorLikeType:
     assert not (
         isinstance(start, complex)
@@ -2531,9 +2531,9 @@ def _arange_aten(
     end: NumberType,
     step: NumberType,
     *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
 ) -> TensorLikeType:
     # mypy: Not all union combinations were tried because there are too many unions
     return torch.arange(  # type: ignore[call-overload, misc]
@@ -2551,7 +2551,7 @@ def _arange_aten(
 # TODO: maybe prims should not have requires_grad arg
 # see: https://github.com/pytorch/pytorch/pull/77542/files#r873943255
 arange = _make_prim(
-    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Device? device=None, bool? requires_grad=False) -> Tensor",  # noqa: B950
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype, Device? device, bool requires_grad) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_arange_meta,
     impl_aten=_arange_aten,
