@@ -3022,34 +3022,56 @@ def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
-    # Also see tests in test/test_tensor_creation_ops.py
-    # We won't attempt to merge those here since outputs are explicity checked there
-    ends = (0, 1, 2, 10, 50)
-    # Start is optional, but we currently don't test `None` because ref does not support
-    # multiple overloads and having optional arguments precede non-optional arguments
-    starts = (1, 3, 10, 50)
-    steps = (None, 1, 3, 7)
-    for start, end in product(starts, ends):
-        for sign in (1, -1):
-            if (start >= end and sign == 1) or (start <= end and sign == -1):
-                continue
-            for step in steps:
-                if step is not None:
-                    step = sign * step
-                else:
-                    step = sign
+    int_samples = (
+        # positive direction
+        (-1, 2, 2),
+        # negative direction
+        (2, -3, -1),
+        # start == end
+        (1, 1, 1),
+        (1, 1, -1),
+        # divides evenly
+        (0, -8, -4),
+        (1, 5, 2),
+        # bool
+        (False, True, True),
+        # default step
+        (0, 1, None),
+        # default start
+        (None, 3, None),
+    )
 
-                # Even though we support complex dtype, we don't check passing
-                # complex numbers to start, end, step
-                if dtype.is_floating_point:
-                    start += 0.1
-                    end += 0.1
-                    step += 0.1
+    def to_float(start, end, step):
+        start = start + 0.1 if start is not None else None
+        end = end + 0.1
+        step = float(step) if step is not None else None
+        return start, end, step
 
-                if step is None:
-                    yield SampleInput(start, args=(end,))
-                else:
-                    yield SampleInput(start, args=(end, step))
+    float_samples = (
+        # includes endpoint
+        (0., -8. - 1e-6, -4.),
+        (1., 5. + 1e-6, 2.),
+        (0., -8., -4.),
+        (1., 5., 2.),
+        *(to_float(start, end, step) for (start, end, step) in int_samples),
+    )
+
+    large_samples = (
+        (0, 10000, None),
+    )
+
+    samples = int_samples + float_samples
+    if dtype not in (torch.int8, torch.uint8):
+        samples += large_samples
+
+    for start, end, step in samples:
+        if start is None:
+            assert step is None
+            yield SampleInput(end, kwargs={"dtype": dtype, "device": device})
+        elif step is None:
+            yield SampleInput(start, args=(end,), kwargs={"dtype": dtype, "device": device})
+        else:
+            yield SampleInput(start, args=(end, step), kwargs={"dtype": dtype, "device": device})
 
 
 
@@ -10703,7 +10725,7 @@ op_db: List[OpInfo] = [
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
     OpInfo('arange',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
            supports_autograd=False,
            error_inputs_func=error_inputs_arange,
@@ -10728,8 +10750,6 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Expected RuntimeError when unsafe cast from torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
 
                # dispatch to lazy test failed
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
@@ -20359,7 +20379,8 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Expected RuntimeError when calling with input.device=cuda:0 and out.device=cpu
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # This also belongs in the list of tests above that expect input to be a tensor
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
         ),
         supports_nvfuser=False,
     ),

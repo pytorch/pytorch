@@ -31,7 +31,7 @@ from torch._prims_common.wrappers import (
 
 from collections.abc import Iterable
 from functools import reduce, partial, wraps
-from typing import Sequence, Optional, Union, Callable, List, Tuple
+from typing import Sequence, Optional, Union, Callable, List, Tuple, overload
 import operator
 import builtins
 import warnings
@@ -2986,8 +2986,19 @@ def empty_like(
     )
 
 
-@register_decomposition(torch.ops.aten.arange)
-@out_wrapper()
+@overload
+def arange(
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    pass
+
+@overload
 def arange(
     start: NumberType,
     end: NumberType,
@@ -2999,18 +3010,47 @@ def arange(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    # TODO: update to pass pin_memory and requires_grad once prim supports it
-    # We allow them to be passed to ref to appease decomposition tests
-    return prims.arange(
-        start,
-        end,
-        step,
-        dtype=dtype,
-        device=device,
-        # layout=layout,
-        # pin_memory=pin_memory,
-        requires_grad=requires_grad,
-    )
+    pass
+
+@register_decomposition(torch.ops.aten.arange)
+@out_wrapper()
+def arange(
+    a: Optional[NumberType] = None,
+    b: Optional[NumberType] = None,
+    step: NumberType = 1,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    assert (a is not None and b is not None) or (a is not None and b is None)
+    # arange(start, end, step)
+    if a is not None and b is not None:
+        return prims.arange(
+            a,
+            b,
+            step,
+            dtype=dtype,
+            device=device,
+            # layout=layout,
+            # pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+    elif a is not None and b is None:
+        return prims.arange(
+            0,
+            a,
+            step,
+            dtype=dtype,
+            device=device,
+            # layout=layout,
+            # pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+    else:
+        assert False
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
