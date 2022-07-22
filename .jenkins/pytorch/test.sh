@@ -603,7 +603,7 @@ test_dynamo() {
 }
 
 test_functorch() {
-  pushd ../functorch
+  pushd functorch
   pytest test
   popd
 }
@@ -688,7 +688,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  checkout_install_functorch
+  install_functorch
   test_functorch
 else
   install_torchvision
