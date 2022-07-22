@@ -439,6 +439,14 @@ void conv2d_sliding_window_q(
   };
 
   uvec3 global_size = v_output.extents();
+  if (method_ == Conv2dQPointwise) {
+    global_size = {
+        safe_downcast<uint32_t>(
+            div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
+        safe_downcast<uint32_t>(
+            div_up(v_output.sizes()[Layout::Filter::height], INT64_C(2))),
+        v_output.extents().data[2u]};
+  }
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
@@ -512,6 +520,23 @@ Tensor conv2d_context_run_q(
   if (method_ == Conv2dQSlidingWindow) {
     conv2d_sliding_window_q(
         VK_KERNEL(quantized_conv2d),
+        v_output,
+        v_input,
+        packed_v_weight,
+        packed_v_bias,
+        packed_filter,
+        packed_stride,
+        packed_padding,
+        packed_dilation,
+        packed_output_min,
+        packed_output_max,
+        unpacked_filter,
+        method_,
+        v_input.get_scale(),
+        v_input.get_zero_point());
+  } else if (method_ == Conv2dQPointwise) {
+    conv2d_sliding_window_q(
+        VK_KERNEL(quantized_conv2d_pw_2x2),
         v_output,
         v_input,
         packed_v_weight,
