@@ -15,11 +15,15 @@ from torchgen.api.types import (
     DispatcherSignature,
     CType,
     BaseCType,
+    NamedCType,
     OptionalCType,
+    VectorCType,
     longT,
     boolT,
     intArrayRefT,
     symIntArrayRefT,
+    iTensorListRefT,
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
