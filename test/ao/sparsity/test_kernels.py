@@ -318,7 +318,6 @@ class TestQuantizedSparseLayers(TestCase):
         fqn_to_check = "linear"
         if qengine_is_fbgemm():
             sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
-            # sparse_mapping[nn.qat.Linear] = ao_nn_sqat.SparseQATLinear
             ref_mapping = tq.get_default_static_quant_module_mappings()
             qconfig_dict = {nn.Linear: tq.get_default_qat_qconfig("fbgemm")}
         else:
