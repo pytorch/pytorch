@@ -1,5 +1,5 @@
-#include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <mutex>
@@ -16,17 +16,16 @@ namespace api {
 CommandBuffer::CommandBuffer(
     const VkCommandBuffer handle,
     const VkCommandBufferUsageFlags flags)
-  : handle_(handle),
-    flags_(flags),
-    state_(CommandBuffer::State::NEW),
-    bound_{} {
-}
+    : handle_(handle),
+      flags_(flags),
+      state_(CommandBuffer::State::NEW),
+      bound_{} {}
 
 CommandBuffer::CommandBuffer(CommandBuffer&& other) noexcept
-  : handle_(other.handle_),
-    flags_(other.flags_),
-    state_(other.state_),
-    bound_(other.bound_) {
+    : handle_(other.handle_),
+      flags_(other.flags_),
+      state_(other.state_),
+      bound_(other.bound_) {
   other.handle_ = VK_NULL_HANDLE;
   other.bound_.reset();
   state_ = CommandBuffer::State::INVALID;
@@ -52,15 +51,13 @@ void CommandBuffer::begin() {
       "is not NEW.");
 
   const VkCommandBufferBeginInfo begin_info{
-    VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    nullptr,
-    flags_,
-    nullptr,
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      nullptr,
+      flags_,
+      nullptr,
   };
 
-  VK_CHECK(vkBeginCommandBuffer(
-      handle_,
-      &begin_info));
+  VK_CHECK(vkBeginCommandBuffer(handle_, &begin_info));
   state_ = CommandBuffer::State::RECORDING;
 }
 
@@ -84,10 +81,7 @@ void CommandBuffer::bind_pipeline(
       "is not RECORDING.");
 
   if (pipeline != bound_.pipeline) {
-    vkCmdBindPipeline(
-        handle_,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline);
+    vkCmdBindPipeline(handle_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 
     bound_.pipeline = pipeline;
   }
@@ -106,14 +100,14 @@ void CommandBuffer::bind_descriptors(const VkDescriptorSet descriptors) {
 
   if (descriptors != bound_.descriptors) {
     vkCmdBindDescriptorSets(
-        handle_,  // commandBuffer
-        VK_PIPELINE_BIND_POINT_COMPUTE,  // pipelineBindPoint
-        bound_.pipeline_layout,  // layout
-        0u,  // firstSet
-        1u,  // descriptorSetCount
-        &descriptors,  // pDescriptorSets
-        0u,  // dynamicOffsetCount
-        nullptr);  // pDynamicOffsets
+        handle_, // commandBuffer
+        VK_PIPELINE_BIND_POINT_COMPUTE, // pipelineBindPoint
+        bound_.pipeline_layout, // layout
+        0u, // firstSet
+        1u, // descriptorSetCount
+        &descriptors, // pDescriptorSets
+        0u, // dynamicOffsetCount
+        nullptr); // pDynamicOffsets
   }
 
   bound_.descriptors = descriptors;
@@ -124,34 +118,34 @@ void CommandBuffer::bind_descriptors(const VkDescriptorSet descriptors) {
 void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
   TORCH_CHECK(
       state_ == CommandBuffer::State::DESCRIPTORS_BOUND ||
-      state_ == CommandBuffer::State::RECORDING,
+          state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called insert_barrier() on a command buffer whose state "
       "is not DESCRIPTORS_BOUND or RECORDING.");
 
   if (pipeline_barrier) {
     c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
-    for (const api::BufferMemoryBarrier& memory_barrier
-         : pipeline_barrier.buffers) {
+    for (const api::BufferMemoryBarrier& memory_barrier :
+         pipeline_barrier.buffers) {
       buffer_memory_barriers.push_back(memory_barrier.handle);
     }
 
     c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
-    for (const api::ImageMemoryBarrier& memory_barrier
-         : pipeline_barrier.images) {
+    for (const api::ImageMemoryBarrier& memory_barrier :
+         pipeline_barrier.images) {
       image_memory_barriers.push_back(memory_barrier.handle);
     }
 
     vkCmdPipelineBarrier(
-        handle_,  // commandBuffer
-        pipeline_barrier.stage.src,  // srcStageMask
-        pipeline_barrier.stage.dst,  // dstStageMask
-        0u,  // dependencyFlags
-        0u,  // memoryBarrierCount
-        nullptr,  // pMemoryBarriers
-        buffer_memory_barriers.size(),  // bufferMemoryBarrierCount
-        buffer_memory_barriers.data(),  // pMemoryBarriers
-        image_memory_barriers.size(),  // imageMemoryBarrierCount
-        image_memory_barriers.data());  // pImageMemoryBarriers
+        handle_, // commandBuffer
+        pipeline_barrier.stage.src, // srcStageMask
+        pipeline_barrier.stage.dst, // dstStageMask
+        0u, // dependencyFlags
+        0u, // memoryBarrierCount
+        nullptr, // pMemoryBarriers
+        buffer_memory_barriers.size(), // bufferMemoryBarrierCount
+        buffer_memory_barriers.data(), // pMemoryBarriers
+        image_memory_barriers.size(), // imageMemoryBarrierCount
+        image_memory_barriers.data()); // pImageMemoryBarriers
   }
 
   state_ = CommandBuffer::State::BARRIERS_INSERTED;
@@ -166,11 +160,9 @@ void CommandBuffer::dispatch(const utils::uvec3& global_workgroup_size) {
   vkCmdDispatch(
       handle_,
       utils::div_up(
-          global_workgroup_size.data[0u],
-          bound_.local_workgroup_size.data[0u]),
+          global_workgroup_size.data[0u], bound_.local_workgroup_size.data[0u]),
       utils::div_up(
-          global_workgroup_size.data[1u],
-          bound_.local_workgroup_size.data[1u]),
+          global_workgroup_size.data[1u], bound_.local_workgroup_size.data[1u]),
       utils::div_up(
           global_workgroup_size.data[2u],
           bound_.local_workgroup_size.data[2u]));
@@ -190,25 +182,25 @@ void CommandBuffer::copy_texture_to_texture(
       "is not BARRIERS_INSERTED.");
 
   const VkImageSubresourceLayers src_subresource_layers{
-    VK_IMAGE_ASPECT_COLOR_BIT,  // aspectMask
-    0u,  // mipLevel
-    0u,  // baseArrayLayer
-    1u,  // layerCount
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
   };
 
   const VkImageSubresourceLayers dst_subresource_layers{
-    VK_IMAGE_ASPECT_COLOR_BIT,  // aspectMask
-    0u,  // mipLevel
-    0u,  // baseArrayLayer
-    1u,  // layerCount
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
   };
 
   const VkImageCopy copy_details{
-    src_subresource_layers,  // srcSubresource
-    create_offset3d(src_offset),  // srcOffset
-    dst_subresource_layers,  // dstSubresource
-    create_offset3d(dst_offset),  // dstOffset
-    create_extent3d(copy_range),  // extent
+      src_subresource_layers, // srcSubresource
+      create_offset3d(src_offset), // srcOffset
+      dst_subresource_layers, // dstSubresource
+      create_offset3d(dst_offset), // dstOffset
+      create_extent3d(copy_range), // extent
   };
 
   vkCmdCopyImage(
@@ -224,17 +216,15 @@ void CommandBuffer::copy_texture_to_texture(
 }
 
 void CommandBuffer::write_timestamp(
-    const VkQueryPool querypool, const uint32_t idx) const {
+    const VkQueryPool querypool,
+    const uint32_t idx) const {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "
       "is not RECORDING.");
 
   vkCmdWriteTimestamp(
-      handle_,
-      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-      querypool,
-      idx);
+      handle_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, querypool, idx);
 }
 
 void CommandBuffer::reset_querypool(
@@ -272,25 +262,21 @@ CommandPool::CommandPool(
     const VkDevice device,
     const uint32_t queue_family_idx,
     const CommandPoolConfig& config)
-  : device_(device),
-    queue_family_idx_(queue_family_idx),
-    pool_(VK_NULL_HANDLE),
-    config_(config),
-    mutex_{},
-    buffers_{},
-    in_use_(0u) {
+    : device_(device),
+      queue_family_idx_(queue_family_idx),
+      pool_(VK_NULL_HANDLE),
+      config_(config),
+      mutex_{},
+      buffers_{},
+      in_use_(0u) {
   const VkCommandPoolCreateInfo create_info{
-    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-    nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    queue_family_idx_,
+      VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+      nullptr,
+      VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+      queue_family_idx_,
   };
 
-  VK_CHECK(vkCreateCommandPool(
-      device_,
-      &create_info,
-      nullptr,
-      &pool_));
+  VK_CHECK(vkCreateCommandPool(device_, &create_info, nullptr, &pool_));
 
   // Pre-allocate some command buffers
   allocate_new_batch(config_.cmdPoolInitialSize);
@@ -330,17 +316,15 @@ void CommandPool::allocate_new_batch(const uint32_t count) {
   buffers_.resize(buffers_.size() + count);
 
   const VkCommandBufferAllocateInfo allocate_info{
-    VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,  // sType
-    nullptr, // pNext
-    pool_,  // commandPool
-    VK_COMMAND_BUFFER_LEVEL_PRIMARY,  // level
-    count,  // commandBufferCount
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, // sType
+      nullptr, // pNext
+      pool_, // commandPool
+      VK_COMMAND_BUFFER_LEVEL_PRIMARY, // level
+      count, // commandBufferCount
   };
 
   VK_CHECK(vkAllocateCommandBuffers(
-      device_,
-      &allocate_info,
-      buffers_.data() + in_use_));
+      device_, &allocate_info, buffers_.data() + in_use_));
 }
 
 } // namespace api

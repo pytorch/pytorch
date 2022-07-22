@@ -19,11 +19,9 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
       descriptor_pool_(device_, config_.descriptorPoolConfig),
       fences_(device_),
-      // Diagnostics
+// Diagnostics
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-      querypool_(
-        device_,
-        config_.queryPoolConfig),
+      querypool_(device_, config_.queryPoolConfig),
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
@@ -44,26 +42,23 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
+  const VkDescriptorSetLayout shader_layout =
+      shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
 
-  const VkDescriptorSetLayout shader_layout = \
-      shader_layout_cache().retrieve(shader_layout_signature);
-
-  const VkPipelineLayout pipeline_layout = \
+  const VkPipelineLayout pipeline_layout =
       pipeline_layout_cache().retrieve(shader_layout);
 
-  const VkPipeline pipeline = pipeline_cache().retrieve({
-      pipeline_layout_cache().retrieve(shader_layout),
-      shader_cache().retrieve(shader_descriptor),
-      local_workgroup_size});
+  const VkPipeline pipeline = pipeline_cache().retrieve(
+      {pipeline_layout_cache().retrieve(shader_layout),
+       shader_cache().retrieve(shader_descriptor),
+       local_workgroup_size});
 
-  command_buffer.bind_pipeline(
-      pipeline, pipeline_layout, local_workgroup_size);
+  command_buffer.bind_pipeline(pipeline, pipeline_layout, local_workgroup_size);
 
   return descriptor_pool().get_descriptor_set(
-      shader_layout, shader_layout_signature);
+      shader_layout, shader_descriptor.kernel_layout);
 }
 
 void Context::submit_compute_epilogue(
@@ -150,46 +145,44 @@ Context* context() {
       const uint32_t submit_frequency = 16u;
 
       const CommandPoolConfig cmd_config{
-        32u,  // cmdPoolInitialSize
-        8u,  // cmdPoolBatchSize
+          32u, // cmdPoolInitialSize
+          8u, // cmdPoolBatchSize
       };
 
       const DescriptorPoolConfig descriptor_pool_config{
-        1024u,  // descriptorPoolMaxSets
-        1024u,  // descriptorUniformBufferCount
-        1024u,  // descriptorStorageBufferCount
-        1024u,  // descriptorCombinedSamplerCount
-        1024u,  // descriptorStorageImageCount
-        32u,  // descriptorPileSizes
+          1024u, // descriptorPoolMaxSets
+          1024u, // descriptorUniformBufferCount
+          1024u, // descriptorStorageBufferCount
+          1024u, // descriptorCombinedSamplerCount
+          1024u, // descriptorStorageImageCount
+          32u, // descriptorPileSizes
       };
 
       const QueryPoolConfig query_pool_config{
-        4096u,  // maxQueryCount
-        256u,  //initialReserveSize
+          4096u, // maxQueryCount
+          256u, // initialReserveSize
       };
 
       const ContextConfig config{
-        submit_frequency,  // cmdSubmitFrequency
-        cmd_config,  // cmdPoolConfig
-        descriptor_pool_config,  // descriptorPoolConfig
-        query_pool_config,  // queryPoolConfig
+          submit_frequency, // cmdSubmitFrequency
+          cmd_config, // cmdPoolConfig
+          descriptor_pool_config, // descriptorPoolConfig
+          query_pool_config, // queryPoolConfig
       };
 
       return new Context(runtime()->default_adapter_i(), config);
-    }
-    catch (const std::exception& e) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
-    }
-    catch (...) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
+    } catch (const std::exception& e) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: ", e.what());
+    } catch (...) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: Unknown");
     }
 
     return nullptr;
   }());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      context,
-      "Invalid Vulkan context!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(context, "Invalid Vulkan context!");
 
   return context.get();
 }
