@@ -1289,6 +1289,14 @@ class Graph:
 
             def forward(self, x):
                 return x + self.attr_1
+
+        .. warning::
+
+            Dead code elimination has some heuristics to avoid removing
+            side-effectful nodes (see Node.is_impure) but in general coverage
+            is very bad, so you should assume that this method is not sound
+            to call unless you know that your FX graph consists entirely
+            of functional operations.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
