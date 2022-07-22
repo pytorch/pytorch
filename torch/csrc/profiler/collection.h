@@ -45,9 +45,17 @@ struct TorchOpBasicFields {
   uint64_t end_tid_{0};
 };
 
+struct TensorMetadata {
+  void* ptr_;
+  c10::ScalarType dtype_;
+  uint32_t dim_;
+  c10::Layout layout_;
+};
+
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -69,7 +77,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
-      FallbackPair&& gpu_fallback)
+      FallbackPair&& gpu_fallback,
+      bool allow_tf32_cublas)
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
@@ -77,7 +86,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
-        gpu_fallback_{std::move(gpu_fallback)} {}
+        gpu_fallback_{std::move(gpu_fallback)},
+        allow_tf32_cublas_{allow_tf32_cublas} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
   Inputs inputs_;
@@ -85,6 +95,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
+  bool allow_tf32_cublas_;
 };
 
 template <>
@@ -248,6 +259,8 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     // Set in the exit callback.
     approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
+
+    bool allow_tf32_cublas_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -279,12 +292,6 @@ class InputOutputEncoder final {
     Scalar,
     Other,
     TERMINATOR
-  };
-
-  struct TensorMetadata {
-    void* ptr_;
-    c10::ScalarType dtype_;
-    uint32_t dim_;
   };
 
   void push(const at::Tensor& t);

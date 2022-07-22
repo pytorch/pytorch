@@ -6,6 +6,7 @@
 
 #include <fmt/format.h>
 
+#include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/Exception.h>
@@ -47,7 +48,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tensor_metadata_.emplace_back(
         /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
         /*dtype_=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim);
+        /*dim_=*/(uint32_t)dim,
+        /*layout_=*/t.layout());
 
     for (const auto i : sizes) {
       tensor_sizes_.emplace_back(i);
@@ -74,6 +76,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             (void)_; // Suppress unused variable warning
             out.shapes_.back().push_back(*tensor_size_it++);
           }
+          out.tensor_metadata_.emplace_back(md);
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -82,15 +85,18 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.dtypes_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::TERMINATOR:
@@ -355,6 +361,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
   return out;
 }
 
@@ -609,7 +616,8 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
               steal_or_default(jit_stack_it),
               steal_or_default(jit_module_it),
               steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it))));
+              steal_or_default(gpu_fallback_it),
+              i.allow_tf32_cublas_)));
     }
     queue.op_events_.clear();
     queue.inputs_outputs_.clear();
