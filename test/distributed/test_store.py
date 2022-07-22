@@ -331,6 +331,10 @@ class RendezvousTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
 
+    def test_url_with_node_params(self):
+        with self.assertRaisesRegex(AssertionError, "has node-specific arguments"):
+            dist.rendezvous("file://foo?rank=12&world_size=16", 12, 16)
+
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
