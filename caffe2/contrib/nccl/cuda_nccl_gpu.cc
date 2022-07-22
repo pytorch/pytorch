@@ -91,7 +91,7 @@ NCCLContext* getNCCLContext(const NCCLExecution& ex) {
     LOG(INFO) << "Creating NCCLContext for key: " << key;
     contexts[key].reset(new NCCLContext(ex));
   }
-  return CHECK_NOTNULL(contexts[key].get());
+  return TORCH_CHECK_NOTNULL(contexts[key].get());
 }
 
 template <typename T>

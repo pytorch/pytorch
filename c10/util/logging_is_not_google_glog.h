@@ -61,8 +61,8 @@ void LogMessageFatal(const char* file, int line, const T& message) {
   MessageLogger(file, line, GLOG_FATAL).stream() << message;
 }
 
-// Helpers for CHECK_NOTNULL(). Two are necessary to support both raw pointers
-// and smart pointers.
+// Helpers for TORCH_CHECK_NOTNULL(). Two are necessary to support both raw
+// pointers and smart pointers.
 template <typename T>
 T& CheckNotNullCommon(const char* file, int line, const char* names, T& t) {
   if (t == nullptr) {
@@ -162,37 +162,37 @@ static_assert(
   while (false)                     \
   CHECK_OP(val1, val2, ==)
 #define TORCH_DCHECK_NE(val1, val2) \
-  while (false)               \
+  while (false)                     \
   CHECK_OP(val1, val2, !=)
 #define TORCH_DCHECK_LE(val1, val2) \
-  while (false)               \
+  while (false)                     \
   CHECK_OP(val1, val2, <=)
 #define TORCH_DCHECK_LT(val1, val2) \
-  while (false)               \
+  while (false)                     \
   CHECK_OP(val1, val2, <)
 #define TORCH_DCHECK_GE(val1, val2) \
-  while (false)               \
+  while (false)                     \
   CHECK_OP(val1, val2, >=)
 #define TORCH_DCHECK_GT(val1, val2) \
-  while (false)               \
+  while (false)                     \
   CHECK_OP(val1, val2, >)
 #endif // NDEBUG
 
 // Check that a pointer is not null.
-#define CHECK_NOTNULL(val) \
-  ::c10::CheckNotNull(     \
+#define TORCH_CHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(           \
       __FILE__, __LINE__, "Check failed: '" #val "' Must be non NULL", (val))
 
 #ifndef NDEBUG
-// Debug only version of CHECK_NOTNULL
-#define DCHECK_NOTNULL(val) \
-  ::c10::CheckNotNull(      \
+// Debug only version of TORCH_CHECK_NOTNULL
+#define TORCH_DCHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(            \
       __FILE__, __LINE__, "Check failed: '" #val "' Must be non NULL", (val))
 #else // !NDEBUG
 // Optimized version - generates no code.
-#define DCHECK_NOTNULL(val) \
-  while (false)             \
-  CHECK_NOTNULL(val)
+#define TORCH_DCHECK_NOTNULL(val) \
+  while (false)                   \
+  TORCH_CHECK_NOTNULL(val)
 #endif // NDEBUG
 
 // ---------------------- Support for std objects --------------------------

@@ -66,22 +66,22 @@ INSTANTIATE_FOR_CONTAINER(set)
 #else // !NDEBUG
 // These versions generate no code in optimized mode.
 #define TORCH_CHECK_EQ(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_EQ(val1, val2)
 #define TORCH_CHECK_NE(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_NE(val1, val2)
 #define TORCH_CHECK_LE(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_LE(val1, val2)
 #define TORCH_CHECK_LT(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_LT(val1, val2)
 #define TORCH_CHECK_GE(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_GE(val1, val2)
 #define TORCH_CHECK_GT(val1, val2) \
-  while (false)                     \
+  while (false)                    \
   CHECK_GT(val1, val2)
 #define TORCH_DCHECK_EQ(val1, val2) \
   while (false)                     \
@@ -101,6 +101,19 @@ INSTANTIATE_FOR_CONTAINER(set)
 #define TORCH_DCHECK_GT(val1, val2) \
   while (false)                     \
   DCHECK_GT(val1, val2)
+#endif // NDEBUG
+
+// Check that a pointer is not null.
+#define TORCH_CHECK_NOTNULL(val) CHECK_NOTNULL(val)
+
+#ifndef NDEBUG
+// Debug only version of TORCH_CHECK_NOTNULL
+#define TORCH_DCHECK_NOTNULL(val) DCHECK_NOTNULL(val)
+#else // !NDEBUG
+// Optimized version - generates no code.
+#define TORCH_DCHECK_NOTNULL(val) \
+  while (false)                   \
+  DCHECK_NOTNULL(val)
 #endif // NDEBUG
 
 // Log with source location information override (to be used in generic
