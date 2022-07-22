@@ -6,7 +6,6 @@ import torch
 from torch.profiler import profile
 from torch.profiler._utils import index_of_first_match
 from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
-                                _ExtraFields_Backend, _ExtraFields_Allocation,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
 
