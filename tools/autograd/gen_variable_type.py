@@ -1167,24 +1167,16 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             if noref_cpp_type == BaseCType(tensorListT) or noref_cpp_type == BaseCType(
                 iTensorListRefT
             ):
-                if noref_cpp_type == BaseCType(iTensorListRefT):
-                    stmts_before_call += [
-                        MATERIALIZE_TENSORLIST.substitute(tensorlist_name=arg)
-                    ]
-                    tensorlist_name = f"{arg}_materialized"
-                else:
-                    tensorlist_name = arg
-
                 stmts_before_call += [
-                    SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=tensorlist_name),
-                    SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=tensorlist_name),
+                    SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                    SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg),
                 ]
                 stmts_after_call += [
                     ENFORCE_SAME_TENSORLIST_STORAGE.substitute(
-                        tensorlist_name=tensorlist_name
+                        tensorlist_name=arg
                     ),
                     ENFORCE_SAME_TENSORLIST_IMPL.substitute(
-                        tensorlist_name=tensorlist_name
+                        tensorlist_name=arg
                     ),
                 ]
             elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
