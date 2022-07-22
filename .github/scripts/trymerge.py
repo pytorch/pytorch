@@ -758,7 +758,6 @@ class GitHubPR:
 
     def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None) -> None:
         assert self.is_ghstack_pr()
-        approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -1015,7 +1014,7 @@ def pr_get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
 
 
 def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
-    return pr_get_checks_with_lambda(pr, lambda x: x == "FAILURE")
+    return pr_get_checks_with_lambda(pr, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
@@ -1150,6 +1149,13 @@ def merge(pr_num: int, repo: GitRepo,
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
+
+            # HACK until GitHub will be better about surfacing those
+            startup_failures = pr_get_checks_with_lambda(pr, lambda x: x == "STARTUP_FAILURE")
+            if len(startup_failures) > 0:
+                raise RuntimeError(f"{len(failing)} STARTUP failures reported, please check workflows syntax! " +
+                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in startup_failures[:5]))
+            # END of HACK
 
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +

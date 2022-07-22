@@ -66,6 +66,15 @@ vTensor::vTensor(
           options,
       }) {}
 
+vTensor::vTensor(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options,
+    double q_scale,
+    int64_t q_zero_point)
+    : view_(
+          new vTensorStorage{context, sizes, options, q_scale, q_zero_point}) {}
+
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
@@ -89,7 +98,8 @@ api::VulkanImage& vTensor::image(
 
 api::VulkanImage allocate_image(
     api::Context* const context_ptr,
-    api::utils::uvec3& extents) {
+    api::utils::uvec3& extents,
+    const caffe2::TypeMeta dtype) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   api::ImageSampler::Properties sampler_props{
@@ -101,8 +111,8 @@ api::VulkanImage allocate_image(
 
   VkSampler sampler = adapter_ptr->sampler_cache().retrieve(sampler_props);
 
-  return adapter_ptr->vma().create_image3d_fp(
-      api::create_extent3d(extents), sampler_props, sampler, true);
+  return adapter_ptr->vma().create_image3d(
+      api::create_extent3d(extents), sampler_props, sampler, dtype, true);
 }
 
 vTensorStorage::vTensorStorage(
@@ -114,7 +124,26 @@ vTensorStorage::vTensorStorage(
       options_(options),
       sizes_(sizes),
       strides_(sizes.size()),
-      image_(allocate_image(context_, extents_)),
+      image_(allocate_image(context_, extents_, options_.dtype())),
+      last_access_{} {
+  ops::verify(options);
+}
+
+vTensorStorage::vTensorStorage(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options,
+    double q_scale_in,
+    int64_t q_zero_point_in)
+    : context_(context),
+      extents_(image_extents(sizes)),
+      options_(options),
+      sizes_(sizes),
+      strides_(sizes.size()),
+      is_quantized_{true},
+      q_scale{q_scale_in},
+      q_zero_point{q_zero_point_in},
+      image_(allocate_image(context_, extents_, options_.dtype())),
       last_access_{} {
   ops::verify(options);
 }
