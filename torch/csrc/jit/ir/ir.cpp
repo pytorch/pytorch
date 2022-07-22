@@ -1148,7 +1148,13 @@ bool Node::isNondeterministic() const {
   if (!kind().is_aten()) {
     return false;
   }
-  TORCH_INTERNAL_ASSERT(schema, "aten Schema not found.")
+  // All aten ops are expecte to have a schema. However this is left as a
+  // warning instead of an assert to ensure that previous use cases do not
+  // break.
+  if (!schema) {
+    TORCH_WARN("aten Schema not found.");
+    return false;
+  }
   torch::utils::SchemaInfo schema_info(*schema);
   if (hasNamedInput("train")) {
     auto value = constant_as<bool>(namedInput("train"));
