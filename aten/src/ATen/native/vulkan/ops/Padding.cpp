@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -63,24 +62,16 @@ Tensor pad2d(
   } block{
       v_output.extents(),
       0u,
-      {
-        safe_downcast<uint32_t>(pad_left),
-        safe_downcast<uint32_t>(pad_right),
-        safe_downcast<uint32_t>(pad_top),
-        safe_downcast<uint32_t>(pad_bottom)
-      },
+      {safe_downcast<uint32_t>(pad_left),
+       safe_downcast<uint32_t>(pad_right),
+       safe_downcast<uint32_t>(pad_top),
+       safe_downcast<uint32_t>(pad_bottom)},
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       shader_descriptor,
       // pipeline barrier
@@ -94,11 +85,9 @@ Tensor pad2d(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -116,8 +105,12 @@ Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
-  m.impl(TORCH_SELECTIVE_NAME("aten::replication_pad2d"), TORCH_FN(replication_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::reflection_pad2d"),
+      TORCH_FN(reflection_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::replication_pad2d"),
+      TORCH_FN(replication_pad2d));
 }
 
 #endif /* USE_VULKAN_API */

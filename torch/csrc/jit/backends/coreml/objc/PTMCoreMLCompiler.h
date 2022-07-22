@@ -10,8 +10,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSString*)modelCacheDirectory;
 
-+ (nullable MLModel*)compileMLModel:(const std::string&)modelSpecs
-                         identifier:(const std::string&)identifier
++ (NSURL*)compileModel:(const std::string&)modelSpecs
+               modelID:(const std::string&)modelID;
+
++ (nullable MLModel*)loadCPUModelAtURL:(NSURL*)modelURL;
+
++ (nullable MLModel*)loadModelAtURL:(NSURL*)modelURL
                             backend:(const std::string&)backend
                   allowLowPrecision:(BOOL)allowLowPrecision;
 

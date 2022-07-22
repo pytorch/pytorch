@@ -20,6 +20,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -38,6 +39,7 @@ namespace details {
 
 using at::areAnyTensorSubclassLike;
 using at::IntArrayRef;
+using at::OptionalIntArrayRef;
 using at::Scalar;
 using at::Tensor;
 using at::TensorList;
@@ -556,35 +558,41 @@ Tensor deg2rad_backward(const Tensor& grad) {
   return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
-Tensor unsqueeze_multiple(const Tensor& t, IntArrayRef dim, size_t n_dims) {
-  auto dim_size = dim.size();
-  // Optimisation for two common cases
-  if (dim_size == 0) {
-    return t;
-  } else if (dim_size == 0) {
-    return t.unsqueeze(dim[0]);
-  } else {
-    auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
-    Tensor res = t;
-    for (const auto i : c10::irange(n_dims)) {
-      if (dims_to_unsqueeze[i]) {
-        res = res.unsqueeze(i);
-      }
+Tensor unsqueeze_multiple(
+    const Tensor& t,
+    OptionalIntArrayRef opt_dim,
+    size_t n_dims) {
+  if (opt_dim.has_value()) {
+    IntArrayRef dim = opt_dim.value();
+    auto dim_size = dim.size();
+    // Optimisation for two common cases
+    if (dim_size == 0) {
+      return t;
+    } else if (dim_size == 1) {
+      return t.unsqueeze(dim[0]);
     }
-    return res;
   }
+  auto dims_to_unsqueeze = at::dim_list_to_bitset(opt_dim, n_dims);
+  Tensor res = t;
+  for (const auto i : c10::irange(n_dims)) {
+    if (dims_to_unsqueeze[i]) {
+      res = res.unsqueeze(i);
+    }
+  }
+  return res;
 }
 
 Tensor sum_backward(
     const Tensor& grad,
     IntArrayRef sizes,
-    IntArrayRef dims,
+    OptionalIntArrayRef opt_dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
-    return unsqueeze_multiple(grad, dims, sizes.size()).expand(sizes);
-  } else {
-    return grad.expand(sizes);
+  if (!keepdim && sizes.size() > 0) {
+    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
+      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
+    }
   }
+  return grad.expand(sizes);
 }
 
 Tensor nansum_backward(
@@ -659,6 +667,10 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
+        .view_as(input);
+  }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return grad * (result / input).conj();
@@ -683,6 +695,9 @@ Tensor prod_backward(
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
+  }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 
   Tensor zero_mask = (input == 0);
@@ -1867,59 +1882,6 @@ Tensor infinitely_differentiable_logit_backward(
         at::empty({}, self.options())
             .fill_(std::numeric_limits<double>::quiet_NaN()));
   }
-}
-
-Tensor kl_div_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  auto result =
-      kl_div_backward(grad, input, target, at::Reduction::None, log_target);
-  if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
-  }
-  return result;
-}
-
-// Compute derivatives for targets.
-Tensor kl_div_target_backward(
-    Tensor grad_output,
-    Tensor self,
-    Tensor target,
-    int64_t reduction,
-    bool log_target) {
-  Tensor grad_target;
-  if (!log_target) {
-    if (!areAnyTensorSubclassLike({self, target}) &&
-        !grad_output._is_zerotensor()) {
-      grad_target = grad_output.mul(target.log().add_(1).sub_(self))
-                        .masked_fill_(target == 0, 0.);
-    } else {
-      grad_target = grad_output.mul(target.log().add(1).sub(self))
-                        .masked_fill(target == 0, 0.);
-    }
-  } else {
-    if (!areAnyTensorSubclassLike({self, target})) {
-      grad_target =
-          grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
-    } else {
-      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
-    }
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
-    } else {
-      grad_target.div(target.numel());
-    }
-  }
-
-  return grad_target;
 }
 
 Tensor binary_cross_entropy_target_backward(
