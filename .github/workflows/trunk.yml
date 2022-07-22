@@ -155,6 +155,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-12" },
           { config: "default", shard: 2, num_shards: 2, runner: "macos-12" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "macos-12" },
         ]}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
