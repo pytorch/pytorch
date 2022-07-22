@@ -33,7 +33,7 @@ DTYPE_CONFIGS_DICT_KEY = "dtype_configs"
 ROOT_MODULE_DICT_KEY = "root_module"
 QAT_MODULE_DICT_KEY = "qat_module"
 REFERENCE_QUANTIZED_MODULE_DICT_KEY = "reference_quantized_module_for_root"
-FUSER_MODULE_DICT_KEY = "fuser_module"
+FUSED_MODULE_DICT_KEY = "fused_module"
 FUSER_METHOD_DICT_KEY = "fuser_method"
 ROOT_NODE_GETTER_DICT_KEY = "root_node_getter"
 EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
@@ -94,12 +94,14 @@ class DTypeConfig:
 
 class BackendConfig:
     # TODO: refer to native fbgemm BackendConfig once that is implemented
+    # TODO(andrew): fix this description before merge
     """
     Config that defines which ops are supported and how they are quantized on a custom backend.
 
     This config specifies how reference quantized models are produced (during the prepare phase) and how they
     are lowered to implementations specific to the target backend (during the convert phase). Each op supported
-    on the target backend can be individually configured through :class:`~torch.ao.quantization.backend_config.BackendPatternConfig`.
+    on the target backend can be individually configured through
+    :class:`~torch.ao.quantization.backend_config.BackendPatternConfig`.
 
     Example usage::
 
@@ -115,22 +117,22 @@ class BackendConfig:
 
         linear_config = BackendPatternConfig(torch.nn.Linear) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
-            .set_dtype_configs([weighted_int8_dtype_config]) \
+            .set_dtype_config(weighted_int8_dtype_config) \
             .set_root_module(torch.nn.Linear) \
             .set_qat_module(torch.nn.qat.Linear) \
             .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
 
         conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
-            .set_dtype_configs([weighted_int8_dtype_config]) \
-            .set_fuser_module(torch.nn.intrinsic.ConvReLU2d) \
+            .set_dtype_config(weighted_int8_dtype_config) \
+            .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
             .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
 
         backend_config = BackendConfig("my_backend") \
-            .set_config(linear_config) \
-            .set_config(conv_relu_config)
+            .set_backend_pattern_config(linear_config) \
+            .set_backend_pattern_config(conv_relu_config)
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str = ""):
         self.name = name
         self.configs: Dict[Pattern, BackendPatternConfig] = {}
 
@@ -141,7 +143,7 @@ class BackendConfig:
         self.name = name
         return self
 
-    def set_config(self, config: BackendPatternConfig) -> BackendConfig:
+    def set_backend_pattern_config(self, config: BackendPatternConfig) -> BackendConfig:
         """
         Set the config for an op that can be run on the target backend.
         This overrides any existing config for the given op.
@@ -163,9 +165,9 @@ class BackendConfig:
         conf = cls(backend_config_dict[NAME_DICT_KEY])
         for d in backend_config_dict[CONFIGS_DICT_KEY]:
             if isinstance(d, BackendPatternConfig):
-                conf.set_config(d)
+                conf.set_backend_pattern_config(d)
             elif isinstance(d, Dict):
-                conf.set_config(BackendPatternConfig.from_dict(d))
+                conf.set_backend_pattern_config(BackendPatternConfig.from_dict(d))
             else:
                 raise ValueError("Expected backend_config_dict['%s'] to be a dictionary" % CONFIGS_DICT_KEY)
         return conf
@@ -185,18 +187,18 @@ class BackendPatternConfig:
     """
     Config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
 
-    The user can configure how an op is handled on a given backend using the following methods:
+    The format of the pattern is described in:
+        https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
 
-        `set_pattern`: sets the pattern that identifies this op. The format is described in
-            https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
+    The user can configure how a operator pattern graph is handled on a given backend using the following methods:
         `set_observation_type`: sets how observers should be inserted for this op.
             See :class:`~torch.ao.quantization.backend_config.ObservationType`
-        `set_dtype_configs`: sets the supported data types for this op
+        `set_dtype_config`: sets the supported data types for this op
         `set_root_module`: sets the module that represents the root for this op
         `set_qat_module`: sets the module that represents the QAT implementation for this op
         `set_reference_quantized_module`: sets the module that represents the reference quantized
             implementation for this op's root module.
-        `set_fuser_module`: sets the module that represents the fused implementation for this op
+        `set_fused_module`: sets the module that represents the fused implementation for this op
         `set_fuser_method`: sets the function that specifies how to fuse the pattern for this op
 
     For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
@@ -208,7 +210,7 @@ class BackendPatternConfig:
         self.root_module: Optional[torch.nn.Module] = None
         self.qat_module: Optional[torch.nn.Module] = None
         self.reference_quantized_module: Optional[torch.nn.Module] = None
-        self.fuser_module: Optional[torch.nn.Module] = None
+        self.fused_module: Optional[torch.nn.Module] = None
         self.fuser_method: Optional[Callable] = None
 
         # Temporary/internal configs
@@ -220,13 +222,6 @@ class BackendPatternConfig:
         self._overwrite_output_fake_quantize: Optional[_PartialWrapper] = None
         self._overwrite_output_observer: Optional[_PartialWrapper] = None
 
-    def set_pattern(self, pattern: Pattern) -> BackendPatternConfig:
-        """
-        Set the pattern that identifies the op.
-        """
-        self.pattern = pattern
-        return self
-
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
         Set how observers should be inserted for this op.
@@ -234,11 +229,11 @@ class BackendPatternConfig:
         self.observation_type = observation_type
         return self
 
-    def set_dtype_configs(self, dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
+    def set_dtype_config(self, dtype_config: DTypeConfig) -> BackendPatternConfig:
         """
         Set the supported data types for this op.
         """
-        self.dtype_configs = dtype_configs
+        self.dtype_configs.append(dtype_config)
         return self
 
     def set_root_module(self, root_module: torch.nn.Module) -> BackendPatternConfig:
@@ -263,11 +258,11 @@ class BackendPatternConfig:
         self.reference_quantized_module = reference_quantized_module
         return self
 
-    def set_fuser_module(self, fuser_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_fused_module(self, fused_module: torch.nn.Module) -> BackendPatternConfig:
         """
         Set the module that represents the fused implementation for this op.
         """
-        self.fuser_module = fuser_module
+        self.fused_module = fused_module
         return self
 
     def set_fuser_method(self, fuser_method: Callable) -> BackendPatternConfig:
@@ -319,7 +314,7 @@ class BackendPatternConfig:
             "qat_module": a :class:`torch.nn.Module` that represents the QAT implementation for this op
             "reference_quantized_module": a :class:`torch.nn.Module` that represents the reference quantized
                 implementation for this op's root module.
-            "fuser_module": a :class:`torch.nn.Module` that represents the fused implementation for this op
+            "fused_module": a :class:`torch.nn.Module` that represents the fused implementation for this op
             "fuser_method": a function that specifies how to fuse the pattern for this op
         """
         def _get_dtype_config(obj: Any) -> DTypeConfig:
@@ -338,13 +333,12 @@ class BackendPatternConfig:
         conf = cls(backend_op_config_dict[PATTERN_DICT_KEY])
         if OBSERVATION_TYPE_DICT_KEY in backend_op_config_dict:
             conf.set_observation_type(backend_op_config_dict[OBSERVATION_TYPE_DICT_KEY])
-        conf.set_dtype_configs([
-            _get_dtype_config(d) for d in backend_op_config_dict.get(DTYPE_CONFIGS_DICT_KEY, [])
-        ])
+        for d in backend_op_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
+            conf.set_dtype_config(_get_dtype_config(d))
         conf.set_root_module(backend_op_config_dict.get(ROOT_MODULE_DICT_KEY, None))
         conf.set_qat_module(backend_op_config_dict.get(QAT_MODULE_DICT_KEY, None))
         conf.set_reference_quantized_module(backend_op_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None))
-        conf.set_fuser_module(backend_op_config_dict.get(FUSER_MODULE_DICT_KEY, None))
+        conf.set_fused_module(backend_op_config_dict.get(FUSED_MODULE_DICT_KEY, None))
         conf.set_fuser_method(backend_op_config_dict.get(FUSER_METHOD_DICT_KEY, None))
         conf._set_root_node_getter(backend_op_config_dict.get(ROOT_NODE_GETTER_DICT_KEY, None))
         conf._set_extra_inputs_getter(backend_op_config_dict.get(EXTRA_INPUTS_GETTER_DICT_KEY, None))
@@ -371,8 +365,8 @@ class BackendPatternConfig:
             backend_op_config_dict[QAT_MODULE_DICT_KEY] = self.qat_module
         if self.reference_quantized_module is not None:
             backend_op_config_dict[REFERENCE_QUANTIZED_MODULE_DICT_KEY] = self.reference_quantized_module
-        if self.fuser_module is not None:
-            backend_op_config_dict[FUSER_MODULE_DICT_KEY] = self.fuser_module
+        if self.fused_module is not None:
+            backend_op_config_dict[FUSED_MODULE_DICT_KEY] = self.fused_module
         if self.fuser_method is not None:
             backend_op_config_dict[FUSER_METHOD_DICT_KEY] = self.fuser_method
         if self._root_node_getter is not None:
