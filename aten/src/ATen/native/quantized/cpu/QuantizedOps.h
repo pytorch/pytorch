@@ -177,6 +177,18 @@ using qstd_inner_dim_fn = void (*)(
     bool /* keepdim */,
     Tensor& /* Y */);
 
+using qnormalize_nhwc_fn = void (*)(
+    const Tensor& /* X */,
+    const Tensor& /* gamma */,
+    const Tensor& /* beta */,
+    bool /* affine_per_channel */,
+    int /* num_channels */,
+    int /* num_groups */,
+    int64_t /* M */,
+    int64_t /* N */,
+    double /* eps */,
+    Tensor* /* Y */);
+
 using qprelu_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                            const Tensor& /*qw*/);
 
@@ -203,6 +215,7 @@ DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qdropout_fn, qdropout_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
+DECLARE_DISPATCH(qnormalize_nhwc_fn, quantized_groupnorm_nhwc_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
 DECLARE_DISPATCH(qgelu_fn, qgelu_stub);

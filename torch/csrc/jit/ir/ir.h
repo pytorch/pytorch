@@ -1428,7 +1428,7 @@ struct Graph {
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
-  friend void Lint(const AliasDb* db);
+  friend TORCH_API void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
