@@ -816,9 +816,8 @@ class TestTypePromotion(TestCase):
         suffix = '_' if inplace else ''
         err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
 
-        def op(t1, t2, suf=None):
-            suf = suffix if suf is None else suf
-            return getattr(t1, op_name + suf)(t2)
+        def op(t1, t2):
+            return getattr(t1, op_name + suffix)(t2)
 
         add_sub = op_name == 'add' or op_name == 'sub'
 
@@ -853,25 +852,21 @@ class TestTypePromotion(TestCase):
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
 
         # Test op(dense, sparse)
-        if add_sub or op_name == 'mul':
+        if add_sub:
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
-            dense_sparse = dense_sparse.to_dense() if dense_sparse.is_sparse else dense_sparse
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
-        # Test op(sparse, dense) not supported for all ops but 'mul'.
+        # Test op(sparse, dense) not supported for any ops:
         # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
         # sparse division only supports division by a scalar
-        if op_name != 'mul':
-            self.assertRaises(RuntimeError, lambda: op(s1, d2))
-        else:
-            # No type promotions for inplace operations, hence suf=''
-            op(s1, d2, suf='')
+        # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
+        self.assertRaises(RuntimeError, lambda: op(s1, d2))
 
         # Test op(sparse, scalar)
         if not add_sub and not (self.device_type == 'cpu' and dtype1 == torch.half):
