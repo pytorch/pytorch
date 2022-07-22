@@ -198,8 +198,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
             typesFromTensors.emplace_back(scalar_type);
           }
         } else if (nkind == prim::Param) {
+          // ONNX doesn't support scalar as graph input. When
+          // seeing a scalar input, we convert its expected type to tensor.
           if (auto scalar_type = get_scalar_type(input)) {
             auto tensor_type = input->type()->castRaw<TensorType>();
+            // get_scalar_type returns non-null value already guranatees
+            // that the input has a valid tensor_type.
+            TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
             auto rank = tensor_type->dim();
             if (rank && rank.value() == 0) {
               emplace_type_from_scalar(scalar_type.value());

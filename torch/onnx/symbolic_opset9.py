@@ -355,37 +355,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    if alpha:
-        is_scalar_one = (
-            symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) == 1
-        )
-        is_value = symbolic_helper._is_value(alpha)
-        if is_value and not is_scalar_one:
-            # If alpha=1, we don't need to add "Mul" because "Mul(x, 1) = x".
-            other = g.op("Mul", other, alpha)
-        elif not is_value and not is_scalar_one:
-            return symbolic_helper._unimplemented(
-                "add", "alpha must be either torch._C.Value or constant scalar 1."
-            )
-
+    if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
-    if alpha:
-        is_value = symbolic_helper._is_value(alpha)
-        is_scalar_one = (
-            symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) == 1
-        )
-        if is_value and not is_scalar_one:
-            # If alpha=1, we don't need to add "Mul" because "Mul(x, 1) = x".
-            other = g.op("Mul", other, alpha)
-        elif not is_value and not is_scalar_one:
-            return symbolic_helper._unimplemented(
-                "sub", "alpha must be either torch._C.Value or constant scalar 1."
-            )
+    if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
