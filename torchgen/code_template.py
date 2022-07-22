@@ -1,5 +1,5 @@
 import re
-from typing import Match, Optional, Sequence, Mapping
+from typing import Mapping, Match, Optional, Sequence
 
 # match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
