@@ -20539,7 +20539,7 @@ torch.cuda.synchronize()
         attn_mask = None
         if attn_mask_dim is not None:
             attn_mask = torch.randint(0, 2, size=((L, S) if attn_mask_dim == 2 else (N, L, S)),
-                                      device=device, dtype=torch.float)
+                                      device=device, dtype=dtype)
         with freeze_rng_state():
             expected = F._scaled_dot_product_attention(
                 query, key, value, attn_mask=attn_mask, dropout_p=dropout_p)
