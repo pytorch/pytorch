@@ -1044,7 +1044,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
-    @skipIfUnsupportedMinOpsetVersion(15)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_autograd_layernorm_shape(self):
         def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
@@ -1061,7 +1061,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             16,
         )
 
-        # wrap nn.layernorm into autograd.func generates the same
+        # wrap nn.layernorm into autograd.func repro the same
         # issue as using apex fusedlayernorm
         class CustomLayerNorm(torch.autograd.Function):
             @staticmethod
@@ -1078,7 +1078,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 max_position_embeddings,
                 type_vocab_size,
                 num_attention_heads=12,
-                layer_norm_eps=1e-12,
             ):
                 super(EmbeddingModule, self).__init__()
                 self.word_embeddings = torch.nn.Embedding(
@@ -1107,9 +1106,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 device = (
                     input_ids.device if input_ids is not None else inputs_embeds.device
                 )
-                input_shape = (
-                    input_ids.size()
-                )  # input_ids=torch.Tensor(a, b) > %43 <- a, %46 <- b
+                input_shape = input_ids.size()
                 seq_length = input_shape[1]
 
                 if position_ids is None:
@@ -1155,6 +1152,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             hidden_size, vocab_size, max_position_embeddings, type_vocab_siz
         ).eval()
         input_ids = torch.ones(batch_size, max_position_embeddings).long()
+        # 17 masks is referenced from the original transformer model
         attention_mask = torch.cat(
             ((torch.ones(17)), torch.zeros(max_position_embeddings - 17))
         )

@@ -1520,8 +1520,12 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // For outputs, only update static shapes. For input, we update symbolic
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
+
+  // Update reliable before processing constantvaluemap prevents unreliable
+  // nodes making static shape
+
+  UpateReliable(n);
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
-  //UpdateReliable(n);
   for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -2316,3 +2320,4 @@ void ONNXShapeTypeInference(
 
 } // namespace jit
 } // namespace torch
+   
