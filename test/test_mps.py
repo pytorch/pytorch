@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file,
      TEST_WITH_UBSAN)
 from torch.testing import make_tensor
-from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
