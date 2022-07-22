@@ -244,7 +244,7 @@ def _sparse_layer_test_helper(
         # the linear gets hidden within the fused module so to check its packed_params
         # need to use the correct target
         if to_fuse is not None:
-            sqmodule_to_check = getattr(sqmodule_to_check, "sparse_qlinear")
+            sqmodule_to_check = sqmodule_to_check.sparse_qlinear
 
         row_block_size, col_block_size = sqmodule_to_check._packed_params._weight_bias()[
             2:

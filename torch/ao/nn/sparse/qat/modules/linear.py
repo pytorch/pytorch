@@ -2,6 +2,8 @@ import torch
 import torch.ao.nn.sparse.quantized as ao_qsparsenn
 from typing import Type, Any
 
+__all__ = ['SparseQATLinear']
+
 class SparseQATLinear(ao_qsparsenn.Linear):
     _FLOAT_MODULE: Type[Any] = torch.nn.qat.modules.linear.Linear
 

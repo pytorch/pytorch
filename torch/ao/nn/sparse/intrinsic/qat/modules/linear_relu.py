@@ -1,6 +1,8 @@
 import torch
 import torch.ao.nn.sparse.intrinsic.quantized as ao_iqsparsenn
 
+__all__ = ['SparseQATLinearReLU']
+
 class SparseQATLinearReLU(ao_iqsparsenn.SparseQuantizedLinearReLU):
     r"""Sparse QAT module (fused).
 
@@ -12,7 +14,7 @@ class SparseQATLinearReLU(ao_iqsparsenn.SparseQuantizedLinearReLU):
     inheritance in the forward. That's why we use composition to override the
     behavior.
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU  # noqa
+    _FLOAT_MODULE = torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU
 
     @classmethod
     def _get_name(cls) -> str:
