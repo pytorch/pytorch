@@ -119,7 +119,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_symeig.*",
     "_svd.*",
     "slice",
-    "randint(_out)?",
     "item",
     "_local_scalar_dense",
     "to",
@@ -911,7 +910,9 @@ def emit_dispatch_case(
                 overload.signature, overload.base, namedtuple_typenames
             ),
             call_dispatch_out=emit_single_dispatch(
-                overload.signature, overload.outplace, namedtuple_typenames
+                overload.signature,
+                overload.outplace,
+                namedtuple_typenames,
             ),
         )
     else:
@@ -1043,21 +1044,13 @@ def group_overloads(
                 + "\n".join(f"- {candidate}" for candidate in candidates)
             )
 
-    grouped: List[PythonSignatureGroup] = []
-    for sig, base in bases.items():
-        outplace = outplaces.get(sig)
-        grouped.append(
-            PythonSignatureGroup(
-                # prefer the signature with optional out=... arguments because it's the
-                # superset that can be used to parse input for both base and outplace.
-                signature=outplace.signature
-                if outplace is not None
-                else base.signature,
-                base=base.function,
-                outplace=outplace.function if outplace is not None else None,
-            )
+    grouped = [
+        PythonSignatureGroup.from_pairs(
+            functional=base,
+            out=outplaces.get(sig),
         )
-
+        for sig, base in bases.items()
+    ]
     return sort_overloads(grouped)
 
 
