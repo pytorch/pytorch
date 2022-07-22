@@ -247,3 +247,76 @@ a reference to `ivalue_array[some_set_of_indices[i]]`)
 Each `ProcessedNode` stores a `ProcessedFunction`, which represents the actual op to execute. `ProcessedFunction`s are initialized
 upon `StaticModule` construction according to the out variant/native/JIT fallback lookup rules described in "Registering Ops".
 **Note that all `ProcessedFunction`s are shared amongst all runtime instances**, so all `ProcessedFunction`s must be thread-safe.
+
+### `ProcessedNodeMetadata`
+
+`ProcessedNodeMetadata` holds various "extra" fields on behalf of `ProcessedNode`. Typically, this field is unused. But a few ops need extra machinery to work:
+* `prim::If` operations have two `BlockRunner`s for the execution of true and false sub-blocks depending upon the condition check.
+* `prim::Loop` operations have a `BlockRunner` for the execution of the looping sub-block.
+* `prim::fork` operations have `torch::jit::TaskLauncher` (`std::function<void(std::function<void()>)>`) responsible for forked graph execution.
+
+### `Asynchronous Execution`
+
+`StaticRuntime::runAsync()` API allows execution of asynchronous operations on `TaskLauncher` passed as arguments.
+`StaticRuntime::runAsync()` performs inline execution of parent graph on caller thread and asynchronous operations like `prim::fork` are executed
+on the launcher passed in. In the case that no launcher is provided, the execution happens on `at::launch` inter-op thread pool.
+
+### `prim::fork and aten::wait`
+
+`prim::fork` takes the callable function/method/Module (say `fn`) and arguments to that callable `args` and `kwargs`. Since the execution of forked function `fn` happens asynchronously and fork returns immediately after creating the async task, the `fn` may not have been executed by the time the line of code after the `fork` call is reached. Thus, `aten::wait` is used to wait for the async `fn` task to be completed. `prim::fork` nodes contain the sub-graph for the forked parts of the network. Each parent graph creates a separate instance of `StaticModule` for the
+forked sub-graph and `StaticRuntime` instances are created on the fly during runtime as the fork nodes are executed. The forked subgraph execution
+happens asynchronously on the launcher provided during `StaticRuntime::runAsync()` or by `at::launch` executor by default. `aten::wait` operator
+waits on the future returned by the corresponding `prim::fork` operation
+
+#### Inter-op parallelism via fork/wait ops
+
+Sample Model with independent operations can be parallelized by inserting fork/wait nodes in the graph.
+
+```python
+def CNNBlock(x):
+    out_1 = conv1(x)
+    out_1 = conv2(out_1)
+    out_1 = max_pool1(out_1)
+
+    out_2 = conv3(x)
+    out_2 = max_pool2(out_2)
+
+    out_merged = conv4(out_1 + out_2)
+    return out_merged
+```
+The two branches of (conv,conv,pool) operations can be parallelized by inserting fork nodes such that the execution of both the branches can
+happen in parallel:
+
+```python
+def branch1(x):
+    out = conv1(x)
+    out = conv2(x)
+    return max_pool1(out)
+
+def branch2(x):
+    out = conv3(x)
+    return max_pool2(out)
+
+def CNNBlock(x):
+    fut_1 = torch.jit.fork(branch1, x)
+    fut_2 = torch.jit.fork(branch2, x)
+
+    out_merged = conv4(torch.jit.wait(fut_1) + torch.jit.wait(fut_2))
+    return out_merged
+ ```
+**Execution without fork/wait operations:**
+```
+<CALLER THREAD>: conv1 ─> conv2 ─> max_pool1 ─> conv3 ─> max_pool2 ─> conv4
+```
+
+**Execution with fork/wait operations:**
+```
+<CALLER THREAD>  :             fork1 ──> fork2 ──────────> wait(fut_1) ─> wait(fut_2) ─> conv4
+                                  |        |
+                                  |        |
+<INTER-OP THREAD>:                |       conv3 ──────────────────> max_pool2 -> fut_2
+                                  |
+<INTER-OP THREAD>:             conv1 ─> conv2 ─> max_pool1 ──>fut_1
+```
+More examples for fork/wait operations and inter-op parallelism in PyTorch can be found at
+[Dynamic Parallelism in TorchScript](https://pytorch.org/tutorials/advanced/torch-script-parallelism.html)

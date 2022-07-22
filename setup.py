@@ -52,6 +52,8 @@
 #
 #   USE_STATIC_MKL
 #     Prefer to link with MKL statically - Unix only
+#   USE_ITT=0
+#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -541,6 +543,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
 
+        if cmake_cache_vars['USE_ITT']:
+            report('-- Using ITT')
+        else:
+            report('-- Not using ITT')
+
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv('CFLAGS', ''))
@@ -657,20 +664,29 @@ class concat_license_files():
     is a single license file in the sdist and wheels with all of the necessary
     licensing info.
     """
-    def __init__(self):
+    def __init__(self, include_files=False):
         self.f1 = 'LICENSE'
         self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+        self.include_files = include_files
 
     def __enter__(self):
         """Concatenate files"""
+
+        old_path = sys.path
+        sys.path.append(third_party_path)
+        try:
+            from build_bundled import create_bundled
+        finally:
+            sys.path = old_path
+
         with open(self.f1, 'r') as f1:
             self.bsd_text = f1.read()
 
         with open(self.f1, 'a') as f1:
-            with open(self.f2, 'r') as f2:
-                self.bundled_text = f2.read()
-                f1.write('\n\n')
-                f1.write(self.bundled_text)
+            f1.write('\n\n')
+            create_bundled(os.path.relpath(third_party_path), f1,
+                           include_files=self.include_files)
+
 
     def __exit__(self, exception_type, exception_value, traceback):
         """Restore content of f1"""
@@ -690,7 +706,7 @@ else:
     class wheel_concatenate(bdist_wheel):
         """ check submodules on sdist to prevent incomplete tarballs """
         def run(self):
-            with concat_license_files():
+            with concat_license_files(include_files=True):
                 super().run()
 
 
@@ -930,9 +946,11 @@ def print_box(msg):
     print('-' * (size + 2))
 
 if __name__ == '__main__':
-    # Parse the command line and check the arguments
-    # before we proceed with building deps and setup
+    # Parse the command line and check the arguments before we proceed with
+    # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
+    dist.script_name = os.path.basename(sys.argv[0])
+    dist.script_args = sys.argv[1:]
     try:
         dist.parse_command_line()
     except setuptools.distutils.errors.DistutilsArgError as e:
@@ -1061,6 +1079,8 @@ if __name__ == '__main__':
                 'include/torch/csrc/deploy/interpreter/*.h',
                 'include/torch/csrc/deploy/interpreter/*.hpp',
                 'include/torch/csrc/distributed/c10d/exception.h',
+                'include/torch/csrc/distributed/rpc/*.h',
+                'include/torch/csrc/generic/utils.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
@@ -1086,6 +1106,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/tensor/*.h',
                 'include/torch/csrc/lazy/backend/*.h',
                 'include/torch/csrc/lazy/core/*.h',
+                'include/torch/csrc/lazy/core/internal_ops/*.h',
                 'include/torch/csrc/lazy/core/ops/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
@@ -1148,7 +1169,7 @@ if __name__ == '__main__':
             'Programming Language :: Python :: 3',
         ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
-        keywords='pytorch machine learning',
+        keywords='pytorch, machine learning',
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
