@@ -235,7 +235,7 @@ class FP32MatMulPattern(Pattern):
 
     def match(self, event: _ProfilerEvent):
         # If we saw this pattern once, we don't need to match it again
-        if event_type(event) != _EventType.TorchOp:
+        if event.tag != _EventType.TorchOp:
             return False
         assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
         if event.name() == "aten::mm":
@@ -249,8 +249,7 @@ class FP32MatMulPattern(Pattern):
 
 def source_code_location(event: _ProfilerEvent):
     while event:
-        if event_type(event) == _EventType.PyCall or event_type(
-                event) == _EventType.PyCCall:
+        if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
@@ -273,18 +272,3 @@ def report_all_anti_patterns(prof):
             if report_msg not in reported:
                 print(report_msg)
                 reported.add(report_msg)
-
-
-def event_type(event: _ProfilerEvent):
-    if isinstance(event.extra_fields, _ExtraFields_TorchOp):
-        return _EventType.TorchOp
-    elif isinstance(event.extra_fields, _ExtraFields_Backend):
-        return _EventType.Backend
-    elif isinstance(event.extra_fields, _ExtraFields_Allocation):
-        return _EventType.Allocation
-    elif isinstance(event.extra_fields, _ExtraFields_PyCall):
-        return _EventType.PyCall
-    elif isinstance(event.extra_fields, _ExtraFields_PyCCall):
-        return _EventType.PyCCall
-    else:
-        raise Exception("Unknown event type")
