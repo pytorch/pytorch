@@ -1,7 +1,9 @@
-import torch
-from torch.utils._mode_utils import no_dispatch
-from torch.multiprocessing.reductions import StorageWeakRef
 import weakref
+
+import torch
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._mode_utils import no_dispatch
+
 
 def safe_is_leaf(t):
     try:
@@ -23,6 +25,7 @@ def safe_is_leaf(t):
 # references.
 # To get around this issue, we can use it as a normal key, and then set
 # `weakref.finalize` to delete the key when its contained tensor dies.
+
 
 class WeakTensorRefKey(object):
     def __init__(self, ten):
@@ -80,8 +83,9 @@ class MetaConverter:
         # even though a tensor with their storage has expired (aliasing or otherwise)
         # check for expired storages less often so as to bound the amount of work we
         # do checking for expired storages
-        self.check_expired_frequency = max(self.check_expired_frequency, len(self.maybe_storages_to_delete))
-
+        self.check_expired_frequency = max(
+            self.check_expired_frequency, len(self.maybe_storages_to_delete)
+        )
 
     def get_tensor_memo(self, t):
         return self.tensor_memo.get(WeakTensorRefKey(t), None)
@@ -126,7 +130,7 @@ class MetaConverter:
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            self.storage_memo[swr] = torch.empty(s.size(), dtype=s.dtype, device='meta')
+            self.storage_memo[swr] = torch.empty(s.size(), dtype=s.dtype, device="meta")
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
@@ -148,8 +152,11 @@ class MetaConverter:
                     base = self.meta_tensor(t._base)
 
                     def is_c_of_r(complex_dtype, real_dtype):
-                        return utils.is_complex_dtype(complex_dtype) and \
-                            utils.corresponding_real_dtype(complex_dtype) == real_dtype
+                        return (
+                            utils.is_complex_dtype(complex_dtype)
+                            and utils.corresponding_real_dtype(complex_dtype)
+                            == real_dtype
+                        )
 
                     if base.dtype == t.dtype:
                         pass
@@ -169,7 +176,9 @@ class MetaConverter:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
                     if t.requires_grad:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta', requires_grad=True)
+                        r = torch.empty(
+                            (0,), dtype=t.dtype, device="meta", requires_grad=True
+                        )
                         if not is_leaf:
                             with torch.enable_grad():
                                 # The backward function here will be wrong, but
@@ -180,7 +189,7 @@ class MetaConverter:
                                 # sort of unsupported grad_fn here
                                 r = r.clone()
                     else:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta')
+                        r = torch.empty((0,), dtype=t.dtype, device="meta")
                     # As long as meta storage is not supported, need to prevent
                     # redispatching on set_(Storage, ...) which will choke with
                     # meta storage
@@ -199,19 +208,26 @@ class MetaConverter:
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-            if any([
-                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
-                t.is_nested, torch._is_functional_tensor(t),
-                # these are supported in meta conversion but the fallbacks
-                # don't work
-                t.is_neg(), t.is_conj(),
-                # conjugate fallback does not support meta tensors
-                t.dtype in (torch.complex128, torch.complex64, torch.complex32),
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]):
+            if any(
+                [
+                    t.is_sparse_csr,
+                    t.is_sparse,
+                    t.is_mkldnn,
+                    t.is_quantized,
+                    t.is_nested,
+                    torch._is_functional_tensor(t),
+                    # these are supported in meta conversion but the fallbacks
+                    # don't work
+                    t.is_neg(),
+                    t.is_conj(),
+                    # conjugate fallback does not support meta tensors
+                    t.dtype in (torch.complex128, torch.complex64, torch.complex32),
+                    t.device.type in ("lazy", "meta"),
+                    # We need a way to test if a tensor is batched but there
+                    # is no official APi to do it
+                    # torch._C._is_batched(t),
+                ]
+            ):
                 # TODO: sparse should support meta
                 # NB technically to('meta') does work but our logging
                 # instrumentation will see the meta conversions and the
@@ -237,4 +253,5 @@ class MetaConverter:
             # non-Tensor types don't count as hit or miss
             return t
 
-import torch._prims.utils as utils
+
+import torch._prims_common as utils
