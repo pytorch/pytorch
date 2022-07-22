@@ -252,7 +252,7 @@ class FullyConnectedPruneGradientOp : public Operator<Context> {
     auto& comp_lb = Input(7);
     DCHECK_GE(X.dim(), 1);
     DCHECK_GE(W.dim(), 2);
-    DCHECK_LE(dY.dim(), 2);
+    TORCH_DCHECK_LE(dY.dim(), 2);
     // batch size
     int M = X.dim() > 1 ? X.dim32(0) : 1;
     // Feature dimension

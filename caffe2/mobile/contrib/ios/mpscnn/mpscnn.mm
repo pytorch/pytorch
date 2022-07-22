@@ -2225,7 +2225,7 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     auto keep =
         utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
 
-    DCHECK_LE(keep.size(), scores.size());
+    TORCH_DCHECK_LE(keep.size(), scores.size());
 
     // 4. sort all (proposal, score) pairs by score from highest to lowest
     // 5. take top pre_nms_topN (e.g. 6000)

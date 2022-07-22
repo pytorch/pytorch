@@ -260,7 +260,7 @@ void MemoryPlanner::allocateOutputTensors() {
     if (tensor_size == 0) {
       continue;
     }
-    DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
+    TORCH_DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
     void* src = static_cast<void*>(start + offset);
     // NOTE: Populating `ctx` enables clients to take the ownership of a
     // tensor managed by Static Runtime. Some clients use "move" semantics to
@@ -376,7 +376,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
       continue;
     }
     at::StorageImpl* storageImpl = &ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
+    TORCH_DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
 #ifndef NDEBUG

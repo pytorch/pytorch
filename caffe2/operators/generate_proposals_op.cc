@@ -244,7 +244,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 3. remove predicted boxes with either height or width < min_size
   auto keep =
       utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
-  DCHECK_LE(keep.size(), scores_sorted.size());
+  TORCH_DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)

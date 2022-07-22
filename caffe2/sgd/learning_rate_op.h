@@ -68,7 +68,7 @@ class LearningRateOp final : public Operator<Context> {
       T start_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_multiplier", 0.);
       DCHECK_GE(start_multiplier, 0); // start_multiplier in range [0, 1]
-      DCHECK_LE(start_multiplier, 1);
+      TORCH_DCHECK_LE(start_multiplier, 1);
       T gamma =
           this->template GetSingleArgument<float>(arg_prefix + "gamma", 0);
       DCHECK_GT(gamma, 0);
@@ -78,7 +78,7 @@ class LearningRateOp final : public Operator<Context> {
       T end_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "end_multiplier", 0);
       DCHECK_GE(end_multiplier, 0); // end_multiplier in range [0, 1]
-      DCHECK_LE(end_multiplier, 1);
+      TORCH_DCHECK_LE(end_multiplier, 1);
       return new HillLearningRate<T>(
           num_iter, start_multiplier, gamma, power, end_multiplier);
     } else if (policy == "slope") {

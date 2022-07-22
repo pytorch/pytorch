@@ -338,7 +338,7 @@ class WorkersPool {
     // One of the tasks will be run on the current thread.
     int workers_count = tasks.size() - 1;
     CreateWorkers(workers_count);
-    DCHECK_LE(workers_count, (int)workers_.size());
+    TORCH_DCHECK_LE(workers_count, (int)workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
     for (const auto task : c10::irange(1, tasks.size())) {
       workers_[task - 1]->StartWork(tasks[task].get());

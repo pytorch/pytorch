@@ -273,7 +273,7 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto* Ydata = Y->template mutable_data<float>();
   for (int64_t i = 0; i < N; ++i) {
     DCHECK_GE(Xdata[i], 0.0);
-    DCHECK_LE(Xdata[i], 1.0);
+    TORCH_DCHECK_LE(Xdata[i], 1.0);
     Ydata[i * 2] = 1.0 - Xdata[i];
     Ydata[i * 2 + 1] = Xdata[i];
   }
