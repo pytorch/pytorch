@@ -13,7 +13,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
 aten = torch.ops.aten
 
 try:
-    import sympy
+    import sympy  # noqa: F401
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
