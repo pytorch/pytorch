@@ -3070,7 +3070,14 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    assert not isinstance(start, complex)
+    if any(isinstance(a, complex) for a in (start, end, steps)):
+        raise NotImplementedError
+    if steps < 0:
+        raise NotImplementedError
+
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
     factory_kwargs = {
         "device": device,
         # "layout":layout,
