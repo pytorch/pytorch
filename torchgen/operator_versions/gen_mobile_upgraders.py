@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import torch
-from torchgen.code_template import CodeTemplate
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
+
+from torchgen.code_template import CodeTemplate
 from torchgen.operator_versions.gen_mobile_upgraders_constant import (
     MOBILE_UPGRADERS_HEADER_DESCRIPTION,
 )
