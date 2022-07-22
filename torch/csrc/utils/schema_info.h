@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 

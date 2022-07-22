@@ -1,3 +1,4 @@
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/utils/schema_info.h>
 
 namespace torch {
