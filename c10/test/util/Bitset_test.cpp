@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/Bitset.h>
+#include <c10/util/Bitset.h> // IWYU pragma: associated
 #include <c10/util/irange.h>
 
 using c10::utils::bitset;

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include <c10/core/OptionalRef.h>
-#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarType.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>

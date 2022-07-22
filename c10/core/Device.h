@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/DeviceType.h>
+#include <c10/core/DeviceType.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 

@@ -1,0 +1,5 @@
+[
+    { include: [ "@<gtest/gtest[-_].*.h>", private, "<gtest/gtest.h>", public ] },
+    { include: [ "@<gmock/gmock[-_].*.h>", private, "<gmock/gmock.h>", public ] },
+    { ref: "system_headers.imp" },
+]

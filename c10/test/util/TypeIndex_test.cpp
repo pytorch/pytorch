@@ -1,5 +1,5 @@
 #include <c10/util/Metaprogramming.h>
-#include <c10/util/TypeIndex.h>
+#include <c10/util/TypeIndex.h> // IWYU pragma: associated
 #include <gtest/gtest.h>
 
 using c10::string_view;

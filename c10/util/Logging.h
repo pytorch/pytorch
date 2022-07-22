@@ -7,10 +7,7 @@
 #include <limits>
 #include <sstream>
 
-// include-what-you-use want to put these includes in the wrong place
 // IWYU pragma: no_include "c10/util/Logging.h"
-// IWYU pragma: no_include "c10/util/logging_is_not_google_glog.h"
-// IWYU pragma: no_include "c10/util/logging_is_google_glog.h"
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>

@@ -7,12 +7,12 @@
 #include <typeinfo>
 #include <utility>
 
-#include <c10/core/Device.h>
-#include <c10/core/DispatchKeySet.h>
-#include <c10/core/TensorImpl.h>
+#include <c10/core/Device.h> // IWYU pragma: export
+#include <c10/core/DispatchKeySet.h> // IWYU pragma: export
+#include <c10/core/TensorImpl.h> // IWYU pragma: export
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h> // IWYU pragma: export
 #include <c10/util/python_stub.h>
 
 /**

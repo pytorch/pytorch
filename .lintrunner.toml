@@ -94,7 +94,7 @@ command = [
     'tools.linter.adapters.iwyu.adapter',
     '--binary=/usr/bin/iwyu_tool',
     '--build_dir=./build',
-    '--mapping_file=tools/linter/adapters/iwyu/system_headers.imp',
+    '--mapping_file=tools/linter/adapters/iwyu/library_mappings.imp',
     '--',
     '@{{PATHSFILE}}',
 ]

@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <c10/core/SymInt.h>
+#include <c10/core/SymInt.h> // IWYU pragma: export
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 

@@ -1,4 +1,4 @@
-#include <c10/util/tempfile.h>
+#include <c10/util/tempfile.h> // IWYU pragma: associated
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <sys/types.h>

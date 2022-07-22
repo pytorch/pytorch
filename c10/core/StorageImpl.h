@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
+#include <c10/core/Allocator.h> // IWYU pragma: export
+#include <c10/core/ScalarType.h> // IWYU pragma: export
 #include <c10/core/SymInt.h>
 
-#include <c10/util/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h> // IWYU pragma: export
 
 namespace c10 {
 

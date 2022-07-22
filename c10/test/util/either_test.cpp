@@ -1,8 +1,8 @@
 // Originally taken from
 // https://raw.githubusercontent.com/cryfs/cryfs/14ad22570ddacef22d5ff139cdff68a54fc8234d/test/cpp-utils/either_test.cpp
+#include <c10/util/either.h> // IWYU pragma: associated
 
 #include <c10/macros/Macros.h>
-#include <c10/util/either.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <sstream>

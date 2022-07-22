@@ -1,6 +1,6 @@
 // clang-format off
-#include <c10/util/BFloat16.h>
-#include <c10/util/BFloat16-math.h>
+#include <c10/util/BFloat16.h> // IWYU pragma: associated
+#include <c10/util/BFloat16-math.h> // IWYU pragma: associated
 #include <c10/util/irange.h>
 // clang-format on
 #include <gtest/gtest.h>

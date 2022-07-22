@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include <c10/core/SymInt.h>
-#include <c10/core/SymIntArrayRef.h>
+#include <c10/core/SymIntArrayRef.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>

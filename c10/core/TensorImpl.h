@@ -1,13 +1,14 @@
 #pragma once
 
-#include <c10/core/Backend.h>
+#include <c10/core/Backend.h> // IWYU pragma: export
+#include <c10/core/DispatchKeySet.h> // IWYU pragma: export
+#include <c10/core/MemoryFormat.h> // IWYU pragma: export
+#include <c10/core/Storage.h> // IWYU pragma: export
+#include <c10/core/TensorOptions.h> // IWYU pragma: export
+
 #include <c10/core/CopyBytes.h>
-#include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/Storage.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>

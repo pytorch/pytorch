@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/DeviceGuard.h>
+#include <c10/core/DeviceGuard.h> // IWYU pragma: associated
 #include <c10/core/impl/FakeGuardImpl.h>
 
 using namespace c10;
