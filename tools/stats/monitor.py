@@ -43,8 +43,8 @@ def main() -> None:
             try:
                 if "python" in process.name() and process.cmdline():
                     python_processes.append(process)
-            except Exception:
-                # access denied
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # access denied or the process died
                 pass
         return python_processes
 
@@ -59,10 +59,9 @@ def main() -> None:
                 "rss_memory": p.memory_info().rss,
                 "uss_memory": p.memory_full_info().uss,
             }
-            try:
+            if "pss" in p.memory_full_info():
+                # only availiable in linux
                 info["pss_memory"] = p.memory_full_info().pss
-            except Exception:
-                pass
             per_process_info.append(info)
         return per_process_info
 
@@ -78,7 +77,8 @@ def main() -> None:
     try:
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-    except Exception:
+    except pynvml.NVMLError:
+        # no pynvml avaliable, probably because not cuda
         pass
 
     while True:
