@@ -58,9 +58,9 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(self.dtype_config1.to_dict(), self.dtype_config_dict1)
         self.assertEqual(self.dtype_config2.to_dict(), self.dtype_config_dict2)
 
-    # =================
+    # ======================
     #  BackendPatternConfig
-    # =================
+    # ======================
 
     _fuser_method = reverse_sequential_wrapper2(nni.LinearReLU)
 
