@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
@@ -11,6 +12,7 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -123,6 +125,18 @@ struct AddKinetoMetadata {
     }
   }
 
+  void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
+    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
+    addMetadata("Device Id", std::to_string(alloc.device_index_));
+    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
+    if (alloc.total_allocated_ >= 0) {
+      addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
+    }
+    if (alloc.total_reserved_ >= 0) {
+      addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
+    }
+  }
+
   void operator()(const ExtraFields<EventType::PyCall>& py_call) {
     if (py_call.module_.has_value()) {
       addMetadata("Python module id", std::to_string(py_call.module_->id_));
@@ -131,7 +145,9 @@ struct AddKinetoMetadata {
 
   void operator()(const ExtraFields<EventType::PyCCall>& py_call) {}
 
-  void operator()(const ExtraFields<EventType::Kineto>& e) {}
+  void operator()(const ExtraFields<EventType::Kineto>& e) {
+    TORCH_INTERNAL_ASSERT(kineto_activity_ == nullptr);
+  }
 
   void setPythonMetadata(std::shared_ptr<Result> result) {
     result->visit([&](const auto& i) {
@@ -164,7 +180,7 @@ struct AddKinetoMetadata {
     }
   }
 
-  torch::profiler::impl::kineto::activity_t* kineto_activity_;
+  const torch::profiler::impl::kineto::activity_t* kineto_activity_;
 };
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
@@ -203,6 +219,22 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       record_queue_.getSubqueue()->emplace_allocation_event(
           torch::profiler::impl::getApproximateTime(),
           ptr,
+          alloc_size,
+          total_allocated,
+          total_reserved,
+          device.type(),
+          device.index());
+    }
+  }
+
+  void reportOutOfMemory(
+      int64_t alloc_size,
+      int64_t total_allocated,
+      int64_t total_reserved,
+      c10::Device device) override {
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+      record_queue_.getSubqueue()->emplace_ooms_event(
+          torch::profiler::impl::getApproximateTime(),
           alloc_size,
           total_allocated,
           total_reserved,
@@ -497,7 +529,8 @@ void reportBackendEventToActiveKinetoProfiler(
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (config.state == ProfilerState::NVTX) {
+  if (config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::ITT) {
     return;
   }
   TORCH_CHECK(
@@ -516,6 +549,9 @@ void enableProfilerWithEventPostProcess(
   TORCH_CHECK(
       config.state != ProfilerState::NVTX,
       "NVTX does not support post processing callback.");
+  TORCH_CHECK(
+      config.state != ProfilerState::ITT,
+      "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
       GlobalStateManager::get() == nullptr,
       "On-demand profiling does not support post processing callback");
@@ -532,6 +568,9 @@ void enableProfiler(
   TORCH_CHECK(!profilerEnabled(), "Profiler is already enabled on this thread");
   if (config.state == ProfilerState::NVTX) {
     torch::profiler::impl::pushNVTXCallbacks(config, scopes);
+    return;
+  } else if (config.state == ProfilerState::ITT) {
+    torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
   }
 
@@ -576,7 +615,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX),
+           config.state == ProfilerState::NVTX ||
+           config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
   if (state_ptr->hasCallbackHandle()) {
@@ -659,6 +699,9 @@ int64_t KinetoEvent::debugHandle() const {
 uint8_t KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
+        return static_cast<uint8_t>(i.device_index_);
+      },
+      [](const ExtraFields<EventType::OutOfMemory>& i) {
         return static_cast<uint8_t>(i.device_index_);
       },
       [&](const auto&) {
