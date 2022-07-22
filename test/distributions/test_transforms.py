@@ -1,5 +1,6 @@
 # Owner(s): ["module: distributions"]
 
+import io
 from numbers import Number
 
 import pytest
@@ -470,6 +471,19 @@ def test_transformed_distribution(base_batch_dim, base_event_dim, transform_dim,
         y = y[0]
     log_prob = d.log_prob(y)
     assert log_prob.shape == d.batch_shape
+
+
+def test_save_load_transform():
+    # Evaluating `log_prob` will create a weakref `_inv` which cannot be pickled. Here, we check
+    # that `__getstate__` correctly handles the weakref, and that we can evaluate the density after.
+    dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
+    x = torch.linspace(0, 1, 10)
+    log_prob = dist.log_prob(x)
+    stream = io.BytesIO()
+    torch.save(dist, stream)
+    stream.seek(0)
+    other = torch.load(stream)
+    assert torch.allclose(log_prob, other.log_prob(x))
 
 
 if __name__ == '__main__':
