@@ -626,12 +626,15 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+                check_run_name_prefix = "" if workflow_run is None else f'{workflow_run["workflow"]["name"]} / '
                 has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
                         if checkrun_node["conclusion"] == 'FAILURE':
                             has_failing_check = True
-                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                        conclusions[f'{check_run_name_prefix}{checkrun_node["name"]}'] = (
+                            checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                        )
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
                                         name=self.project,
@@ -967,12 +970,15 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
             checkruns = node["checkRuns"]
             if workflow_run is not None:
                 conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+            check_run_name_prefix = "" if workflow_run is None else f'{workflow_run["workflow"]["name"]} / '
             has_failing_check = False
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                    conclusions[f'{check_run_name_prefix}{checkrun_node["name"]}'] = (
+                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    )
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
                     rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
                                     name=project,
