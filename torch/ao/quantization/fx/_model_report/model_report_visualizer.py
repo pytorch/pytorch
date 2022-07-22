@@ -1,6 +1,6 @@
 import torch
-from typing import Any, Set, Dict, List, Tuple
-from collections import OrderedDict
+from typing import Any, Set, Dict, List, Tuple, OrderedDict
+from collections import OrderedDict as OrdDict
 from tabulate import tabulate
 import matplotlib.pyplot as plt
 
@@ -131,7 +131,7 @@ class ModelReportVisualizer:
             module_fqns -> feature_names -> values
         """
         # create return dict
-        filtered_dict: OrderedDict[str, Any] = OrderedDict()
+        filtered_dict: OrderedDict[str, Any] = OrdDict()
 
         for module_fqn in self.generated_reports:
             # first filter based on module
