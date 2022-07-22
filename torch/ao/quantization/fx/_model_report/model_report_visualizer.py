@@ -2,6 +2,7 @@ import torch
 from typing import Any, Set, Dict, List, Tuple
 from collections import OrderedDict
 from tabulate import tabulate
+import matplotlib.pyplot as plt
 
 class ModelReportVisualizer:
     r"""
@@ -407,11 +408,15 @@ class ModelReportVisualizer:
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
-
+            When the tensor information is plotted, it will plot:
+                idx as the x val, feature value as the y_val
+            When the channel information is plotted, it will plot:
+                idx // 3 as the x val, feature value as the y_val [for each channel]
+                The reason for this is that we want to be able to compare values across the
+                channels for same layer, and it will be hard if values are staggered by idx
         Args:
-            feature_filter (str, optional): Filters the features presented to only those that
+            feature_filter (str): Filters the features presented to only those that
                 contain this filter substring
-                Default = "", results in all the features being printed
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
@@ -419,7 +424,84 @@ class ModelReportVisualizer:
             >>> # the code below both returns the info and diplays the plot
             >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
         """
-        pass
+        # get the table dict and the specific tables of interest
+        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
+        tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
+        channel_headers, channel_table = table_dict[self.TABLE_CHANNEL_KEY]
+
+        # make sure it is only 1 feature that is being plotted
+        # get the number of features in each of these
+        tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS
+        channel_info_features_count = len(channel_headers) - ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS
+
+        # keep track of per_channel or not
+        data_is_per_channel: bool = False
+
+        x_data: List = []
+        y_data: List[List] = []
+        # the feature will either be a tensor feature or channel feature
+        if tensor_info_features_count == 1:
+            # it should only be single value data, so easy to plot
+            for row in tensor_table:
+                row_value = row[ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS]
+                if not type(row_value) == str:
+                    x_data.append(row[0])
+                    y_data.append(row[ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS])
+
+        elif channel_info_features_count == 1:
+            data_is_per_channel = True
+            # gather the x_data and multiple y_data
+            # calculate the number of channels
+            num_channels: int = max(row[2] for row in channel_table) + 1
+            for channel in range(num_channels):
+                y_data.append([])  # seperate data list per channel
+
+            # keep track of last added x_value
+            last_added = None
+
+            # get the data for each channel seperately
+            for row in channel_table:
+                # we want append based on what channel it is
+                current_channel = row[2]
+                data_value = row[ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS]
+                if not type(data_value) == str:
+                    # every num channels all belong to the same module
+                    # if we haven't already added it
+                    new_x_val = (row[0] - 1) // num_channels
+                    if new_x_val != last_added:
+                        x_data.append((row[0] - 1) // num_channels)
+                        last_added = new_x_val
+
+                    # add it to the proper channel list
+                    y_data[current_channel].append(data_value)
+        else:
+            # more than one feature was chosen
+            error_str = "Make sure to pick only a single feature with your filter to plot a graph."
+            error_str += " We recommend calling get_all_unique_feature_names() to find unique feature names."
+            error_str += " Pick one of those features to plot."
+            raise ValueError(error_str)
+
+        # plot based on whether data is per channel or not
+        fig = plt.figure()
+        ax = plt.subplot()
+        ax.set_ylabel(feature_filter)
+        ax.set_title(feature_filter + " Plot")
+        plt.xticks(x_data)  # only show ticks for actual points
+
+        if data_is_per_channel:
+            ax.set_xlabel("First idx of module")
+            # set the legend as well
+            # plot a seperate line for each channel
+            for index, channel_info in enumerate(y_data):
+                ax.plot(x_data, channel_info, label="Channel {}".format(index))
+
+            ax.legend(loc='upper right')
+        else:
+            ax.set_xlabel("idx")
+            ax.plot(x_data, y_data)
+
+        # actually show the plot
+        plt.show()
 
     def generate_histogram_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
