@@ -160,13 +160,13 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  macos-10-py3-x86-64-lite-interpreter-build-test:
-    name: macos-10-py3-x86-64-lite-interpreter
+  macos-12-py3-x86-64-lite-interpreter-build-test:
+    name: macos-12-py3-x86-64-lite-interpreter
     uses: ./.github/workflows/_mac-build.yml
     with:
-      build-environment: macos-10-py3-lite-interpreter-x86-64
-      xcode-version: "12"
-      runner-type: macos-10.15
+      build-environment: macos-12-py3-lite-interpreter-x86-64
+      xcode-version: "13.3.1"
+      runner-type: macos-12-xl
       build-generates-artifacts: false
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
