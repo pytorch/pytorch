@@ -1,9 +1,11 @@
-import torch.fx
+import torch
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 from torch.utils._pytree import tree_map
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
 
 import _operator
 from enum import Enum
@@ -43,7 +45,7 @@ def _get_view_type(tgt) -> _ViewType:
 
 # Stores a bunch of metadata related to functionalization each node.
 # Relevant metadata:
-# n.meta['fake_result']: FakeTensor
+# n.meta['fake_result']: FakeTensor (same type as the output of the node, but with FakeTenors instead of Tensors)
 #   The fake tensor output from running the current node
 # n.meta['node_usages']: List[List[int, Node]]
 #   A list of all nodes that take in the current node as an input
@@ -107,6 +109,15 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
                     # I don't think this metadata is strictly needed for de-functionalization.
                     assert isinstance(maybe_base_of_view, torch.fx.node.Node)
                     node.meta['view_of'] = maybe_base_of_view
+
+        if 'view_of' in node.meta:
+            # We're linking the current node with its first argument as views.
+            # Assert here that this is actually the case, and their storages are the same.
+            assert isinstance(node.meta['fake_result'], FakeTensor)
+            assert isinstance(node.meta['view_of'].meta['fake_result'], FakeTensor)
+            view_storage = StorageWeakRef(node.meta['fake_result'].storage())
+            base_storage = StorageWeakRef(node.meta['view_of'].meta['fake_result'].storage())
+            assert view_storage == base_storage
         return result
 
 
@@ -135,6 +146,11 @@ def _schemas_match(functional_schema, inplace_schema):
 def _maybe_get_inplace_op(op):
     # __module__ seems broken; it returns torch._ops.aten which doesn't exist
     if not isinstance(op, torch._ops.OpOverload):
+        return None
+    # Some view ops have inplace variants (as_strided_, etc),
+    # but we do NOT want the reinplacing pass to directly add these into the program.
+    # (they'll require extra special handling, aren't aren't really useful for perf anyway)
+    if _is_view_op(op):
         return None
     op_namespace = op.__module__.split(".")[-1]
     op_base_name = op.overloadpacket.__name__
@@ -241,7 +257,6 @@ def _satisfies_inverse_view(view_inverse_node: torch.fx.node.Node, tensor_aliase
         if view_inverse_node.target == _VIEW_INVERSE_MAP.get(alias.target, None):
             # Every view_inverse op is of the form *_scatter(base, mutated_view, args...)
             # First, check that "base" in the inverse call matches the base in the view op call.
-
             if _are_matching_view_tensors(view_inverse_node.args[0], alias.args[0]):
                 # Then, check that "args..." are the same too.
                 # view inverse nodes like *_scatter are always of the form:
@@ -250,8 +265,8 @@ def _satisfies_inverse_view(view_inverse_node: torch.fx.node.Node, tensor_aliase
                 assert len(alias.args) + 1 == len(view_inverse_node.args)
                 assert len(alias.kwargs) == len(view_inverse_node.kwargs)
                 if all(x == y for (x, y) in zip(
-                       itertools.chain(view_inverse_node.args[2:], view_inverse_node.kwargs),
-                       itertools.chain(alias.args[1:], alias.kwargs))):
+                       itertools.chain(view_inverse_node.args[2:], view_inverse_node.kwargs.items()),
+                       itertools.chain(alias.args[1:], alias.kwargs.items()))):
                     return True
     return False
 
@@ -274,7 +289,7 @@ def _satisfies_inverse_view(view_inverse_node: torch.fx.node.Node, tensor_aliase
 #   This is effectively undoing the view-inverse logic performed by functionalization.
 def _get_all_later_node_usages(curr_node: torch.fx.node.Node, tensor_aliases: Set[torch.fx.node.Node], op_index: int, *, only_include_view_inverse_nodes: bool = False) -> Set[torch.fx.node.Node]:
     def _add_if_tensor(x, set_):
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, FakeTensor):
             set_.add(StorageWeakRef(x.storage()))
 
     # Get all storages of the current node
@@ -292,20 +307,8 @@ def _get_all_later_node_usages(curr_node: torch.fx.node.Node, tensor_aliases: Se
             # We only care about usages after the current node
             if n.meta['node_idx'] <= op_index:
                 continue
-            # And we don't care about view usages (they only matter if that view is then later used in another node)
-            # We really just need to check if this node shares storage with curr_node,
-            # but we need to take care to handle the more general case: if curr_node and n are both lists of tensors,
-            # then their storages should fully intersect.
-            n_tensor_storages = set()
-            tree_map(lambda x: _add_if_tensor(x, n_tensor_storages), n.meta['fake_result'])
-
-            # What's the idea here? if "n" is a non-view node, like add_tensor = torch.add(x, ...),
-            # Then the FakeTensor storage of the add_tensor node will be different
-            # from all of the tensor all of the current tensor's storages.
-            # Also, if n isn't an operator, then its fake result won't be a tensor.
-            if len(n_tensor_storages) > 0:
-                if curr_node_tensor_storages & n_tensor_storages == n_tensor_storages:
-                    continue
+            if n in tensor_aliases:
+                continue
             if only_include_view_inverse_nodes and not _satisfies_inverse_view(n, tensor_aliases):
                 continue
             nodes_used_after.add(n)
@@ -327,31 +330,121 @@ def reinplace(gm, *sample_args):
     In general, we can't reinplace node `b = a.add(...)` if "a" aliases any of the
     inputs to the program.
 
-    There is one exception though: if "a" is copied to at any point later in the program,
-    e.g. `a.copy_(...)`, then we are free to re-use a's buffer any time
-    before that node executes.
+    Given a node "b = foo(a, ...)", the algorithm for re-inplacing is as follows:
 
-    This is an important optimization to include, to ensure that after running
-    functionalization and then reinplacing, we don't regress the net memory usage
-    of the original model.
+    (1) Check if foo has a mutating variant. If not, move to the next node.
+
+        Note that we ignore view ops (we don't bother to turn `as_strided()`
+        into `as_strided_()`), as it complicates the algorithm and doesn't
+        provide meaningful speedups.
+
+        Currently, we also only check for an inplace op, `foo_`.
+        Later, we should beef this up to check for out= or mutable ops.
+
+    (2) Check if "a" is an alias of any of the program inputs.
+
+        If it is, skip and move to the next node.
+        Inplace'ing an op that would cause it to mutate a program is not sound,
+        because that would be a side effect visible to the user.
+
+        NOTE: there's a future optimization that we should make:
+        if "a" is a (alias of a)  program input, but later in the program
+        there is a node that looks like "a.copy_(...)",
+        Then re-inplacing is ok to do - we are temporarily re-using a's buffer,
+        which will later be overwritten by the copy_() call.
+
+        This will be an important optimization to have for programs that mutate
+        their inputs. It currently isn't implemented though.
+
+    (3) Check that "a" and all of its outstanding aliases are not used anywhere
+        later in the graph. If this is the case, then it's safe to re-inplace
+        to "b = foo_(a)".
+
+        There are a few caveats to this, explained in more detail below:
+        (a) If "a" is used later as an argument to a view op, that is okay.
+            It's only a problem if "a" (or that view) is later passed
+            into a normal operator, or if it is returned as the program output.
+        (b) If "a" is used as an input into a view "inverse" / "scatter"
+            operator, it is potentially fine to re-inplace
+            (and remove that scatter operator from the graph).
+            See below for a more detailed example.
+
+        NOTE: there is an optimization in this step that is crucial
+        to fully recovering performance from functionalization.
+
+        Given this program:
+        def f(x):
+            a = torch.ops.aten.add(x, x)
+            b = torch.ops.aten.diagonal(a)
+            torch.ops.aten.fill_(b, 0)
+            return d
+
+        Functionalization will emit the following:
+        def f(x):
+            a = torch.ops.aten.add(x, x)
+            b = torch.ops.aten.diagonal(a, 0, 1)
+            b_updated = torch.ops.aten.fill(b, 0)
+            a_updated = torch.ops.aten.diagonal_scatter(a, b_updated, 0, 1)
+            return a_updated
+
+        And "re-inplacing" is on the hook for figuring out how to remove
+        the expensive diagonal_scatter call.
+
+        So, for every `alias in alias_set(a)`, instead of checking
+        that "alias" is not used anywhere later in the graph,
+        we check that
+            EITHER:
+          (a) alias is not used anywhere later in the graph
+            OR:
+          (b) alias is used exactly once later on in the graph,
+              in the following op:
+
+                out = foo_scatter(alias, x, args...)
+
+              where the following must hold:
+                (i) "foo_scatter" is the "inverse" operator for foo.
+                    This only applies to "foo" ops that are view operators,
+                    which view into a subset of the original tensor's memory.
+                    In practice, there are ~4 operators where this applies:
+                      diagonal -> diagonal_scatter
+                      slice -> slice_scatter
+                      select -> select_scatter
+                      as_strided -> as_strided
+                (ii) "args..." are the same between the foo() and foo_scatter() calls.
+
+    (4) Finally, after converting "b = foo(a)" into "foo_(a)",
+        we need to find all later nodes that use "b" as an argument
+        and update them to take in "a" instead.
+
+        Note that for the majority of inplace ops, this isn't actually necessary
+        (because most inplace ops return "self" as their output).
+        This isn't generally true for all mutable ops though, which is why
+        we need to actually replace all of the arguments.
+
+    (5) Any "view_inverse/scatter" nodes that were identified as "it's ok to ignore them"
+        during step (3) get manually deleted from the graph.
+        Their outputs are no longer used, so technically standard DCE would be able
+        to do this, but we can no longer run FX's DCE pass now that we mave mutable
+        ops in the graph.
     """
     _FunctionalizationMetadataProp(gm).propagate(*sample_args)
 
-    def _print(x):
-        if isinstance(x, torch.Tensor):
-            print(f'fake_result: {StorageWeakRef(x.storage()).cdata}')
+    # Useful debug printing
+    # def _print(x):
+    # if isinstance(x, FakeTensor):
+    # print(f'fake_result: {StorageWeakRef(x.storage()).cdata}')
 
-    for n in gm.graph.nodes:
-        print(n.format_node())
-        if hasattr(n, 'meta'):
-            print(f'node_idx: {n.meta["node_idx"]}')
-            if 'fake_result' in n.meta:
-                tree_map(_print, n.meta['fake_result'])
-            if 'node_usages' in n.meta:
-                print(f'node_usages: {", ".join([str(x) for x in n.meta["node_usages"]])}')
-            if 'view_of' in n.meta:
-                print(f'view_of: {str(n.meta["view_of"])}')
-        print()
+    # for n in gm.graph.nodes:
+    # print(n.format_node())
+    # if hasattr(n, 'meta'):
+    # print(f'node_idx: {n.meta["node_idx"]}')
+    # if 'fake_result' in n.meta:
+    # tree_map(_print, n.meta['fake_result'])
+    # if 'node_usages' in n.meta:
+    # print(f'node_usages: {", ".join([str(x) for x in n.meta["node_usages"]])}')
+    # if 'view_of' in n.meta:
+    # print(f'view_of: {str(n.meta["view_of"])}')
+    # print()
 
     # We need to know which nodes correspond to inputs (or their aliases)
     # so we know not to re-inplace them.
@@ -365,10 +458,13 @@ def reinplace(gm, *sample_args):
     for n in gm.graph.nodes:
         if 'fake_result' in n.meta:
             # Tree-mapping because some ops can return lists of tensors.
-            tree_map(lambda x: storage_to_nodes[StorageWeakRef(x.storage())].add(n), n.meta['fake_result'])
-
+            def _add_to_map(x):
+                if isinstance(x, FakeTensor):
+                    storage_to_nodes[StorageWeakRef(x.storage())].add(n)
+            tree_map(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
+    all_later_view_inverse_node_usages = []
     for idx, node in enumerate(gm.graph.nodes):
         if node.op == 'call_function':
             # Step 1: Check to see if this operator has an inplace variant.
@@ -388,15 +484,29 @@ def reinplace(gm, *sample_args):
                     # TODO: later, add the optimization for handling `copy_()` calls in the graph.
                     continue
 
-                # Step 3: Check to see if the input to the op is re-used later in the graph.
-                # If not (same goes for its aliases), then this op is safe to re-in place.
+                # Technically, grabbing every node in the graph with the same FakeTensor storage
+                # will give you all aliases of a node, plus other nodes like "return output".
+                # In this case, I want "self_aliases" to refer *only* to the nodes corresponding to actual tensors.
+                # In general, this is satisfied by aliasing nodes with targets that are torch operators.
                 self_aliases = storage_to_nodes[StorageWeakRef(self_arg.meta['fake_result'].storage())]
+                self_aliases = [
+                    x for x in self_aliases
+                    # Sigh, we also need to check for getitem(), which FX includes when grabbing tensors
+                    # from a multi-output view node.
+                    if isinstance(x.target, torch._ops.OpOverload) or x.target == _operator.getitem
+                ]
+
                 later_view_inverse_node_usages = _get_all_later_node_usages(self_arg, self_aliases, node.meta['node_idx'], only_include_view_inverse_nodes=True)
                 later_node_usages = _get_all_later_node_usages(self_arg, self_aliases, node.meta['node_idx'])
 
+                # Step 3: Check to see if the input to the op is re-used later in the graph.
+                # If not (same goes for its aliases), then this op is safe to re-in place.
+                # This is a slightly roundabout way to check that there are no later usages of the current self argument.
+                # (later_view_inverse_node_usages corresponds to "view_scatter" nodes that we are allowed to delete)
                 if len(later_node_usages - later_view_inverse_node_usages) == 0:
                     # Step 4: replace the current out-of-place op with its inplace variant.
                     node.target = maybe_inplace_op
+                    all_later_view_inverse_node_usages += later_view_inverse_node_usages
 
                     # Now that we've replaced b = a.foo() with a.foo_(),
                     # We need to replace any later usages of "b" with "a"
@@ -411,17 +521,19 @@ def reinplace(gm, *sample_args):
                                 else:
                                     new_args.append(a)
                             new_kwargs = {}
-                            for kwarg_idx, (k, v) in enumerate(node_to_update.kwargs):
+                            for kwarg_idx, (k, v) in enumerate(node_to_update.kwargs.items()):
                                 if isinstance(v, torch.fx.node.Node) and v.name == old.name:
                                     new_kwargs[k] = new
                                 else:
                                     new_kwargs[k] = v
-                            node_to_update.args = new_args
+                            node_to_update.args = tuple(new_args)
                             node_to_update.kwargs = new_kwargs
 
-                    # Step 5: delete any _scatter nodes that we de-functionalized
-                    for to_delete in later_view_inverse_node_usages:
-                        gm.graph.erase_node(to_delete)
+    # Step 5: delete any _scatter nodes that we de-functionalized
+    # Need to take care not to delete any of these nodes until after *all* modifications
+    # to the graph are finished.
+    for to_delete in all_later_view_inverse_node_usages:
+        gm.graph.erase_node(to_delete)
 
 
     gm.recompile()
