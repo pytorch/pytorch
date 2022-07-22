@@ -1523,8 +1523,8 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
 
   // Update reliable before processing constantvaluemap prevents unreliable
   // nodes making static shape
+  UpdateReliable(n);
 
-  UpateReliable(n);
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
