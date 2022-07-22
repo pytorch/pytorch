@@ -22,6 +22,8 @@ The BaseDataSparsifier handles all the housekeeping while allowing the user to j
 
 ```add_data```: Accepts name, data tuple and registers the data as a parametrized buffer inside the container model. Note that the data is always associated to a name. A custom sparse config can be provided along with the name, data pair. If not provided, the default config will be applied while doing the sparsification.
 
+**Note**: name containing '.' is not a valid name for the data sparsifier
+
 ```
 data_sparsifier = ImplementedDataSparsifier()
 data_sparsifier.add_data(name=name, data=data, **some_config)
@@ -39,15 +41,46 @@ data_sparsifier.squash_mask()
 ```
 
 ## Write your own data sparsifier.
-The custom data sparsifier should be inherited from the BaseDataSparsifier class and the ```update_mask()``` should be implemented. For example, the following data sparsifier just creates a mask to zero out the first row of the data.
+The custom data sparsifier should be inherited from the BaseDataSparsifier class and the ```update_mask()``` should be implemented. For example, the following data sparsifier zeros out all entries of the tensor smaller than some threshold value.
 ```
 class ImplementedDataSparsifier(BaseDataSparsifier):
-    def update_mask(self, name, data, **kwargs):
+    def __init__(self, threshold):
+        super().__init__(threshold=threshold)
+
+    def update_mask(self, name, data, threshold):
         mask = self.get_mask(name)
-        mask[0] = 0
+        mask[torch.abs(data) < threshold] = 0.0
 ```
 
-Note::
+## Using Data Sparsifier with a model
+The data sparsifier can also sparsify the model weights. Example:
+```
+# Defining a simple network for classification
+class Model(nn.Module):
+    def __init__(self, in_features, num_classes):
+        self.linear1 = nn.Linear(in_features, 1024)
+        self.linear2 = nn.Linear(1024, num_classes)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        out = self.relu(self.linear1(x))
+        out = self.relu(self.linear2(x))
+        return out
+
+model = Model(10, 10)
+data_sparsifier = ImplementedDataSparsifer(threshold=1.0)
+
+# Suppose we wish to use threshold=0.5 for linear1 and default for linear2
+model_config = [
+    {'name': 'linear1', 'data': model.linear1.weight, 'threshold': 0.5},
+    {'name': 'linear2', 'data': model.linear1.weight}
+]
+
+for config in model_config:
+    data_sparsifier.add_data(**config)
+```
+
+**Note**:
 1. It is the responsibility of the ```BaseDataSparsifier``` to call the ```self.update_mask``` when appropriate.
 2. The mask should be modified in place.
 
@@ -60,3 +93,4 @@ Note::
 
     1. Reassignment of a mask: ```mask = torch.zeros_like(mask)```
     2. Non-inplace arithmetic operations: ```mask = mask * another_mask```
+3. The name of the data cannot contain a `'.'` (period)
