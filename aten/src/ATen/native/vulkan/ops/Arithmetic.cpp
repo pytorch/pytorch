@@ -38,7 +38,6 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
 std::vector<int64_t> broadcast_size(
     const Tensor& input1,
     const Tensor& input2) {
-  // std::vector<in64_t> out = {}
   std::vector<int64_t> out = {};
   int input1_size = input1.sizes().size();
   int input2_size = input2.sizes().size();
