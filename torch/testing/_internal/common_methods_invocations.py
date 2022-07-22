@@ -3090,7 +3090,8 @@ def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (0, 1, 2, 4)
     starts = (0, 1, 2, 4)
     n_steps = (0, 1, 2, 4)
-    bases = (1, 3,) if dtype in (torch.int8, torch.uint8) else (None, 1, 3, 5, 10)
+    # TODO: negative bases
+    bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
     for start, end, n_step, base in product(starts, ends, n_steps, bases):
         if start > end:
             continue
@@ -12958,7 +12959,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            supports_out=True,
            supports_autograd=False,
-           # prims.to_dtype can return a view
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
@@ -12978,17 +12978,22 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+
+               # linspace CPU implementation is wrong on integers (except uint8, int8)
+               # https://github.com/pytorch/pytorch/issues/81996
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            supports_out=True,
            supports_autograd=False,
-           # prims.to_dtype can return a view
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_logpace,
            skips=(
-               # NOTE: This is an exact copy of xfails for arange except test_out was removed
-
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -12999,12 +13004,17 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+
+               # Off-by-one issue when casting floats to ints
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -20484,6 +20494,7 @@ python_ref_db = [
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.logspace",
@@ -20493,9 +20504,29 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+            # Off-by-one issue when casting floats to ints + precision issue on bfloat16
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+        ),
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-02, rtol=1e-02),
+                }),
+                'TestCommon', device_type='cuda',
+            ),
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",

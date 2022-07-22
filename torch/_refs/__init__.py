@@ -3095,6 +3095,7 @@ def linspace(
                     end * denom + eps,
                     step_size_x_denom,
                     dtype=torch.int64,
+                    **factory_kwargs
                 )
                 / denom
             )
@@ -3103,7 +3104,7 @@ def linspace(
             step_size = (end - start) / (steps - 1)
             eps = step_size / 2
             tmp = torch.arange(
-                start, end + eps, step_size, **factory_kwargs, dtype=torch.float64
+                start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
             )
             res = prims.to_dtype(tmp, dtype)
 
