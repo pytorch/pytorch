@@ -1,5 +1,5 @@
 from .linear import SparseQATLinear
 
-__all__ =[
+__all__ = [
     "SparseQATLinear"
 ]

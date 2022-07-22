@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     first_sample,
     parametrize,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -96,6 +97,7 @@ _ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -362,7 +364,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -512,7 +514,7 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten', 'nvfuser'])
     def test_python_ref_executor(self, device, dtype, op, executor):
         # TODO: Not all dtypes are supported with nvfuser
-        from torch._prims.utils import _torch_dtype_to_nvfuser_dtype_map
+        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
         if executor == "nvfuser" and dtype not in _torch_dtype_to_nvfuser_dtype_map:
             raise unittest.SkipTest(f"nvfuser doesn't support dtype {dtype}")
 
@@ -536,13 +538,14 @@ class TestCommon(TestCase):
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
         )
 
@@ -560,7 +563,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1217,8 +1220,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_with_mode(op, args, kwargs)
-            composite_compliance.check_all_permutations(op, args, kwargs)
+            composite_compliance.check_with_mode(op, args, kwargs, self.assertEqual)
+            composite_compliance.check_all_permutations(op, args, kwargs, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1259,6 +1262,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
+@skipIfSlowGradcheckEnv
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1468,6 +1472,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
+@skipIfSlowGradcheckEnv
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1480,6 +1485,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@skipIfSlowGradcheckEnv
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1499,6 +1505,7 @@ class TestTags(TestCase):
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
+@skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
@@ -1661,6 +1668,8 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+
+@skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)

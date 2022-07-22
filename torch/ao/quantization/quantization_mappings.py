@@ -19,7 +19,7 @@ from typing import Optional, Union, Dict, Set, Callable, Any
 import torch.ao.nn as ao_nn
 import torch.ao.nn.sparse.intrinsic.quantized as ao_nn_siq
 import torch.ao.nn.sparse.intrinsic.qat as ao_nn_siqat
-import  torch.ao.nn.sparse.qat as ao_nn_sqat
+import torch.ao.nn.sparse.qat as ao_nn_sqat
 
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
