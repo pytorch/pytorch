@@ -463,7 +463,9 @@ def convert_weighted_module(
     # to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
     ref_qmodule_cls = root_module_to_quantized_reference_module.get(type_before_parametrizations(float_module), None)
-    assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
+    assert (
+        ref_qmodule_cls is not None
+    ), f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
         fused_module[0] = ref_qmodule  # type: ignore[operator]
