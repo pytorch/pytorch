@@ -2302,8 +2302,13 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
             if g1.view_copy is None or g2.view_copy is None:
                 continue
             # TODO: make this more first class in the data model
-            same_base_op = str(g1.view_copy.func.name.name) == str(
-                g2.view_copy.func.name.name
+            g1_base_name = str(g1.view_copy.func.name.name)
+            g2_base_name = str(g2.view_copy.func.name.name)
+
+            same_base_op = (
+                g1_base_name == g2_base_name
+                and g1.view_copy.func.arguments.symints_to_ints()
+                == g2.view_copy.func.arguments.symints_to_ints()
             )
             op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
             op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
