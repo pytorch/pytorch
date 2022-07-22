@@ -507,7 +507,7 @@ class MemoryEventTracker {
     };
     num_alloc_events[device] += 1;
   }
-  std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
+  std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() const {
     std::vector<std::vector<AllocFreeEvent>> result = alloc_free_events;
     for (const auto i : c10::irange(0, alloc_free_events.size())) {
       result[i].resize(num_alloc_events[i]);
@@ -1957,7 +1957,7 @@ void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
 }
 
-std::vector<std::vector<AllocFreeEvent>> GetAllocFreeEvents() {
+std::vector<std::vector<AllocFreeEvent>> getAllocFreeEvents() {
   return memory_tracker.get_alloc_free_events();
 }
 

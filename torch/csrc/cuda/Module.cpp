@@ -662,7 +662,7 @@ static void bindGetAllocFreeEvents(PyObject* module) {
           "device", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::device);
   m.def(
       "_get_alloc_free_events",
-      &c10::cuda::CUDACachingAllocator::GetAllocFreeEvents,
+      &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,
       "Get allocation/free sequence");
 }
 
