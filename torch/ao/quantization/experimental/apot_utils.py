@@ -22,7 +22,7 @@ def float_to_apot(x, levels, indices, alpha):
     best_idx = 0
 
     for level, idx in zip(levels_lst, indices_lst):
-        cur_delta = abs(level - x)
+        cur_delta = abs(abs(level) - abs(x))
         if cur_delta < min_delta:
             min_delta = cur_delta
             best_idx = idx
