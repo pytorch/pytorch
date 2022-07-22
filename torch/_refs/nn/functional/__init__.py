@@ -1,8 +1,8 @@
 import torch
 
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+from torch._prims_common import (
     check,
     ShapeType,
     TensorLike,
@@ -12,7 +12,7 @@ from torch._prims.utils import (
 )
 import torch._refs as refs
 from torch._decomp import register_decomposition
-from torch._prims.wrappers import (
+from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
