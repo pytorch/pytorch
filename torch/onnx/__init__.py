@@ -11,6 +11,7 @@ from torch._C._onnx import (
 )
 
 from . import (
+    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -90,11 +91,10 @@ producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
 
+@_deprecation.deprecated(
+    since="1.12.0", removed_in="TBD", instructions="use `torch.onnx.export` instead"
+)
 def _export(*args, **kwargs):
-    warnings.warn(
-        "`torch.onnx._export` is deprecated. Please use `torch.onnx.export` instead.",
-        DeprecationWarning,
-    )
     return utils._export(*args, **kwargs)
 
 
