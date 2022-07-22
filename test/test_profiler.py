@@ -1562,7 +1562,7 @@ aten::mm""")
         )
         num_matched = []
         for _, fn in cases:
-            with profile(with_stack=True) as prof:
+            with profile(with_stack=True, record_shapes=True) as prof:
                 fn()
             pattern = ExtraCUDACopyPattern(prof)
             num_matched.append(len(pattern.matched_events()))
@@ -1615,6 +1615,16 @@ aten::mm""")
         has_tf32 = 0 if pattern.skip else 1
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, has_tf32)
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern_benchmark(self):
+        with profile(with_stack=True, record_shapes=True) as prof:
+            x = torch.ones((100, 100)).to("cuda")
+            x = torch.ones((50, 50)).to("cuda")
+        pattern = ExtraCUDACopyPattern(prof)
+        shapes_factor_map = pattern.benchmark(pattern.matched_events())
+        self.assertEqual(len(shapes_factor_map), 2)
 
 
 if __name__ == '__main__':
