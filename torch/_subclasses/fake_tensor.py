@@ -1,20 +1,19 @@
-import contextlib
+import torch
+
+from torch.utils._pytree import tree_map, tree_flatten
+from functools import partial
+from torch.fx.operator_schemas import normalize_function
+from torch.utils._mode_utils import no_dispatch
+from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
+from typing import Union, Callable
+from torch._ops import OpOverload
+from torch.overrides import TorchFunctionMode
+from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
+import weakref
 import functools
 import itertools
-import weakref
+import contextlib
 from dataclasses import dataclass
-from functools import partial
-from typing import Callable, Union
-
-import torch
-from torch._ops import OpOverload
-from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
-from torch.fx.operator_schemas import normalize_function
-from torch.overrides import TorchFunctionMode
-from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
-
-from torch.utils._pytree import tree_flatten, tree_map
 
 
 aten = torch.ops.aten
@@ -23,7 +22,6 @@ aten = torch.ops.aten
 @dataclass
 class UnsupportedFakeTensorException(RuntimeError):
     reason: str
-
 
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
@@ -172,10 +170,7 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
-
-@register_op_impl(
-    lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
-)
+@register_op_impl(lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors))
 def contructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
@@ -194,7 +189,6 @@ def contructors(fake_mode, func, *args, **kwargs):
     new_kwargs["device"] = torch.device("meta")
     r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
-
 
 @register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
@@ -231,7 +225,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
             fake_mode, torch.ops.aten._to_copy(input, **new_kwargs), out_device
         )
 
-
 @register_op_impl(torch.ops.aten.clone.default)
 def clone(fake_mode, func, input, memory_format=None):
     out_device = input.device
@@ -239,15 +232,11 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-
 # index.Tensor data-dependent in only some conditions
-@register_op_impl(
-    lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func != aten.index.Tensor
-)
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+                  and func != aten.index.Tensor)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
-
 
 # Bool Indices get Expanded as Masks
 # See: IndexingUtils.h:expandTensors
@@ -255,7 +244,6 @@ def check_no_bool_index_tensors(func, self, indices):
     for index in indices:
         if index is not None and index.dtype in (torch.bool, torch.uint8):
             raise DynamicOutputShapeException(func)
-
 
 # Dont default to default device handling,
 # Since op can take in non-zero sized cpu
@@ -282,7 +270,6 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # FakeTensor extends MetaTensors to also carry an additional `fake_device`
 # which tracks devices that would have been used.
 
-
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     fake_mode.in_kernel_invocation = True
@@ -290,7 +277,6 @@ def in_kernel_invocation_manager(fake_mode):
         yield
     finally:
         fake_mode.in_kernel_invocation = False
-
 
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
@@ -306,6 +292,9 @@ class FakeTensor(torch.Tensor):
         # elem does not need to be recorded, because FakeTensor *is a* elem
         assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
+        # normalize cuda device
+        if device.type == "cuda" and device.index is None:
+            device = torch.device(f"cuda:{torch.cuda.current_device()}")
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
@@ -486,8 +475,7 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
                 )
                 subclass_seen = subclass_seen or (
-                    isinstance(x, torch.Tensor)
-                    and not isinstance(x, FakeTensor)
+                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
                     and type(x) is not torch.Tensor
                 )
 
@@ -514,10 +502,7 @@ class FakeTensorMode(TorchDispatchMode):
             # this is generated from torch.tensor(), which does not use the
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
             # we need to handle before error checking
-            if func in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.lift_fresh_copy.default,
-            ]:
+            if func in [torch.ops.aten.lift_fresh.default, torch.ops.aten.lift_fresh_copy.default]:
                 assert (
                     len(kwargs) == 0
                     and len(args) == 1
@@ -558,13 +543,21 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
 
-
 def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
+    # these should all be supported, just to be safe
+    # avoid fallback for operators which inplace modify metadata
+    # because the input fake tensors would be umodified
+    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
+        raise orig_not_implemented_exception
+
     with no_dispatch():
+        inp_impls = {}
 
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                return torch.zeros_like(e, device=e.fake_device)
+                out = torch.zeros_like(e, device=e.fake_device)
+                inp_impls[id(out)] = e
+                return out
             return e
 
         try:
@@ -580,22 +573,26 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
 
         for e in tree_flatten((args, kwargs))[0]:
             if isinstance(e, torch.Tensor):
-                tensor_impls.add(e)
                 storages.add(e.storage()._cdata)
 
         # TODO: also check metadata change on inputs
         # proper aliasing/metadata relationship between outputs and inputs will
-        # not be set up, bc of conversion to cpu, error on reused impls
+        # not be set up, bc of conversion to device, unless we can reuse an
+        # input impl
         for e in tree_flatten(r)[0]:
-            if e in tensor_impls or (
+            if id(e) not in inp_impls and (
                 isinstance(e, torch.Tensor) and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
 
-    # we're only converting these to MetaTensors now, not Fake Tensors,
-    # and the cpu inputs should be temporary. just convert outputs to meta
-    # and continue
-    return tree_map(MetaConverter(), r)
+    # the outputs which are are not reused from impls will be converted
+    # to fake tensors later
+    meta_converter = MetaConverter()
+
+    def map_out(e):
+        return inp_impls.get(id(e), meta_converter(e))
+
+    return tree_map(map_out, r)
 
 
 # Just for use to allow copying a module to fake tensors,
