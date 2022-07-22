@@ -96,15 +96,11 @@ def hardtanh(g, self, min_val, max_val):
         scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            min_val, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            max_val, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
     return opset9.op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
@@ -177,15 +173,11 @@ def relu6(g, input):
         scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            0, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(0, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            6, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(6, dtype=scalar_type.dtype()),
     )
     return clamp(g, relu_, min_val, max_val)
 
@@ -379,9 +371,7 @@ def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-        cast = g.op(
-            "Cast", self, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type()
-        )
+        cast = g.op("Cast", self, to_i=_type_utils.ScalarType(parsed_dtype).onnx_type())
     else:
         cast = self
     csum = g.op("CumSum", cast, dim_tensor)
@@ -753,15 +743,11 @@ def arange(g, *args):
         )
         start_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=type_.dtype()
-            ),
+            value_t=torch.tensor(0, dtype=type_.dtype()),
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=type_.dtype()
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
         arange_tensor = g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
@@ -783,9 +769,7 @@ def arange(g, *args):
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=type_.dtype()
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
         arange_tensor = g.op("Range", start, end, delta_default)
     else:

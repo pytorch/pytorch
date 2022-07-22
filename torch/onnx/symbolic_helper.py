@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import enum
 import functools
 import inspect
 import sys
@@ -992,7 +991,9 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
 
 def _arange_cast_helper(
     g, end, start=None, step=None, dtype=None
-) -> Tuple[_type_utils.ScalarType, Optional[_C.Value], Optional[_C.Value], Optional[_C.Value]]:
+) -> Tuple[
+    _type_utils.ScalarType, Optional[_C.Value], Optional[_C.Value], Optional[_C.Value]
+]:
     def _is_all_integral(scalars):
         for scalar in scalars:
             try:
