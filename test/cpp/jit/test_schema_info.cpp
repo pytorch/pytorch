@@ -64,21 +64,21 @@ TEST(SchemaInfoIsMutableTest, AliasingInputs) {
 TEST(SchemaInfoIsMutableTest, InstanceNorm) {
   SchemaInfo schema_info(
       "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
-  ASSERT_FALSE(schema_info.is_mutable("running_var"));
-  schema_info.addArgumentValue("use_input_stats", true);
   ASSERT_TRUE(schema_info.is_mutable("running_mean"));
   ASSERT_TRUE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("use_input_stats", false);
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
 }
 
 TEST(SchemaInfoIsMutableTest, BatchNorm) {
   SchemaInfo schema_info(
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
-  ASSERT_FALSE(schema_info.is_mutable("running_var"));
-  schema_info.addArgumentValue("training", true);
   ASSERT_TRUE(schema_info.is_mutable("running_mean"));
   ASSERT_TRUE(schema_info.is_mutable("running_var"));
+  schema_info.addArgumentValue("training", false);
+  ASSERT_FALSE(schema_info.is_mutable("running_mean"));
+  ASSERT_FALSE(schema_info.is_mutable("running_var"));
 }
 
 TEST(SchemaInfoIsNonDeterministicTest, Basic) {

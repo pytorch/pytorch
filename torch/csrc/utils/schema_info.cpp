@@ -78,12 +78,18 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
               return this->schema_ == training_op;
             });
         if (special_case && is_training_op) {
-          bool has_training = value_map_.count("training") &&
-              value_map_.at("training").toBool();
+          bool has_training = (hasInputArgumentNamed("training") &&
+                               !value_map_.count("training")) ||
+              (value_map_.count("training") &&
+               value_map_.at("training").toBool());
           bool has_train =
-              value_map_.count("train") && value_map_.at("train").toBool();
-          bool has_use_input_stats = value_map_.count("use_input_stats") &&
-              value_map_.at("use_input_stats").toBool();
+              (hasInputArgumentNamed("train") && !value_map_.count("train")) ||
+              (value_map_.count("train") && value_map_.at("train").toBool());
+          bool has_use_input_stats =
+              (hasInputArgumentNamed("use_input_stats") &&
+               !value_map_.count("use_input_stats")) ||
+              (value_map_.count("use_input_stats") &&
+               value_map_.at("use_input_stats").toBool());
           return has_training || has_train || has_use_input_stats;
         } else {
           return this->schema_.is_mutable(
