@@ -20,6 +20,8 @@
 #include <regex>
 #include <set>
 #include <vector>
+#include <chrono>
+#include <iostream>
 
 namespace c10 {
 
@@ -489,30 +491,21 @@ class MemoryEventTracker {
 
  public:
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
-  std::vector<unsigned int> num_alloc_events;
   void append_alloc_free_event(
       intptr_t ptr,
       size_t size,
       bool type,
       int device) {
     std::lock_guard<std::mutex> lock(mutex);
-    if (num_alloc_events[device] >= alloc_free_events[device].size()) {
-      alloc_free_events[device].resize(alloc_free_events[device].size() * 2);
-    }
-    alloc_free_events[device][num_alloc_events[device]] = {
+    alloc_free_events[device].push_back(AllocFreeEvent{
         ptr, // ptr
         size, // size: of allocation in bytes
         type, // type: 1 = allocation; 0 = free
         device // allocation device
-    };
-    num_alloc_events[device] += 1;
+    });
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() const {
-    std::vector<std::vector<AllocFreeEvent>> result = alloc_free_events;
-    for (const auto i : c10::irange(0, alloc_free_events.size())) {
-      result[i].resize(num_alloc_events[i]);
-    }
-    return result;
+    return alloc_free_events;
   }
 };
 MemoryEventTracker memory_tracker;
@@ -1640,12 +1633,9 @@ class THCCachingAllocator {
     const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       memory_tracker.alloc_free_events.resize(device_count);
-      memory_tracker.num_alloc_events.resize(device_count);
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
         device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
-        memory_tracker.alloc_free_events[i].resize(2);
-        memory_tracker.num_alloc_events[i] = 0;
       }
     }
   }
