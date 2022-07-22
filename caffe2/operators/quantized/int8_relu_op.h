@@ -40,8 +40,8 @@ class Int8ReluOp final : public Operator<CPUContext> {
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale =
         this->template GetSingleArgument<float>("Y_scale", 1.0f);
-    CHECK_EQ(Y_offset, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_EQ(Y_offset, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
 
     initQNNPACK();
 

@@ -141,7 +141,7 @@ static_assert(
                              << (val1) << " vs. " << (val2) << ") "
 
 // Check_op macro definitions
-#define CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
+#define TORCH_CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
 #define CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
 #define CHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
 #define CHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
