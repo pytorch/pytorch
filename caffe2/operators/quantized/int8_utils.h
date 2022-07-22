@@ -92,7 +92,7 @@ inline void QuantizeMultiplierSmallerThanOne(
     --*right_shift;
   }
   CHECK_GE(*right_shift, 0);
-  CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
+  TORCH_CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
   *quantized_multiplier = static_cast<int32_t>(q_fixed);
 }
 
@@ -109,7 +109,7 @@ inline void QuantizeMultiplierGreaterThanOne(
     ++*left_shift;
   }
   CHECK_GE(*left_shift, 0);
-  CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
+  TORCH_CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
   *quantized_multiplier = static_cast<int32_t>(q_fixed);
 }
 

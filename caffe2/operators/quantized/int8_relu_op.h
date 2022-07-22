@@ -35,7 +35,7 @@ class Int8ReluOp final : public Operator<CPUContext> {
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
     CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
     const int32_t Y_offset =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale =

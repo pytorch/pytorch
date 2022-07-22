@@ -39,7 +39,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
 
     /*
      * Record quantization parameters for the input, because if the op is

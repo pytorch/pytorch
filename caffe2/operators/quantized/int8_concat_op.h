@@ -42,7 +42,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     TORCH_CHECK_EQ(Y_offset, X0.zero_point);
     TORCH_CHECK_EQ(Y_scale, X0.scale);
     CHECK_GE(X0.zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(X0.zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_LE(X0.zero_point, std::numeric_limits<uint8_t>::max());
     auto Y_dims = X0.t.sizes().vec();
     if (this->template GetSingleArgument<string>("order", "") == "NHWC") {
       TORCH_CHECK_EQ(Y_dims.size(), 4);
