@@ -20547,7 +20547,11 @@ torch.cuda.synchronize()
             need_attn_weights: bool = True
             actual = torch.ops.aten._scaled_dot_product_attention(
                 query, key, value, attn_mask, dropout_p, need_attn_weights)
-        self.assertEqual(actual, expected)
+
+        # freeze_rng_state() doesn't seem to work outside of CPU, so dropout makes the results incomparable.
+        # TODO: Do this skipping in a nicer way once the granular test skipping logic lands.
+        if dropout_p == 0.0 or device == 'cpu':
+            self.assertEqual(actual, expected)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
