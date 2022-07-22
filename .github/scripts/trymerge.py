@@ -449,6 +449,11 @@ def gh_get_team_members(org: str, name: str) -> List[str]:
         rc += [member["login"] for member in team_members["nodes"]]
     return rc
 
+def get_check_run_name_prefix(workflow_run: Any) -> str:
+    if workflow_run is None:
+        return ""
+    else:
+        return f'{workflow_run["workflow"]["name"]} / '
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -626,13 +631,12 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-                check_run_name_prefix = "" if workflow_run is None else f'{workflow_run["workflow"]["name"]} / '
                 has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
                         if checkrun_node["conclusion"] == 'FAILURE':
                             has_failing_check = True
-                        conclusions[f'{check_run_name_prefix}{checkrun_node["name"]}'] = (
+                        conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
                             checkrun_node["conclusion"], checkrun_node["detailsUrl"]
                         )
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -970,13 +974,12 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
             checkruns = node["checkRuns"]
             if workflow_run is not None:
                 conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-            check_run_name_prefix = "" if workflow_run is None else f'{workflow_run["workflow"]["name"]} / '
             has_failing_check = False
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    conclusions[f'{check_run_name_prefix}{checkrun_node["name"]}'] = (
+                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
                         checkrun_node["conclusion"], checkrun_node["detailsUrl"]
                     )
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
