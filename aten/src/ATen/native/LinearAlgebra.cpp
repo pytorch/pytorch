@@ -2690,7 +2690,9 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // This frobenius norm is just wrong, but well
   TORCH_CHECK(dim.size() <= 2,
               "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
-  return at::linalg_vector_norm(self, 2., dim, keepdim);
+  // Dispatch to at::norm as it is implemented for Sparse and MPS backends
+  // TODO Make the backends implement vector_norm and matrix_norm
+  return at::norm(self, 2., dim, keepdim);
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
@@ -2704,7 +2706,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
   );
   TORCH_CHECK(dim.size() <= 2,
               "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
-  return at::linalg_vector_norm_out(result, self, 2., dim, keepdim);
+  return at::norm_out(result, self, 2., dim, keepdim);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

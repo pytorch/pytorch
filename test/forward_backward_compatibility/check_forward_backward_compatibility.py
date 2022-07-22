@@ -66,6 +66,7 @@ ALLOW_LIST = [
     ("aten::linalg_solve", datetime.date(2022, 8, 31)),
     ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
     ("aten::binary_cross_entropy_with_logits_backward", datetime.date(2022, 9, 21)),
+    ("aten::frobenius_norm", datetime.date(2022, 9, 1)),
     ("aten::_linalg_qr_helper", datetime.date(2022, 8, 1)),
     ("aten::linalg_lu_solve", datetime.date(2022, 8, 1)),
     ("aten::linalg_lu_solve.out", datetime.date(2022, 8, 1)),
