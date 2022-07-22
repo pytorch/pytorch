@@ -13,8 +13,6 @@ import torch
 import torch.ao.quantization as tq
 
 from torch import nn
-from torch.ao.nn.sparse import quantized as ao_nn_sq
-from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 from torch.ao.sparsity.sparsifier.utils import fqn_to_module
 
 from torch.testing._internal.common_utils import TestCase
