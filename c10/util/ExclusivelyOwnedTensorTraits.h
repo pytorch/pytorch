@@ -5,7 +5,8 @@
 #include <utility>
 
 namespace c10 {
-// Shared ExclusivelyOwnedTraits implementation between caffe2::Tensor and at::TensorBase.
+// Shared ExclusivelyOwnedTraits implementation between caffe2::Tensor and
+// at::TensorBase.
 template <typename TensorType>
 struct ExclusivelyOwnedTensorTraits {
   using repr_type = TensorType;
