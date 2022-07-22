@@ -145,6 +145,14 @@ function install_functorch() {
   popd
 }
 
+function test_functorch() {
+  pushd functorch
+  # Some CI configurations require that tests output an XML file
+  # into the pytorch/test folder, so we do that.
+  pytest test --junitxml='../test/functorch-tests.xml'
+  popd
+}
+
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
   sccache --show-stats
