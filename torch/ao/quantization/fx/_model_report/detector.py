@@ -279,9 +279,13 @@ class DynamicStaticDetector(DetectorBase):
     POST_OBS_COMP_STAT_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
     PRE_OBS_DATA_DIST_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
     POST_OBS_DATA_DIST_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    IS_CURRENTLY_SUPPORTED_KEY = "is_dynamic_supported"
 
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
+
+    # modules that will be supported soon for both
+    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = set([nn.Conv1d, nn.Conv2d, nn.Conv3d])
 
     def __init__(self, tolerance=0.5):
         super().__init__()
@@ -358,13 +362,19 @@ class DynamicStaticDetector(DetectorBase):
         # check to see if module is of a supported type
         is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
 
+        # check if it will be supported
+        future_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED))) > 0
+
+        # supported
+        supported = is_supported_type or future_supported_type
+
         # this is check for observer insertion
         if insert:
-            return is_supported_type
+            return supported
         else:
             # this is for report gen and we also need to check if it contains observers
             has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
-            return is_supported_type and has_obs
+            return supported and has_obs
 
     def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
         r"""
@@ -381,6 +391,7 @@ class DynamicStaticDetector(DetectorBase):
                 their S metric of output of module
                 whether output of module is stationary or non-stationary
                 the tolerance level to decided whether input/output is stationary or non-stationary
+                whether it is currently supported or planned for the future
         """
         # store modules dynamic vs static information
         module_dynamic_static_info = {}
@@ -409,6 +420,9 @@ class DynamicStaticDetector(DetectorBase):
                 pre_obs_dist_classif = self.STATIONARY_STR if pre_stat > self.tolerance else self.NON_STATIONARY_STR
                 post_obs_dist_classif = self.STATIONARY_STR if post_stat > self.tolerance else self.NON_STATIONARY_STR
 
+                # check if current support or future support
+                is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
                 # store the set of important information for this module
                 module_info = {
                     self.TOLERANCE_KEY: self.tolerance,
@@ -417,6 +431,7 @@ class DynamicStaticDetector(DetectorBase):
                     self.PRE_OBS_DATA_DIST_KEY: pre_obs_dist_classif,
                     self.POST_OBS_COMP_STAT_KEY: post_stat,
                     self.POST_OBS_DATA_DIST_KEY: post_obs_dist_classif,
+                    self.IS_CURRENTLY_SUPPORTED_KEY: is_supported_type,
                 }
 
                 module_dynamic_static_info[fqn] = module_info
@@ -451,6 +466,7 @@ class DynamicStaticDetector(DetectorBase):
                 their S metric of output of module
                 whether output of module is stationary or non-stationary
                 the tolerance level to decided whether input/output is stationary or non-stationary
+                whether it is currently supported or planned for the future
         """
 
         # get the dictionary of the information to format the string report
@@ -460,6 +476,9 @@ class DynamicStaticDetector(DetectorBase):
 
         modules_added: bool = False  # check to make sure at least 1 module added.
 
+        dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
+        static_benefit = " You can increase model efficiency if you use static quantization"
+        future_support_str = ". This layer is not yet supported for dynamic quantization"
         # This for loop goes through the information collected in module_dynamic_static_info and:
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relavent formatted strings
@@ -473,10 +492,8 @@ class DynamicStaticDetector(DetectorBase):
 
             # decide what string formatting values will be
             quantization_type = ""
-
             quantization_reasoning = "the distribution of data before {} is {} and the distribution after is {}."
-            dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
-            static_benefit = " You can increase model efficiency if you use static quantization"
+
             benefit_str = ""
 
             # strings for if dynamic quantized per tensor is needed
@@ -490,7 +507,10 @@ class DynamicStaticDetector(DetectorBase):
             # start composing explanation
             if module_info[self.DEFAULT_DYNAMIC_REC_KEY]:
                 quantization_type = "dynamic"
+                # check if currently supported or future supported
                 benefit_str = dynamic_benefit
+                if not module_info[self.IS_CURRENTLY_SUPPORTED_KEY]:
+                    benefit_str += future_support_str
             else:
                 quantization_type = "static"
                 benefit_str = static_benefit
@@ -522,7 +542,7 @@ class DynamicStaticDetector(DetectorBase):
             dynamic_vs_static_string += module_suggestion_string
 
         if not modules_added:
-            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear valid.\n"
+            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear and conv are valid.\n"
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
