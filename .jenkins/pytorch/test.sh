@@ -602,12 +602,6 @@ test_dynamo() {
   popd
 }
 
-test_functorch() {
-  pushd functorch
-  pytest test
-  popd
-}
-
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
