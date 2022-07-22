@@ -1,15 +1,15 @@
+from typing import List, Optional
+
 import torch
-from torch import Tensor
 import torch._prims_common as utils
+from torch import Tensor
 from torch._prims_common import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
     check,
     elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_map
-
-from typing import List, Optional
 
 aten = torch.ops.aten
 

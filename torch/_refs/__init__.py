@@ -1,43 +1,44 @@
+import builtins
+import collections
+import math
+import operator
+import warnings
+
+from collections.abc import Iterable
+from enum import Enum
+from functools import partial, reduce, wraps
+from typing import Callable, List, Optional, Sequence, Tuple, Union
+
 import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
 from torch._prims_common import (
     check,
+    DeviceLikeType,
+    DimsSequenceType,
     DimsType,
+    dtype_to_type,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_weakly_lesser_type,
+    Number,
+    NumberType,
+    REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     StrideType,
     TensorLike,
     TensorLikeType,
-    DeviceLikeType,
     TensorOrNumberLikeType,
-    DimsSequenceType,
     TensorSequenceType,
-    Number,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
-    REDUCTION_OUTPUT_TYPE_KIND,
-    is_weakly_lesser_type,
-    dtype_to_type,
 )
 from torch._prims_common.wrappers import (
-    elementwise_type_promotion_wrapper,
-    out_wrapper,
     _maybe_convert_to_dtype,
     _maybe_resize_out,
-    elementwise_unary_scalar_wrapper,
     _safe_copy_out,
+    elementwise_type_promotion_wrapper,
+    elementwise_unary_scalar_wrapper,
+    out_wrapper,
 )
-
-from collections.abc import Iterable
-from functools import reduce, partial, wraps
-from typing import Sequence, Optional, Union, Callable, List, Tuple
-import operator
-import builtins
-import warnings
-import math
-from enum import Enum
-import collections
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -3154,6 +3155,6 @@ def trace(self: TensorLikeType) -> TensorLikeType:
     return torch.sum(torch.diag(self, 0))
 
 
+import torch._refs.fft
 import torch._refs.nn.functional
 import torch._refs.special
-import torch._refs.fft

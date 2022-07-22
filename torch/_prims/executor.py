@@ -1,9 +1,10 @@
 from typing import Callable
 
-from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch._prims.context import TorchRefsMode
 from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
+
+from torch.fx import GraphModule
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 def execute(gm: GraphModule, *args, executor: str = "aten"):
