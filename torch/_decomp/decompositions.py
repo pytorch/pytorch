@@ -1,13 +1,14 @@
+import functools
+from enum import Enum
+from typing import Callable, List, Optional, Tuple
+
 import torch
+import torch._prims_common as utils
+import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from enum import Enum
-from typing import Tuple, Optional, List, Callable
-import torch.nn.functional as F
-import functools
-from torch.utils._pytree import tree_map, tree_flatten
-import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper
+from torch._prims_common.wrappers import out_wrapper
+from torch.utils._pytree import tree_flatten, tree_map
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -783,7 +784,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes)
+@register_decomposition(aten.split_with_sizes, disable_meta=True)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -797,7 +798,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor)
+@register_decomposition(aten.split.Tensor, disable_meta=True)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1155,7 +1156,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.transpose.int)
+@register_decomposition(aten.transpose.int, disable_meta=True)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
