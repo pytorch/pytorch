@@ -3301,7 +3301,7 @@ NetDef truncateAfter(NetDef def, size_t idx) {
 }
 
 NetDef addMPSCNNCopyFinalizer(NetDef def) {
-  CHECK_GE(def.op_size(), 1);
+  TORCH_CHECK_GE(def.op_size(), 1);
   const auto name = def.mutable_op(def.op_size() - 1)->output(0);
   def.mutable_op(def.op_size() - 1)->set_output(0, "METAL_COPIER");
   {

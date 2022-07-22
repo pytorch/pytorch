@@ -38,7 +38,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
+    TORCH_CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
     TORCH_CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
 
     /*

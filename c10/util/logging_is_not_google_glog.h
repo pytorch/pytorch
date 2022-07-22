@@ -145,7 +145,7 @@ static_assert(
 #define TORCH_CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
 #define TORCH_CHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
 #define TORCH_CHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
-#define CHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
+#define TORCH_CHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
 #define CHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
 
 #ifndef NDEBUG
