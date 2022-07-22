@@ -2,12 +2,11 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
+from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import unittest
-import logging
 
 def are_aliased(x, y):
     if x._base is None and y._base is None:
@@ -17,46 +16,6 @@ def are_aliased(x, y):
     if x._base is None and y._base is not None:
         return y._base is x
     return x._base is y._base
-
-# Just for testing: a logging tensor that also transforms out-of-place ops into inplace ops.
-# That way even if the outer wrapper is functionalized, the inner wrapper will also need functionalization.
-class InplaceLoggingTensor(LoggingTensorReentrant):
-    @staticmethod
-    def __new__(cls, e):
-        r = torch.Tensor._make_wrapper_subclass(cls, e.shape, dtype=e.dtype, requires_grad=False)
-        r.elem = e
-        return r
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    def __str__(self):
-        return f'InplaceLoggingTensor({self.elem})'
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            if isinstance(e, InplaceLoggingTensor):
-                return e.elem
-            else:
-                return e
-
-        def wrap(e):
-            if isinstance(e, torch.Tensor):
-                return InplaceLoggingTensor(e)
-            else:
-                return e
-        f = func
-        # this subclass converts all `add()` ops into `add_()` ops
-        if f is torch.ops.aten.add.Tensor:
-            f = torch.ops.aten.add_.Tensor
-
-        with cls.context():
-            rs = tree_map(wrap, f(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        # after running the (potentially transformed) op,
-        # log the original op that we saw.
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
-        return rs
-
 
 
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
@@ -463,10 +422,27 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     ge_scalar = torch.ops.aten.ge.Scalar(a_1, 0);  a_1 = None
-    _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
-    _tensor_constant0 = self._tensor_constant0
-    return _tensor_constant0
+    to_dtype_layout = torch.ops.aten.to.dtype_layout(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
+    return to_dtype_layout
     """)
+
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
+    def test_metadata_change_out_op(self):
+        def f(t, y):
+            out_1 = torch.ones(1)
+            return torch.add(t, y, out=out_1)
+
+        inpt1, inpt2 = torch.tensor([1]), torch.tensor([1])
+        inpt1_func, inpt2_func = torch._to_functional_tensor(inpt1), torch._to_functional_tensor(inpt2)
+
+        out_ref = f(inpt1, inpt2)
+        torch._enable_functionalization(reapply_views=True)
+        try:
+            out_functional = f(inpt1_func, inpt2_func)
+        finally:
+            torch._disable_functionalization()
+        self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
+
 
     def test_only_one_view(self):
         def f(x):

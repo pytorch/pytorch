@@ -204,7 +204,7 @@ def hook_with_zero_step(
 
     Raises:
         ValueError: if ``zero`` was constructed with ``overlap_with_ddp=False``.
-        RuntimeError: if using any backend other than NCCL since currently
+        RuntimeError: if using any backend other than NCCL/HCCL since currently
             Gloo may hang.
 
     .. warning::
@@ -226,11 +226,12 @@ def hook_with_zero_step(
     ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
-    # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
+    # NCCL/HCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
+    pg = dist.get_backend(ddp_ref().process_group)  # type: ignore[union-attr]
+    if ((pg != dist.Backend.NCCL) and (pg != 'hccl')):
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
-            "NCCL backend to avoid hangs"
+            "NCCL/HCCL backend to avoid hangs"
         )
 
     if shard_buckets:
@@ -385,11 +386,12 @@ def hook_with_zero_step_interleaved(
     ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
-    # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
+    # NCCL/HCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
+    pg = dist.get_backend(ddp_ref().process_group)  # type: ignore[union-attr]
+    if ((pg != dist.Backend.NCCL) and (pg != 'hccl')):
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
-            "NCCL backend to avoid hangs"
+            "NCCL/HCCL backend to avoid hangs"
         )
 
     if shard_buckets:
