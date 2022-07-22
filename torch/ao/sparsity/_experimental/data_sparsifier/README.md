@@ -61,7 +61,7 @@ class Model(nn.Module):
         self.linear1 = nn.Linear(in_features, 1024)
         self.linear2 = nn.Linear(1024, num_classes)
         self.relu = nn.ReLU()
-    
+
     def forward(self, x):
         out = self.relu(self.linear1(x))
         out = self.relu(self.linear2(x))
