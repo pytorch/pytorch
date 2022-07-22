@@ -29,7 +29,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/in_place.h>
+#include <c10/util/in_place.h> // IWYU pragma: export
 
 #include <cassert>
 #include <functional>

@@ -8,12 +8,15 @@ from .fix_includes import (
     IWYUOutputRecord,
     ParseOneFile,
     FixFileLines,
+    OrderedSet,
 )
 from .lint_message import LintMessage, LintSeverity
 from .fixup import (
     use_angled_includes,
     normalize_c_headers,
     use_quotes_for_project_includes,
+    QUOTE_INCLUDE_RE,
+    ANGLE_INCLUDE_RE,
 )
 
 from dataclasses import dataclass
@@ -33,7 +36,7 @@ import logging
 import io
 
 
-from ..iwyu import fix_includes
+from ..iwyu import fix_includes  # type: ignore[import]
 
 # This changes the order that header groups are sorted.
 # Each kind will be sorted in the order it appears here
@@ -44,14 +47,16 @@ from ..iwyu import fix_includes
     fix_includes._NONSYSTEM_INCLUDE_KIND,
     fix_includes._C_SYSTEM_INCLUDE_KIND,
     fix_includes._CXX_SYSTEM_INCLUDE_KIND,
-) = sorted([
-    fix_includes._MAIN_CU_INCLUDE_KIND,
-    fix_includes._PROJECT_INCLUDE_KIND,
-    fix_includes._FORWARD_DECLARE_KIND,
-    fix_includes._NONSYSTEM_INCLUDE_KIND,
-    fix_includes._C_SYSTEM_INCLUDE_KIND,
-    fix_includes._CXX_SYSTEM_INCLUDE_KIND,
-])
+) = sorted(
+    [
+        fix_includes._MAIN_CU_INCLUDE_KIND,
+        fix_includes._PROJECT_INCLUDE_KIND,
+        fix_includes._FORWARD_DECLARE_KIND,
+        fix_includes._NONSYSTEM_INCLUDE_KIND,
+        fix_includes._C_SYSTEM_INCLUDE_KIND,
+        fix_includes._CXX_SYSTEM_INCLUDE_KIND,
+    ]
+)
 
 
 T = TypeVar("T")
@@ -166,6 +171,32 @@ def _ReadFile(filename: str, fileinfo: FileInfo) -> Optional[List[str]]:
         return content.decode(fileinfo.encoding).splitlines(True)
 
 
+def fixup_iwyu_record(record: IWYUOutputRecord, file_contents: List[str]) -> None:
+    # IWYU sometimes suggest the same file be included again, but quoted
+    # instead of angle brackets. Remove any cases of duplicate includes.
+    if len(record.includes_and_forward_declares_to_add) == 0:
+        return
+
+    def get_include_path(line: str) -> Optional[str]:
+        match = QUOTE_INCLUDE_RE.match(line) or ANGLE_INCLUDE_RE.match(line)
+        return match.group(1) if match else None
+
+    current_includes: Set[str] = set()
+    for line in file_contents:
+        path = get_include_path(line)
+        if path is not None:
+            current_includes.add(path)
+
+    to_add: List[str] = []
+    for line in record.includes_and_forward_declares_to_add:
+        path = get_include_path(line)
+        assert path is not None
+        if path not in current_includes:
+            to_add.append(line)
+
+    record.includes_and_forward_declares_to_add = OrderedSet(to_add)
+
+
 def generate_diff(
     iwyu_record: IWYUOutputRecord, flags: FixIncludeFlags
 ) -> List[LintMessage]:
@@ -176,11 +207,13 @@ def generate_diff(
         if not original_file_contents:
             return []
 
+        fixup_iwyu_record(iwyu_record, original_file_contents)
+
         # IWYU expects project includes to always use "quoted includes"
-        file_lines = ParseOneFile(
-            [use_quotes_for_project_includes(line) for line in original_file_contents],
-            iwyu_record,
-        )
+        file_contents = [
+            use_quotes_for_project_includes(line) for line in original_file_contents
+        ]
+        file_lines = ParseOneFile(file_contents, iwyu_record)
 
         old_lines = [
             fl.line for fl in file_lines if fl is not None and fl.line is not None
@@ -188,7 +221,14 @@ def generate_diff(
         fixed_lines = FixFileLines(iwyu_record, file_lines, flags, fileinfo)
 
         # Convert IWYU's quoted includes to ATen-style angled includes
-        fixed_lines = [use_angled_includes(line) for line in fixed_lines]
+        fixed_lines = [
+            normalize_c_headers(use_angled_includes(line)) for line in fixed_lines
+        ]
+
+        original = "".join(original_file_contents)
+        replacement = "".join(fixed_lines)
+        if original == replacement:
+            return []
 
         return [
             LintMessage(
@@ -198,8 +238,8 @@ def generate_diff(
                 code="IWYU",
                 severity=LintSeverity.WARNING,
                 name="include-what-you-use",
-                original="".join(original_file_contents),
-                replacement="".join(fixed_lines),
+                original=original,
+                replacement=replacement,
                 description="Fix includes",
             )
         ]

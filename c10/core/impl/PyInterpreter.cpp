@@ -1,6 +1,7 @@
+#include <c10/core/impl/PyInterpreter.h>
+
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/core/impl/PyInterpreter.h>
 
 namespace c10 {
 namespace impl {

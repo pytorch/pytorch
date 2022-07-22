@@ -1,5 +1,6 @@
 #include <c10/core/SafePyObject.h>
-#include <c10/core/TensorImpl.h>
+
+#include <c10/core/TensorImpl.h> // IWYU pragma: keep
 
 namespace c10 {
 

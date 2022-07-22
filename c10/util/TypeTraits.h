@@ -1,7 +1,8 @@
 #pragma once
 
-#include <c10/util/C++17.h>
+#include <c10/util/C++17.h> // IWYU pragma: export
 #include <functional>
+#include <type_traits> // IWYU pragma: export
 
 namespace c10 {
 namespace guts {

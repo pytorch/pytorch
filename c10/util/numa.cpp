@@ -1,5 +1,7 @@
 #include <c10/util/numa.h>
 
+#include <c10/macros/Macros.h> // IWYU pragma: keep
+
 C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
 
 #if defined(__linux__) && defined(C10_USE_NUMA) && !defined(C10_MOBILE)

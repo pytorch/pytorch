@@ -5,7 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <c10/util/order_preserving_flat_hash_map.h>
+#include <c10/util/order_preserving_flat_hash_map.h> // IWYU pragma: associated
 #include <gtest/gtest.h>
 
 namespace {

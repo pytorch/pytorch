@@ -1,4 +1,4 @@
-#include <c10/core/CompileTimeFunctionPointer.h>
+#include <c10/core/CompileTimeFunctionPointer.h> // IWYU pragma: associated
 #include <gtest/gtest.h>
 
 namespace test_is_compile_time_function_pointer {

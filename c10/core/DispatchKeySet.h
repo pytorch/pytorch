@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKey.h> // IWYU pragma: export
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/llvmMathExtras.h>

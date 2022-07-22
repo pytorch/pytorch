@@ -3,10 +3,11 @@
 #include <stddef.h>
 #include <memory>
 
-#include <c10/core/Device.h>
+#include <c10/core/Device.h> // IWYU pragma: export
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/UniqueVoidPtr.h> // IWYU pragma: export
+
 
 namespace c10 {
 

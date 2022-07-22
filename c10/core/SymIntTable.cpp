@@ -1,4 +1,4 @@
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymbolicIntNode.h> // IWYU: associated
 
 namespace c10 {
 
