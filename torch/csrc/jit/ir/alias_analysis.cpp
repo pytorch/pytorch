@@ -812,15 +812,18 @@ void AliasDb::analyzeImpl(Node* node) {
       schema_info.addArgumentValue("training", false);
     } else {
       auto value = constant_as<bool>(node->namedInput("training"));
-      schema_info.addArgumentValue("training", !value.has_value() || *value);
+      if (value.has_value()) {
+        schema_info.addArgumentValue("training", *value);
+      }
     }
   } else if (node->hasNamedInput("use_input_stats")) {
     if (isFrozen_) {
       schema_info.addArgumentValue("use_input_stats", false);
     } else {
       auto value = constant_as<bool>(node->namedInput("use_input_stats"));
-      schema_info.addArgumentValue(
-          "use_input_stats", !value.has_value() || *value);
+      if (value.has_value()) {
+        schema_info.addArgumentValue("use_input_stats", *value);
+      }
     }
   }
 
