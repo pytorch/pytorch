@@ -183,7 +183,8 @@ ForLoop::ForLoop(
     Val* step,
     bool vectorize,
     Val* vectorize_shift,
-    bool unroll_required)
+    bool unroll_required,
+    DoubleBufferLoopStage double_buffer_loop_stage)
     : Expr(passkey, ExprType::ForLoop),
       iter_domain_{iter_domain},
       index_(index),
@@ -193,7 +194,8 @@ ForLoop::ForLoop(
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
       unroll_required_(unroll_required),
-      body_(this) {
+      body_(this),
+      double_buffer_loop_stage_(double_buffer_loop_stage) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -216,15 +218,15 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
           iter_domain,
-          iter_domain->isBroadcast() ? FusionGuard::getCurFusion()->zeroVal()
-                                     : IrBuilder::create<Int>(c10::nullopt),
+          GpuLower::current()->caMap()->getIndexVariable(iter_domain),
           nullptr,
           nullptr,
           nullptr,
           !iter_domain->isBroadcast() &&
               isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
-          false) {
+          false,
+          DoubleBufferLoopStage::NotApplicable) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -240,7 +242,8 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
           other->step(),
           other->vectorize(),
           other->vectorize_shift(),
-          other->isUnrollRequired()) {
+          other->isUnrollRequired(),
+          other->doubleBufferLoopStage()) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -470,17 +473,21 @@ GroupedGridReduction::GroupedGridReduction(
     std::vector<Val*> inputs,
     std::vector<Allocate*> reduction_buffers,
     Allocate* sync_buffer,
-    bool is_fused)
+    Val* entrance_index,
+    Val* entrances,
+    bool is_allreduce)
     : GroupedReductionOp(
           passkey,
           std::move(reduction_op_types),
           std::move(init_vals),
           std::move(outputs),
           std::move(inputs),
-          is_fused,
+          is_allreduce,
           ExprType::GroupedGridReduction),
       reduction_buffers_(std::move(reduction_buffers)),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

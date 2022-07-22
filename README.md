@@ -48,10 +48,10 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 | Component | Description |
 | ---- | --- |
-| [**torch**](https://pytorch.org/docs/stable/torch.html) | a Tensor library like NumPy, with strong GPU support |
-| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | a compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
-| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
@@ -379,6 +379,13 @@ You can then build the documentation by running `make <format>` from the
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
+
+> Note: if you installed `nodejs` with a different package manager (e.g.,
+`conda`) then `npm` will probably install a version of `katex` that is not
+compatible with your version of `nodejs` and doc builds will fail.
+A combination of versions that is known to work is `node@6.13.1` and
+`katex@0.13.18`. To install the latter with `npm` you can run
+```npm install -g katex@0.13.18```
 
 ### Previous Versions
 

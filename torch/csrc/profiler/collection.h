@@ -25,6 +25,7 @@ enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
   Allocation,
+  OutOfMemory,
   PyCall,
   PyCCall
 };
@@ -33,7 +34,6 @@ template <EventType>
 struct ExtraFields;
 
 struct TorchOpBasicFields {
-  uint64_t correlation_id_;
   int64_t sequence_number_;
   uint64_t forward_tid_;
   at::RecordScope scope_;
@@ -45,9 +45,17 @@ struct TorchOpBasicFields {
   uint64_t end_tid_{0};
 };
 
+struct TensorMetadata {
+  void* ptr_;
+  c10::ScalarType dtype_;
+  uint32_t dim_;
+  c10::Layout layout_;
+};
+
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -55,34 +63,39 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  ProfilerEventStub cuda_event_start_ = nullptr;
+  ProfilerEventStub cuda_event_end_ = nullptr;
 };
 
 template <>
 struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   ExtraFields(
       TorchOpBasicFields&& f,
+      uint64_t correlation_id,
       time_t end_time_ns,
       Inputs&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
-      FallbackPair&& gpu_fallback)
+      FallbackPair&& gpu_fallback,
+      bool allow_tf32_cublas)
       : TorchOpBasicFields(std::move(f)),
+        correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
-        gpu_fallback_{std::move(gpu_fallback)} {}
-
+        gpu_fallback_{std::move(gpu_fallback)},
+        allow_tf32_cublas_{allow_tf32_cublas} {}
+  uint64_t correlation_id_;
   time_t end_time_ns_;
   Inputs inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
+  bool allow_tf32_cublas_;
 };
 
 template <>
@@ -112,6 +125,21 @@ struct ExtraFields<EventType::Allocation> {
 static_assert(
     std::is_pod<ExtraFields<EventType::Allocation>>::value,
     "Non-POD member of ExtraFields<EventType::Allocation>.");
+
+template <>
+struct ExtraFields<EventType::OutOfMemory> {
+  torch::profiler::impl::approx_time_t start_time_;
+  int64_t alloc_size_;
+  int64_t total_allocated_;
+  int64_t total_reserved_;
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+};
+
+// For performance.
+static_assert(
+    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
   int line_no_;
@@ -187,7 +215,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
-  torch::profiler::impl::kineto::KinetoActivityType kinetoType() const;
+  libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
   int64_t endTimeNS() const;
   uint64_t endTID() const;
@@ -200,6 +228,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Allocation>,
+      ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
       ExtraFields<EventType::PyCCall>>
       extra_fields_;
@@ -207,6 +236,8 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
+
+  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
   template <EventType E>
@@ -228,6 +259,8 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     // Set in the exit callback.
     approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
+
+    bool allow_tf32_cublas_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -259,12 +292,6 @@ class InputOutputEncoder final {
     Scalar,
     Other,
     TERMINATOR
-  };
-
-  struct TensorMetadata {
-    void* ptr_;
-    c10::ScalarType dtype_;
-    uint32_t dim_;
   };
 
   void push(const at::Tensor& t);
@@ -323,9 +350,7 @@ class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
 
-  std::unique_ptr<KinetoObserverContext> begin_op(
-      const at::RecordFunction& fn,
-      uint64_t correlation_id);
+  std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn);
 
   template <class... Args>
   void emplace_backend_event(Args&&... args) {
@@ -335,6 +360,11 @@ class TORCH_API ThreadLocalSubqueue {
   template <class... Args>
   void emplace_allocation_event(Args&&... args) {
     allocations_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
+  void emplace_ooms_event(Args&&... args) {
+    ooms_.emplace_back(std::forward<Args>(args)...);
   }
 
   template <class... Args>
@@ -358,7 +388,33 @@ class TORCH_API ThreadLocalSubqueue {
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
   static constexpr size_t BlockSize = 512;
-  AppendOnlyList<KinetoObserverContext::Event, BlockSize> op_events_;
+
+  template <typename T, size_t ChunkSize>
+  class EventBlock : public std::array<T, ChunkSize> {
+   public:
+    EventBlock();
+    uint64_t correlation_id(const T* ptr) const {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          ptr >= this->data() && ptr < this->data() + ChunkSize);
+      return id_start_ + (ptr - this->data());
+    }
+
+   private:
+    uint64_t id_start_;
+  };
+
+  class OpList : public AppendOnlyList<
+                     KinetoObserverContext::Event,
+                     BlockSize,
+                     EventBlock> {
+   public:
+    template <class... Args>
+    std::pair<KinetoObserverContext::Event*, uint64_t> emplace_back(
+        Args&&... args);
+    static uint64_t correlationID(const OpList::Iterator& e);
+  };
+
+  OpList op_events_;
 
   // report_input_shapes
   InputOutputEncoder inputs_outputs_;
@@ -382,6 +438,9 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportMemoryUsage
   AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+
+  // reportOOMs
+  AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
 };
 
 class TORCH_API RecordQueue {
@@ -394,7 +453,9 @@ class TORCH_API RecordQueue {
 
   // NB: This is a destructive operation.
   std::vector<std::shared_ptr<Result>> getRecords(
-      std::function<time_t(approx_time_t)> time_converter);
+      std::function<time_t(approx_time_t)> time_converter,
+      uint64_t start_time_us,
+      uint64_t end_time_us);
 
  private:
   uint32_t id_;

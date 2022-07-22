@@ -63,6 +63,7 @@ namespace at { namespace native {
 
 std::ostream& operator<<(std::ostream & out, const ConvolutionParams& params) {
   out << "ConvolutionParams \n"
+    << "    memory_format = " << params.memory_format << "\n"
     << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
     << "    padding = " << ArrayRef<int>{params.padding} << "\n"
     << "    stride = " << ArrayRef<int>{params.stride} << "\n"
@@ -83,7 +84,7 @@ void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool deterministic, bool allow_tf32) {
+    int64_t groups, bool deterministic, bool allow_tf32, at::MemoryFormat memory_format) {
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -91,7 +92,7 @@ void setConvolutionParams(
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
   params->input_dim = input.dim();
-  params->memory_format = input.suggest_memory_format();
+  params->memory_format = memory_format;
   for (int i = 0; i != params->input_dim; ++i) {
     params->input_size[i] = (int) input.sizes()[i];
     params->weight_size[i] = (int) weight.sizes()[i];

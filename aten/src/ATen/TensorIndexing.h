@@ -619,7 +619,7 @@ static inline Tensor get_item(
           index.slice().step(),
           /*disable_slice_optimization=*/true,
           self_device,
-          *self_sizes);
+          self_sizes);
     } else if (index.is_none()) {
       return self.unsqueeze(0);
     } else if (index.is_ellipsis()) {
@@ -640,7 +640,7 @@ static inline Tensor get_item(
       tensorIndices,
       disable_slice_optimization,
       self_device,
-      *self_sizes);
+      self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]

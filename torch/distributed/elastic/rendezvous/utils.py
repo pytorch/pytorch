@@ -14,6 +14,7 @@ from datetime import timedelta
 from threading import Event, Thread
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
+__all__ = ['parse_rendezvous_endpoint']
 
 def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
     """Extracts key-value pairs from a rendezvous configuration string.

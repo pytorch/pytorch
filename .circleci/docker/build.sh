@@ -54,6 +54,8 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *-jammy* ]]; then
+  UBUNTU_VERSION=22.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 elif [[ "$image" == *centos* ]]; then
@@ -70,7 +72,8 @@ else
 fi
 
 DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *cuda* ]]; then
+# When using ubuntu - 22.04, start from Ubuntu docker image, instead of nvidia/cuda docker image.
+if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
@@ -136,7 +139,17 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.6.0
+    CUDA_VERSION=11.6.2
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=7
@@ -159,9 +172,23 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-focal-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-focal-py3-clang10-onnx)
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -217,7 +244,7 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm5.0-py3.7)
+  pytorch-linux-focal-rocm5.0-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
@@ -225,7 +252,7 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=5.0
     ;;
-  pytorch-linux-bionic-rocm5.1-py3.7)
+  pytorch-linux-focal-rocm5.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
@@ -241,6 +268,24 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    ;;
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.7
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

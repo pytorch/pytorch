@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
@@ -11,7 +12,6 @@
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <aten/src/ATen/Parallel.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/ArrayRef.h>

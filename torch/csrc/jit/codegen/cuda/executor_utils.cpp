@@ -582,11 +582,13 @@ void validateAlignedVectorizedFusionInputOutput(
   bool still_rightmost = true;
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
-    // If this domain is contiguous, then not necessary to check the
-    // stride. Otherwise, stride must be 1 if it's rightmost or
-    // divisible by word_size.
+    const auto size = aten_tensor.sizes().at(i);
+    // If this domain is contiguous or size == 1, then not necessary to check
+    // the stride. Otherwise, stride must be 1 if it's rightmost or
+    // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || (still_rightmost && stride == 1) ||
+        stride == cur_contig_stride || size == 1 ||
+            (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
         tv->toString(),
@@ -599,9 +601,12 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    const auto size = aten_tensor.sizes().at(i);
     still_rightmost = still_rightmost && size == 1;
-    cur_contig_stride = stride * size;
+    // We do not update cur_contig_stride for size==1 dimensions,
+    // since we have specialized vectorization stride check for them
+    if (size != 1) {
+      cur_contig_stride = stride * size;
+    }
   }
 }
 

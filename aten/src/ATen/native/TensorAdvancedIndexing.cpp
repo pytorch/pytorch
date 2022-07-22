@@ -626,7 +626,7 @@ Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& 
 
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of index_put_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -821,7 +821,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::ComplexHalf,
       result.scalar_type(), "index_add_", [&result, &source, &dim, &index_contig, &numel, &alpha] {
       auto alpha_value = alpha.to<scalar_t>();
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
@@ -853,7 +853,7 @@ void index_reduce_func_impl(
   const SCATTER_GATHER_OP& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
@@ -932,7 +932,11 @@ void index_reduce_func_impl(
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
-      result.div_(counts);
+      if (result.is_floating_point() || result.is_complex()) {
+        result.div_(counts);
+      } else {
+        result.div_(counts, "floor");
+      }
     }
   }
   else {
@@ -940,7 +944,7 @@ void index_reduce_func_impl(
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+    AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       result.scalar_type(), "index_func_", [&result, &source, &dim, &index_contig, &numel, &op, &counts] {
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
@@ -983,7 +987,11 @@ void index_reduce_func_impl(
     });
     if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
       counts.masked_fill_(counts == 0, 1);
-      result.div_(counts);
+      if (result.is_floating_point() || result.is_complex()) {
+        result.div_(counts);
+      } else {
+        result.div_(counts, "floor");
+      }
     }
   }
 }
@@ -1267,7 +1275,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
     "index_fill_(): Expected dtype int64 for index.");
 
   at::assert_no_overlap(self, index);
-  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
     TORCH_WARN(
       "Use of index_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
@@ -1555,7 +1563,7 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const S
             "please use a mask with dtype torch.bool instead.");
   }
 
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "

@@ -357,7 +357,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     // NOLINTNEXTLINE
     strides[i] = 1;
     while (--i >= 0) {
-      strides[i] = sizes[i] * strides[i + 1];
+      strides[i] = sizes[i + 1] * strides[i + 1];
     }
   }
   return from_blob_quantized_per_tensor_affine(

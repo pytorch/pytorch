@@ -10,6 +10,27 @@ namespace c10 {
 constexpr DispatchKeySet backend_dispatch_keyset =
     autogradother_backends | DispatchKeySet(DispatchKey::Dense);
 
+// See Note [CompositeExplicitAutogradNonFunctional Key]
+// We have several types of decompositions in aten, that each have their own
+// alias key. You should register your decomposition to the
+// `CompositeExplicitAutogradNonFunctional key` if: (1) It's an out-of-place op
+// (2) It decomposes into one more mutation ops
+// (3) It has a derivative formula
+//     (In theory we could also have a separate key for
+//     "CompositeImplicitAutogradNonFunctional", but there isn't much of a use
+//     case for it currently).
+// This key is important for "functional" backends like LazyTensor / XLA.
+// If you're a backend that only expects to deal with "functional ops",
+// then you don't want to decompose a functional op into an op that causes
+// aliasing. You should just directly write a kernel for that functional op
+// instead!
+constexpr DispatchKeySet non_functional_backend_dispatch_keyset =
+    backend_dispatch_keyset
+        // XLA and LazyTensor are currently the only 2 backends in core
+        // that use functionalization pass in eager mode.
+        .remove_backend(BackendComponent::XLABit)
+        .remove_backend(BackendComponent::LazyBit);
+
 bool isBackendDispatchKey(DispatchKey t) {
   return t != DispatchKey::Undefined
       // See Note [No Alias Keys in DispatchKeySet]
@@ -17,8 +38,7 @@ bool isBackendDispatchKey(DispatchKey t) {
       // Note [NestedTensor Not Included in Backend Keys]
       // NestedTensor has been explicitly removed from the "backend keyset" due
       // to incompatibility with some kernels, so we don't want it to be
-      // included in CompositeImplicitAutograd or CompositeExplicitAutograd
-      // kernels.
+      // included in CompositeExplicitAutograd kernels.
       && t != DispatchKey::NestedTensor && backend_dispatch_keyset.has(t);
 }
 
@@ -42,6 +62,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return math_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
+    case DispatchKey::CompositeExplicitAutogradNonFunctional:
+      return non_functional_backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }
@@ -54,10 +76,14 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       return autograd_dispatch_keyset.has(toFunctionalityKey(k));
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
-      return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);
+      return math_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutogradNonFunctional:
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return k != DispatchKey::NestedTensor &&
+          non_functional_backend_dispatch_keyset.has(k);
     default:
       return t == k;
   }
@@ -91,6 +117,9 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::PrivateUse2);
     case DispatchKey::AutogradPrivateUse3:
       return DispatchKeySet(DispatchKey::PrivateUse3);
+    case DispatchKey::AutogradNestedTensor:
+      return DispatchKeySet(DispatchKey::NestedTensor) |
+          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::AutogradOther:
       return autogradother_backends;
     default:

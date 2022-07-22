@@ -155,6 +155,7 @@ def _communicate_optim_state(
                 buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
                 tensor_buffer = value.new_zeros(*buffer_size)
             dist._all_gather_base(tensor_buffer, value, group=group)
+            torch.cuda.synchronize()
             if to_save:
                 assert hasattr(flat_param, "_orig_size"), \
                     "Sharded flattened parameter should have `_orig_size` set"
@@ -605,7 +606,6 @@ def _broadcast_processed_optim_state_dict(
     processed_optim_state_dict: Optional[Dict[str, Any]],
     rank: int,
     group,
-    device: torch.device,
 ) -> Dict[str, Any]:
     """
     Broadcasts the processed optimizer state dict from rank 0 to all ranks.
@@ -614,8 +614,6 @@ def _broadcast_processed_optim_state_dict(
         processed_optim_state_dict (Optional[Dict[str, Any]]): The flattened
             optimizer state dict with positive-dimension tensor states replaced
             with metadata if on rank 0; ignored otherwise.
-        device (torch.device): Device to move zero-dimension tensors post-
-            broadcast.
 
     Returns:
         Dict[str, Any]: The processed optimizer state dict.
@@ -626,11 +624,7 @@ def _broadcast_processed_optim_state_dict(
     dist.broadcast_object_list(obj_list, src=0, group=group)
     processed_optim_state_dict = obj_list[0]  # type: ignore[assignment]
     assert processed_optim_state_dict is not None
-    # Move zero-dimension tensors to `device`
-    for param_state in processed_optim_state_dict["state"].values():
-        for state_name, value in param_state.items():
-            if _is_zero_dim_tensor(value):
-                param_state[state_name] = value.to(device)
+    # Keep zero-dimension tensors on CPU
     return processed_optim_state_dict
 
 
