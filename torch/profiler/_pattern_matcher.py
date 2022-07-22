@@ -21,8 +21,9 @@ class Pattern:
     In subclass, define description and skip property.
     '''
 
-    def __init__(self, prof: profile):
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         self.prof = prof
+        self.should_benchmark = should_benchmark
         self.name = "Please specify a name for pattern"
         self.description = "Please specify a description for pattern"
         assert prof.profiler is not None and prof.profiler.kineto_results is not None
@@ -48,7 +49,15 @@ class Pattern:
         yield from eventTreeDFS(self.event_tree)
 
     def summary(self, events: List[_ProfilerEvent]):
-        return f"{self.name}: {len(events)} events matched."
+        default_summary = f"{self.name}: {len(events)} events matched."
+        if self.should_benchmark:
+            summary = self.benchmark_summary(events)
+            # If benchmark summary is not empty, use it.
+            return summary if summary else default_summary
+        return default_summary
+
+    def benchmark_summary(self, events: List[_ProfilerEvent]):
+        return ""
 
     def match(self, event: _ProfilerEvent):
         '''
@@ -93,8 +102,8 @@ class Pattern:
 
 class NamePattern(Pattern):
 
-    def __init__(self, prof: profile, name: str):
-        super().__init__(prof)
+    def __init__(self, prof: profile, name: str, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.description = f"Matched Name Event: {name}"
         self.name = name
 
@@ -119,8 +128,8 @@ class ExtraCUDACopyPattern(Pattern):
     If at any step we failed, it is not a match.
     '''
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "Extra CUDA Copy Pattern"
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
         self.init_ops = {
@@ -163,7 +172,7 @@ class ExtraCUDACopyPattern(Pattern):
             shapes_factor_map[shape] = de_time / to_time
         return shapes_factor_map
 
-    def summary(self, events: List[_ProfilerEvent]):
+    def benchmark_summary(self, events: List[_ProfilerEvent]):
         shapes_factor_map = self.benchmark(events)
         original_time = sum(event.duration_time_ns for event in events) / 1e3
         new_time = sum(
@@ -192,8 +201,8 @@ class ForLoopIndexingPattern(Pattern):
     We also keep a dictionary to avoid duplicate match in the for loop.
     '''
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "For Loop Indexing Pattern"
         self.description = "For loop indexing detected. Vectorization recommended."
         self.visited: Set[int] = set()
@@ -241,8 +250,8 @@ class ForLoopIndexingPattern(Pattern):
 
 class FP32MatMulPattern(Pattern):
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "FP32 MatMul Pattern"
         self.description = (
             "You are currently using GPU that supports TF32. "
@@ -292,7 +301,7 @@ class FP32MatMulPattern(Pattern):
             shapes_factor_map[shape] = tf32_time / fp32_time
         return shapes_factor_map
 
-    def summary(self, events: List[_ProfilerEvent]):
+    def benchmark_summary(self, events: List[_ProfilerEvent]):
         shapes_factor_map = self.benchmark(events)
         original_time = sum(event.duration_time_ns for event in events) / 1e3
         new_time = sum(
@@ -319,8 +328,8 @@ class OptimizerSingleTensorPattern(Pattern):
     String match
     '''
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "Optimizer Single Tensor Pattern"
         self.optimizers_with_foreach = ["adam", "sgd", "adamw"]
         self.description = (
@@ -353,8 +362,8 @@ class SynchronizedDataLoaderPattern(Pattern):
 
     '''
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "Synchronized DataLoader Pattern"
         self.description = (
             "Detected DataLoader running with synchronized implementation. "
@@ -406,8 +415,8 @@ class GradNotSetToNonePattern(Pattern):
     String match
     '''
 
-    def __init__(self, prof: profile):
-        super().__init__(prof)
+    def __init__(self, prof: profile, should_benchmark: bool = False):
+        super().__init__(prof, should_benchmark)
         self.name = "Gradient Set To Zero Instead of None Pattern"
         self.description = "Detected gradient set to zero instead of None. Please add 'set_to_none=True' when calling zero_grad()."
 
@@ -466,14 +475,14 @@ def eventTreeBFS(event_tree: List[_ProfilerEvent]):
             stack.append(child_event)
 
 
-def report_all_anti_patterns(prof):
+def report_all_anti_patterns(prof, should_benchmark: bool = False):
     anti_patterns = [
-        ExtraCUDACopyPattern(prof),
-        ForLoopIndexingPattern(prof),
-        FP32MatMulPattern(prof),
-        OptimizerSingleTensorPattern(prof),
-        SynchronizedDataLoaderPattern(prof),
-        GradNotSetToNonePattern(prof),
+        ExtraCUDACopyPattern(prof, should_benchmark),
+        ForLoopIndexingPattern(prof, should_benchmark),
+        FP32MatMulPattern(prof, should_benchmark),
+        OptimizerSingleTensorPattern(prof, should_benchmark),
+        SynchronizedDataLoaderPattern(prof, should_benchmark),
+        GradNotSetToNonePattern(prof, should_benchmark)
     ]
     reported = set()
     summaries = []
@@ -481,8 +490,9 @@ def report_all_anti_patterns(prof):
     message_list.append("Matched Events:")
     for anti_pattern in anti_patterns:
         matched_events = anti_pattern.matched_events()
-        if matched_events:
-            summaries.append(anti_pattern.summary(matched_events))
+        if not matched_events:
+            continue
+        summaries.append(anti_pattern.summary(matched_events))
         for event in matched_events:
             report_msg = anti_pattern.report(event)
             if report_msg not in reported:
