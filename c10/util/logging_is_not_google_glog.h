@@ -142,7 +142,7 @@ static_assert(
 
 // Check_op macro definitions
 #define TORCH_CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
-#define CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
+#define TORCH_CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
 #define CHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
 #define CHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
 #define CHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)

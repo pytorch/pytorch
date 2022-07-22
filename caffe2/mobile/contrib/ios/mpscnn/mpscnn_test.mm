@@ -126,7 +126,7 @@ void testMPSCNN() {
                 CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                 for (auto i = 0; i < t1.size(); ++i) {
                   // FP16 <-> FP32 round trip.
-                  CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
+                  TORCH_CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
                 }
               }
             }
@@ -197,7 +197,7 @@ void testMPSCNN() {
           CAFFE_ENFORCE_EQ(t1.size(), t2.size());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip.
-            CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
+            TORCH_CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
           }
         }
       }
@@ -274,7 +274,7 @@ void testMPSCNN() {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
           const float t2_i = t2.data<float>()[i];
-          CHECK_NEAR(t1_i, t2_i, 0.1);
+          TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
         }
       }
     }
@@ -467,7 +467,7 @@ void testMPSCNN() {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
             const float t2_i = t2.data<float>()[i];
-            CHECK_NEAR(t1_i, t2_i, 0.1);
+            TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
           }
         }
       }
@@ -560,7 +560,7 @@ void testMPSCNN() {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
           const float t2_i = t2.data<float>()[i];
-          CHECK_NEAR(t1_i, t2_i, 0.1);
+          TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
         }
       }
     }
@@ -651,7 +651,7 @@ void testMPSCNN() {
                 const float t2_i = t2.data<float>()[i];
                 // LOG(INFO) << "i: " << i << ", cpu: " << t1_i << ", mtl: " <<
                 // t2_i;
-                CHECK_NEAR(t1_i, t2_i, 0.7);
+                TORCH_CHECK_NEAR(t1_i, t2_i, 0.7);
               }
             }
           }
@@ -763,7 +763,7 @@ void testMPSCNN() {
                             // FP16 <-> FP32 round trip, accumulation, etc.
                             const float t1_i = t1.data<float>()[i];
                             const float t2_i = t2.data<float>()[i];
-                            CHECK_NEAR(t1_i, t2_i, 0.1);
+                            TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
                           }
                         }
                       }
@@ -851,7 +851,7 @@ void testMPSCNN() {
         const float t2_i = t2.data<float>()[i];
         // LOG(INFO) << "i: " << i << ", " << "CPU: " << t1_i << ", MTL: " <<
         // t2_i;
-        CHECK_NEAR(t1_i, t2_i, 0.01);
+        TORCH_CHECK_NEAR(t1_i, t2_i, 0.01);
       }
     }
   }
@@ -932,7 +932,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -991,7 +991,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
       const float t2_i = t2.data<uint8_t>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -1050,7 +1050,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
       const float t2_i = t2.data<uint8_t>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -1166,7 +1166,7 @@ void testMPSCNN() {
                         // FP16 <-> FP32 round trip, accumulation, etc.
                         const float t1_i = t1.data<float>()[i];
                         const float t2_i = t2.data<float>()[i];
-                        CHECK_NEAR(t1_i, t2_i, 0.2);
+                        TORCH_CHECK_NEAR(t1_i, t2_i, 0.2);
                       }
                     }
                   }
@@ -1264,7 +1264,7 @@ void testMPSCNN() {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
               const float t2_i = t2.data<float>()[i];
-              CHECK_NEAR(t1_i, t2_i, 0.3);
+              TORCH_CHECK_NEAR(t1_i, t2_i, 0.3);
             }
           }
         }
@@ -1378,7 +1378,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -1481,7 +1481,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -1589,7 +1589,7 @@ void testMPSCNN() {
                 // FP16 <-> FP32 round trip, accumulation, etc.
                 const float t1_i = t1.data<float>()[i];
                 const float t2_i = t2.data<float>()[i];
-                CHECK_NEAR(t1_i, t2_i, 0.1);
+                TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
               }
             }
           }
@@ -1713,7 +1713,7 @@ void testMPSCNN() {
                   // FP16 <-> FP32 round trip, accumulation, etc.
                   const float t1_i = t1.data<float>()[i];
                   const float t2_i = t2.data<float>()[i];
-                  CHECK_NEAR(t1_i, t2_i, 0.1);
+                  TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
                 }
               }
             }
@@ -1784,7 +1784,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.02);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.02);
     }
   }
 
@@ -1849,7 +1849,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.01);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.01);
     }
   }
 
@@ -1914,7 +1914,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.01);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.01);
     }
   }
 
@@ -2003,7 +2003,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.05);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.05);
     }
   }
 
@@ -2057,7 +2057,7 @@ void testMPSCNN() {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
         const float t2_i = t2.data<float>()[i];
-        CHECK_NEAR(t1_i, t2_i, 0.02);
+        TORCH_CHECK_NEAR(t1_i, t2_i, 0.02);
       }
     }
   }
@@ -2123,7 +2123,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.1);
+      TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
     }
   }
 
@@ -2237,7 +2237,7 @@ void testMPSCNN() {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
               const float t2_i = t2.data<float>()[i];
-              CHECK_NEAR(t1_i, t2_i, 0.1);
+              TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
             }
           }
         }
@@ -2349,7 +2349,7 @@ void testMPSCNN() {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
           const float t2_i = t2.data<float>()[i];
-          CHECK_NEAR(t1_i, t2_i, 0.1);
+          TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
         }
       }
     }
@@ -2428,7 +2428,7 @@ void testMPSCNN() {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
               const float t2_i = t2.data<float>()[i];
-              CHECK_NEAR(t1_i, t2_i, 0.1);
+              TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
             }
           }
         }
@@ -2570,7 +2570,7 @@ void testMPSCNN() {
       const float t3_i = t3.data<float>()[i / 5];
       if (t3_i - HALF_MIN_VAL * 2 > 0) {
         LOG(INFO) << i << " " << t1_i << " " << t2_i << " " << t3_i;
-        CHECK_NEAR(t1_i, t2_i, 0.1);
+        TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
       }
     }
 
@@ -2579,7 +2579,7 @@ void testMPSCNN() {
       const float t3_i = t3.data<float>()[i];
       const float t4_i = t4.data<float>()[i];
       LOG(INFO) << i << " " << t3_i;
-      CHECK_NEAR(t3_i, t4_i, 0.1);
+      TORCH_CHECK_NEAR(t3_i, t4_i, 0.1);
     }
   }
 
@@ -2634,7 +2634,7 @@ void testMPSCNN() {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
         const float t2_i = t2.data<float>()[i];
-        CHECK_NEAR(t1_i, t2_i, 0.1);
+        TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
       }
     }
   }
@@ -2875,7 +2875,7 @@ void testMPSCNN() {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
             const float t2_i = t2.data<float>()[i];
-            CHECK_NEAR(t1_i, t2_i, 0.1);
+            TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
           }
         }
       }
@@ -2943,7 +2943,7 @@ void testMPSCNN() {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
             const float t2_i = t2.data<float>()[i];
-            CHECK_NEAR(t1_i, t2_i, 0.1);
+            TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
           }
         }
       }
@@ -3030,7 +3030,7 @@ void testMPSCNN() {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
             const float t2_i = t2.data<float>()[i];
-            CHECK_NEAR(t1_i, t2_i, 0.1);
+            TORCH_CHECK_NEAR(t1_i, t2_i, 0.1);
           }
         }
       }
@@ -3373,7 +3373,7 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
                       << ", CPU: " << ct.data<float>()[j]
                       << ", MTL: " << mt.data<float>()[j];
           }
-          CHECK_NEAR(mt.data<float>()[j], ct.data<float>()[j], 5);
+          TORCH_CHECK_NEAR(mt.data<float>()[j], ct.data<float>()[j], 5);
         } else {
           CHECK(mt.IsType<uint8_t>());
           if (j < 10) {
@@ -3381,7 +3381,7 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
                       << ", CPU: " << ct.data<uint8_t>()[j]
                       << ", MTL: " << mt.data<uint8_t>()[j];
           }
-          CHECK_NEAR(mt.data<uint8_t>()[j], ct.data<uint8_t>()[j], 5);
+          TORCH_CHECK_NEAR(mt.data<uint8_t>()[j], ct.data<uint8_t>()[j], 5);
         }
       }
     }
@@ -3437,7 +3437,7 @@ void verifyRewrite(
                     << ", MTL: " << mt.data<float>()[j];
         }
         // Disabling check for now because of precision issues
-        // CHECK_NEAR(mt.data<float>()[j], ct.data<float>()[j], 5);
+        // TORCH_CHECK_NEAR(mt.data<float>()[j], ct.data<float>()[j], 5);
       } else {
         LOG(INFO) << "Type uint8_t";
         CHECK(mt.IsType<uint8_t>());
@@ -3447,7 +3447,7 @@ void verifyRewrite(
                     << ", MTL: " << mt.data<uint8_t>()[j];
         }
         // Disabling check for now.
-        // CHECK_NEAR(mt.data<uint8_t>()[j], ct.data<uint8_t>()[j], 5);
+        // TORCH_CHECK_NEAR(mt.data<uint8_t>()[j], ct.data<uint8_t>()[j], 5);
       }
     }
   }
