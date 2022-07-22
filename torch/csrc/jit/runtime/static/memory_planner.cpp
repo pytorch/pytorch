@@ -89,7 +89,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   auto assignToAvailableStorageGroup = [&](const Value* value) {
     DCHECK(!free_storage_groups.empty());
     const auto storage_group = free_storage_groups.back();
-    DCHECK_LT(storage_group, managed_tensor_groups.size());
+    TORCH_DCHECK_LT(storage_group, managed_tensor_groups.size());
     storage_group_mapping.emplace(value, storage_group);
     auto* tensor_ptr = tensor_value_to_tensor.at(value);
     managed_tensor_groups[storage_group].addTensor(tensor_ptr);

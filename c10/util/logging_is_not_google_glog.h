@@ -153,7 +153,7 @@ static_assert(
 #define TORCH_DCHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
 #define TORCH_DCHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
 #define TORCH_DCHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
-#define DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
 #define DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
 #define DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
 #else // !NDEBUG
@@ -167,7 +167,7 @@ static_assert(
 #define TORCH_DCHECK_LE(val1, val2) \
   while (false)               \
   CHECK_OP(val1, val2, <=)
-#define DCHECK_LT(val1, val2) \
+#define TORCH_DCHECK_LT(val1, val2) \
   while (false)               \
   CHECK_OP(val1, val2, <)
 #define DCHECK_GE(val1, val2) \

@@ -34,7 +34,7 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
       }
     }
     int labelid = labeldata[i];
-    DCHECK_LT(labelid, D);
+    TORCH_DCHECK_LT(labelid, D);
     if (maxid == labelid) {
       accuracies[labelid]++;
     }

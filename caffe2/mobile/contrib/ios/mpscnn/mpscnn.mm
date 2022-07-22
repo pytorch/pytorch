@@ -1512,8 +1512,8 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
                     kw * output_channels * input_channels +
                     oc * input_channels + ic;
               }
-              DCHECK_LT(inputIdx, filter.size());
-              DCHECK_LT(outputIdx, filter.size());
+              TORCH_DCHECK_LT(inputIdx, filter.size());
+              TORCH_DCHECK_LT(outputIdx, filter.size());
               refilter[outputIdx] = filter_[inputIdx];
             }
           }

@@ -25,7 +25,7 @@ class SleepOp final : public Operator<CPUContext> {
       : Operator<CPUContext>(operator_def, ws),
         ms_(OperatorBase::GetSingleArgument<int>("ms", 1000)) {
     DCHECK_GT(ms_, 0);
-    DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
+    TORCH_DCHECK_LT(ms_, 3600 * 1000) << "Really? This long?";
   }
 
   bool RunOnDevice() override {
