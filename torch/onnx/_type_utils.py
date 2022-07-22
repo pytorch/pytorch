@@ -54,22 +54,22 @@ class ScalarType(enum.IntEnum):
 
     # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
     UINT8 = 0
-    INT8 = enum.auto()
-    INT16 = enum.auto()
-    INT = enum.auto()
-    INT64 = enum.auto()
-    HALF = enum.auto()
-    FLOAT = enum.auto()
-    DOUBLE = enum.auto()
-    COMPLEX32 = enum.auto()
-    COMPLEX64 = enum.auto()
-    COMPLEX128 = enum.auto()
-    BOOL = enum.auto()
-    QINT8 = enum.auto()
-    QUINT8 = enum.auto()
-    QINT32 = enum.auto()
-    BFLOAT16 = enum.auto()
-    UNDEFINED = enum.auto()
+    INT8 = enum.auto()  # 1
+    INT16 = enum.auto()  # 2
+    INT = enum.auto()  # 3
+    INT64 = enum.auto()  # 4
+    HALF = enum.auto()  # 5
+    FLOAT = enum.auto()  # 6
+    DOUBLE = enum.auto()  # 7
+    COMPLEX32 = enum.auto()  # 8
+    COMPLEX64 = enum.auto()  # 9
+    COMPLEX128 = enum.auto()  # 10
+    BOOL = enum.auto()  # 11
+    QINT8 = enum.auto()  # 12
+    QUINT8 = enum.auto()  # 13
+    QINT32 = enum.auto()  # 14
+    BFLOAT16 = enum.auto()  # 15
+    UNDEFINED = enum.auto()  # 16
 
     @classmethod
     def from_name(cls, name: Union[ScalarName, TorchName, str]) -> ScalarType:
@@ -107,7 +107,7 @@ class ScalarType(enum.IntEnum):
 
     def onnx_compatible(self) -> bool:
         """Return whether this ScalarType is compatible with ONNX."""
-        return self in _SCALAR_TYPE_TO_ONNX
+        return self in _ONNX_COMPATIBLE_TYPES
 
 
 def valid_scalar_name(scalar_name: Union[ScalarName, str]) -> bool:
@@ -168,6 +168,26 @@ _TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()
 }
 
+_ONNX_COMPATIBLE_TYPES = frozenset(
+    (
+        ScalarType.BOOL,
+        ScalarType.UINT8,
+        ScalarType.INT8,
+        ScalarType.INT16,
+        ScalarType.INT,
+        ScalarType.INT64,
+        ScalarType.HALF,
+        ScalarType.FLOAT,
+        ScalarType.DOUBLE,
+        ScalarType.COMPLEX64,
+        ScalarType.COMPLEX128,
+        ScalarType.BFLOAT16,
+        ScalarType.QINT8,
+        ScalarType.QUINT8,
+        ScalarType.QINT32,
+    )
+)
+
 _SCALAR_TYPE_TO_ONNX = {
     ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,
     ScalarType.UINT8: _C_onnx.TensorProtoDataType.UINT8,
@@ -182,6 +202,10 @@ _SCALAR_TYPE_TO_ONNX = {
     ScalarType.COMPLEX128: _C_onnx.TensorProtoDataType.COMPLEX128,
     ScalarType.BFLOAT16: _C_onnx.TensorProtoDataType.BFLOAT16,
     ScalarType.UNDEFINED: _C_onnx.TensorProtoDataType.UNDEFINED,
+    ScalarType.COMPLEX32: _C_onnx.TensorProtoDataType.UNDEFINED,
+    ScalarType.QINT8: _C_onnx.TensorProtoDataType.INT8,
+    ScalarType.QUINT8: _C_onnx.TensorProtoDataType.UINT8,
+    ScalarType.QINT32: _C_onnx.TensorProtoDataType.INT32,
 }
 
 # source of truth is
