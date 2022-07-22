@@ -56,6 +56,16 @@ def set_device_states(devices, states) -> None:
         with torch.cuda.device(device):
             torch.cuda.set_rng_state(state)
 
+def _get_autocast_kwargs():
+    gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
+                           "dtype": torch.get_autocast_gpu_dtype(),
+                           "cache_enabled": torch.is_autocast_cache_enabled()}
+
+    cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
+                           "dtype": torch.get_autocast_cpu_dtype(),
+                           "cache_enabled": torch.is_autocast_cache_enabled()}
+
+    return gpu_autocast_kwargs, cpu_autocast_kwargs
 
 class CheckpointFunction(torch.autograd.Function):
 
@@ -65,12 +75,7 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-        ctx.gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
-                                   "dtype": torch.get_autocast_gpu_dtype(),
-                                   "cache_enabled": torch.is_autocast_cache_enabled()}
-        ctx.cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
-                                   "dtype": torch.get_autocast_cpu_dtype(),
-                                   "cache_enabled": torch.is_autocast_cache_enabled()}
+        ctx.gpu_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs()
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
             # Don't eagerly initialize the cuda context by accident.
@@ -326,7 +331,8 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
-    had_autocast_in_fwd = torch.is_autocast_enabled()
+    # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
+    gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
@@ -374,9 +380,12 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                     torch.set_rng_state(fwd_cpu_state)
                     if had_cuda_in_fwd:
                         set_device_states(fwd_gpu_devices, fwd_gpu_states)
-                with torch.enable_grad(), torch.cuda.amp.autocast(had_autocast_in_fwd):
-                    with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                        _unused = function(*args, **kwargs)
+
+                with torch.enable_grad(), \
+                     torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+                     torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                     torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
+                    _unused = function(*args, **kwargs)
 
         if x not in storage:
             raise RuntimeError(
