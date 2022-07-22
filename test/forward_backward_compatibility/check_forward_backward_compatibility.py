@@ -114,6 +114,11 @@ ALLOW_LIST = [
     ("c10d::broadcast", datetime.date(2022, 6, 25)),
     ("aten::.*functional", datetime.date(2022, 8, 1)),
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
+    # verify the next 4 SymInt ones against commits BEFORE c078476eb04376c53c5008515f341fa6e81e82b6
+    ("aten::view_copy.SymInt", datetime.date(2022, 8, 15)),
+    ("aten::view.SymInt", datetime.date(2022, 8, 15)),
+    ("aten::sum.SymInt", datetime.date(2022, 8, 15)),
+    ("aten::zeros.SymInt", datetime.date(2022, 8, 15)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
