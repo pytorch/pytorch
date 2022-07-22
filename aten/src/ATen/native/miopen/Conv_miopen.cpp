@@ -114,6 +114,8 @@ at::Tensor miopen_convolution_relu(
     const at::Tensor& input, const at::Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   AT_ERROR("miopen_convolution_relu: ATen not compiled with MIOpen support");
+}
+
 }}
 
 #else  // AT_ROCM_ENABLED
