@@ -1051,7 +1051,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
         register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
-        self.addCleanup(unregister_custom_op_symbolic, "::PythonOp", 1)
+        self.addCleanup(unregister_custom_op_symbolic, "prim::PythonOp", 1)
 
         # necessay parameters for transformer embeddings
         hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = 768, 128000, 512, 0, 16
@@ -1131,7 +1131,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # If there is a onnx::Constant node with dim=3, it is making the shape static
         for node in graph.graph.node:
             if node.op_type == "Constant":
-                print(node)
                 if node.attribute[0].t.dims:
                     self.assertNotEqual(node.attribute[0].t.dims[0], 3)
 
