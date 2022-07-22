@@ -3844,6 +3844,37 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual, expected)
 
 
+class TestSparseMeta(TestCase):
+    exact_dtype = True
+
+    def test_basic(self):
+        r = torch.empty(4, 4, layout=torch.sparse_coo, device='meta')
+        self.assertTrue(r.is_meta)
+        self.assertEqual(r.device.type, "meta")
+        r2 = torch.empty_like(r)
+        self.assertTrue(r2.is_meta)
+        self.assertEqual(r, r2)
+        r3 = torch.sparse_coo_tensor(size=(4, 4), device='meta')
+        self.assertTrue(r3.is_meta)
+        self.assertEqual(r, r3)
+        r.sparse_resize_((4, 4), 1, 1)
+        r.sparse_resize_and_clear_((4, 4, 4), 2, 1)
+        self.assertEqual(r.sparse_dim(), 2)
+        self.assertEqual(r.dense_dim(), 1)
+        self.assertEqual(r._dimV(), 1)
+        self.assertEqual(r._nnz(), 0)
+        # TODO: nnz zero sparse tensors should always be coalesced...
+        self.assertEqual(r.is_coalesced(), False)
+        r._coalesced_(True)
+        self.assertEqual(r.is_coalesced(), True)
+        # TODO: this sort of aliasing will need to be handled by
+        # functionalization
+        self.assertEqual(r._indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
+        self.assertEqual(r._values(), torch.empty(0, 4, device='meta'))
+        self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
+        self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
