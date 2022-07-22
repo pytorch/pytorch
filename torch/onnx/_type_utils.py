@@ -76,14 +76,14 @@ class ScalarType(enum.IntEnum):
         """Convert a JIT scalar type name to ScalarType."""
         if scalar_name not in _SCALAR_NAME_TO_TYPE:
             raise ValueError(f"Unknown scalar type: {scalar_name}")
-        return _SCALAR_NAME_TO_TYPE[scalar_name]
+        return _SCALAR_NAME_TO_TYPE[scalar_name]  # type: ignore[index]
 
     @classmethod
     def from_torch_name(cls, torch_name: Union[TorchName, str]) -> ScalarType:
         """Convert a torch scalar type name to ScalarType."""
         if torch_name not in _TORCH_NAME_TO_SCALAR_TYPE:
             raise ValueError(f"Unknown torch type: {torch_name}")
-        return _TORCH_NAME_TO_SCALAR_TYPE[torch_name]
+        return _TORCH_NAME_TO_SCALAR_TYPE[torch_name]  # type: ignore[index]
 
     @classmethod
     def from_dtype(cls, dtype: torch.dtype) -> ScalarType:

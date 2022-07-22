@@ -557,7 +557,6 @@ def addmm(g, self, mat1, mat2, beta, alpha):
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
         scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
-        dtype = scalar_type.dtype()
 
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
@@ -566,12 +565,12 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         beta = symbolic_helper._scalar(beta)
 
         if alpha != 1:
-            alpha = g.op("Constant", value_t=torch.tensor(alpha, dtype=dtype))
+            alpha = g.op("Constant", value_t=torch.tensor(alpha, dtype=scalar_type.dtype()))
             res1 = g.op("Mul", res1, alpha)
         if beta != 1:
             beta = g.op(
                 "Constant",
-                value_t=torch.tensor(symbolic_helper._scalar(beta), dtype=dtype),
+                value_t=torch.tensor(symbolic_helper._scalar(beta), dtype=scalar_type.dtype()),
             )
             res2 = g.op("Mul", res2, beta)
 
@@ -783,7 +782,7 @@ def expand(g, self, size, implicit):
         size = symbolic_helper._reshape_helper(
             g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
         )
-    dtype = symbolic_helper.ScalarType.INT64
+    dtype = _type_utils.ScalarType.INT64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
     size = where(g, g.op("Equal", size, neg_ones), ones, size)
@@ -3260,7 +3259,7 @@ def to(g, self, *args):
 
 
 def repeat(g, self, repeats):
-    dtype = symbolic_helper.ScalarType.INT64
+    dtype = _type_utils.ScalarType.INT64
     shape_ = ones_like(g, repeats, dtype)
     self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
