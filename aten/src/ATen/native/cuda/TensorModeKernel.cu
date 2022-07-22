@@ -83,6 +83,14 @@ struct ModeImpl {
   }
 };
 
+struct EqualsMode {
+  bool mode;
+
+  C10_DEVICE bool operator()(const uint8_t x) {
+    return static_cast<bool>(x) == mode;
+  }
+};
+
 template <>
 struct ModeImpl<bool> {
   std::tuple<bool, int64_t> operator()(
@@ -113,9 +121,7 @@ struct ModeImpl<bool> {
 
     // Find first index within which it occurs
     const auto position_iter = thrust::find_if(
-        policy, first_bytes, last_bytes, [mode] GPU_LAMBDA (uint8_t x) {
-      return static_cast<bool>(x) == mode;
-    });
+        policy, first_bytes, last_bytes, EqualsMode{mode});
     const int64_t index = position_iter - first_bytes;
     return {mode, index};
   }
