@@ -481,6 +481,7 @@ class FakeTensorMode(TorchDispatchMode):
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
+
             # TODO: hack, doesn't actually work.
             # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
             with enable_torch_dispatch_mode(
