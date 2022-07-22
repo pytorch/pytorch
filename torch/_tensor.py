@@ -640,6 +640,7 @@ class Tensor(torch._C._TensorBase):
 
     def eig(self, eigenvectors=False):
         from ._linalg_utils import eig
+
         return eig(self, eigenvectors=eigenvectors)
 
     def lu(self, pivot=True, get_infos=False):
