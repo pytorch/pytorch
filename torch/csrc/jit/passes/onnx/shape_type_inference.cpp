@@ -2320,4 +2320,3 @@ void ONNXShapeTypeInference(
 
 } // namespace jit
 } // namespace torch
-   
