@@ -20525,6 +20525,30 @@ torch.cuda.synchronize()
                 t, output_size = inp
                 m(output_size)(t)
 
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.double, torch.float, torch.half)
+    @parametrize_test("attn_mask_dim", [None, 2, 3],
+                      name_fn=lambda a: f"{a}D_attn_mask" if a is not None else "no_attn_mask")
+    @parametrize_test("dropout_p", [0.0, 0.2, 0.5])
+    def test_scaled_dot_product_attention(self, device, dtype, attn_mask_dim, dropout_p):
+        # This test compares python and C++ implementations of SDP.
+        N, L, S, E = 5, 4, 3, 6
+        query = torch.randn(N, L, E, device=device, dtype=dtype)
+        key = torch.randn(N, S, E, device=device, dtype=dtype)
+        value = torch.randn(N, S, E, device=device, dtype=dtype)
+        attn_mask = None
+        if attn_mask_dim is not None:
+            attn_mask = torch.randint(0, 2, size=((L, S) if attn_mask_dim == 2 else (N, L, S)),
+                                      device=device, dtype=torch.float)
+        with freeze_rng_state():
+            expected = F._scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p)
+        with freeze_rng_state():
+            need_attn_weights: bool = True
+            actual = torch.ops.aten._scaled_dot_product_attention(
+                query, key, value, attn_mask, dropout_p, need_attn_weights)
+        self.assertEqual(actual, expected)
+
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):

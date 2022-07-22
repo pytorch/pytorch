@@ -658,5 +658,44 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
   return std::make_tuple(std::move(proj), std::move(qkt), std::move(k), std::move(v));
 }
 
+// Computes scaled dot product attention on query, key and value tensors, using
+// an optional attention mask if passed, and applying dropout if a probability
+// greater than 0.0 is specified.
+//
+// Args:
+//     query_ (Tensor): Query tensor; shape (N, L, E)
+//     key (Tensor): Key tensor; shape (N, S, E)
+//     value (Tensor): Value tensor; shape (N, S, E)
+//     attn_mask (optional Tensor): Float values to add to attention weighting; shape (N, L, S) or (L, S)
+//     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+//     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
+//         otherwise, the second return value is unspecified
+//
+// Returns a tuple containing:
+//     output (Tensor): Attention output; shape (N, L, E)
+//     attn_weights (Tensor): Attention weighting; shape (N, L, S)
+//
+// Shape legend:
+//     N: Batch size
+//     S: Source sequence length
+//     L: Target sequence length
+//     E: Embedding dimension
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask, double dropout_p, bool need_attn_weights) {
+    // Naive, composite implementation defined here.
+    const auto embed_size = query_.size(-1);
+    const auto query = query_ / ::sqrt(static_cast<double>(embed_size));
+    auto attn = attn_mask.has_value() ?
+        at::baddbmm(*attn_mask, query, key.transpose(-2, -1)) :
+        at::bmm(query, key.transpose(-2, -1));
+    attn = at::softmax(attn, -1);
+    if (dropout_p > 0.0) {
+        at::dropout_(attn, dropout_p, true);
+    }
+    const auto output = at::bmm(attn, value);
+    return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, Tensor()));
+}
+
 } // namespace native
 } // namespace at
