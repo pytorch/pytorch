@@ -1,6 +1,7 @@
 import torch
 from typing import Any, Set, Dict, List, Tuple
 from collections import OrderedDict
+from tabulate import tabulate
 
 class ModelReportVisualizer:
     r"""
@@ -376,7 +377,29 @@ class ModelReportVisualizer:
         Expected Use:
             >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
         """
-        pass
+        # get the table dict and the specific tables of interest
+        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
+        tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
+        channel_headers, channel_table = table_dict[self.TABLE_CHANNEL_KEY]
+
+        # get the table string and print it out
+        # now we have populated the tables for each one
+        # let's create the strings to be returned
+        table_str = ""
+        if len(tensor_headers) > self.DEFAULT_NON_FEATURE_TENSOR_HEADERS:
+            # if we have at least one tensor level feature to be addded we add tensor table
+            table_str += "Tensor Level Information \n"
+            table_str += tabulate(tensor_table, headers=tensor_headers)
+        if len(channel_headers) > self.DEFAULT_NON_FEATURE_CHANNEL_HEADERS:
+            # if we have at least one channel level feature to be addded we add tensor table
+            table_str += "\n\n Channel Level Information \n"
+            table_str += tabulate(channel_table, headers=channel_headers)
+
+        # if no features at all, let user know
+        if table_str == "":
+            table_str = "No data points to generate table with."
+
+        print(table_str)
 
     def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
