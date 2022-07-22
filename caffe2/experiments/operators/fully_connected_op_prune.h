@@ -17,6 +17,7 @@
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 
+#include <c10/util/Logging.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
