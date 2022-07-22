@@ -27,7 +27,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
-#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -3104,11 +3103,6 @@ Tensor adjoint(const Tensor &self) {
 Tensor view(const Tensor& self,
             IntArrayRef size) {
   return view_impl(self, size);
-}
-
-Tensor view_symint(const Tensor& self,
-            c10::SymIntArrayRef size) {
-  return self.view(c10::asIntArrayRefSlow(size));
 }
 
 Tensor alias(const Tensor& self) {

@@ -143,13 +143,9 @@ void LTCTensorImpl::shallow_copy_from(
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  if (FLAGS_ltc_enable_symbolic_shapes) {
-    return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
-  }
-
-  // return upper bound
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return TensorImpl::sym_sizes_default();
+  return FLAGS_ltc_enable_symbolic_shapes
+      ? c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size())
+      : TensorImpl::sym_sizes_default();
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
