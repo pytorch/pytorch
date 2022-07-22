@@ -1,7 +1,14 @@
 import torch
 from typing import Any, Set, Dict, List, Tuple, OrderedDict
 from collections import OrderedDict as OrdDict
-from tabulate import tabulate
+
+# try to import tablate
+got_tabulate = True
+try:
+    from tabulate import tabulate
+except ImportError:
+    got_tabulate = False
+
 
 class ModelReportVisualizer:
     r"""
@@ -377,6 +384,11 @@ class ModelReportVisualizer:
         Expected Use:
             >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
         """
+        # see if we got tabulate
+        if not got_tabulate:
+            print("Make sure to install tabulate and try again.")
+            return None
+
         # get the table dict and the specific tables of interest
         table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
         tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
