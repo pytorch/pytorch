@@ -27,7 +27,6 @@ def get_latest_commits() -> List[str]:
         ],
         encoding="ascii",
     )
-    
     commits = _check_output(
         [
             "git",
