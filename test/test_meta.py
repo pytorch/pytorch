@@ -838,7 +838,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefFunctionMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
@@ -854,7 +854,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefDispatchMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)

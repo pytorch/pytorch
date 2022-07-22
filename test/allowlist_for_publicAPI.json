@@ -1369,8 +1369,7 @@
     "TorchFunctionModeMeta",
     "enable_torch_function_mode",
     "get_default_nowrap_functions",
-    "has_torch_function",
-    "push_torch_function_mode"
+    "has_torch_function"
   ],
   "torch.package.analyze.is_from_package": [
     "Any",

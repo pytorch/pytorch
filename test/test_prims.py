@@ -170,7 +170,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.sigmoid(a)
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a)
 
         # First run to create the cache
@@ -203,7 +203,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -227,7 +227,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:

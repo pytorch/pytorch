@@ -162,7 +162,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):
-        with FakeTensorMode.push():
+        with FakeTensorMode():
             x = torch.empty(1, device="cuda")
             y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
             out = x + y
