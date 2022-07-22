@@ -1,8 +1,8 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
-import unittest
 
 import torch
+from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
@@ -106,9 +106,7 @@ class _TestJITIRToONNX:
         x = torch.randn(5, 2)
         self.run_test(graph_ir, (x,))
 
-    @unittest.skipIf(
-        not torch.cuda.is_available(), "half_to_float only on CUDA implementation"
-    )
+    @skipIfNoCuda
     def test_log_softmax_half_to_float(self):
         graph_ir = """
         graph(%x: Tensor):
