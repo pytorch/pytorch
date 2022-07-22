@@ -37,7 +37,9 @@ optimizer = SomeOptimizer(model.parameters(), lr=...)
 data_sparsifier = SomeDataSparsifier(...)
 
 # attach data sparsifier to the model
-data_sparsifier.add_data(name=..., data=..., **some_config)
+for name, param in model.named_parameters():
+    data_name = name.replace('.', '_')  # remember, name with a '.' is not valid name for the data sparsifier
+    data_sparsifier.add_data(name=data_name, data=param)
 
 data_scheduler = SomeDataScheduler(data_sparsifier, ...)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, ..)
@@ -49,9 +51,8 @@ for epoch in range(EPOCHS):
         loss = loss_fn(output, target)
         loss.backward()
         optimizer.step()
-        data_sparsifier.step()
-        # add data_scheduler.step() here if you need schedule at each step instead of epoch
 
+    data_sparsifier.step()
     data_scheduler.step()
     lr_scheduler.step()
 ```
