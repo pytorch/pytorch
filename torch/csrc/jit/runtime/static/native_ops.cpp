@@ -934,7 +934,7 @@ namespace {
 
 std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
   const auto num_inputs = p_node.num_inputs();
-  DCHECK_GE(num_inputs, 2);
+  TORCH_DCHECK_GE(num_inputs, 2);
   // The first two inputs to the loop node are the max trip count
   // and initial condition. We don't collect them here, since those
   // are not inputs for the sub-block.

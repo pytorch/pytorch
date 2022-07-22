@@ -57,8 +57,8 @@ class LearningRateOp final : public Operator<Context> {
           arg_prefix + "active_period", -1);
       int64_t inactive_period = this->template GetSingleArgument<int64_t>(
           arg_prefix + "inactive_period", -1);
-      DCHECK_GE(active_period, 0);
-      DCHECK_GE(inactive_period, 0);
+      TORCH_DCHECK_GE(active_period, 0);
+      TORCH_DCHECK_GE(inactive_period, 0);
       return new AlternateLearningRate<T>(
           active_period, inactive_period, active_first);
     } else if (policy == "hill") {
@@ -67,7 +67,7 @@ class LearningRateOp final : public Operator<Context> {
       DCHECK_GT(num_iter, 0);
       T start_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_multiplier", 0.);
-      DCHECK_GE(start_multiplier, 0); // start_multiplier in range [0, 1]
+      TORCH_DCHECK_GE(start_multiplier, 0); // start_multiplier in range [0, 1]
       TORCH_DCHECK_LE(start_multiplier, 1);
       T gamma =
           this->template GetSingleArgument<float>(arg_prefix + "gamma", 0);
@@ -77,7 +77,7 @@ class LearningRateOp final : public Operator<Context> {
       DCHECK_GT(power, 0);
       T end_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "end_multiplier", 0);
-      DCHECK_GE(end_multiplier, 0); // end_multiplier in range [0, 1]
+      TORCH_DCHECK_GE(end_multiplier, 0); // end_multiplier in range [0, 1]
       TORCH_DCHECK_LE(end_multiplier, 1);
       return new HillLearningRate<T>(
           num_iter, start_multiplier, gamma, power, end_multiplier);
@@ -137,7 +137,7 @@ class LearningRateOp final : public Operator<Context> {
           arg_prefix + "start_multiplier", 0.);
       int num_iter =
           this->template GetSingleArgument<int>(arg_prefix + "num_iter", 0);
-      DCHECK_GE(start_multiplier, 0);
+      TORCH_DCHECK_GE(start_multiplier, 0);
       return new LinearWarmupLearningRate<T>(start_multiplier, num_iter);
     } else if (policy == "constantWarmup") {
       T multiplier = this->template GetSingleArgument<float>(
@@ -194,7 +194,7 @@ class LearningRateOp final : public Operator<Context> {
       T decay =
           this->template GetSingleArgument<float>(arg_prefix + "decay", 1.0);
       DCHECK_GT(stepsize, 0);
-      DCHECK_GE(max_lr, base_lr_);
+      TORCH_DCHECK_GE(max_lr, base_lr_);
       return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);
     } else if (policy == "constantThenLinearWarmup") {
       T start_warmup_multiplier = this->template GetSingleArgument<float>(
@@ -220,7 +220,7 @@ class LearningRateOp final : public Operator<Context> {
           arg_prefix + "cyclical_step_size", 1000000);
       T cyclical_decay = this->template GetSingleArgument<float>(
           arg_prefix + "cyclical_decay", 1.0);
-      DCHECK_GE(cyclical_max_lr, base_lr_);
+      TORCH_DCHECK_GE(cyclical_max_lr, base_lr_);
       return new CompositeCyclicalLearningRate<T>(
           base_lr_,
           start_warmup_multiplier,
@@ -240,7 +240,7 @@ class LearningRateOp final : public Operator<Context> {
           this->template GetSingleArgument<float>(arg_prefix + "t_mult", 1.0);
       T lr_shrink = this->template GetSingleArgument<float>(
           arg_prefix + "lr_shrink", 0.99);
-      DCHECK_GE(max_lr, min_lr);
+      TORCH_DCHECK_GE(max_lr, min_lr);
       return new CosineLearningRate<T>(
           min_lr, max_lr, period, t_mult, lr_shrink);
     } else if (policy == "compositeCosine") {
@@ -261,7 +261,7 @@ class LearningRateOp final : public Operator<Context> {
       T cosine_lr_shrink = this->template GetSingleArgument<float>(
           arg_prefix + "cosine_lr_shrink", 0.99);
 
-      DCHECK_GE(cosine_max_lr, cosine_min_lr);
+      TORCH_DCHECK_GE(cosine_max_lr, cosine_min_lr);
       return new CompositeCosineLearningRate<T>(
           start_warmup_multiplier,
           constant_warmup_num_iter,

@@ -30,7 +30,7 @@ class RoIAlignRotatedOp final : public Operator<Context> {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);
-    DCHECK_GE(sampling_ratio_, 0);
+    TORCH_DCHECK_GE(sampling_ratio_, 0);
     DCHECK(order_ == StorageOrder::NCHW || order_ == StorageOrder::NHWC);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;

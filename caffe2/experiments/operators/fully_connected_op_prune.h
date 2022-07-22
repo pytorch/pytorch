@@ -250,8 +250,8 @@ class FullyConnectedPruneGradientOp : public Operator<Context> {
     auto& thres = Input(6);
     // TODO(wyiming): check comp_lb is a float
     auto& comp_lb = Input(7);
-    DCHECK_GE(X.dim(), 1);
-    DCHECK_GE(W.dim(), 2);
+    TORCH_DCHECK_GE(X.dim(), 1);
+    TORCH_DCHECK_GE(W.dim(), 2);
     TORCH_DCHECK_LE(dY.dim(), 2);
     // batch size
     int M = X.dim() > 1 ? X.dim32(0) : 1;

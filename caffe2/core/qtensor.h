@@ -188,7 +188,7 @@ class C10_EXPORT QTensor {
    */
   inline int dim32(const int i) const {
     TORCH_DCHECK_LT(i, static_cast<int>(dims_.size())) << "Exceeding ndim limit " << dims_.size();
-    DCHECK_GE(i, 0) << "Cannot have negative index";
+    TORCH_DCHECK_GE(i, 0) << "Cannot have negative index";
     CAFFE_ENFORCE_LT(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }

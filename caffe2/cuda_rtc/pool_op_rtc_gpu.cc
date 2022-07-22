@@ -163,7 +163,7 @@ string MaxPoolRTCFunction::GetSource(
       stride_w,
       pad_t,
       pad_l);
-  DCHECK_GE(nbytes, 0);
+  TORCH_DCHECK_GE(nbytes, 0);
   TORCH_DCHECK_LT(nbytes, 65536);
   return string(buffer);
 }
@@ -202,7 +202,7 @@ string MaxPoolGradientRTCFunction::GetSource(
       stride_w,
       pad_t,
       pad_l);
-  DCHECK_GE(nbytes, 0);
+  TORCH_DCHECK_GE(nbytes, 0);
   TORCH_DCHECK_LT(nbytes, 65536);
   return string(buffer);
 }

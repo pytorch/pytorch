@@ -284,7 +284,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);
-    DCHECK_GE(sampling_ratio_, 0);
+    TORCH_DCHECK_GE(sampling_ratio_, 0);
     // only supports NHWC
     CAFFE_ENFORCE(order_ == StorageOrder::NHWC);
   }

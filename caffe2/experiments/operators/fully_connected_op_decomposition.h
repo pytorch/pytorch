@@ -145,9 +145,9 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     const auto& U = Input(1);
     const auto& V = Input(2);
     const auto& dY = Input(3);
-    DCHECK_GE(X.dim(), 1);
-    DCHECK_GE(U.dim(), 2);
-    DCHECK_GE(V.dim(), 2);
+    TORCH_DCHECK_GE(X.dim(), 1);
+    TORCH_DCHECK_GE(U.dim(), 2);
+    TORCH_DCHECK_GE(V.dim(), 2);
     TORCH_DCHECK_LE(dY.dim(), 2);
     // batch size
     int M = X.dim() > 1 ? X.dim32(0) : 1;
