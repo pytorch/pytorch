@@ -587,6 +587,9 @@ class InputWeightEqualizationDetector(DetectorBase):
     WEIGHT_STR = "weight"
     INPUT_STR = "input"
 
+    # default for what ratio we recommend input weight
+    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.5
+
     def __init__(self, ratio_threshold: float, ch_axis: int = 1):
         # ensure passed in inputs are valid
         if ratio_threshold <= 0 or ratio_threshold >= 1:
@@ -717,11 +720,26 @@ class InputWeightEqualizationDetector(DetectorBase):
             if self._is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
-                min_val, max_val = torch.aminmax(module.weight, dim=self.ch_axis)
+                min_val: torch.Tensor = torch.tensor([float('inf')])
+                max_val: torch.Tensor = torch.tensor([float('-inf')])
+                x_copy = module.weight
+                x_dim = x_copy.size()
 
-                # flatten entries since conv can have multiple dimensions
-                min_val = torch.flatten(min_val)
-                max_val = torch.flatten(max_val)
+                new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
+                new_axis_list[self.ch_axis] = 0
+                new_axis_list[0] = self.ch_axis
+                y = x_copy.permute(new_axis_list)
+
+                # Need to match dtype of min/max because the updates to buffers
+                # are done in place and types need to match for comparisons
+                y = y.to(min_val.dtype)
+                y = torch.flatten(y, start_dim=1)
+                if min_val.numel() == 0 or max_val.numel() == 0:
+                    min_val, max_val = torch.aminmax(y, dim=1)
+                else:
+                    min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
+                    min_val = torch.min(min_val_cur, min_val)
+                    max_val = torch.max(max_val_cur, max_val)
 
                 weight_info[fqn] = {
                     self.WEIGHT_PREFIX + self.PER_CHANNEL_MAX_KEY: max_val,
@@ -789,10 +807,20 @@ class InputWeightEqualizationDetector(DetectorBase):
             weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)
             input_ratio = self._calculate_range_ratio(input_info[module_fqn], self.INPUT_STR, module_fqn)
 
+            # if mismatched size, because of grouping, we want to replicate weight enough times
+            weight_channels = len(weight_ratio)
+            input_channels = len(input_ratio)
+            if weight_channels != input_channels:
+                # we try to replicate
+                assert input_channels % weight_channels == 0, "input channels should be divisible by weight channels."
+                # get replication factor
+                rep_factor: int = input_channels // weight_channels
+
+                # weight ratio is (n,), input ratio is (k,), we just repeat weight ratio k // n
+                weight_ratio = weight_ratio.repeat(rep_factor)
+
             # calculate the s metric per channel
             s = torch.sqrt(weight_ratio) / torch.sqrt(input_ratio)
-
-            # add to dictionary
             module_fqn_to_channel[module_fqn] = s
 
         # return compiled observer ratios
@@ -890,12 +918,12 @@ class InputWeightEqualizationDetector(DetectorBase):
         input_weight_string = "Input-Weight Equalization suggestions: \n"
 
         # some strings to be formatted depending on module we are adding
-        module_suggestion_str = "For Module {} looked at with axis {} we suggest: \n"
-        channel_suggestion_str = "\tFor channel {}, we suggest {} input weight equalization because {}\n"
+        module_suggestion_str = "For Module {} looked at with axis {}: \n"
+        channel_suggestion_str = "\tWe suggest {} input weight equalization because {}\n"
         use_str = "to use"
         no_use_str = "to not use"
-        input_weight_benefit_str = "we expect significant reduction in quantization error."
-        input_weight_non_benefit_reasoning = "the scales of the input vs. weight with regards to their ranges."
+        input_weight_benefit_str = "{}/{} channels would benefit and we expect significant reduction in quantization error."
+        input_weight_non_benefit_reasoning = "{}/{} channels benefitting from input-weight equalization being applied."
         input_weight_non_benefit_str = "we don't expect much improvement from input-weight equalization based on {}"
 
         # added module check
@@ -910,15 +938,19 @@ class InputWeightEqualizationDetector(DetectorBase):
 
             mod_info: Dict[str, Any] = input_weight_equalization_info[module_fqn]
 
-            # look at each individual channel and add a suggestion
-            for index, channel_suggested in enumerate(mod_info[self.RECOMMENDED_KEY]):
-                if channel_suggested:
-                    channel_str = channel_suggestion_str.format(index, use_str, input_weight_benefit_str)
-                    input_weight_string += channel_str
-                else:
-                    non_benefit_str = input_weight_non_benefit_str.format(input_weight_non_benefit_reasoning)
-                    channel_str = channel_suggestion_str.format(index, no_use_str, non_benefit_str)
-                    input_weight_string += channel_str
+            # gather info on how many channels would benefit from input weight and
+            recommendation_per_channel: torch.Tensor = mod_info[self.RECOMMENDED_KEY]
+            num_recs = sum(recommendation_per_channel)
+
+            if num_recs / len(recommendation_per_channel) >= self.DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO:
+                input_benefit_formatted = input_weight_benefit_str.format(num_recs, len(recommendation_per_channel))
+                channel_str = channel_suggestion_str.format(use_str, input_benefit_formatted)
+                input_weight_string += channel_str
+            else:
+                non_benefit_reason_formatted = input_weight_non_benefit_reasoning.format(num_recs, len(recommendation_per_channel))
+                non_benefit_str = input_weight_non_benefit_str.format(non_benefit_reason_formatted)
+                channel_str = channel_suggestion_str.format(no_use_str, non_benefit_str)
+                input_weight_string += channel_str
 
         # if no modules looked at, amend return string
         if not added_module:
