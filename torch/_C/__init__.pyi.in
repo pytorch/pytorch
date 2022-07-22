@@ -1221,6 +1221,10 @@ class IntType(JitType):
     @staticmethod
     def get() -> IntType: ...
 
+class SymIntType(JitType):
+    @staticmethod
+    def get() -> SymIntType: ...
+
 class NumberType(JitType):
     @staticmethod
     def get() -> NumberType: ...
