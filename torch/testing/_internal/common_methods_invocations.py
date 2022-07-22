@@ -3076,23 +3076,31 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
+    yield ErrorInput(SampleInput(0, args=(3, 1.)), error_type=TypeError, error_regex='must be int, not float')
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
-    ends = (0, 1, 4, 50)
-    starts = (0, 1, 4, 50)
-    nsteps = (0, 1, 4, 50)
+    ends = (-3, 0, 1, 4, 50)
+    starts = (-2., 0, 4.3, 50)
+    nsteps = (0, 1, 50)
     for start, end, nstep in product(starts, ends, nsteps):
+        if not dtype.is_floating_point and not dtype.is_complex and (isinstance(start, float) or isinstance(end, float)):
+            continue
+        if dtype == torch.uint8 and end < 0 or start < 0:
+            continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
 
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
-    ends = (0, 1, 2, 4)
-    starts = (0, 1, 2, 4)
+    ends = (-3, 0, 1.2, 2, 4)
+    starts = (-2., 0, 1, 2, 4.3)
     n_steps = (0, 1, 2, 4)
-    # TODO: negative bases
     bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
     for start, end, n_step, base in product(starts, ends, n_steps, bases):
+        if not dtype.is_floating_point and not dtype.is_complex and (isinstance(start, float) or isinstance(end, float)):
+            continue
+        if dtype == torch.uint8 and end < 0 or start < 0:
+            continue
         if start > end:
             continue
         if base is None:
@@ -20483,6 +20491,18 @@ python_ref_db = [
                          dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+            # precision issues on both cpu and cuda
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.float16,), device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float16,), device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.bfloat16, torch.float16)),
+
         ),
         decorators=(
             DecorateInfo(
