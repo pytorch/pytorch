@@ -164,7 +164,7 @@ T WaitForVariableChange(std::atomic<T>* var,
       new_value = var->load(std::memory_order_relaxed);
       return new_value != initial_value;
     });
-    DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
+    TORCH_DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
     return new_value;
   }
 }

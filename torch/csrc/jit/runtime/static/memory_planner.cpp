@@ -385,7 +385,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
       TORCH_DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
 #endif
-    DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
+    TORCH_DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
     reused_tensors_ += managed_tensors_[group_idx].numManagedTensors() - 1;
     storageImpl->set_data_ptr_noswap(
         at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));

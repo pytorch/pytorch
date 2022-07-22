@@ -27,7 +27,7 @@ class ProcessedNodeWrapperBase {
         : container_(container), idx_(start_idx) {}
 
     ProcessedNodeWrapperBaseIter& operator++() {
-      DCHECK_NE(idx_, container_->size());
+      TORCH_DCHECK_NE(idx_, container_->size());
       ++idx_;
       return *this;
     }
