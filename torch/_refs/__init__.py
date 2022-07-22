@@ -3095,7 +3095,7 @@ def linspace(
                     end * denom + eps,
                     step_size_x_denom,
                     dtype=torch.int64,
-                    **factory_kwargs
+                    **factory_kwargs,
                 )
                 / denom
             )
