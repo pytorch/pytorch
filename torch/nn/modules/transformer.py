@@ -417,9 +417,10 @@ class TransformerEncoderLayer(Module):
         self.activation = activation
 
     def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
+        if not hasattr(self, 'activation'):
+            self.activation = F.relu
+
 
     def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None) -> Tensor:

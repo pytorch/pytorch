@@ -1,18 +1,17 @@
-from typing import Callable, Sequence, Any, Dict
 import functools
-
+from typing import Any, Callable, Dict, Sequence
 
 import torch
-import torch.overrides
 
-from torch._prims_common import torch_function_passthrough
+import torch._prims
 
 import torch._refs
 import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
+import torch.overrides
 
-import torch._prims
+from torch._prims_common import torch_function_passthrough
 
 
 @functools.lru_cache(None)
