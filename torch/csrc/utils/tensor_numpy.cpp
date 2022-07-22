@@ -7,7 +7,7 @@
 #ifndef USE_NUMPY
 namespace torch {
 namespace utils {
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor&, bool) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
@@ -27,6 +27,10 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
+void warn_numpy_not_writeable() {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 } // namespace utils
