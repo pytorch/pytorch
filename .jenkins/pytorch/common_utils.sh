@@ -148,6 +148,9 @@ function install_functorch() {
 function test_functorch() {
   pushd functorch
   pytest test
+  # Copy test reports to the pytorch/test folder. Those are what actually get uploaded.
+  cp *.json ../test
+  cp *.xml ../test
   popd
 }
 
