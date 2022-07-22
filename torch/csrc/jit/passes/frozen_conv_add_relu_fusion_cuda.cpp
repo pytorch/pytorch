@@ -1,7 +1,7 @@
 #include <ATen/Utils.h>
 
 #include <ATen/code_template.h>
-#include <ATen/hip/HIPConfig.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
