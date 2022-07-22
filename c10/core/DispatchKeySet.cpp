@@ -46,7 +46,7 @@ bool isBackendDispatchKey(DispatchKey t) {
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to [math_dispatch_keyset x full_backend_mask]
 constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+    backend_dispatch_keyset | autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Python);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
