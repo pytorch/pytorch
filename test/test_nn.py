@@ -19775,7 +19775,7 @@ torch.cuda.synchronize()
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
-            if TEST_WITH_ROCM:
+            if torch.version.hip:
                 cudnn_out = torch.miopen_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             else:
                 cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
@@ -19807,7 +19807,7 @@ torch.cuda.synchronize()
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
             z = z.to(memory_format=memory_format)
-            if TEST_WITH_ROCM:
+            if torch.version.hip:
                 cudnn_out = torch.miopen_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
             else:
                 cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)

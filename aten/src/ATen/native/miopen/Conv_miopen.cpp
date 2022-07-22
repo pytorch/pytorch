@@ -1596,8 +1596,10 @@ Tensor miopen_convolution_relu(
   auto& ctx = at::globalContext();
   bool benchmark = ctx.benchmarkCuDNN();
 
-  // MIOpen currently only supports MemoryFormat::Contiguous and fp32
-  if (input.suggest_memory_format() == at::MemoryFormat::Contiguous && input.scalar_type() == at::kFloat) {
+  // MIOpen currently only supports MemoryFormat::Contiguous and fp32 and 2d
+  if (input.suggest_memory_format() == at::MemoryFormat::Contiguous
+          && input.scalar_type() == at::kFloat
+          && input.ndimension() == 4) {
 
     // FuseFrozenConvAddRelu performs some tensor shape checking
     Tensor output_t = at::detail::empty_cuda(
