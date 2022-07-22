@@ -121,6 +121,7 @@ class NaiveTypePropagator {
       case aten::round:
       case aten::trunc:
       case aten::frac:
+      case aten::leaky_relu:
       case aten::relu:
       case aten::silu:
       case aten::gelu:

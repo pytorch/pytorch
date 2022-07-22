@@ -668,6 +668,7 @@ class TestCudaFuser(JitTestCase):
                       torch.isreal,
                       torch.nn.functional.softplus,
                       torch.nn.functional.gelu,
+                      torch.nn.functional.leaky_relu,
                       torch.relu,
                       torch.sigmoid,
                       torch.bitwise_not,
