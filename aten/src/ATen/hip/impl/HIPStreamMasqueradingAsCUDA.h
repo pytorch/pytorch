@@ -66,14 +66,16 @@ public:
     return Stream(Stream::UNSAFE, device(), id());
   }
 
-  uint64_t pack() const noexcept {
+  c10::StreamData3 pack3() const noexcept {
     // Unsafely coerce HIP stream into "CUDA" stream before packing
-    return unwrap().pack();
+    return unwrap().pack3();
   }
 
-  static HIPStreamMasqueradingAsCUDA unpack(uint64_t bits) {
+  static HIPStreamMasqueradingAsCUDA unpack3(int64_t stream_id,
+                                             int64_t device_index,
+                                             int64_t device_type) {
     // NB: constructor manages CUDA->HIP translation for us
-    return HIPStreamMasqueradingAsCUDA(Stream::unpack(bits));
+    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(stream_id, device_index, device_type));
   }
 
   static std::tuple<int, int> priority_range() { return HIPStream::priority_range(); }
