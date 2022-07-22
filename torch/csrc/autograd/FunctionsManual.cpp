@@ -595,6 +595,21 @@ Tensor sum_backward(
   return grad.expand(sizes);
 }
 
+Tensor sum_backward(
+    const Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_symint(sizes);
+  }
+}
+
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -667,6 +682,10 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
+        .view_as(input);
+  }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return grad * (result / input).conj();
@@ -691,6 +710,9 @@ Tensor prod_backward(
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
+  }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 
   Tensor zero_mask = (input == 0);
