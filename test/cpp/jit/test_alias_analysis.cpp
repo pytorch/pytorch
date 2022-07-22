@@ -1607,5 +1607,57 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
       [&graph] { AliasDb aliasDb(graph); },
       "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
+
+TEST(IRNonDeterminismTest, Basic) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : NoneType = prim::Constant()
+    %2 : Tensor = aten::bernoulli(%x, %1)
+    %3 : Tensor = aten::add(%x, %2, %0)
+    return (%3))IR";
+  parseIR(graph_string, graph.get());
+
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::bernoulli) {
+      ASSERT_TRUE(n->isNondeterministic());
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
+TEST(IRNonDeterminismTest, DropoutSpecialCase) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : bool = prim::Constant[value=0]()
+    %1 : bool = prim::Constant[value=1]()
+    %3 : int = prim::Constant[value=1]()
+    %3 : float = prim::Constant[value=1.0]()
+    %4 : Tensor = aten::dropout(%x, %3, %0)
+    %5 : Tensor = aten::dropout(%x, %3, %1)
+    %6 : Tensor = aten::add(%4, %5, %3)
+    return (%6))IR";
+  parseIR(graph_string, graph.get());
+
+  bool train = false;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::dropout) {
+      if (!train) {
+        ASSERT_FALSE(n->isNondeterministic());
+        train = true;
+      } else {
+        ASSERT_TRUE(n->isNondeterministic());
+      }
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
