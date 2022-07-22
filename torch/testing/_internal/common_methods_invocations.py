@@ -10776,6 +10776,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
+               # Lazy tensor failures
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+
                # Captured graph does not contain aten::arange (succeeds on complex!)
                # g: graph():
                #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
@@ -10784,12 +10789,6 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-
-               # dispatch to lazy test failed
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-               # RuntimeError: lazy/test_ts_opinfo failed! Received signal: SIGIOT
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
-
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
