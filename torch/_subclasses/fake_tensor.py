@@ -292,6 +292,9 @@ class FakeTensor(torch.Tensor):
         # elem does not need to be recorded, because FakeTensor *is a* elem
         assert elem.device.type == "meta", elem
         device = device if isinstance(device, torch.device) else torch.device(device)
+        # normalize cuda device
+        if device.type == "cuda" and device.index is None:
+            device = torch.device(f"cuda:{torch.cuda.current_device()}")
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
