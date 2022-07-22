@@ -593,6 +593,7 @@ include_patterns = [
     'torch/_meta_registrations.py',
     'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
