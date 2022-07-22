@@ -805,14 +805,25 @@ void AliasDb::analyzeImpl(Node* node) {
       "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
   torch::utils::SchemaInfo schema_info(schema);
-  if (!isFrozen_ && node->hasNamedInput("training")) {
-    auto value = constant_as<bool>(node->namedInput("training"));
-    schema_info.addArgumentValue("training", !value.has_value() || *value);
-  } else if (!isFrozen_ && node->hasNamedInput("use_input_stats")) {
-    auto value = constant_as<bool>(node->namedInput("use_input_stats"));
-    schema_info.addArgumentValue(
-        "use_input_stats", !value.has_value() || *value);
+
+  // Add arguments for batch_norm and instance_norm special case.
+  if (node->hasNamedInput("training")) {
+    if (isFrozen_) {
+      schema_info.addArgumentValue("training", false);
+    } else {
+      auto value = constant_as<bool>(node->namedInput("training"));
+      schema_info.addArgumentValue("training", !value.has_value() || *value);
+    }
+  } else if (node->hasNamedInput("use_input_stats")) {
+    if (isFrozen_) {
+      schema_info.addArgumentValue("use_input_stats", false);
+    } else {
+      auto value = constant_as<bool>(node->namedInput("use_input_stats"));
+      schema_info.addArgumentValue(
+          "use_input_stats", !value.has_value() || *value);
+    }
   }
+
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
