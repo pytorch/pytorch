@@ -54,16 +54,14 @@ test/test_dispatch.py
 class PythonDispatcher:
     namespace = "__test__"
     name = "foo"
+    # fmt: off
     runtime_keys = [
-        "CPU",
-        "AutogradCPU",
-        "FPGA",
-        "AutogradOther",
-        "XLA",
-        "AutogradXLA",
-        "Lazy",
-        "AutogradLazy",
+        "CPU", "AutogradCPU",
+        "FPGA", "AutogradOther",
+        "XLA", "AutogradXLA",
+        "Lazy", "AutogradLazy",
     ]
+    # fmt: on
     alias_keys = [
         "CompositeExplicitAutograd",
         "Autograd",
