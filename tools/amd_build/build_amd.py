@@ -113,6 +113,9 @@ ignores = [
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    # Correct path to generate HIPConfig.h:
+    #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
+    "aten/src/ATen/cuda/CUDAConfig.h",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
