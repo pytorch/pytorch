@@ -33,51 +33,61 @@ void SchemaInfo::addArgumentValues(
   }
 }
 
+bool SchemaInfo::hasInputArgumentNamed(const std::string& name) const {
+  return std::any_of(
+      schema_.arguments().begin(),
+      schema_.arguments().end(),
+      [&name](const c10::Argument& arg) { return arg.name() == name; });
+}
+
 bool SchemaInfo::is_mutable() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
-    if (is_mutable(i)) {
+    if (is_mutable({c10::SchemaArgType::input, i})) {
       return true;
     }
   }
   return false;
 }
 
-bool SchemaInfo::is_mutable(size_t index) {
+bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
   TORCH_INTERNAL_ASSERT(
-      index < schema_.arguments().size(), "Invalid index for schema.");
+      argument.index < schema_.getCorrectList(argument.type).size(),
+      "Invalid index for schema.");
   if (!alias_maps_current_) {
     generateAliasMaps();
   }
-
-  static const c10::FunctionSchema batch_norm_schema = torch::jit::parseSchema(
-      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-  static const c10::FunctionSchema instance_norm_schema = torch::jit::parseSchema(
-      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor");
-
-  // Note that the batch norm and instance norm checks depend on index because
+  static const std::vector<c10::FunctionSchema> training_ops = getTrainingOps();
+  const auto& correct_map = (argument.type == c10::SchemaArgType::input)
+      ? input_alias_map_
+      : output_alias_map_;
+  // Note that the training_op checks depend on index because
   // of cases where either running_mean or running_var alias another input
   // argument causing its alias status to change.
   return std::any_of(
-      input_alias_map_[index].begin(),
-      input_alias_map_[index].end(),
+      correct_map[argument.index].begin(),
+      correct_map[argument.index].end(),
       [this](size_t aliasing_index) {
-        if (batch_norm_schema == this->schema_ &&
+        bool special_case =
             (this->schema_.arguments()[aliasing_index].name() ==
                  "running_mean" ||
-             this->schema_.arguments()[aliasing_index].name() ==
-                 "running_var")) {
-          return value_map_.count("training") &&
+             this->schema_.arguments()[aliasing_index].name() == "running_var");
+        bool is_training_op = std::any_of(
+            training_ops.begin(),
+            training_ops.end(),
+            [this](const c10::FunctionSchema& training_op) {
+              return this->schema_ == training_op;
+            });
+        if (special_case && is_training_op) {
+          bool has_training = value_map_.count("training") &&
               value_map_.at("training").toBool();
-        } else if (
-            instance_norm_schema == this->schema_ &&
-            (this->schema_.arguments()[aliasing_index].name() ==
-                 "running_mean" ||
-             this->schema_.arguments()[aliasing_index].name() ==
-                 "running_var")) {
-          return value_map_.count("use_input_stats") &&
+          bool has_train =
+              value_map_.count("train") && value_map_.at("train").toBool();
+          bool has_use_input_stats = value_map_.count("use_input_stats") &&
               value_map_.at("use_input_stats").toBool();
+          return has_training || has_train || has_use_input_stats;
         } else {
-          return this->schema_.is_mutable(aliasing_index);
+          return this->schema_.is_mutable(
+              {c10::SchemaArgType::input, aliasing_index});
         }
       });
 }
@@ -87,7 +97,7 @@ bool SchemaInfo::is_mutable(c10::string_view name) {
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
 
-  return is_mutable(*index);
+  return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
 }
 
 bool SchemaInfo::is_nondeterministic() const {
@@ -236,6 +246,29 @@ void SchemaInfo::ensureConservativity(
       }
     }
   }
+}
+
+std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
+  // This is a list of ops where the a boolean variable (either "training",
+  // "train" or "use_input_stats") affects the mutability of running_mean and
+  // running_var
+  static const std::vector<std::string> training_op_strings = {
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+      "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)",
+      "aten::cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)",
+      "aten::miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)",
+      "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
+      "aten::native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))",
+  };
+
+  std::vector<c10::FunctionSchema> training_ops;
+  training_ops.reserve(training_op_strings.size());
+  for (const std::string& signature : training_op_strings) {
+    training_ops.push_back(torch::jit::parseSchema(signature));
+  }
+
+  return training_ops;
 }
 
 void SchemaInfo::initSchemaInfo() {
