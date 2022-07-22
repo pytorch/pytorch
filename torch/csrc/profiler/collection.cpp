@@ -647,7 +647,14 @@ class TransferEvents {
           [&](const ExtraFields<EventType::Kineto>& i) {
             if (i.flow.type == libkineto::kLinkAsyncCpuGpu && i.flow.start) {
               auto inserted = flow_map.insert({i.flow.id, e});
+#ifdef USE_ROCM
+              if (inserted.second) {
+                TORCH_WARN_ONCE(
+                    "ROCTracer produced duplicate flow start: ", i.flow.id);
+              }
+#else // USE_ROCM
               TORCH_INTERNAL_ASSERT(inserted.second);
+#endif // USE_ROCM
             }
             TORCH_INTERNAL_ASSERT(e->parent_.expired());
             e->parent_ = i.linked_activity_;
