@@ -155,7 +155,7 @@ static_assert(
 #define TORCH_DCHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
 #define TORCH_DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
 #define TORCH_DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
-#define DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
+#define TORCH_DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
 #else // !NDEBUG
 // These versions generate no code in optimized mode.
 #define TORCH_DCHECK_EQ(val1, val2) \
@@ -173,7 +173,7 @@ static_assert(
 #define TORCH_DCHECK_GE(val1, val2) \
   while (false)               \
   CHECK_OP(val1, val2, >=)
-#define DCHECK_GT(val1, val2) \
+#define TORCH_DCHECK_GT(val1, val2) \
   while (false)               \
   CHECK_OP(val1, val2, >)
 #endif // NDEBUG
