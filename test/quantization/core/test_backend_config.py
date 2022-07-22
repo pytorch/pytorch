@@ -101,7 +101,7 @@ class TestBackendConfig(QuantizationTestCase):
             ._set_overwrite_output_fake_quantize(self._fake_quantize) \
             ._set_overwrite_output_observer(default_fixed_qparams_range_0to1_observer)
 
-    def _get_backend_op_config_dict1(self):
+    def _get_backend_pattern_config_dict1(self):
         return {
             "pattern": (torch.nn.ReLU, torch.nn.Linear),
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
@@ -113,7 +113,7 @@ class TestBackendConfig(QuantizationTestCase):
             "fuser_method": self._fuser_method,
         }
 
-    def _get_backend_op_config_dict2(self):
+    def _get_backend_pattern_config_dict2(self):
         return {
             "pattern": torch.add,
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
@@ -215,7 +215,7 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(conf._overwrite_output_observer, default_fixed_qparams_range_0to1_observer)
 
     def test_backend_op_config_from_dict(self):
-        conf_dict1 = self._get_backend_op_config_dict1()
+        conf_dict1 = self._get_backend_pattern_config_dict1()
         conf1 = BackendPatternConfig.from_dict(conf_dict1)
         self.assertEqual(conf1.pattern, (torch.nn.ReLU, torch.nn.Linear))
         self.assertEqual(conf1.observation_type, ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
@@ -232,7 +232,7 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertTrue(conf1._overwrite_output_fake_quantize is None)
         self.assertTrue(conf1._overwrite_output_observer is None)
         # Test temporary/internal keys
-        conf_dict2 = self._get_backend_op_config_dict2()
+        conf_dict2 = self._get_backend_pattern_config_dict2()
         conf2 = BackendPatternConfig.from_dict(conf_dict2)
         self.assertEqual(conf2.pattern, torch.add)
         self.assertEqual(conf2.observation_type, ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
@@ -252,8 +252,8 @@ class TestBackendConfig(QuantizationTestCase):
     def test_backend_op_config_to_dict(self):
         conf1 = self._get_backend_op_config1()
         conf2 = self._get_backend_op_config2()
-        conf_dict1 = self._get_backend_op_config_dict1()
-        conf_dict2 = self._get_backend_op_config_dict2()
+        conf_dict1 = self._get_backend_pattern_config_dict1()
+        conf_dict2 = self._get_backend_pattern_config_dict2()
         self.assertEqual(conf1.to_dict(), conf_dict1)
         self.assertEqual(conf2.to_dict(), conf_dict2)
 
@@ -285,8 +285,8 @@ class TestBackendConfig(QuantizationTestCase):
     def test_backend_config_from_dict(self):
         op1 = self._get_backend_op_config1()
         op2 = self._get_backend_op_config2()
-        op_dict1 = self._get_backend_op_config_dict1()
-        op_dict2 = self._get_backend_op_config_dict2()
+        op_dict1 = self._get_backend_pattern_config_dict1()
+        op_dict2 = self._get_backend_pattern_config_dict2()
         conf_dict = {
             "name": "name1",
             "configs": [op_dict1, op_dict2],
@@ -304,8 +304,8 @@ class TestBackendConfig(QuantizationTestCase):
     def test_backend_config_to_dict(self):
         op1 = self._get_backend_op_config1()
         op2 = self._get_backend_op_config2()
-        op_dict1 = self._get_backend_op_config_dict1()
-        op_dict2 = self._get_backend_op_config_dict2()
+        op_dict1 = self._get_backend_pattern_config_dict1()
+        op_dict2 = self._get_backend_pattern_config_dict2()
         conf = BackendConfig("name1").set_backend_pattern_config(op1).set_backend_pattern_config(op2)
         conf_dict = {
             "name": "name1",
