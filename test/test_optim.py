@@ -840,17 +840,20 @@ class TestOptim(TestCase):
     def test_asgd(self):
         for optimizer in [optim.ASGD, optim_mt.ASGD]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, t0=100)
+                    lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, weight_decay=1)
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
