@@ -23,7 +23,20 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes,
             false),
-        strides_(strides.vec()) {}
+        strides_(strides.vec()) {
+    // VulkanOpContext objects store some vTensor objects cast as at::Tensor in
+    // the packed_context_ member variable. When trying to save a Torchscript
+    // model that contains VulkanOpContext objects, the pickler (serializer)
+    // will invoke the .storage() member of the converted at::Tensor objects.
+    // However, the issue is that OpaqueTensorImpl calls
+    // TensorImpl::set_storage_access_should_throw() in its constructor since
+    // opaque tensors never set the storage_ member TensorImpl (i.e. storage_
+    // will be a default constructed c10::Storage struct). This means calling
+    // the .storage() function on opaque tensors will throw an exception. To
+    // circumvent that, the flags is turned off the flag to enable
+    // serialization.
+    this->storage_access_should_throw_ = false;
+  }
 
   IntArrayRef strides_custom() const override {
     return strides_;
