@@ -281,9 +281,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     # the safest approach is to capture all passes in the same order they'll run:
     # fwd 1, fwd 2, ... fwd N, then bwd N, bwd N-1, ... bwd 1.
 
-    # Clear AMP autocast cache before capturing the graphs
-    torch.clear_autocast_cache()
-
     # Capture forward graphs
     per_callable_static_outputs = []
     per_callable_output_was_tensor = []
@@ -342,9 +339,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     per_callable_static_grad_outputs = list(reversed(per_callable_static_grad_outputs))
     per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
-
-    # Clear AMP autocast cache after both forward and backward graphs are captured
-    torch.clear_autocast_cache()
 
     def make_graphed_autograd_function(fwd_graph,
                                        bwd_graph,
