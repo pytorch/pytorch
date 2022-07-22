@@ -1045,30 +1045,34 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
-    @skipIfNoCuda
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_node_shape_after_apex(self):
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_autograd_layernorm_shape(self):
         
-        try:
-            from apex.normalization.fused_layer_norm import FusedLayerNorm
-        except Exception:
-            raise unittest.SkipTest("Apex is not available")
-        
-        self.addCleanup(unregister_custom_op_symbolic, "::PythonOp", 1)
         def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
         register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
+        self.addCleanup(unregister_custom_op_symbolic, "::PythonOp", 1)
 
-        class CustomPythonOp(torch.nn.Module):
+        # necessay parameters for transformer embeddings
+        hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = 768, 128000, 512, 0, 16
+
+        # wrap nn.layernorm into autograd.func generates the same 
+        # issue as using apex fusedlayernorm
+        class CustomLayerNorm(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, embedding):
+                ctx.save_for_backward(embedding)
+                layer_norm = torch.nn.LayerNorm(hidden_size, eps=1e-12)
+                return layer_norm(embedding)
+        class EmbeddingModule(torch.nn.Module):
             def __init__(self, hidden_size, vocab_size, max_position_embeddings, type_vocab_size, num_attention_heads=12, layer_norm_eps=1e-12):
-                super(CustomPythonOp, self).__init__()
+                super(EmbeddingModule, self).__init__()
                 self.word_embeddings = torch.nn.Embedding(vocab_size, hidden_size, padding_idx=0)
                 self.position_embeddings = torch.nn.Embedding(max_position_embeddings, hidden_size)
                 if type_vocab_size > 0:
                     self.token_type_embeddings = torch.nn.Embedding(type_vocab_size, hidden_size)
                 else:
                     self.token_type_embeddings = None
-                self.layernorm = FusedLayerNorm(hidden_size, eps=layer_norm_eps)
                 self.in_proj = torch.nn.Linear(hidden_size, hidden_size * 3, bias=True)
                 self.num_heads = num_attention_heads
 
@@ -1091,7 +1095,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 if self.token_type_embeddings:
                     embeddings = embeddings + self.token_type_embeddings(token_type_ids)
 
-                embedding_output = self.layernorm(embeddings)
+                embedding_output = CustomLayerNorm.apply(embeddings)
                 embedding_output = embedding_output * (attention_mask.unsqueeze(-1).type_as(embedding_output))
                 if attention_mask is None:
                     attention_mask = torch.ones(input_shape, device=device)
@@ -1108,10 +1112,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 )
                 return q
 
-        hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = 768, 128000, 512, 0, 16
-        model = CustomPythonOp(hidden_size, vocab_size, max_position_embeddings, type_vocab_siz).to("cuda").eval()
-        input_ids = torch.ones(batch_size, max_position_embeddings, device=torch.device("cuda")).long()
-        attention_mask = torch.cat(((torch.ones(17, device=torch.device("cuda"))), torch.zeros(max_position_embeddings-17, device=torch.device("cuda"))))
+        model = EmbeddingModule(hidden_size, vocab_size, max_position_embeddings, type_vocab_siz).eval()
+        input_ids = torch.ones(batch_size, max_position_embeddings).long()
+        attention_mask = torch.cat(((torch.ones(17)), torch.zeros(max_position_embeddings-17)))
         attention_masks = attention_mask.repeat(batch_size, 1)
         f = io.BytesIO()
         torch.onnx.export(
@@ -1124,6 +1127,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             custom_opsets={"com.microsoft": 1},
         )
         graph = onnx.load(io.BytesIO(f.getvalue()))
+
+        # If there is a onnx::Constant node with dim=3, it is making the shape static
         for node in graph.graph.node:
             if node.op_type == "Constant":
                 print(node)
