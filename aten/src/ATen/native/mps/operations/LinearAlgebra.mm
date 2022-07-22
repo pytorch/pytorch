@@ -246,7 +246,7 @@ Tensor& addmm_out_mps_impl(
   bool transpose_mat1            = false;
   bool transpose_mat2            = false;
 
-  prepare_matrices_for_broadcasting(&bias, self, other, &beta, &transpose_mat1_times_mat2, transpose_mat1, transpose_mat2);
+  prepare_matrices_for_broadcasting(&(*bias_), self, other, &beta, &transpose_mat1_times_mat2, transpose_mat1, transpose_mat2);
 
   struct CachedGraph : public mps::MPSCachedGraph
   {
@@ -260,7 +260,7 @@ Tensor& addmm_out_mps_impl(
   mps::MPSGraphCache *cache_ = mps::MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, bias})
+    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_})
                                        + ":" + to_string(transpose_mat1) + ":" + to_string(transpose_mat2)
                                        + ":" + to_string(beta.toDouble())
                                        + ":" + to_string(alpha.toDouble());
@@ -276,7 +276,7 @@ Tensor& addmm_out_mps_impl(
 
           MPSGraphTensor *selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor *otherTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
-          MPSGraphTensor *biasTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, bias);
+          MPSGraphTensor *biasTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
           MPSGraphTensor* t1 = nil;
           MPSGraphTensor* t2 = nil;
@@ -306,7 +306,7 @@ Tensor& addmm_out_mps_impl(
 
           // Intermediates for beta and alpha
           MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                           dataType:getMPSScalarType(bias.scalar_type())];
+                                                           dataType:getMPSScalarType((*bias_).scalar_type())];
           MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
                                                            dataType:getMPSScalarType(self.scalar_type())];
 
@@ -340,7 +340,7 @@ Tensor& addmm_out_mps_impl(
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
     Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
-    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
+    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, *bias_);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
