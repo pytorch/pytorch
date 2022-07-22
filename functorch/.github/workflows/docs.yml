@@ -1,0 +1,82 @@
+name: Build and Deploy Docs
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build-docs:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.9"
+          architecture: x64
+      - name: Checkout functorch
+        uses: actions/checkout@v2
+      - name: Install PyTorch Nightly
+        run: |
+          python3 -mpip install --pre torch>=1.12.0.dev -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+      - name: Install functorch
+        run: |
+          python3 setup.py install
+      - name: Install docs requirements
+        run: |
+          cd docs
+          python3 -mpip install -r requirements.txt
+      - name: Build docs
+        run: |
+          cd docs
+          make html
+      - name: Upload docs as GHA artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: built-docs
+          path: docs/build/html
+
+  deploy-docs:
+    needs: [build-docs]
+    runs-on: ubuntu-latest
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push')
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: gh-pages
+          fetch-depth: 3
+
+      - name: Download docs artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: built-docs
+          path: /tmp/docs
+
+      - name: Copy built docs to nightly
+        id: copy-docs
+        run: |
+          cp -R /tmp/docs/* nightly/
+          git log -3
+          # Set commit name and hash as variables: commit_name, commit_hash
+          echo "::set-output name=commit_name::$(git log -1 --format='%s')"
+          echo "::set-output name=commit_hash::$(git log -1 --format='%h')"
+
+      - name: Git reset to commit/amend
+        if: ${{ steps.copy-docs.outputs.commit_name == 'auto-generated commit' }}
+        run: |
+          # if commit_name is "auto-generated commit"
+          # then go back in commit history to commit to the same commit
+          git reset --soft ${{ steps.copy-docs.outputs.commit_hash }}~1
+          git log -3
+
+      - name: Commit and push to gh-pages
+        uses: github-actions-x/commit@v2.9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          push-branch: 'gh-pages'
+          commit-message: 'auto-generated commit'
+          force-push: 'true'
+          name: gha
+          email: gha@email.org

@@ -108,6 +108,24 @@ std::unordered_set<IterDomain*> buildPreferredPaths(
     TensorDomain* reference_domain,
     const std::unordered_set<IterDomain*>& preferred_roots);
 
+// When indexing there are sometimes an option to propagate an index down
+// multiple paths. This will return the IterDomains in the history of the
+// reference domain and mark which paths should be taken (if there's a
+// preference) to reach the roots provided in preferred_roots.
+std::unordered_set<IterDomain*> buildLoopIndexingPreferredPath(
+    const TensorView* original_tv,
+    const LoopIndexing& loop_indexing,
+    bool use_replay_map = false,
+    std::unordered_map<IterDomain*, IterDomain*> p2c_map = {});
+
+// Get an rfactor IterDomain that is mapped with an IterDomain. If
+// multiple such IDs exist, select one whose input IDs are mapped with
+// the consumer IDs. This is to ensure the path from the leaf
+// IterDomains to the root matches with the consumer tensor.
+IterDomain* getRfactorIDToTraverse(
+    IterDomain* id,
+    const std::vector<Val*>& consumer_all_ids);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

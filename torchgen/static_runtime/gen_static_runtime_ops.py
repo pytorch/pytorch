@@ -1,13 +1,14 @@
-from torchgen import gen
-from torchgen.context import native_function_manager
-from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
-from torchgen.static_runtime import generator
-
 import argparse
 import itertools
 import os
 from typing import Sequence, Union
+
 from libfb.py.log import set_simple_logging
+
+from torchgen import gen
+from torchgen.context import native_function_manager
+from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
+from torchgen.static_runtime import generator
 
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and

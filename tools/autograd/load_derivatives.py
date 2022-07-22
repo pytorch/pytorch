@@ -2,50 +2,48 @@
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
-from collections import defaultdict
 import re
-from typing import Counter, Sequence, Any, Tuple, List, Set, Dict, Match, Optional
+from collections import defaultdict
+from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
+
 import yaml
+from torchgen.api import cpp
 
 from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
-    SavedAttribute,
     ForwardDerivative,
+    SavedAttribute,
 )
 from torchgen.api.types import (
-    Binding,
-    CppSignatureGroup,
-    NamedCType,
     BaseCType,
-    VectorCType,
-    intArrayRefT,
-    tensorOptionsT,
-    typeAndSizeT,
-    longT,
+    Binding,
     boolT,
+    CppSignatureGroup,
+    intArrayRefT,
     layoutT,
-    tensorGeometryT,
+    longT,
+    NamedCType,
+    OptionalCType,
     scalarTypeT,
     SpecialArgName,
-    OptionalCType,
     stringT,
-)
-from torchgen.api import cpp
-from torchgen.gen import (
-    parse_native_yaml,
-    get_grouped_by_view_native_functions,
+    tensorGeometryT,
+    tensorOptionsT,
+    typeAndSizeT,
+    VectorCType,
 )
 from torchgen.context import with_native_function
+from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
 from torchgen.model import (
     FunctionSchema,
     NativeFunction,
-    Variant,
-    Type,
     NativeFunctionsViewGroup,
     OperatorName,
+    Type,
+    Variant,
 )
-from torchgen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
+from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
