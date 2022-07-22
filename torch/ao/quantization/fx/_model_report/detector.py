@@ -812,14 +812,12 @@ class InputWeightEqualizationDetector(DetectorBase):
             input_channels = len(input_ratio)
             if weight_channels != input_channels:
                 # we try to replicate
-                if input_channels % weight_channels == 0:
-                    # get replication factor
-                    rep_factor: int = input_channels // weight_channels
-                    weight_ratio = weight_ratio.repeat(rep_factor)
-                else:
-                    # we throw an error since there is something wrong
-                    error_str = "For module {}, num channels in weight ({}) doesn't match num channels in input activation ({})."
-                    raise ValueError(error_str.format(module_fqn, weight_channels, input_channels))
+                assert input_channels % weight_channels == 0, "input channels should be divisible by weight channels."
+                # get replication factor
+                rep_factor: int = input_channels // weight_channels
+
+                # weight ratio is (n,), input ratio is (k,), we just repeat weight ratio k // n
+                weight_ratio = weight_ratio.repeat(rep_factor)
 
             # calculate the s metric per channel
             s = torch.sqrt(weight_ratio) / torch.sqrt(input_ratio)
