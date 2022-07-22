@@ -133,23 +133,31 @@ def _default_meta_device_init_fn(module):
 
 class ShardingStrategy(Enum):
     """
-    Specify which sharding strategy will be used for the distributed training.
-    FULL_SHARD: Shards parameters, gradients and optimizer states. This algorithm
-                inserts ``all_gather`` before forward and backward computation to gather
-                parameters, also inserts ``reduce_scatter`` after backward computation for
-                synchronizing and sharding gradients. Sharded optimizer states are
+    This specifies the sharding strategy to be used for distributed training by
+    :class:`FullyShardedDataParallel`.
+    FULL_SHARD: Parameters, gradients, and optimizer states are sharded. For
+                the parameters, this algorithm all-gathers before the forward,
+                reshards after the forward, all-gathers before the backward
+                computation, and reshards after the backward computation. The
+                gradients are synchronized and sharded via reduce-scatter after
+                the backward computation. The sharded optimizer states are
                 updated locally.
-    SHARD_GRAD_OP: Shard optimizer states and gradients, this algorithm inserts all_gather
-                   before forward computation and keeps the full parameters in
-                   GPU memory until backward computation is done. It inserts reduce_scater
-                   after backward computation for synchronizing and sharding gradients.
-                   Sharded optimizer states are updated locally.
-    NO_SHARD: This is similar to PyTorch ``DistributedDataParallel`` API. Parameters, gradients
-              and optimizer states are replicated among ranks, ``all_reduce`` is inserted after
-              backward computation is done for synchronizing gradients. Full optimizer states
-              are updated in each rank.
-    HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intra node and
-                                  apply NO_SHARD algorithm in the inter nodes.
+    SHARD_GRAD_OP: Gradients and optimizer states are sharded during
+                   computation, and additionally parameters are sharded outside
+                   computation. For the parameters, this algorithm all-gathers
+                   before the forward, does not reshard after the forward, and
+                   only reshards after the backward computation. The gradients
+                   are synchronized and sharded via reduce-scatter after the
+                   backward computation. The sharded optimizer states are
+                   updated locally. Inside ``no_sync()``, the parameters are
+                   not resharded after the backward computation.
+    NO_SHARD: Parameters, gradients, and optimizer states are not sharded but
+              instead replicated across ranks, similar to PyTorch's
+              ``DistributedDataParallel`` API. The gradients are synchronized
+              via all-reduce after the backward computation. The unsharded
+              optimizer states are updated locally.
+    HYBRID_SHARD(future support): Apply ``FULL_SHARD`` intra-node and
+                                  ``NO_SHARD`` inter-node.
 
     """
     FULL_SHARD = auto()
@@ -2880,13 +2888,10 @@ class FullyShardedDataParallel(nn.Module):
                     "FSDP only works with gradients that don't require gradients"
                 )
 
-            if self._require_backward_grad_sync or \
-                    self.sharding_strategy == ShardingStrategy.FULL_SHARD:
-                # We free full parameters unless we are in `no_sync()` (i.e. when
-                # `_require_backward_grad_sync=False`) and not using the
-                # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
-                # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
-                # full parameters in memory and save network overhead.
+            if (
+                self._require_backward_grad_sync
+                or self.sharding_strategy == ShardingStrategy.FULL_SHARD
+            ):
                 self._free_full_params(cast(List[FlatParameter], [param]))
 
             if self._mixed_precision_enabled_for_params():
