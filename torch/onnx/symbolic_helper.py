@@ -403,7 +403,7 @@ def _is_scalar_list(x):
     return (
         _is_list(x)
         and _type_utils.valid_torch_name(element_type)
-        and _type_utils.ScalarType.from_torch_name(element_type).onnx_compatible()
+        and _type_utils.ScalarType.from_name(element_type).onnx_compatible()
     )
 
 
@@ -1098,7 +1098,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=_type_utils.ScalarType.from_scalar_name(
+            dtype=_type_utils.ScalarType.from_name(
                 input.type().scalarType()
             ).dtype(),
         )
@@ -1110,7 +1110,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=_type_utils.ScalarType.from_scalar_name(
+            dtype=_type_utils.ScalarType.from_name(
                 input.type().scalarType()
             ).dtype(),
         )

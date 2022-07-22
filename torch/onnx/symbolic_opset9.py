@@ -556,7 +556,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return v is not None and v != u
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
-        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        scalar_type = _type_utils.ScalarType.from_name(dtype)
 
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
@@ -2751,7 +2751,7 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
+        dtype = _type_utils.ScalarType.from_name(dtype)
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2769,7 +2769,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         if dtype is None:
             scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()  # type: ignore[attr-defined]
             # TODO(justinchuby): Remove type ignore after #81112 is checked in.
-            dtype = _type_utils.ScalarType.from_scalar_name(scalar_name)
+            dtype = _type_utils.ScalarType.from_name(scalar_name)
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
@@ -2780,7 +2780,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
     else:
         if dtype is None:
             scalar_name = data.type().scalarType()
-            dtype = _type_utils.ScalarType.from_scalar_name(scalar_name)
+            dtype = _type_utils.ScalarType.from_name(scalar_name)
         if symbolic_helper._is_list(data) and (
             symbolic_helper._is_tensor_list(data)
             or symbolic_helper._is_scalar_list(data)
@@ -2829,7 +2829,7 @@ def zeros_like(
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
-        dtype = _type_utils.ScalarType.from_scalar_name(self_dtype)
+        dtype = _type_utils.ScalarType.from_name(self_dtype)
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2869,7 +2869,7 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
+        dtype = _type_utils.ScalarType.from_name(dtype)
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -2930,7 +2930,7 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
+        dtype = _type_utils.ScalarType.from_name(dtype)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
@@ -3059,7 +3059,7 @@ def hardshrink(g, self, lambd):
     if dtype is None:
         scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        scalar_type = _type_utils.ScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -3082,7 +3082,7 @@ def softshrink(g, self, lambd):
     if dtype is None:
         scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        scalar_type = _type_utils.ScalarType.from_name(dtype)
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -4160,7 +4160,7 @@ def scatter_add(g, self, dim, index, src):
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible"
         )
-    scalar_type = _type_utils.ScalarType.from_scalar_name(scalar_name)
+    scalar_type = _type_utils.ScalarType.from_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=scalar_type.dtype()))
@@ -5109,7 +5109,7 @@ def fill(g, self, value):
     if dtype is None:
         dtype = _type_utils.ScalarType.FLOAT
     else:
-        dtype = _type_utils.ScalarType.from_scalar_name(dtype)
+        dtype = _type_utils.ScalarType.from_name(dtype)
 
     return full_like(g, self, value, dtype)
 
@@ -5350,7 +5350,7 @@ class Prim:
         scalar_name = symbolic_helper._try_get_scalar_type(self)
         if scalar_name is None:
             scalar_name = "Float"
-        scalar_type = _type_utils.ScalarType.from_scalar_name(scalar_name)
+        scalar_type = _type_utils.ScalarType.from_name(scalar_name)
         # This node records a torch dtype as int
         return g.op("Constant", value_t=torch.tensor(scalar_type))
 

@@ -93,7 +93,7 @@ def hardtanh(g, self, min_val, max_val):
     if dtype is None:
         scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        scalar_type = _type_utils.ScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
@@ -170,7 +170,7 @@ def relu6(g, input):
     if dtype is None:
         scalar_type = _type_utils.ScalarType.FLOAT
     else:
-        scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+        scalar_type = _type_utils.ScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(0, dtype=scalar_type.dtype()),
@@ -281,7 +281,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
         values = g.op("Cast", values, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
-    scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
+    scalar_type = _type_utils.ScalarType.from_name(dtype)
 
     if accumulate:
         zeros = g.op(
