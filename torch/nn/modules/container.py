@@ -135,7 +135,7 @@ class Sequential(Module):
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
 
-    def __iadd__(self, other: 'Sequential') -> 'Sequential':
+    def __iadd__(self, other) -> 'Sequential':
         if isinstance(other, Sequential):
             offset = len(self)
             for i, module in enumerate(other):
