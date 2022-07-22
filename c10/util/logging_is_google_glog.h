@@ -50,6 +50,14 @@ INSTANTIATE_FOR_CONTAINER(set)
 #include <glog/logging.h>
 
 // Additional macros on top of glog
+#ifndef NDEBUG
+#define TORCH_DCHECK_EQ(val1, val2) DCHECK_EQ(val1, val2)
+#else // !NDEBUG
+// These versions generate no code in optimized mode.
+#define TORCH_DCHECK_EQ(val1, val2) \
+  while (false)                     \
+  DCHECK_EQ(val1, val2)
+#endif // NDEBUG
 
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)
