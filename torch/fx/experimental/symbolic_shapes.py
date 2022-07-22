@@ -83,10 +83,10 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
 }
 
-for method, func in magic_methods.items():
+for method, _func in magic_methods.items():
     method_name = f'{method}'
 
-    def create_magic_impl(func):
+    def _create_magic_impl(func):
         def magic_impl(self, other):
             if isinstance(other, PySymInt):
                 other = other.expr
@@ -94,7 +94,7 @@ for method, func in magic_methods.items():
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymbolicIntNode
-    setattr(PySymInt, method_name, create_magic_impl(func))
+    setattr(PySymInt, method_name, _create_magic_impl(_func))
 
 class ShapeEnv(object):
     def __init__(self):
