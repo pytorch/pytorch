@@ -5802,41 +5802,6 @@ class TestNoRegression(TestCase):
 
         b = a.new(1)
 
-    def test_serialization_map_location(self):
-
-        # Ensures that cpu Tensor can be loaded on mps
-        with tempfile.NamedTemporaryFile() as f:
-            x = torch.rand(2)
-            torch.save(x, f)
-
-            f.seek(0)
-            x2 = torch.load(f, map_location="mps")
-
-            self.assertEqual(x, x2)
-            self.assertEqual(x2.device.type, "mps")
-
-        # Ensures that mps Tensors can be loaded on mps
-        with tempfile.NamedTemporaryFile() as f:
-            x = torch.rand(2, device="mps")
-            torch.save(x, f)
-
-            f.seek(0)
-            x2 = torch.load(f)
-
-            self.assertEqual(x, x2)
-            self.assertEqual(x2.device.type, "mps")
-
-        # Ensures that mps Tensors can be loaded on cpu
-        with tempfile.NamedTemporaryFile() as f:
-            x = torch.rand(2, device="mps")
-            torch.save(x, f)
-
-            f.seek(0)
-            x2 = torch.load(f, map_location="cpu")
-
-            self.assertEqual(x, x2)
-            self.assertEqual(x2.device.type, "cpu")
-
 
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
