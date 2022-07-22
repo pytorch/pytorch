@@ -1,5 +1,4 @@
 import torch
-import time
 from functorch.compile import memory_efficient_fusion, clear_compile_cache
 import benchmark_helper
 

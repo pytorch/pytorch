@@ -1,9 +1,8 @@
 import torch
-import time
 from functorch.compile import memory_efficient_pointwise_fusion, clear_compile_cache
 import benchmark_helper
 
-### ALL comments regarding the patetrns
+# ALL comments regarding the patetrns
 
 
 def bias_gelu_dropout(input, bias):

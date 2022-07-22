@@ -37,4 +37,3 @@ inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
 }
 
 }}
-

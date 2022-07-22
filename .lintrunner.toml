@@ -9,11 +9,9 @@ exclude_patterns = [
     'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
-    # NOTE: [Impending functorch move]
-    # In preparation for the functorch -> pytorch merge,
-    # we are adding the following excludes so that functorch passes
-    # lint when it gets merged in. Please don't delete.
-    'functorch/**',
+    'functorch/docs/**',
+    'functorch/examples/**',
+    'functorch/notebooks/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'third_party/**',
@@ -227,8 +225,6 @@ code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
     'test/test_jit.py',
-    # See NOTE: [Impending functorch move]
-    'functorch/**',
 ]
 command = [
     'python3',
@@ -301,8 +297,6 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    # See NOTE: [Impending functorch move]
-    'functorch/**',
 ]
 command = [
     'python3',
@@ -322,8 +316,6 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    # See NOTE: [Impending functorch move]
-    'functorch/**',
 ]
 command = [
     'python3',
@@ -353,8 +345,6 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
-    # See NOTE: [Impending functorch move]
-    'functorch/**',
 ]
 command = [
     'python3',
@@ -436,8 +426,6 @@ exclude_patterns = [
     '**/git-pre-commit',
     '**/git-clang-format',
     '**/gradlew',
-    # See NOTE: [Impending functorch move]
-    'functorch/**',
 ]
 command = [
     'python3',

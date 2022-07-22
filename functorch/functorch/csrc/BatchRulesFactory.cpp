@@ -97,4 +97,3 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // Not sure how to add the ones with irregular args to the mix cleanly (i.e. randint takes an extra int parameter)
 }
 }}
-
