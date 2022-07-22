@@ -47,11 +47,7 @@ from torch.utils._mode_utils import no_dispatch
 import pickle
 
 # bfloat16 is only supported by CUDA 11+
-BFLOAT16_AVAIL = (
-    torch.cuda.is_available()
-    and torch.version.cuda is not None
-    and int(torch.version.cuda.split('.')[0]) >= 11
-)
+BFLOAT16_AVAIL = torch.cuda.is_bf16_supported()
 
 
 def graph_desc(fn):
