@@ -14,6 +14,7 @@ import threading
 import time
 import warnings
 
+from datetime import timedelta
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
@@ -578,19 +579,31 @@ class DataLoader(Generic[T_co]):
                     # Use 'add' instead of 'get' since for some store implementations 'add'
                     # doesn't work well with 'get'.
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    start = time.time()
                     while _shared_seed_recv_cnt < ws:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the signal from the distribtued store on "
+                                               "Rank 0 that all other Ranks have received the shared seed. "
+                                               f"(world_size={ws}, received={_shared_seed_recv_cnt}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
                     # Reset after all distributed processes have received the shared seed
                     store.set(_utils.DATAPIPE_SHARED_SEED, "")
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
                     assert _shared_seed_recv_cnt == 0
                 else:
                     _shared_seed_str = ""
-                    store.wait([_utils.DATAPIPE_SHARED_SEED], _utils.MP_STATUS_CHECK_INTERVAL)
+                    start = time.time()
                     while len(_shared_seed_str) == 0:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the shared seed from the distribtued store "
+                                               f"on Rank {rank}. (world_size={ws}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
                     logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
                     # Exit only when all ranks received seed, otherwise we are at risk that current rank
