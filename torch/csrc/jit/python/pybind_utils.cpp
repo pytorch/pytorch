@@ -391,9 +391,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       throw py::cast_error(
           c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
     }
+    case TypeKind::GeneratorType:
+      return py::cast<at::Generator>(obj);
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
-    case TypeKind::GeneratorType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::AnyListType:

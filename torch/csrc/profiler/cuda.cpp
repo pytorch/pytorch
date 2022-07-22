@@ -33,8 +33,8 @@ static inline void cudaCheck(cudaError_t result, const char* file, int line) {
 }
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
 
-struct CUDAMethods : public CUDAStubs {
-  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns)
+struct CUDAMethods : public ProfilerStubs {
+  void record(int* device, ProfilerEventStub* event, int64_t* cpu_ns)
       const override {
     if (device) {
       TORCH_CUDA_CHECK(cudaGetDevice(device));
@@ -52,7 +52,7 @@ struct CUDAMethods : public CUDAStubs {
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
 
-  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2)
+  float elapsed(const ProfilerEventStub* event, const ProfilerEventStub* event2)
       const override {
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
@@ -63,17 +63,17 @@ struct CUDAMethods : public CUDAStubs {
     return ms * 1000.0;
   }
 
-  void nvtxMarkA(const char* name) const override {
+  void mark(const char* name) const override {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
-  void nvtxRangePushA(const char* name) const override {
+  void rangePush(const char* name) const override {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 
-  void nvtxRangePop() const override {
+  void rangePop() const override {
     ::nvtxRangePop();
   }
 
