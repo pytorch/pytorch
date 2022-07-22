@@ -3191,7 +3191,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('complex'),
         xfail('copysign'),
-        xfail('eig'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
