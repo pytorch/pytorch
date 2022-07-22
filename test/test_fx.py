@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import builtins
 import contextlib
@@ -42,6 +42,9 @@ from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+from fx.test_pass_infra import TestPassManager  # noqa: F401
+from fx.test_common_passes import TestCommonPass  # noqa: F401
+from fx.test_cse_pass import TestCSEPass  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -52,7 +55,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
-    TEST_WITH_ROCM,
     find_library_location,
     run_tests,
 )
@@ -149,7 +151,7 @@ class TestFX(JitTestCase):
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
-        if not (TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS):
+        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
             lib_file_path = find_library_location('libtorchbind_test.so')
             torch.ops.load_library(str(lib_file_path))
 
@@ -577,7 +579,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, (a, b))
 
     def test_native_callable(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
@@ -1551,7 +1553,7 @@ class TestFX(JitTestCase):
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
-        # Test shape propogation and make sure results match actual
+        # Test shape propagation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
 
@@ -1657,6 +1659,18 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
+
+    def test_pytree_unpack_annotations(self):
+        def foo(x : torch.Tensor, y : torch.Tensor, l : List[torch.Tensor]):
+            return torch.cat([x, y] + l)
+
+        concrete_args = {'l': [torch.fx._symbolic_trace.PH] * 10}
+        traced = torch.fx.symbolic_trace(foo, concrete_args=concrete_args)
+        x = torch.randn(5, 3)
+        y = torch.randn(5, 3)
+        l = [torch.randn(5, 3)] * 10
+
+        torch.testing.assert_close(traced(x, y, l), foo(x, y, l))
 
     def test_interpreter_run_node_override(self):
         class MyModule(torch.nn.Module):
@@ -2362,7 +2376,7 @@ class TestFX(JitTestCase):
             node.__update_args_kwargs((), {})
 
     def test_torchbind_class_attribute_in_fx(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
 
         class FooBar1234(torch.nn.Module):
@@ -2377,7 +2391,7 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, ())
 
     def test_torchbind_class_attribute_in_fx_tensor_arg(self):
-        if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
+        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._ReLUClass is registered, skipping")
 
         class FooBar2341(torch.nn.Module):
@@ -3399,7 +3413,7 @@ class TestFX(JitTestCase):
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3434,7 +3448,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3463,7 +3477,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):

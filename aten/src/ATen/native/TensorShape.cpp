@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -3105,6 +3106,11 @@ Tensor view(const Tensor& self,
   return view_impl(self, size);
 }
 
+Tensor view_symint(const Tensor& self,
+            c10::SymIntArrayRef size) {
+  return self.view(c10::asIntArrayRefSlow(size));
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
@@ -3404,6 +3410,11 @@ at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at:
 // If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
 // then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
 at::Tensor lift(const at::Tensor& self) {
+    return self;
+}
+
+// See notes in native_functions.yaml
+at::Tensor lift_fresh(const at::Tensor& self) {
     return self;
 }
 

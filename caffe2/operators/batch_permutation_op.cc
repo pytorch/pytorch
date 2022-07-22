@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -89,7 +89,7 @@ bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BatchPermutation,
     IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);
