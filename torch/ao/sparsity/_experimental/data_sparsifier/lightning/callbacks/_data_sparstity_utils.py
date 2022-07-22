@@ -4,7 +4,7 @@ from torch.ao.sparsity._experimental.data_sparsifier.base_data_sparsifier import
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def _attach_model_to_data_sparsifier(module, data_sparsifier):
+def _attach_model_to_data_sparsifier(module, data_sparsifier, config=None):
     """Attaches a data sparsifier to all the layers of the module.
     Essentialy, loop over all the weight parameters in the module and
     attach it to the data sparsifier.
@@ -13,10 +13,13 @@ def _attach_model_to_data_sparsifier(module, data_sparsifier):
         before attaching to the sparsifier. This is because, the data
         sparsifier uses a dummy model inside to store the weight parameters.
     """
+    if config is None:
+        config = {}
     for name, parameter in module.named_parameters():
         if type(parameter) in SUPPORTED_TYPES:
             valid_name = _get_valid_name(name)
-            data_sparsifier.add_data(name=valid_name, data=parameter)  # will be defaulted to default configs
+            # will be defaulted to default configs
+            data_sparsifier.add_data(name=valid_name, data=parameter, **config.get(valid_name, {}))
 
 
 def _get_valid_name(name):
