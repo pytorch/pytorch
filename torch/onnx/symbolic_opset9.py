@@ -2913,9 +2913,7 @@ def full_like(
         scalar_type = _type_utils.ScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
         tmp = zeros_like(g, input, dtype, layout, device)
-        fill_value = g.op(
-            "Cast", fill_value, to_i=scalar_type.onnx_type()
-        )
+        fill_value = g.op("Cast", fill_value, to_i=scalar_type.onnx_type())
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         shape = g.op("Shape", input)
