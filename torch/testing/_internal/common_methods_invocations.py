@@ -13000,10 +13000,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
-               # Captured graph does not contain aten::arange (succeeds on complex!)
-               # g: graph():
-               #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-               #   return (%25)
+               # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
@@ -20460,9 +20457,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Expected RuntimeError when calling with input.device=cuda:0 and out.device=cpu
-            # This also belongs in the list of tests above that expect input to be a tensor
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
         ),
         supports_nvfuser=False,
     ),
