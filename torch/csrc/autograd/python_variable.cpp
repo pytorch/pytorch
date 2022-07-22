@@ -262,6 +262,9 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+void concrete_trace_cuda_event_creation_fn(
+    const c10::impl::PyInterpreter*,
+    uintptr_t event);
 
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
@@ -282,7 +285,8 @@ class PyInterpreterHolder {
             &concrete_sizes_fn,
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
-            &concrete_sym_numel_fn)) {}
+            &concrete_sym_numel_fn,
+            &trace_cuda_event_creation_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2489,6 +2493,10 @@ c10::SymInt concrete_sym_numel_fn(
   return torch::is_symint_node(out)
       ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
       : c10::SymInt{py::cast<int64_t>(out)};
+}
+
+void concrete_trace_cuda_event_creation_fn(const c10::impl::PyInterpreter*, uintptr_t event) {
+  // call into Python here
 }
 
 } // anonymous namespace

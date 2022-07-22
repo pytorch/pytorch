@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -100,6 +101,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
+    const auto* interp = get_trace();
+    if (interp) {
+      interp->trace_cuda_event_creation(static_cast<uintptr_t>(cuda_event));
+    }
   }
 
   void destroyEvent(void* event, const DeviceIndex device_index)

@@ -137,6 +137,7 @@ struct C10_API PyInterpreter {
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
   using sym_numel_sig = c10::SymInt(const PyInterpreter*, const TensorImpl*);
+  using trace_cuda_event_creation_sig = void(const PyInterpreter*, uintptr_t event);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -150,7 +151,8 @@ struct C10_API PyInterpreter {
       sizes_sig* sizes,
       sym_sizes_sig* sym_sizes,
       layout_sig* layout,
-      sym_numel_sig* sym_numel)
+      sym_numel_sig* sym_numel,
+      trace_cuda_event_creation_sig* trace_cuda_event_creation)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
@@ -162,7 +164,8 @@ struct C10_API PyInterpreter {
         sizes_fn_(sizes),
         sym_sizes_fn_(sym_sizes),
         layout_fn_(layout),
-        sym_numel_fn_(sym_numel) {}
+        sym_numel_fn_(sym_numel),
+        trace_cuda_event_creation_fn_(trace_cuda_event_creation) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -176,6 +179,7 @@ struct C10_API PyInterpreter {
   sym_sizes_sig* sym_sizes_fn_;
   layout_sig* layout_fn_;
   sym_numel_sig* sym_numel_fn_;
+  trace_cuda_event_creation_sig* trace_cuda_event_creation_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -243,6 +247,10 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::SymInt sym_numel(
       const TensorImpl* self) const {
     return (*sym_numel_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ void trace_cuda_event_creation(uintptr_t event) const {
+    return (*trace_cuda_event_creation_fn_)(this, event);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

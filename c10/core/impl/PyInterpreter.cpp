@@ -82,6 +82,9 @@ static c10::SymInt noop_sym_numel_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to call `sym_numel` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static void noop_trace_cuda_event_creation_fn(const PyInterpreter*, uintptr_t) {
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -95,6 +98,7 @@ void PyInterpreter::disarm() noexcept {
   sym_sizes_fn_ = &noop_sym_sizes_fn;
   layout_fn_ = &noop_layout_fn;
   sym_numel_fn_ = &noop_sym_numel_fn;
+  trace_cuda_event_creation_fn_ = &noop_trace_cuda_event_creation_fn;
 }
 
 } // namespace impl
