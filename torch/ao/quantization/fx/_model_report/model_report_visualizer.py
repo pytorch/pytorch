@@ -1,8 +1,21 @@
 import torch
 from typing import Any, Set, Dict, List, Tuple, OrderedDict
 from collections import OrderedDict as OrdDict
-from tabulate import tabulate
-import matplotlib.pyplot as plt
+
+# try to import tablate
+got_tabulate = True
+try:
+    from tabulate import tabulate
+except ImportError:
+    got_tabulate = False
+
+
+# var to see if we could import matplotlib
+got_matplotlib = True
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    got_matplotlib = False
 
 class ModelReportVisualizer:
     r"""
@@ -378,6 +391,11 @@ class ModelReportVisualizer:
         Expected Use:
             >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
         """
+        # see if we got tabulate
+        if not got_tabulate:
+            print("Make sure to install tabulate and try again.")
+            return None
+
         # get the table dict and the specific tables of interest
         table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
         tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
@@ -497,6 +515,11 @@ class ModelReportVisualizer:
             >>> # the code below both returns the info and diplays the plot
             >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
         """
+        # checks if we have matplotlib and let's user know to install it if don't
+        if not got_matplotlib:
+            print("make sure to install matplotlib and try again.")
+            return None
+
         # get the x and y data and if per channel
         x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
 
@@ -545,6 +568,11 @@ class ModelReportVisualizer:
             >>> # displays the histogram
             >>> model_report_visualizer.generate_histogram_visualization(*filters) # displays the histogram
         """
+        # checks if we have matplotlib and let's user know to install it if don't
+        if not got_matplotlib:
+            print("make sure to install matplotlib and try again.")
+            return None
+
         # get the x and y data and if per channel
         x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
 
