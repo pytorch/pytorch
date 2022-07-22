@@ -1283,12 +1283,12 @@ TEST_F(VulkanAPITest, empty) {
   ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
-TEST_F(VulkanAPITest, glu) {
+void test_glu(const at::IntArrayRef input_shape) {
   if (!at::is_vulkan_available()) {
     return;
   }
 
-  const auto in_cpu = at::rand({17, 200, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
   const auto out_cpu = at::glu(in_cpu, 1);
@@ -1300,6 +1300,26 @@ TEST_F(VulkanAPITest, glu) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, glu_ch_200) {
+  test_glu({17, 200, 302, 5});
+}
+
+TEST_F(VulkanAPITest, glu_ch_64) {
+  test_glu({1, 64, 100, 8});
+}
+
+TEST_F(VulkanAPITest, glu_ch_32) {
+  test_glu({1, 32, 100, 19});
+}
+
+TEST_F(VulkanAPITest, glu_ch_10) {
+  test_glu({17, 10, 57, 41});
+}
+
+TEST_F(VulkanAPITest, glu_ch_2) {
+  test_glu({1, 2, 100, 40});
 }
 
 TEST_F(VulkanAPITest, hardsigmoid) {
@@ -2267,6 +2287,37 @@ TEST_F(VulkanAPITest, reshape_) {
   ASSERT_TRUE(check);
 }
 
+void test_select(const at::IntArrayRef input_shape, int64_t dim, int64_t index) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::select(in_cpu, dim, index);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::select(in_vulkan, dim, index);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, select_3d_depth_small) {
+  test_select({1, 1, 1}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, select_3d_depth_medium) {
+  test_select({3, 2, 5}, 0, 2);
+}
+
+TEST_F(VulkanAPITest, select_3d_depth_large) {
+  test_select({100, 1, 144}, 0, 50);
+}
+
 TEST_F(VulkanAPITest, sigmoid) {
   if (!at::is_vulkan_available()) {
     return;
@@ -2643,6 +2694,42 @@ TEST_F(VulkanAPITest, upsample_nearest2d) {
   }
 
   ASSERT_TRUE(check);
+}
+
+void test_unbind(const at::IntArrayRef input_shape, int64_t dim) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::unbind(in_cpu, dim);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::unbind(in_vulkan, dim);
+
+  int64_t size = out_vulkan.size();
+
+  for (const auto i : c10::irange(size)) {
+    const auto check = almostEqual(out_cpu[i], out_vulkan[i].cpu());
+    if (!check) {
+      std::cout << "The " << i << "th vectors aren't equal." << std::endl;
+      showRtol(out_cpu[i], out_vulkan[i].cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST_F(VulkanAPITest, unbind_3d_depth_small) {
+  test_unbind({1, 1, 1}, 0);
+}
+
+TEST_F(VulkanAPITest, unbind_3d_depth_medium) {
+  test_unbind({3, 2, 5}, 0);
+}
+
+TEST_F(VulkanAPITest, unbind_3d_depth_large) {
+  test_unbind({100, 1, 144}, 0);
 }
 
 #if !defined(__APPLE__)
