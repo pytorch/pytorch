@@ -652,6 +652,46 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    def test_oom_tracing(self):
+        def run_profiler(tensor_creation_fn):
+            with _profile(profile_memory=True, record_shapes=True) as prof:
+                with self.assertRaisesRegex(RuntimeError, ".*[tT]ried to allocate.*"):
+                    x = tensor_creation_fn()
+                return prof
+
+        def create_cuda_tensor_oom():
+            device = torch.device("cuda:0")
+            return torch.empty(1024, 1024, 1024, 20, dtype=torch.float32, device=device)
+
+        def check_trace(fname):
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                self.assertTrue("traceEvents" in trace)
+                events = trace["traceEvents"]
+                found_out_of_memory_events = False
+                for evt in events:
+                    self.assertTrue("name" in evt)
+                    if evt["name"] == "[OutOfMemory]":
+                        found_out_of_memory_events = True
+                        self.assertTrue("args" in evt)
+                        self.assertTrue("Device Type" in evt["args"])
+                        self.assertTrue("Device Id" in evt["args"])
+                        self.assertTrue("Bytes" in evt["args"])
+
+                        # Memory should be an instantaneous event.
+                        self.assertTrue("dur" not in evt["args"])
+                        self.assertTrue("cat" not in evt["args"])
+                self.assertTrue(found_out_of_memory_events)
+
+        if torch.cuda.is_available():
+            with TemporaryFileName(mode="w+") as fname:
+                prof = run_profiler(create_cuda_tensor_oom)
+                check_trace(fname)
+
+
+
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
@@ -1148,9 +1188,9 @@ class TestTorchTidyProfiler(TestCase):
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
 
-    def test_tensor_sizes(self):
-        x = torch.ones(10, 10)
-        y = torch.ones(1, 10)
+    def test_tensor_properties(self):
+        x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
+        y = torch.ones(4, 1)
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + y
@@ -1163,9 +1203,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._autograd._ExtraFields_TorchOp)
 
-        # The alpha scalar has a [] size
-        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
-        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch.strided, torch.strided, None])
 
 
 @dataclass(frozen=True)
