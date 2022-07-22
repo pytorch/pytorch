@@ -20380,9 +20380,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Expected RuntimeError when calling with input.device=cuda:0 and out.device=cpu
-            # This also belongs in the list of tests above that expect input to be a tensor
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
         ),
         supports_nvfuser=False,
     ),
