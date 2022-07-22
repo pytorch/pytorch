@@ -79,12 +79,7 @@ class ActivationSparsifier:
         >>>     # epoch ends
         >>>     act_sparsifier.step()
         >>> # end training process
-<<<<<<< HEAD
         >>> sparsifier.squash_mask()
-=======
-
-        >>> act_sparsifier.squash_mask()
->>>>>>> f229dda582... [ao][sparsity] Implementation of step() and update_mask()
     """
     def __init__(self, model: nn.Module, aggregate_fn=None, reduce_fn=None, mask_fn=None,
                  features=None, feature_dim=None, **sparse_config):
@@ -278,9 +273,34 @@ class ActivationSparsifier:
                 data_feature = reduce_fn(data[feature_idx])
                 mask[feature_idx].data = mask_fn(data_feature, **sparse_config)
 
+    def _sparsify_hook(self, name):
+        """Returns hook that applies sparsification mask to input entering the attached layer
+        """
+        mask = self.get_mask(name)
+        features = self.data_groups[name]['features']
+        feature_dim = self.data_groups[name]['feature_dim']
+
+        def hook(module, input):
+            input_data = input[0]
+            if features is None:
+                # apply to all the features
+                return input_data * mask
+            else:
+                # apply per feature, feature_dim
+                for feature_idx in range(0, len(features)):
+                    feature = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
+                    sparsified = torch.index_select(input_data, feature_dim, feature) * mask[feature_idx]
+                    input_data.index_copy_(feature_dim, feature, sparsified)
+                return input_data
+        return hook
+
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
         Unregisters aggreagate hook that was applied earlier and registers sparsification hooks if
         attach_sparsify_hook = True.
         """
-        pass
+        for name, configs in self.data_groups.items():
+            # unhook agg hook
+            configs['hook'].remove()
+            if attach_sparsify_hook:
+                configs['hook'] = configs['layer'].register_forward_pre_hook(self._sparsify_hook(name))
