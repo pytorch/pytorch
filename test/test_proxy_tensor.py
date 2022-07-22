@@ -15,6 +15,13 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 import re
 
+try:
+    import sympy
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+
 
 def process_failures():
     """
@@ -268,6 +275,7 @@ class TestProxyTensor(TestCase):
         self.assertEqual(fx_module(x), decomposed_module(x))
 
 # TODO: Need to test the guards themselves specifically as well
+@skipIfNoSympy
 class TestSymbolicTracing(TestCase):
     def _test_dynamic(self, fn, trace_inputs, test_inputs):
         """
@@ -797,6 +805,7 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
+    @skipIfNoSympy
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
