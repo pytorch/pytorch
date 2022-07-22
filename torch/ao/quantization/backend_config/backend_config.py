@@ -47,7 +47,7 @@ OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 @dataclass
 class DTypeConfig:
     """
-    Data type config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
+    Data type config for patterns defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
     input_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
@@ -93,15 +93,20 @@ class DTypeConfig:
 
 
 class BackendConfig:
-    # TODO: refer to native fbgemm BackendConfig once that is implemented
-    # TODO(andrew): fix this description before merge
+    # TODO: refer to NativeBackendConfig once that is implemented
     """
-    Config that defines which ops are supported and how they are quantized on a custom backend.
+    Config that defines the set of patterns that can be quantized on a given backend, and how reference
+    quantized models can be produced from these patterns.
 
-    This config specifies how reference quantized models are produced (during the prepare phase) and how they
-    are lowered to implementations specific to the target backend (during the convert phase). Each op supported
-    on the target backend can be individually configured through
-    :class:`~torch.ao.quantization.backend_config.BackendPatternConfig`.
+    A pattern in this context refers to a module, a functional, an operator, or a directed acyclic graph
+    of the above. Each pattern supported on the target backend can be individually configured through
+    :class:`~torch.ao.quantization.backend_config.BackendPatternConfig` in terms of:
+        (1) The supported input/output activation, weight, and bias data types
+        (2) How observers and quant/dequant ops are inserted in order to construct the reference pattern, and
+        (3) (Optionally) Fusion, QAT, and reference module mappings.
+
+    The format of the patterns is described in:
+    https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
 
     Example usage::
 
@@ -117,14 +122,14 @@ class BackendConfig:
 
         linear_config = BackendPatternConfig(torch.nn.Linear) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
-            .set_dtype_config(weighted_int8_dtype_config) \
+            .add_dtype_config(weighted_int8_dtype_config) \
             .set_root_module(torch.nn.Linear) \
             .set_qat_module(torch.nn.qat.Linear) \
             .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
 
         conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
-            .set_dtype_config(weighted_int8_dtype_config) \
+            .add_dtype_config(weighted_int8_dtype_config) \
             .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
             .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
 
@@ -187,13 +192,10 @@ class BackendPatternConfig:
     """
     Config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
 
-    The format of the pattern is described in:
-        https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
-
     The user can configure how a operator pattern graph is handled on a given backend using the following methods:
         `set_observation_type`: sets how observers should be inserted for this op.
             See :class:`~torch.ao.quantization.backend_config.ObservationType`
-        `set_dtype_config`: sets the supported data types for this op
+        `add_dtype_config`: sets the supported data types for this op
         `set_root_module`: sets the module that represents the root for this op
         `set_qat_module`: sets the module that represents the QAT implementation for this op
         `set_reference_quantized_module`: sets the module that represents the reference quantized
@@ -229,7 +231,7 @@ class BackendPatternConfig:
         self.observation_type = observation_type
         return self
 
-    def set_dtype_config(self, dtype_config: DTypeConfig) -> BackendPatternConfig:
+    def add_dtype_config(self, dtype_config: DTypeConfig) -> BackendPatternConfig:
         """
         Set the supported data types for this op.
         """
@@ -334,7 +336,7 @@ class BackendPatternConfig:
         if OBSERVATION_TYPE_DICT_KEY in backend_op_config_dict:
             conf.set_observation_type(backend_op_config_dict[OBSERVATION_TYPE_DICT_KEY])
         for d in backend_op_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
-            conf.set_dtype_config(_get_dtype_config(d))
+            conf.add_dtype_config(_get_dtype_config(d))
         conf.set_root_module(backend_op_config_dict.get(ROOT_MODULE_DICT_KEY, None))
         conf.set_qat_module(backend_op_config_dict.get(QAT_MODULE_DICT_KEY, None))
         conf.set_reference_quantized_module(backend_op_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None))

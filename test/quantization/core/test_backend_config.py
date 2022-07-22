@@ -82,8 +82,8 @@ class TestBackendConfig(QuantizationTestCase):
     def _get_backend_op_config1(self):
         return BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
-            .set_dtype_config(self.dtype_config1) \
-            .set_dtype_config(self.dtype_config2) \
+            .add_dtype_config(self.dtype_config1) \
+            .add_dtype_config(self.dtype_config2) \
             .set_root_module(torch.nn.Linear) \
             .set_qat_module(nnqat.Linear) \
             .set_reference_quantized_module(nnqr.Linear) \
@@ -92,7 +92,7 @@ class TestBackendConfig(QuantizationTestCase):
 
     def _get_backend_op_config2(self):
         return BackendPatternConfig(torch.add) \
-            .set_dtype_config(self.dtype_config2) \
+            .add_dtype_config(self.dtype_config2) \
             ._set_root_node_getter(_default_root_node_getter) \
             ._set_extra_inputs_getter(self._extra_inputs_getter) \
             ._set_num_tensor_args_to_observation_type(self._num_tensor_args_to_observation_type) \
@@ -133,11 +133,11 @@ class TestBackendConfig(QuantizationTestCase):
         conf.set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
         self.assertEqual(conf.observation_type, ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
 
-    def test_backend_op_config_set_dtype_config(self):
+    def test_backend_op_config_add_dtype_config(self):
         conf = BackendPatternConfig(torch.nn.Linear)
         self.assertEqual(len(conf.dtype_configs), 0)
-        conf.set_dtype_config(self.dtype_config1)
-        conf.set_dtype_config(self.dtype_config2)
+        conf.add_dtype_config(self.dtype_config1)
+        conf.add_dtype_config(self.dtype_config2)
         self.assertEqual(len(conf.dtype_configs), 2)
         self.assertEqual(conf.dtype_configs[0], self.dtype_config1)
         self.assertEqual(conf.dtype_configs[1], self.dtype_config2)
