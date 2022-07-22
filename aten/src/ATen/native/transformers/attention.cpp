@@ -663,13 +663,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 // greater than 0.0 is specified.
 //
 // Args:
-//     query_ (Tensor): Query tensor; shape (N, L, E)
+//     query (Tensor): Query tensor; shape (N, L, E)
 //     key (Tensor): Key tensor; shape (N, S, E)
 //     value (Tensor): Value tensor; shape (N, S, E)
-//     attn_mask (optional Tensor): Float values to add to attention weighting; shape (N, L, S) or (L, S)
+//     attn_mask (optional Tensor): Attention mask; shape (N, L, S) or (L, S). Currently, only a boolean mask
+//         is supported, where a value of True indicates that the element *should* take part in attention.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
 //     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
 //         otherwise, the second return value is unspecified
+//     is_causal (bool): If true, assumes causal attention masking and ignores the value of attn_mask.
+//         TODO: Consider removing this flag before promoting this function to the public API. It's possible
+//         to get specialized support for causal masks (and other types of masking e.g. local attention / block
+//         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
 // Returns a tuple containing:
 //     output (Tensor): Attention output; shape (N, L, E)
@@ -682,10 +687,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //     E: Embedding dimension
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask, double dropout_p, bool need_attn_weights) {
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+    auto attn_mask = attn_mask_;
+    TORCH_CHECK(!attn_mask.has_value() || attn_mask->dtype() == at::kBool,
+            "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
+            attn_mask->dtype())
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
     const auto query = query_ / ::sqrt(static_cast<double>(embed_size));
+    if (is_causal) {
+        // Replace attn_mask with causal mask; lower triangular elements take part in attention.
+        const auto L = query.size(-2), S = key.size(-2);
+        attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
+    }
+    if (attn_mask.has_value()) {
+        // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
+        auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
+        new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+        attn_mask = new_attn_mask;
+    }
     auto attn = attn_mask.has_value() ?
         at::baddbmm(*attn_mask, query, key.transpose(-2, -1)) :
         at::bmm(query, key.transpose(-2, -1));
