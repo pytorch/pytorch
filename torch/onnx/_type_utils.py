@@ -144,7 +144,9 @@ _SCALAR_TYPE_TO_NAME: Dict[ScalarType, ScalarName] = {
     ScalarType.UNDEFINED: "Undefined",
 }
 
-_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = {v: k for k, v in _SCALAR_TYPE_TO_NAME.items()}
+_SCALAR_NAME_TO_TYPE: Dict[ScalarName, ScalarType] = {
+    v: k for k, v in _SCALAR_TYPE_TO_NAME.items()
+}
 
 _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
     ScalarType.BOOL: "bool",
@@ -165,7 +167,9 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[ScalarType, TorchName] = {
     ScalarType.BFLOAT16: "bfloat16",
 }
 
-_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()}
+_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, ScalarType] = {
+    v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()
+}
 
 _SCALAR_TYPE_TO_ONNX = {
     ScalarType.BOOL: _C_onnx.TensorProtoDataType.BOOL,

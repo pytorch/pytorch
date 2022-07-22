@@ -565,12 +565,16 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         beta = symbolic_helper._scalar(beta)
 
         if alpha != 1:
-            alpha = g.op("Constant", value_t=torch.tensor(alpha, dtype=scalar_type.dtype()))
+            alpha = g.op(
+                "Constant", value_t=torch.tensor(alpha, dtype=scalar_type.dtype())
+            )
             res1 = g.op("Mul", res1, alpha)
         if beta != 1:
             beta = g.op(
                 "Constant",
-                value_t=torch.tensor(symbolic_helper._scalar(beta), dtype=scalar_type.dtype()),
+                value_t=torch.tensor(
+                    symbolic_helper._scalar(beta), dtype=scalar_type.dtype()
+                ),
             )
             res2 = g.op("Mul", res2, beta)
 
@@ -2802,9 +2806,7 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     return g.op(
         "ConstantOfShape",
         sizes,
-        value_t=torch.tensor(
-            [0], dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
 
@@ -2843,9 +2845,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return g.op(
         "ConstantOfShape",
         sizes,
-        value_t=torch.tensor(
-            [1], dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor([1], dtype=scalar_type.dtype()),
     )
 
 
@@ -2861,9 +2861,7 @@ def ones_like(
     return g.op(
         "ConstantOfShape",
         shape,
-        value_t=torch.tensor(
-            [1], dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor([1], dtype=scalar_type.dtype()),
     )
 
 
@@ -2893,9 +2891,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return g.op(
             "ConstantOfShape",
             sizes,
-            value_t=const_value.view(1).to(
-                scalar_type.dtype()
-            ),
+            value_t=const_value.view(1).to(scalar_type.dtype()),
         )
 
 
@@ -3066,9 +3062,7 @@ def hardshrink(g, self, lambd):
         scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     lambd_op = g.op(
         "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
     )
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
     return g.op(
@@ -3077,9 +3071,7 @@ def hardshrink(g, self, lambd):
         self,
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=scalar_type.dtype()
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
 
@@ -3093,9 +3085,7 @@ def softshrink(g, self, lambd):
         scalar_type = _type_utils.ScalarType.from_scalar_name(dtype)
     lambd_op = g.op(
         "Constant",
-        value_t=torch.tensor(
-            lambd, dtype=scalar_type.dtype()
-        ),
+        value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
     )
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
@@ -3104,9 +3094,7 @@ def softshrink(g, self, lambd):
         sub(g, self, lambd_op),
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=scalar_type.dtype()
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
@@ -3116,9 +3104,7 @@ def softshrink(g, self, lambd):
         add(g, self, lambd_op),
         g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=scalar_type.dtype()
-            ),
+            value_t=torch.tensor(0, dtype=scalar_type.dtype()),
         ),
     )
     return add(g, gt_out, lt_out)
@@ -3949,9 +3935,7 @@ def randn(g, shapes, dtype, *options):
         shape_const = g.op(
             "ConstantOfShape",
             shapes,
-            value_t=torch.tensor(
-                [0], dtype=torch.float
-            ),
+            value_t=torch.tensor([0], dtype=torch.float),
         )
         return g.op(
             "RandomNormalLike",
@@ -3976,9 +3960,7 @@ def rand(g, shapes, dtype, *options):
         shape_const = g.op(
             "ConstantOfShape",
             shapes,
-            value_t=torch.tensor(
-                [0], dtype=torch.float
-            ),
+            value_t=torch.tensor([0], dtype=torch.float),
         )
         return g.op(
             "RandomUniformLike",
@@ -4000,9 +3982,7 @@ def randn_like(
         scalar_type = _type_utils.ScalarType.FLOAT
     else:
         scalar_type = _type_utils.ScalarType(dtype)
-    return g.op(
-        "RandomNormalLike", self, dtype_i=scalar_type.onnx_type()
-    )
+    return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
 
 
 def rand_like(
@@ -5049,7 +5029,7 @@ def hann_window(
     g,
     window_length,
     periodic=True,
-    dtype: Optional[int]=None,
+    dtype: Optional[int] = None,
     layout=None,
     device=None,
     pin_memory=None,
