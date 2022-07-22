@@ -5,7 +5,7 @@ from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._pytree import tree_flatten
 
 from torch.fx import GraphModule, Graph
-from torch.fx import node as fxnode
+from torch.fx import Node
 
 aten = torch.ops.aten
 
@@ -64,8 +64,8 @@ class CSEPass(PassBase):
 
         modified = False
         new_graph = Graph()
-        env: Dict[fxnode.Node, fxnode.Node] = {}  # map from node in the old graph to node in the new graph
-        hash_env: Dict[Tuple[torch._ops.OpOverload, int], fxnode.Node] = {}  # map from hash to a node in the new graph
+        env: Dict[Node, Node] = {}  # map from node in the old graph to node in the new graph
+        hash_env: Dict[Tuple[torch._ops.OpOverload, int], Node] = {}  # map from hash to a node in the new graph
         token_map: Dict[Tuple[torch._ops.OpOverload, int], Dict[str, Any]] = {}  # map from hash to token
         for n in graph_module.graph.nodes:
             # The placeholder, output, and get_attr nodes are copied to the new grpah without change
@@ -80,7 +80,7 @@ class CSEPass(PassBase):
                     arg_list, spec = tree_flatten(arg_list)
                     for i in range(len(arg_list)):
                         v = arg_list[i]
-                        if isinstance(v, fxnode.Node) and v in env:
+                        if isinstance(v, Node) and v in env:
                             arg_list[i] = env[v]
                     return tuple(arg_list), spec
                 args, args_spec = substitute(n.args)
