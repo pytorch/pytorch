@@ -79,7 +79,12 @@ class ActivationSparsifier:
         >>>     # epoch ends
         >>>     act_sparsifier.step()
         >>> # end training process
+<<<<<<< HEAD
         >>> sparsifier.squash_mask()
+=======
+
+        >>> act_sparsifier.squash_mask()
+>>>>>>> f229dda582... [ao][sparsity] Implementation of step() and update_mask()
     """
     def __init__(self, model: nn.Module, aggregate_fn=None, reduce_fn=None, mask_fn=None,
                  features=None, feature_dim=None, **sparse_config):
@@ -242,17 +247,36 @@ class ActivationSparsifier:
         self.data_groups.pop(name)
 
     def step(self):
+        """Internally calls the update_mask() function for each layer
         """
-        step() does the following for each registered layer -
+        with torch.no_grad():
+            for name, configs in self.data_groups.items():
+                data = configs['data']
+                self.update_mask(name, data, configs)
+
+                self.data_groups[name].pop('data')  # reset the accumulated data
+
+    def update_mask(self, name, data, configs):
+        """
+        Called for each registered layer and does the following-
             1. apply reduce_fn on the aggregated activations
             2. use mask_fn to compute the sparsification mask
-        """
-        pass
 
-    def update_mask(self, name, data, **config):
-        """Computes and updates mask based on config, feature and dim and data
+        Note:
+            the reduce_fn and mask_fn is called for each feature, dim over the data
         """
-        pass
+        mask = self.get_mask(name)
+        sparse_config = configs['sparse_config']
+        features = configs['features']
+        reduce_fn = configs['reduce_fn']
+        mask_fn = configs['mask_fn']
+        if features is None:
+            data = reduce_fn(data)
+            mask.data = mask_fn(data, **sparse_config)
+        else:
+            for feature_idx in range(len(features)):
+                data_feature = reduce_fn(data[feature_idx])
+                mask[feature_idx].data = mask_fn(data_feature, **sparse_config)
 
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
