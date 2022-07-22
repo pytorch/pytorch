@@ -11,7 +11,6 @@ import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
-    BATCH_SIZE,
     skipIfNoCuda,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
@@ -1047,16 +1046,22 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_autograd_layernorm_shape(self):
-        
         def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
+
         register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
         self.addCleanup(unregister_custom_op_symbolic, "prim::PythonOp", 1)
 
         # necessay parameters for transformer embeddings
-        hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = 768, 128000, 512, 0, 16
+        hidden_size, vocab_size, max_position_embeddings, type_vocab_siz, batch_size = (
+            768,
+            128000,
+            512,
+            0,
+            16,
+        )
 
-        # wrap nn.layernorm into autograd.func generates the same 
+        # wrap nn.layernorm into autograd.func generates the same
         # issue as using apex fusedlayernorm
         class CustomLayerNorm(torch.autograd.Function):
             @staticmethod
@@ -1064,28 +1069,58 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 ctx.save_for_backward(embedding)
                 layer_norm = torch.nn.LayerNorm(hidden_size, eps=1e-12)
                 return layer_norm(embedding)
+
         class EmbeddingModule(torch.nn.Module):
-            def __init__(self, hidden_size, vocab_size, max_position_embeddings, type_vocab_size, num_attention_heads=12, layer_norm_eps=1e-12):
+            def __init__(
+                self,
+                hidden_size,
+                vocab_size,
+                max_position_embeddings,
+                type_vocab_size,
+                num_attention_heads=12,
+                layer_norm_eps=1e-12,
+            ):
                 super(EmbeddingModule, self).__init__()
-                self.word_embeddings = torch.nn.Embedding(vocab_size, hidden_size, padding_idx=0)
-                self.position_embeddings = torch.nn.Embedding(max_position_embeddings, hidden_size)
+                self.word_embeddings = torch.nn.Embedding(
+                    vocab_size, hidden_size, padding_idx=0
+                )
+                self.position_embeddings = torch.nn.Embedding(
+                    max_position_embeddings, hidden_size
+                )
                 if type_vocab_size > 0:
-                    self.token_type_embeddings = torch.nn.Embedding(type_vocab_size, hidden_size)
+                    self.token_type_embeddings = torch.nn.Embedding(
+                        type_vocab_size, hidden_size
+                    )
                 else:
                     self.token_type_embeddings = None
                 self.in_proj = torch.nn.Linear(hidden_size, hidden_size * 3, bias=True)
                 self.num_heads = num_attention_heads
 
-            def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
-                device = input_ids.device if input_ids is not None else inputs_embeds.device
-                input_shape = input_ids.size() #input_ids=torch.Tensor(a, b) > %43 <- a, %46 <- b
+            def forward(
+                self,
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                inputs_embeds=None,
+            ):
+                device = (
+                    input_ids.device if input_ids is not None else inputs_embeds.device
+                )
+                input_shape = (
+                    input_ids.size()
+                )  # input_ids=torch.Tensor(a, b) > %43 <- a, %46 <- b
                 seq_length = input_shape[1]
 
                 if position_ids is None:
-                    position_ids = torch.arange(seq_length, dtype=torch.long, device=device)
+                    position_ids = torch.arange(
+                        seq_length, dtype=torch.long, device=device
+                    )
                     position_ids = position_ids.unsqueeze(0).expand(input_shape)
                 if token_type_ids is None:
-                    token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+                    token_type_ids = torch.zeros(
+                        input_shape, dtype=torch.long, device=device
+                    )
                 if inputs_embeds is None:
                     inputs_embeds = self.word_embeddings(input_ids)
 
@@ -1096,7 +1131,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                     embeddings = embeddings + self.token_type_embeddings(token_type_ids)
 
                 embedding_output = CustomLayerNorm.apply(embeddings)
-                embedding_output = embedding_output * (attention_mask.unsqueeze(-1).type_as(embedding_output))
+                embedding_output = embedding_output * (
+                    attention_mask.unsqueeze(-1).type_as(embedding_output)
+                )
                 if attention_mask is None:
                     attention_mask = torch.ones(input_shape, device=device)
 
@@ -1107,14 +1144,20 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 head_dim = embed_dim // self.num_heads
                 scaling = (head_dim * 1) ** -0.5
                 q = (
-                    q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim)
-                    .transpose(0, 1) * scaling
+                    q.contiguous()
+                    .view(tgt_len, bsz * self.num_heads, head_dim)
+                    .transpose(0, 1)
+                    * scaling
                 )
                 return q
 
-        model = EmbeddingModule(hidden_size, vocab_size, max_position_embeddings, type_vocab_siz).eval()
+        model = EmbeddingModule(
+            hidden_size, vocab_size, max_position_embeddings, type_vocab_siz
+        ).eval()
         input_ids = torch.ones(batch_size, max_position_embeddings).long()
-        attention_mask = torch.cat(((torch.ones(17)), torch.zeros(max_position_embeddings-17)))
+        attention_mask = torch.cat(
+            ((torch.ones(17)), torch.zeros(max_position_embeddings - 17))
+        )
         attention_masks = attention_mask.repeat(batch_size, 1)
         f = io.BytesIO()
         torch.onnx.export(
@@ -1123,7 +1166,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             f,
             opset_version=self.opset_version,
             input_names=["input_ids", "attention_masks"],
-            dynamic_axes={"input_ids":[0, 1], "attention_masks":[0, 1]},
+            dynamic_axes={"input_ids": [0, 1], "attention_masks": [0, 1]},
             custom_opsets={"com.microsoft": 1},
         )
         graph = onnx.load(io.BytesIO(f.getvalue()))
