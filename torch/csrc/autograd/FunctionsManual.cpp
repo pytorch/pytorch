@@ -706,6 +706,9 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
+  if (input.numel() == 0) {
+      return grad * (result / input).conj();
+  }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
@@ -717,11 +720,17 @@ Tensor prod_backward(
 
   Tensor zero_mask = (input == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
-  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
-  if (total_zeros == 0) {
-    return grad * (result / input).conj();
+  auto total_zeros = slice_zero_count.sum();
+  if (isTensorSubclassLike(total_zeros)) {
+    auto false_case = grad * (result / input).conj();
+    auto true_case = prod_safe_zeros_backward(grad, input, dim);
+    return at::where(total_zeros.to(at::kBool), true_case, false_case);
   } else {
-    return prod_safe_zeros_backward(grad, input, dim);
+    if (total_zeros.item<int64_t>() == 0) {
+      return grad * (result / input).conj();
+    } else {
+      return prod_safe_zeros_backward(grad, input, dim);
+    }
   }
 }
 
