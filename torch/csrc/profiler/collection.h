@@ -45,9 +45,17 @@ struct TorchOpBasicFields {
   uint64_t end_tid_{0};
 };
 
+struct TensorMetadata {
+  void* ptr_;
+  c10::ScalarType dtype_;
+  uint32_t dim_;
+  c10::Layout layout_;
+};
+
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -284,12 +292,6 @@ class InputOutputEncoder final {
     Scalar,
     Other,
     TERMINATOR
-  };
-
-  struct TensorMetadata {
-    void* ptr_;
-    c10::ScalarType dtype_;
-    uint32_t dim_;
   };
 
   void push(const at::Tensor& t);
