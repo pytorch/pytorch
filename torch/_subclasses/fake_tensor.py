@@ -311,13 +311,13 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
 
     def stride(self):
-        if symbolic_shapes.has_symbolic_sizes_strides(self):
+        if self.has_sym_ints:
             # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
             # The reason this needs to be here instead of __torch_dispatch__ is that
             # when aten.stride goes into __torch_dispatch__, it expects a list of
             # concrete ints to be returned. So we need to short-circuit that entirely
             return symbolic_shapes.create_contiguous(self.shape)
-        return self.stride()
+        return super().stride()
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -461,13 +461,14 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)]
         has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
         if has_symbolic_sizes:
+            # TODO: hack, doesn't actually work.
+            # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
             with enable_torch_dispatch_mode(self), torch.overrides.enable_reentrant_dispatch():
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
-                elif func in decomposition_table:
-                    r = decomposition_table[func](*args, **kwargs)
-                    return r
+                if func in decomposition_table:
+                    return decomposition_table[func](*args, **kwargs)
 
             with no_dispatch():
                 if symbolic_shapes.is_symbolic_op(func):
@@ -484,7 +485,7 @@ class FakeTensorMode(TorchDispatchMode):
         if has_symbolic_sizes:
             constructors = [torch.ops.aten.empty.SymInt]
             if func not in constructors:
-                raise RuntimeError(f"Couldn't find symbolic meta function/decomposition, {func}")
+                raise RuntimeError(f"{func} - couldn't find symbolic meta function/decomposition")
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator
@@ -571,8 +572,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             common_device = FakeTensor._find_common_device(func, args, kwargs)
 
-            out = tree_map(partial(wrap, device=common_device), r)
-            return out
+            return tree_map(partial(wrap, device=common_device), r)
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
