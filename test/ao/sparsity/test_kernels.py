@@ -120,7 +120,8 @@ def _sparse_layer_test_helper(
     test_class,
     test_scripting,
 ):
-    ## SET UP TEST PARAMETERS, INPUTS AND WEIGHTS
+    # SET UP TEST PARAMETERS, INPUTS AND WEIGHTS
+    # ------------------------------------------
     batch_size = 12
     input_channels = 4
     output_channels = 7
@@ -147,7 +148,8 @@ def _sparse_layer_test_helper(
 
         W_q = torch.quantize_per_tensor(W_fp32, W_scale, W_zp, torch.qint8)
 
-        ## PREPARE MODELS FOR QUANTIZATION
+        # PREPARE MODELS FOR QUANTIZATION
+        # -------------------------------
         model.linear.weight = nn.Parameter(W_q.dequantize())
         model.eval()
 
@@ -171,7 +173,8 @@ def _sparse_layer_test_helper(
             qmodel(X_fp32)
             sqmodel(X_fp32)
 
-        ## ACTUAL TESTING BEGINS HERE
+        # ACTUAL TESTING BEGINS HERE
+        # --------------------------
 
         # Make sure the quantization parameters are computed the same way
         qparams = qmodel.linear.qconfig.weight().calculate_qparams()
