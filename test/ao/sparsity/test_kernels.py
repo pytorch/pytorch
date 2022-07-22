@@ -169,7 +169,7 @@ def _sparse_layer_test_helper(
         W_q = torch.quantize_per_tensor(W_fp32, W_scale, W_zp, torch.qint8)
 
         # PREPARE MODELS FOR QUANTIZATION
-        # ------------------------------------------
+        # -------------------------------
         model.linear.weight = nn.Parameter(W_q.dequantize())
         model.eval()
 
@@ -202,7 +202,7 @@ def _sparse_layer_test_helper(
             sqmodel(X_fp32)
 
         # ACTUAL TESTING BEGINS HERE
-        # ---------------------------
+        # --------------------------
 
         # identify modules by fqn that need to be checked
         # and determine expected post-convert module type
