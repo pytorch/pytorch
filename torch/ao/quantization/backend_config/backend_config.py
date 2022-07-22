@@ -10,12 +10,12 @@ from torch.ao.quantization.utils import Pattern
 
 __all__ = [
     "BackendConfig",
-    "BackendOpConfig",
-    "DtypeConfig",
+    "BackendPatternConfig",
+    "DTypeConfig",
 ]
 
 
-# DtypeConfig dict keys
+# DTypeConfig dict keys
 INPUT_DTYPE_DICT_KEY = "input_dtype"
 OUTPUT_DTYPE_DICT_KEY = "output_dtype"
 WEIGHT_DTYPE_DICT_KEY = "weight_dtype"
@@ -26,7 +26,7 @@ IS_DYNAMIC_DICT_KEY = "is_dynamic"
 NAME_DICT_KEY = "name"
 CONFIGS_DICT_KEY = "configs"
 
-# BackendOpConfig dict keys
+# BackendPatternConfig dict keys
 PATTERN_DICT_KEY = "pattern"
 OBSERVATION_TYPE_DICT_KEY = "observation_type"
 DTYPE_CONFIGS_DICT_KEY = "dtype_configs"
@@ -45,7 +45,7 @@ OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
 
 @dataclass
-class DtypeConfig:
+class DTypeConfig:
     """
     Data type config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
@@ -56,9 +56,9 @@ class DtypeConfig:
     is_dynamic: Optional[bool] = None
 
     @classmethod
-    def from_dict(cls, dtype_config_dict: Dict[str, Any]) -> DtypeConfig:
+    def from_dict(cls, dtype_config_dict: Dict[str, Any]) -> DTypeConfig:
         """
-        Create a `DtypeConfig` from a dictionary with the following items (all optional):
+        Create a `DTypeConfig` from a dictionary with the following items (all optional):
 
             "input_dtype": torch.dtype
             "output_dtype": torch.dtype
@@ -75,8 +75,8 @@ class DtypeConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert this `DtypeConfig` to a dictionary with the items described in
-        :func:`~torch.ao.quantization.backend_config.DtypeConfig.from_dict`.
+        Convert this `DTypeConfig` to a dictionary with the items described in
+        :func:`~torch.ao.quantization.backend_config.DTypeConfig.from_dict`.
         """
         dtype_config_dict: Dict[str, Any] = {}
         if self.input_dtype is not None:
@@ -99,28 +99,28 @@ class BackendConfig:
 
     This config specifies how reference quantized models are produced (during the prepare phase) and how they
     are lowered to implementations specific to the target backend (during the convert phase). Each op supported
-    on the target backend can be individually configured through :class:`~torch.ao.quantization.backend_config.BackendOpConfig`.
+    on the target backend can be individually configured through :class:`~torch.ao.quantization.backend_config.BackendPatternConfig`.
 
     Example usage::
 
         import torch
-        from torch.ao.quantization.backend_config import BackendConfig, BackendOpConfig, DtypeConfig, ObservationType
+        from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
         from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
 
-        weighted_int8_dtype_config = DtypeConfig(
+        weighted_int8_dtype_config = DTypeConfig(
             input_dtype=torch.quint8,
             output_dtype=torch.quint8,
             weight_dtype=torch.qint8,
             bias_type=torch.float)
 
-        linear_config = BackendOpConfig(torch.nn.Linear) \
+        linear_config = BackendPatternConfig(torch.nn.Linear) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .set_dtype_configs([weighted_int8_dtype_config]) \
             .set_root_module(torch.nn.Linear) \
             .set_qat_module(torch.nn.qat.Linear) \
             .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
 
-        conv_relu_config = BackendOpConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
+        conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .set_dtype_configs([weighted_int8_dtype_config]) \
             .set_fuser_module(torch.nn.intrinsic.ConvReLU2d) \
@@ -132,7 +132,7 @@ class BackendConfig:
     """
     def __init__(self, name: str):
         self.name = name
-        self.configs: Dict[Pattern, BackendOpConfig] = {}
+        self.configs: Dict[Pattern, BackendPatternConfig] = {}
 
     def set_name(self, name: str) -> BackendConfig:
         """
@@ -141,7 +141,7 @@ class BackendConfig:
         self.name = name
         return self
 
-    def set_config(self, config: BackendOpConfig) -> BackendConfig:
+    def set_config(self, config: BackendPatternConfig) -> BackendConfig:
         """
         Set the config for an op that can be run on the target backend.
         This overrides any existing config for the given op.
@@ -155,17 +155,17 @@ class BackendConfig:
         Create a `BackendConfig` from a dictionary with the following items:
 
             "name": the name of the target backend
-            "configs": a list of dictionaries that each represents a `BackendOpConfig`
+            "configs": a list of dictionaries that each represents a `BackendPatternConfig`
         """
         for dict_key in [NAME_DICT_KEY, CONFIGS_DICT_KEY]:
             if dict_key not in backend_config_dict:
                 raise ValueError("backend_config_dict must contain '%s'" % dict_key)
         conf = cls(backend_config_dict[NAME_DICT_KEY])
         for d in backend_config_dict[CONFIGS_DICT_KEY]:
-            if isinstance(d, BackendOpConfig):
+            if isinstance(d, BackendPatternConfig):
                 conf.set_config(d)
             elif isinstance(d, Dict):
-                conf.set_config(BackendOpConfig.from_dict(d))
+                conf.set_config(BackendPatternConfig.from_dict(d))
             else:
                 raise ValueError("Expected backend_config_dict['%s'] to be a dictionary" % CONFIGS_DICT_KEY)
         return conf
@@ -181,7 +181,7 @@ class BackendConfig:
         }
 
 
-class BackendOpConfig:
+class BackendPatternConfig:
     """
     Config for ops defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
 
@@ -204,7 +204,7 @@ class BackendOpConfig:
     def __init__(self, pattern: Pattern):
         self.pattern = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        self.dtype_configs: List[DtypeConfig] = []
+        self.dtype_configs: List[DTypeConfig] = []
         self.root_module: Optional[torch.nn.Module] = None
         self.qat_module: Optional[torch.nn.Module] = None
         self.reference_quantized_module: Optional[torch.nn.Module] = None
@@ -220,28 +220,28 @@ class BackendOpConfig:
         self._overwrite_output_fake_quantize: Optional[_PartialWrapper] = None
         self._overwrite_output_observer: Optional[_PartialWrapper] = None
 
-    def set_pattern(self, pattern: Pattern) -> BackendOpConfig:
+    def set_pattern(self, pattern: Pattern) -> BackendPatternConfig:
         """
         Set the pattern that identifies the op.
         """
         self.pattern = pattern
         return self
 
-    def set_observation_type(self, observation_type: ObservationType) -> BackendOpConfig:
+    def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
         Set how observers should be inserted for this op.
         """
         self.observation_type = observation_type
         return self
 
-    def set_dtype_configs(self, dtype_configs: List[DtypeConfig]) -> BackendOpConfig:
+    def set_dtype_configs(self, dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
         """
         Set the supported data types for this op.
         """
         self.dtype_configs = dtype_configs
         return self
 
-    def set_root_module(self, root_module: torch.nn.Module) -> BackendOpConfig:
+    def set_root_module(self, root_module: torch.nn.Module) -> BackendPatternConfig:
         """
         Set the module that represents the root for this op.
         For example, the root module for :class:`torch.nn.intrinsic.LinearReLU` should be :class:`torch.nn.Linear`.
@@ -249,72 +249,72 @@ class BackendOpConfig:
         self.root_module = root_module
         return self
 
-    def set_qat_module(self, qat_module: torch.nn.Module) -> BackendOpConfig:
+    def set_qat_module(self, qat_module: torch.nn.Module) -> BackendPatternConfig:
         """
         Set the module that represents the QAT implementation for this op.
         """
         self.qat_module = qat_module
         return self
 
-    def set_reference_quantized_module(self, reference_quantized_module: torch.nn.Module) -> BackendOpConfig:
+    def set_reference_quantized_module(self, reference_quantized_module: torch.nn.Module) -> BackendPatternConfig:
         """
         Set the module that represents the reference quantized implementation for this op's root module.
         """
         self.reference_quantized_module = reference_quantized_module
         return self
 
-    def set_fuser_module(self, fuser_module: torch.nn.Module) -> BackendOpConfig:
+    def set_fuser_module(self, fuser_module: torch.nn.Module) -> BackendPatternConfig:
         """
         Set the module that represents the fused implementation for this op.
         """
         self.fuser_module = fuser_module
         return self
 
-    def set_fuser_method(self, fuser_method: Callable) -> BackendOpConfig:
+    def set_fuser_method(self, fuser_method: Callable) -> BackendPatternConfig:
         """
         Set the function that specifies how to fuse the pattern for this op.
         """
         self.fuser_method = fuser_method
         return self
 
-    def _set_root_node_getter(self, root_node_getter: Callable) -> BackendOpConfig:
+    def _set_root_node_getter(self, root_node_getter: Callable) -> BackendPatternConfig:
         self._root_node_getter = root_node_getter
         return self
 
-    def _set_extra_inputs_getter(self, extra_inputs_getter: Callable) -> BackendOpConfig:
+    def _set_extra_inputs_getter(self, extra_inputs_getter: Callable) -> BackendPatternConfig:
         self._extra_inputs_getter = extra_inputs_getter
         return self
 
     def _set_num_tensor_args_to_observation_type(
-            self, num_tensor_args_to_observation_type: Dict[int, ObservationType]) -> BackendOpConfig:
+            self, num_tensor_args_to_observation_type: Dict[int, ObservationType]) -> BackendPatternConfig:
         self._num_tensor_args_to_observation_type = num_tensor_args_to_observation_type
         return self
 
-    def _set_input_type_to_index(self, input_type_to_index: Dict[str, int]) -> BackendOpConfig:
+    def _set_input_type_to_index(self, input_type_to_index: Dict[str, int]) -> BackendPatternConfig:
         self._input_type_to_index = input_type_to_index
         return self
 
-    def _set_input_output_observed(self, input_output_observed: bool) -> BackendOpConfig:
+    def _set_input_output_observed(self, input_output_observed: bool) -> BackendPatternConfig:
         self._input_output_observed = input_output_observed
         return self
 
-    def _set_overwrite_output_fake_quantize(self, overwrite_output_fake_quantize: _PartialWrapper) -> BackendOpConfig:
+    def _set_overwrite_output_fake_quantize(self, overwrite_output_fake_quantize: _PartialWrapper) -> BackendPatternConfig:
         self._overwrite_output_fake_quantize = overwrite_output_fake_quantize
         return self
 
-    def _set_overwrite_output_observer(self, overwrite_output_observer: _PartialWrapper) -> BackendOpConfig:
+    def _set_overwrite_output_observer(self, overwrite_output_observer: _PartialWrapper) -> BackendPatternConfig:
         self._overwrite_output_observer = overwrite_output_observer
         return self
 
     @classmethod
-    def from_dict(cls, backend_op_config_dict: Dict[str, Any]) -> BackendOpConfig:
+    def from_dict(cls, backend_op_config_dict: Dict[str, Any]) -> BackendPatternConfig:
         """
-        Create a `BackendOpConfig` from a dictionary with the following items:
+        Create a `BackendPatternConfig` from a dictionary with the following items:
 
             "pattern": the pattern that identifies this op
             "observation_type": the :class:`~torch.ao.quantization.backend_config.ObservationType` that specifies how
                 observers should be inserted for this op
-            "dtype_configs": a list of dictionaries that represents :class:`~torch.ao.quantization.backend_config.DtypeConfig`s
+            "dtype_configs": a list of dictionaries that represents :class:`~torch.ao.quantization.backend_config.DTypeConfig`s
             "root_module": a :class:`torch.nn.Module` that represents the root for this op
             "qat_module": a :class:`torch.nn.Module` that represents the QAT implementation for this op
             "reference_quantized_module": a :class:`torch.nn.Module` that represents the reference quantized
@@ -322,15 +322,15 @@ class BackendOpConfig:
             "fuser_module": a :class:`torch.nn.Module` that represents the fused implementation for this op
             "fuser_method": a function that specifies how to fuse the pattern for this op
         """
-        def _get_dtype_config(obj: Any) -> DtypeConfig:
+        def _get_dtype_config(obj: Any) -> DTypeConfig:
             """
-            Convert the given object into a `DtypeConfig` if possible, else throw an exception.
+            Convert the given object into a `DTypeConfig` if possible, else throw an exception.
             """
-            if isinstance(obj, DtypeConfig):
+            if isinstance(obj, DTypeConfig):
                 return obj
             if isinstance(obj, Dict):
-                return DtypeConfig.from_dict(obj)
-            raise ValueError("Expected a list of DtypeConfigs in backend_op_config_dict[\"%s\"], got '%s'" %
+                return DTypeConfig.from_dict(obj)
+            raise ValueError("Expected a list of DTypeConfigs in backend_op_config_dict[\"%s\"], got '%s'" %
                              (DTYPE_CONFIGS_DICT_KEY, type(obj)))
 
         if PATTERN_DICT_KEY not in backend_op_config_dict:
@@ -357,8 +357,8 @@ class BackendOpConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert this `BackendOpConfig` to a dictionary with the items described in
-        :func:`~torch.ao.quantization.backend_config.BackendOpConfig.from_dict`.
+        Convert this `BackendPatternConfig` to a dictionary with the items described in
+        :func:`~torch.ao.quantization.backend_config.BackendPatternConfig.from_dict`.
         """
         backend_op_config_dict: Dict[str, Any] = {
             PATTERN_DICT_KEY: self.pattern,

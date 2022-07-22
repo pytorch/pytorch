@@ -1,4 +1,4 @@
-from .backend_config import BackendConfig, BackendOpConfig, DtypeConfig
+from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
 from .native import get_native_backend_config_dict
 from .observation_type import ObservationType
 from .tensorrt import get_tensorrt_backend_config_dict

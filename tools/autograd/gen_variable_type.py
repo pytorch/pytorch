@@ -48,6 +48,7 @@ from torchgen.api.types import (
     scalarT,
     SpecialArgName,
     stringT,
+    symIntArrayRefT,
     tensorListT,
     tensorT,
     TupleCType,
@@ -517,6 +518,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    "lift_fresh",
+    "lift_fresh_copy",
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
@@ -1086,6 +1089,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
+                expr = expr + ".vec()"
+            elif type == BaseCType(symIntArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
