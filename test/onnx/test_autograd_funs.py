@@ -1,13 +1,13 @@
 # Owner(s): ["module: onnx"]
 
+import unittest
+
 import torch
-from torch.onnx import OperatorExportTypes
-from torch.onnx.utils import _model_to_graph
-from torch.onnx._globals import GLOBALS
 
 from test_pytorch_onnx_onnxruntime import run_model_test
-
-import unittest
+from torch.onnx import OperatorExportTypes
+from torch.onnx._globals import GLOBALS
+from torch.onnx.utils import _model_to_graph
 
 
 class TestAutogradFuns(unittest.TestCase):
