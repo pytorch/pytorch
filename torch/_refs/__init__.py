@@ -2233,7 +2233,6 @@ def _repeat_if_defined(a: Optional[Tensor], sizes: int):
     return a
 
 
-@register_decomposition(torch.ops.aten.instance_norm)
 def instance_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -2388,14 +2387,13 @@ def native_batch_norm(
     )
 
     if training:
-        out, save_mean, save_rstd, unbiased_var = _normalize(input, reduction_dims, eps)
+        out, mean, rstd, unbiased_var = _normalize(input, reduction_dims, eps)
+        save_mean = _squeeze_multiple(mean, reduction_dims)
+        save_rstd = _squeeze_multiple(rstd, reduction_dims)
 
         # update running_mean and running_var
         if running_mean is not None:
-            squeeze_mean = _squeeze_multiple(save_mean, reduction_dims)
-            copy_to(
-                running_mean, _momentum_update(running_mean, squeeze_mean, momentum)
-            )
+            copy_to(running_mean, _momentum_update(running_mean, save_mean, momentum))
 
         if running_var is not None:
             squeeze_var = _squeeze_multiple(unbiased_var, reduction_dims)
@@ -2407,12 +2405,16 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        if input.device.type != "cpu":
-            save_mean = running_mean
-            save_rstd = rstd
+        if input.device.type == "cuda":
+            squeeze_rstd = _squeeze_multiple(rstd, reduction_dims)
+            compute_dtype, _ = utils.elementwise_dtypes(
+                input, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            save_mean = prims.convert_element_type(running_mean, compute_dtype)
+            save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
         else:
-            save_mean = torch.zeros_like(input)
-            save_rstd = torch.zeros_like(input)
+            save_mean = torch.empty([0])
+            save_rstd = torch.empty([0])
 
     if weight is None and bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
