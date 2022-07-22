@@ -497,8 +497,10 @@ class ShardedTensor(torch.Tensor):
         if len(args) == 1:
             if isinstance(args[0], torch.dtype):
                 dtype_to = args[0]
-            elif isinstance(args[0], (str, int, torch.device)):
+            elif isinstance(args[0], torch.device):
                 device_to = args[0]
+            elif isinstance(args[0], (str, int)):
+                device_to = torch.device(args[0])
             elif isinstance(args[0], torch.Tensor):
                 dtype_to = args[0].dtype
                 device_to = args[0].device
