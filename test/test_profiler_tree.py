@@ -9,15 +9,19 @@ import unittest
 import expecttest
 
 import torch
+from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
     skipIfRocm, TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
 
-# There is a bunch of noise from profiler startup and shutdown that distracts
-# from the test and varies based on CUDA so we prune it.
+# These functions can vary from based on platform and build (e.g. with CUDA)
+# and generally distract from rather than adding to the test.
 PRUNE_FUNCTIONS = {
-    "torch/profiler/profiler.py(...): start",
-    "torch/profiler/profiler.py(...): stop_trace",
+    "torch/profiler/profiler.py(...): start": True,
+    "torch/profiler/profiler.py(...): stop_trace": True,
+    "cudaStreamIsCapturing": False,
+    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": False,
 }
+
 
 class ProfilerTree:
 
@@ -50,11 +54,13 @@ class ProfilerTree:
                 out = []
 
             for node in nodes:
+                cls.validate_node(node)
                 name = cls.fmt_name(node.name())
-                if name.strip() not in PRUNE_FUNCTIONS:
+                add_ellipses = PRUNE_FUNCTIONS.get(name.strip(), None)
+                if add_ellipses is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
-                else:
+                elif add_ellipses:
                     out.append((depth, "..."))
 
             return out
@@ -79,7 +85,7 @@ class ProfilerTree:
 
         match = re.match(r"(.*)\.py\(([0-9]+)\): (.*)$", name)
         if match:
-            filename, lineno, fn = match.groups()
+            filename, _, fn = match.groups()
 
             # This test can appear as `test/test_profiler_tree.py` depending on
             # where it is run from.
@@ -113,6 +119,26 @@ class ProfilerTree:
             "object at 0x[0-9a-fA-F]+>",
             "object at 0xXXXXXXXXXXXX>",
             name)
+
+    @classmethod
+    def validate_node(cls, node):
+        extra_fields = node.extra_fields
+        if isinstance(extra_fields, (_ExtraFields_PyCall, _ExtraFields_PyCCall)):
+            # Check that the lineage established by the profiler matches the
+            # caller recorded by the Python tracer.
+            parent = node.parent
+            while parent is not None:
+                if isinstance(parent.extra_fields, _ExtraFields_PyCall):
+                    break
+                parent = parent.parent
+
+            def to_string(frame_state):
+                return f"{frame_state.file_name}(...): {frame_state.function_name}"
+
+            if parent:
+                parent_name = to_string(parent.extra_fields.callsite)
+                caller_name = to_string(extra_fields.caller)
+                assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
 class TestProfilerTree(TestCase):
     def assertTreesMatch(self, actual: str, expected: str):
@@ -381,8 +407,8 @@ class TestProfilerTree(TestCase):
                           aten::empty_strided
                             [memory]
                         aten::fill_
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                  <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in method append of list object at 0xXXXXXXXXXXXX>
+                  <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
                     autograd::engine::evaluate_function: PowBackward0
                       PowBackward0
                         aten::pow
@@ -427,7 +453,7 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   torch/profiler/profiler.py(...): _transit_action
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
                     ..."""
@@ -553,6 +579,7 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
     @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda(self):
@@ -649,6 +676,7 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
     @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_with_stream(self):
@@ -659,7 +687,9 @@ class TestProfilerTree(TestCase):
             for stream in streams:
                 with torch.cuda.stream(stream):
                     results.append(torch.tanh(x) - x)
-
+        del results
+        for s in streams:
+            torch.cuda.current_stream().wait_stream(s)
 
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
@@ -671,7 +701,6 @@ class TestProfilerTree(TestCase):
                 cudaLaunchKernel
                   void at::native::vectorized_elementwise_kernel<...>(...)
             aten::tanh
-              cudaStreamIsCapturing
               cudaMalloc
               cudaLaunchKernel
                 void at::native::vectorized_elementwise_kernel<...>(...)
@@ -682,7 +711,6 @@ class TestProfilerTree(TestCase):
               [memory]
             [memory]
             aten::tanh
-              cudaStreamIsCapturing
               cudaMalloc
               cudaLaunchKernel
                 void at::native::vectorized_elementwise_kernel<...>(...)
@@ -693,7 +721,6 @@ class TestProfilerTree(TestCase):
               [memory]
             [memory]
             aten::tanh
-              cudaStreamIsCapturing
               cudaMalloc
               cudaLaunchKernel
                 void at::native::vectorized_elementwise_kernel<...>(...)
@@ -706,6 +733,8 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
+    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
         model = torch.nn.modules.Linear(1, 1, device="cuda")
@@ -752,7 +781,6 @@ class TestProfilerTree(TestCase):
                         aten::addmm
                           cudaMemcpyAsync
                             Memcpy DtoD (Device -> Device)
-                          cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
                           cudaLaunchKernel
                             void ..._kernel<...>(...)
                           [memory]
@@ -776,15 +804,14 @@ class TestProfilerTree(TestCase):
                           aten::fill_
                             cudaLaunchKernel
                               void at::native::vectorized_elementwise_kernel<...>(...)
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
+                    <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
                       autograd::engine::evaluate_function: AddmmBackward0
                         AddmmBackward0
                           aten::t
                             aten::transpose
                               aten::as_strided
                           aten::mm
-                            cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
                             cudaLaunchKernel
                               void ..._kernel<...>(...)
                             [memory]
@@ -815,7 +842,7 @@ class TestProfilerTree(TestCase):
                           [memory]
                   [memory]
                 torch/optim/optimizer.py(...): wrapper
-                  <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                  <built-in method format of str object at 0xXXXXXXXXXXXX>
                   torch/autograd/profiler.py(...): __init__
                     <built-in method zeros of type object at 0xXXXXXXXXXXXX>
                       aten::zeros
@@ -840,45 +867,45 @@ class TestProfilerTree(TestCase):
                         <built-in function is_grad_enabled>
                         <built-in function _set_grad_enabled>
                     torch/optim/sgd.py(...): step
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
                         <built-in function _has_torch_function_unary>
                         <built-in function id>
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/_tensor.py(...): __hash__
                         <built-in function _has_torch_function_unary>
                         <built-in function id>
-                      <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in method append of list object at 0xXXXXXXXXXXXX>
                       torch/optim/sgd.py(...): sgd
                         torch/optim/sgd.py(...): _single_tensor_sgd
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method mul_ of Tensor object at 0xXXXXXXXXXXXX>
                             [memory]
                             aten::mul_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
                             [memory]
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method add_ of Tensor object at 0xXXXXXXXXXXXX>
                             aten::add_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method add_ of Tensor object at 0xXXXXXXXXXXXX>
                             aten::add_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method mul_ of Tensor object at 0xXXXXXXXXXXXX>
                             [memory]
                             aten::mul_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
                             [memory]
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method add_ of Tensor object at 0xXXXXXXXXXXXX>
                             aten::add_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
-                          <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                          <built-in method add_ of Tensor object at 0xXXXXXXXXXXXX>
                             aten::add_
                               cudaLaunchKernel
                                 void at::native::vectorized_elementwise_kernel<...>(...)
@@ -900,7 +927,7 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   torch/profiler/profiler.py(...): _transit_action
-                    <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
                     ..."""  # noqa: B950

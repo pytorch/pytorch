@@ -31,6 +31,7 @@ namespace impl {
 namespace {
 enum CallType { PyCall = 0, PyModuleCall, PyCCall };
 static constexpr size_t CallTypeSize = 3;
+using no_ephemeral_t = std::tuple<>;
 
 // ============================================================================
 // == Miscellaneous structs and utils =========================================
@@ -141,8 +142,21 @@ class CallTypeHelper final {
 //
 // To add a new event type to the cache:
 //   1) Add an entry to the `CallType` enum.
-//   2) Add a specialization of Config which defined key_t and cache_t.
+//   2) Add a specialization of Config which defined key_t, ephemeral_t and
+//      cache_t.
 //   3) Add a specialization of ValueCache::store and ValueCache::load.
+//
+// -------------------------
+// -- Ephemeral arguments --
+// -------------------------
+// The value cache mechanism assumes that `key_t` is enough to specify the
+// correct value. However it may not be possible to materialize a value using
+// only an instance of `key_t`. As a result, the cache also accepts "ephemeral"
+// inputs which can be used to populate the value cache. Ephemeral inputs come
+// with two caveats:
+//  1) They are NOT safe to save, and cannot be used after `ValueCache::store`.
+//  2) They should be used to access data that is not expect to change from
+//     call to call, such as the name of a function.
 
 template <CallType>
 struct Config;
@@ -150,6 +164,7 @@ struct Config;
 template <>
 struct Config<CallType::PyCall> {
   using key_t = CodeLocation;
+  using ephemeral_t = no_ephemeral_t;
   using cache_t = ska::flat_hash_map<key_t, PyFrameState>;
   static constexpr EventType event_type = EventType::PyCall;
 };
@@ -157,6 +172,7 @@ struct Config<CallType::PyCall> {
 template <>
 struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
+  using ephemeral_t = PyFrameObject*;
   struct cache_t {
     c10::optional<CodeLocation> module_forward_;
     ska::flat_hash_map<PyModuleSelf, PyModuleCls> modules_;
@@ -167,7 +183,8 @@ struct Config<CallType::PyModuleCall> {
 
 template <>
 struct Config<CallType::PyCCall> {
-  using key_t = torch::profiler::impl::PyCFunction;
+  using key_t = PyMethod;
+  using ephemeral_t = PyObject*;
   using cache_t = ska::flat_hash_map<key_t, at::StringView>;
   static constexpr EventType event_type = EventType::PyCCall;
 };
@@ -200,7 +217,7 @@ class Callsite {
 class ValueCache {
  public:
   template <CallType C>
-  void store(const typename Config<C>::key_t&);
+  void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
 
   template <CallType C>
   auto load(const Callsite<C>& callsite, size_t python_tid) const {
@@ -234,7 +251,7 @@ using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
 using PyCCallKey = Config<CallType::PyCCall>::key_t;
 
 template <>
-void ValueCache::store<CallType::PyCall>(const PyCallKey& key) {
+void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
   auto& locations = std::get<CallType::PyCall>(state_);
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     TORCH_INTERNAL_ASSERT(key.code_ != nullptr);
@@ -252,14 +269,15 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyCall>(
 }
 
 template <>
-void ValueCache::store<CallType::PyModuleCall>(const PyModuleCallKey& key) {
+void ValueCache::store<CallType::PyModuleCall>(
+    const PyModuleCallKey& key,
+    PyFrameObject* frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
-      auto frame = PyEval_GetFrame();
       TORCH_INTERNAL_ASSERT((PyObject*)(frame->f_code) == nnModuleCode());
       cache.module_forward_ = PyCallKey(frame);
-      store<CallType::PyCall>(*cache.module_forward_);
+      store<CallType::PyCall>(*cache.module_forward_, no_ephemeral_t());
     }
     auto cls_handle = py::handle((PyObject*)key).attr("__class__");
     auto cls = PyModuleCls(cls_handle.ptr());
@@ -283,10 +301,12 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
 }
 
 template <>
-void ValueCache::store<CallType::PyCCall>(const PyCCallKey& key) {
+void ValueCache::store<CallType::PyCCall>(
+    const PyCCallKey& key,
+    PyObject* arg) {
   auto& names = std::get<CallType::PyCCall>(state_);
   if (C10_UNLIKELY(names.find(key) == names.end())) {
-    names[key] = at::StringView(py::repr((PyObject*)key));
+    names[key] = at::StringView(py::repr(arg));
   }
 }
 
@@ -335,11 +355,14 @@ struct TraceKeyCacheState {
     }
   };
 
-  TraceKey intern(Callsite<C> callsite, ValueCache& value_cache) {
+  TraceKey intern(
+      Callsite<C> callsite,
+      typename Config<C>::ephemeral_t ephemeral,
+      ValueCache& value_cache) {
     auto it = state_.find(callsite);
     if (C10_UNLIKELY(it == state_.end())) {
-      value_cache.store<C>(callsite.value_);
-      value_cache.store<CallType::PyCall>(callsite.caller_);
+      value_cache.store<C>(callsite.value_, ephemeral);
+      value_cache.store<CallType::PyCall>(callsite.caller_, no_ephemeral_t());
       it = state_.insert({callsite, nextKey()}).first;
     }
     return it->second;
@@ -429,13 +452,13 @@ struct ThreadLocalResults {
     Py_DECREF((PyObject*)ctx_);
   }
 
-  template <CallType C, EventType E, typename... Args>
-  TraceKey intern(Args... args) {
+  template <CallType C, EventType E, typename Ephemeral, typename... Args>
+  TraceKey intern(Ephemeral ephemeral, Args... args) {
     static_assert(
         Config<C>::event_type == E,
         "ThreadLocalResults.intern called from the wrong typed context.");
-    return std::get<C>(trace_keys_)
-        .intern(Callsite<C>(std::forward<Args>(args)...), *value_cache_);
+    auto callsite = Callsite<C>(std::forward<Args>(args)...);
+    return std::get<C>(trace_keys_).intern(callsite, ephemeral, *value_cache_);
   }
 
   static constexpr size_t BLOCK_SIZE = 1024;
@@ -589,11 +612,11 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       auto self = PyDict_GetItemString(frame->f_locals, "self");
       PyFrame_LocalsToFast(frame, 0);
       TORCH_INTERNAL_ASSERT(frame->f_back != nullptr);
-      return tls.intern<CallType::PyModuleCall, E>(self, frame->f_back);
+      return tls.intern<CallType::PyModuleCall, E>(frame, self, frame->f_back);
 
     } else {
       auto f_back = frame->f_back != nullptr ? frame->f_back : frame;
-      return tls.intern<CallType::PyCall, E>(frame, f_back);
+      return tls.intern<CallType::PyCall, E>(no_ephemeral_t(), frame, f_back);
     }
   };
   queue_->getSubqueue()->emplace_py_call(get_key(), getApproximateTime());
@@ -603,9 +626,13 @@ void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
     PyObject* arg) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(Py_TYPE(arg) == &PyCFunction_Type);
+  auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
+
   // NB: For C calls a new frame is not created, so we use `frame` rather than
   //     `frame->f_back`.
-  auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(arg, frame);
+  auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
+      arg, (void*)(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, getApproximateTime());
 }
 
