@@ -1,28 +1,28 @@
+from typing import Optional, Union
+
 import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+import torch._refs as refs
+from torch._decomp import register_decomposition
 from torch._prims_common import (
     check,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    NumberType,
     ShapeType,
     TensorLike,
     TensorLikeType,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._refs as refs
-from torch._decomp import register_decomposition
 from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
 from torch._refs import (
-    _make_elementwise_unary_reference,
     _make_elementwise_binary_reference,
+    _make_elementwise_unary_reference,
 )
-
-from typing import Optional, Union
 
 __all__ = [
     "celu",
