@@ -1522,6 +1522,10 @@
   self: grad.expand(self.sizes())
   result: auto_linear
 
+- name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+  result: auto_linear
+
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
@@ -1706,6 +1710,12 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: auto_linear
+
+- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  # TODO: add proper double backward for view.SymInt
+  # by SymIntizing `reshape`
+  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
