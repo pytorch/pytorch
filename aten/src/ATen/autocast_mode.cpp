@@ -414,7 +414,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(linalg_vector_norm), "linalg_vector_norm", Tensor (const Tensor &, const Scalar&, at::OptionalIntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm", Tensor (const Tensor &, const Scalar&, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm.str_ord", Tensor (const Tensor &, c10::string_view, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
   KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
   KERNEL(ADD_NS(nuclear_norm), "nuclear_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
