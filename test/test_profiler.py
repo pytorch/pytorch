@@ -1586,12 +1586,6 @@ aten::mm""")
 
     def test_profiler_optimizer_single_tensor_pattern(self):
         x = torch.ones((100, 100))
-        model = nn.Sequential(
-            nn.Linear(100, 100),
-            nn.ReLU(),
-            nn.Linear(100, 10),
-        )
-
         cases = (
             (1, lambda: torch.optim.Adam(model.parameters())),
             (1, lambda: torch.optim.SGD(model.parameters(), lr=0.01)),
@@ -1600,11 +1594,14 @@ aten::mm""")
             (0, lambda: torch.optim.SGD(model.parameters(), lr=0.01, foreach=True)),
             (0, lambda: torch.optim.AdamW(model.parameters(), foreach=True)),
         )
-
         num_matched = []
         for _, fn in cases:
-            optimizer = torch.optim.Adam(model.parameters())
             with profile(with_stack=True) as prof:
+                model = nn.Sequential(
+                    nn.Linear(100, 100),
+                    nn.ReLU(),
+                    nn.Linear(100, 10),
+                )
                 optimizer = fn()
                 optimizer.zero_grad()
                 y_hat = model(x)
