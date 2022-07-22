@@ -1880,11 +1880,13 @@ Tensor _matmul_impl(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::Tensor unused;
+  at::Tensor result, unused;
   if (tensor1.is_nested() || tensor2.is_nested()) {
-    return at::_NestedTensor_GeneralizedBMM(tensor1, tensor2);
+    result = at::_NestedTensor_GeneralizedBMM(tensor1, tensor2);
   }
-  auto result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  else {
+    result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
