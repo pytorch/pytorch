@@ -1,13 +1,14 @@
+import functools
+from enum import Enum
+from typing import Callable, List, Optional, Tuple
+
 import torch
+import torch._prims_common as utils
+import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from enum import Enum
-from typing import Tuple, Optional, List, Callable
-import torch.nn.functional as F
-import functools
-from torch.utils._pytree import tree_map, tree_flatten
-import torch._prims_common as utils
 from torch._prims_common.wrappers import out_wrapper
+from torch.utils._pytree import tree_flatten, tree_map
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
