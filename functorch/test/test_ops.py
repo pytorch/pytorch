@@ -1293,9 +1293,11 @@ class TestOperators(TestCase):
 
         # numerical inconsistencies, look like bugs
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
-        skip('__rmatmul__', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('matmul', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('nn.functional.conv_transpose3d', dtypes=(torch.float32,)),  # only fails on cpu only linux
+        skip('__rmatmul__', dtypes=(torch.float32,)),  # fails on all but windows
+        skip('matmul', dtypes=(torch.float32,)),  # fails on all but windows
+        skip('nn.functional.conv_transpose3d', dtypes=(torch.float32,)),
+        skip('nn.functional.conv_transpose2d', dtypes=(torch.float32,)),
+        skip('nn.functional.conv_transpose1d', dtypes=(torch.float32,)),
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
