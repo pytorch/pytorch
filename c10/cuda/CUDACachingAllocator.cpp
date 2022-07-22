@@ -484,28 +484,28 @@ class CachingAllocatorConfig {
 
 // records allocate/free events
 class MemoryEventTracker {
-  private:
+ private:
   std::mutex mutex;
 
-  public:
+ public:
   std::vector<std::vector<AllocFreeEvent>> alloc_free_events;
   std::vector<unsigned int> num_alloc_events;
   void append_alloc_free_event(
-    intptr_t ptr,
-    size_t size,
-    bool type,
-    int device) {
-  std::lock_guard<std::mutex> lock(mutex);
-  if (num_alloc_events[device] >= alloc_free_events[device].size()) {
-    alloc_free_events[device].resize(alloc_free_events[device].size() * 2);
-  }
-  alloc_free_events[device][num_alloc_events[device]] = {
-      ptr, // ptr
-      size, // size: of allocation in bytes
-      type, // type: 1 = allocation; 0 = free
-      device // allocation device
-  };
-  num_alloc_events[device] += 1;
+      intptr_t ptr,
+      size_t size,
+      bool type,
+      int device) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (num_alloc_events[device] >= alloc_free_events[device].size()) {
+      alloc_free_events[device].resize(alloc_free_events[device].size() * 2);
+    }
+    alloc_free_events[device][num_alloc_events[device]] = {
+        ptr, // ptr
+        size, // size: of allocation in bytes
+        type, // type: 1 = allocation; 0 = free
+        device // allocation device
+    };
+    num_alloc_events[device] += 1;
   }
   std::vector<std::vector<AllocFreeEvent>> get_alloc_free_events() {
     std::vector<std::vector<AllocFreeEvent>> result = alloc_free_events;
@@ -1092,10 +1092,10 @@ class DeviceCachingAllocator {
         block->stream_uses.empty());
 
     memory_tracker.append_alloc_free_event(
-      reinterpret_cast<intptr_t>(block->ptr), // ptr
-      block->size, // size: of allocation in bytes
-      0, // type: 1 = allocation; 0 = free
-      block->device // allocation device
+        reinterpret_cast<intptr_t>(block->ptr), // ptr
+        block->size, // size: of allocation in bytes
+        0, // type: 1 = allocation; 0 = free
+        block->device // allocation device
     );
 
     size_t original_block_size = block->size;
