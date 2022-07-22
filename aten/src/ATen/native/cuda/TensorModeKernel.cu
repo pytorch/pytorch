@@ -104,7 +104,7 @@ struct ModeImpl<bool> {
         policy,
         first_bytes,
         last_bytes,
-        [] __device__ (uint8_t x) {
+        [] GPU_LAMBDA (uint8_t x) {
           return static_cast<bool>(x);
         }
       );
@@ -113,7 +113,7 @@ struct ModeImpl<bool> {
 
     // Find first index within which it occurs
     const auto position_iter = thrust::find_if(
-        policy, first_bytes, last_bytes, [mode] __device__ (uint8_t x) {
+        policy, first_bytes, last_bytes, [mode] GPU_LAMBDA (uint8_t x) {
       return static_cast<bool>(x) == mode;
     });
     const int64_t index = position_iter - first_bytes;
