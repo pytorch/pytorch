@@ -8,8 +8,6 @@ from typing import Callable, Union
 
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
-from torch._decomp import decomposition_table
-from torch._meta_registrations import meta_table
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -479,6 +477,10 @@ class FakeTensorMode(TorchDispatchMode):
         ]
         has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
         if has_symbolic_sizes:
+            # TODO: Find better approach for this
+            # Avoid circular import
+            from torch._decomp import decomposition_table
+            from torch._meta_registrations import meta_table
             # TODO: hack, doesn't actually work.
             # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
             with enable_torch_dispatch_mode(
