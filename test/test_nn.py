@@ -20530,7 +20530,7 @@ torch.cuda.synchronize()
     @parametrize_test("attn_mask_dim,is_causal",
                       [(None, False), (2, False), (2, True), (3, False), (3, True)],
                       name_fn=lambda dim, is_causal: (f"{dim}D_{'causal_' if is_causal else ''}attn_mask"
-                                                     if dim is not None else "no_attn_mask"))
+                                                      if dim is not None else "no_attn_mask"))
     @parametrize_test("dropout_p", [0.0, 0.2, 0.5])
     def test_scaled_dot_product_attention(self, device, dtype, attn_mask_dim, is_causal, dropout_p):
         # This test compares python and C++ implementations of SDP.
