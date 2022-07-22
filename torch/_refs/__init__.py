@@ -3084,13 +3084,28 @@ def linspace(
     elif end - start == 0:
         res = torch.full((steps,), start, dtype=dtype, **factory_kwargs)
     else:
-        step_size = (end - start) / (steps - 1)
-        eps = step_size / 2
-        # Does linspace actually do its computation in the specified dtype? Does that matter?
-        tmp = torch.arange(
-            start, end + eps, step_size, **factory_kwargs, dtype=torch.float64
-        )
-        res = prims.to_dtype(tmp, dtype)
+        if dtype is not None and (not dtype.is_complex and not dtype.is_floating_point):
+            # Do computation with integers to be more precise
+            step_size_x_denom = end - start
+            eps = 1 if end > start else -1
+            denom = steps - 1
+            tmp = (
+                torch.arange(
+                    start * denom,
+                    end * denom + eps,
+                    step_size_x_denom,
+                    dtype=torch.int64,
+                )
+                / denom
+            )
+            res = prims.to_dtype(tmp, dtype)
+        else:
+            step_size = (end - start) / (steps - 1)
+            eps = step_size / 2
+            tmp = torch.arange(
+                start, end + eps, step_size, **factory_kwargs, dtype=torch.float64
+            )
+            res = prims.to_dtype(tmp, dtype)
 
     return res
 

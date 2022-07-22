@@ -3075,33 +3075,24 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_linspace(op, device, **kwargs):
-    # What happens when n-partition = 0
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
-    ends = (0, 1, 2, 10, 50)
-    starts = (1, 3, 10, 50)
-    n_steps = (1, 3, 7)
-    for start, end, n_step in product(starts, ends, n_steps):
-        if start > end:
-            # Should this error?
-            continue
-        yield SampleInput(start, args=(end, n_step), kwargs={"dtype": dtype, "device": device})
+    ends = (0, 1, 4, 50)
+    starts = (0, 1, 4, 50)
+    nsteps = (0, 1, 4, 50)
+    for start, end, nstep in product(starts, ends, nsteps):
+        yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
 
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (0, 1, 2, 4)
-    starts = (1, 3, 4)
-    n_steps = (1, 3, 7)
-    if dtype in (torch.int8, torch.uint8):
-        # Avoid overflow
-        bases = (1, 3,)
-    else:
-        bases = (None, 1, 3, 5, 10)
+    starts = (0, 1, 2, 4)
+    n_steps = (0, 1, 2, 4)
+    bases = (1, 3,) if dtype in (torch.int8, torch.uint8) else (None, 1, 3, 5, 10)
     for start, end, n_step, base in product(starts, ends, n_steps, bases):
         if start > end:
-            # Should this error?
             continue
         if base is None:
             yield SampleInput(start, args=(end, n_step), kwargs={"dtype": dtype, "device": device})
@@ -12971,8 +12962,6 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
-               # NOTE: This is an exact copy of xfails for arange except test_out was removed
-
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -12984,10 +12973,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
-               # Captured graph does not contain aten::arange (succeeds on complex!)
-               # g: graph():
-               #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-               #   return (%25)
+               # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
@@ -12999,7 +12985,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            # prims.to_dtype can return a view
            error_inputs_func=error_inputs_linspace,
-           sample_inputs_func=sample_inputs_linspace,
+           sample_inputs_func=sample_inputs_logpace,
            skips=(
                # NOTE: This is an exact copy of xfails for arange except test_out was removed
 
@@ -20488,6 +20474,19 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # cpu implementation is wrong https://github.com/pytorch/pytorch/issues/81996
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+        ),
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-02, rtol=1e-02)
+                }),
+                'TestCommon', device_type='cpu',
+            ),
         ),
         # returns a view of an intermediate tensor (prims.to_dtype)
         validate_view_consistency=False,
