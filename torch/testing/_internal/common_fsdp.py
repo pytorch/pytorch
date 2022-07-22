@@ -1,20 +1,35 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
+import itertools
 import sys
+from abc import ABC, abstractmethod
 from contextlib import suppress
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, auto
 from math import inf
-from typing import Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
-from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
+from torch.distributed.fsdp import CPUOffload
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    BackwardPrefetch,
+    MixedPrecision,
+    ShardingStrategy,
+    TrainingState_,
+)
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import wrap
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    transformer_auto_wrap_policy,
+    wrap,
+)
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
@@ -23,30 +38,98 @@ from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
 class FSDPInitMode(Enum):
-    # Move model to CUDA before wrap
-    CUDA_BEFORE = 1
-    # Move model to CUDA after wrap
-    CUDA_AFTER = 2
-    # Don't move model to CUDA at all.
-    CUDA_NEVER = 3
+    # No FSDP wrapping
+    NO_FSDP = auto()
+    # FSDP recursive wrapping
+    RECURSIVE = auto()
+    # TODO: FSDP non-recursive wrapping
+    # NONRECURSIVE = auto()
 
 
-def _validate(model, process_group, assert_fn):
-    module_states = [param.detach().cpu() for param in model.parameters()]
-    module_states.extend([buffer.detach().cpu() for buffer in model.buffers()])
+class CUDAInitMode(Enum):
+    # Move model to CUDA before passing to the FSDP constructor
+    CUDA_BEFORE = auto()
+    # Move model to CUDA after passing to the FSDP constructor
+    CUDA_AFTER = auto()
+    # Keep on CPU
+    CUDA_NEVER = auto()
+
+
+class FSDPTestModel(nn.Module, ABC):
+    """This defines the interface expected from all models used commonly for
+    FSDP unit tests."""
+    @abstractmethod
+    def get_input(self, device) -> Tuple[torch.Tensor, ...]:
+        """Returns an input for the model as as tuple."""
+        ...
+
+    @abstractmethod
+    def get_loss(self, input, output) -> torch.Tensor:
+        """Returns the loss given the input and output."""
+        ...
+
+    @abstractmethod
+    def run_backward(self, loss) -> None:
+        """Runs the backward pass (e.g. including ``loss.backward()``)."""
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        *init_args: Any,
+        cuda_init_mode: CUDAInitMode,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+        **init_kwargs: Any,
+    ) -> nn.Module:
+        """Initializes an instance of this model."""
+        ...
+
+
+
+def _assert_module_states(
+    model: nn.Module,
+    process_group: dist.ProcessGroup,
+    assert_fn: Callable,
+):
+    """
+    All-gathers module states across ranks and calls ``assert_fn`` on each pair
+    of corresponding states from rank 0 and a nonzero rank. For example, if
+    ``assert_fn`` is ``self.assertEqual()``, then this checks that all module
+    states are equal across ranks.
+    """
+    # Include names for debugging convenience
+    named_module_states = [
+        (param_name, param.detach().cpu())
+        for param_name, param in model.named_parameters()
+    ]
+    named_module_states += [
+        (buffer_name, buffer.detach().cpu())
+        for buffer_name, buffer in model.named_buffers()
+    ]
     world_size = dist.get_world_size(process_group)
     olist = [None for _ in range(world_size)]
-    dist.all_gather_object(olist, module_states, group=process_group)
+    dist.all_gather_object(olist, named_module_states, group=process_group)
     rank0_states = olist[0]
     for state in olist[1:]:
-        for p1, p2 in zip(rank0_states, state):
+        for (_, p1), (_, p2) in zip(rank0_states, state):
             assert_fn(p1, p2)
 
-def _zero_model(fsdp_model: FullyShardedDataParallel):
-    with FullyShardedDataParallel.summon_full_params(fsdp_model):
-        for param in fsdp_model.parameters():
+def _zero_model(
+    model: nn.Module,
+    zero_buffers: bool = False,
+):
+    """Zeros the parameters and optionally buffers of ``model`` in place."""
+    with FSDP.summon_full_params(model):
+        for param in model.parameters():
             with torch.no_grad():
                 param.zero_()
+        if zero_buffers:
+            for buffer in model.buffers():
+                with torch.no_grad():
+                    buffer.zero_()
 
 def _get_state_dict(model, cpu_offload=False, half=False):
     if not cpu_offload:
@@ -61,20 +144,26 @@ def subtest_name(test_name_mapping, *args):
         [test_name_mapping[str(s)] if s is not None else "none" for s in args]
     )
 
-# get full params of a model recursively. Note that if CPU offloading, it will
-# also automatically move the parameters to GPU, due to _rebuild_full_params
-# call.
-def get_full_params(model, recurse=True):
-    with FullyShardedDataParallel.summon_full_params(model, recurse=recurse):
+def get_full_params(model: nn.Module, recurse: bool = True):
+    """
+    Returns the full unsharded parameters of ``model``. Any FSDP-managed
+    parameters offloaded to CPU are moved to GPU in the returned list.
+
+    Args:
+        recurse (bool): If ``False``, only unshards the parameters immediate to
+            ``model``; if ``True``, recurses through the module hierarchy
+            rooted at ``model``.
+    """
+    with FSDP.summon_full_params(model, recurse=recurse):
         return deepcopy(list(model.parameters()))
 
-def _maybe_cuda(model, move_to_cuda):
+def _maybe_cuda(model: nn.Module, move_to_cuda: bool):
     return model.cuda() if move_to_cuda else model
 
-def _maybe_wrap_fsdp(model, wrap_fsdp, *args, **kwargs):
+def _maybe_wrap_fsdp(model: nn.Module, wrap_fsdp: bool, *args, **kwargs):
     return (
         model if not wrap_fsdp
-        else FullyShardedDataParallel(model, *args, **kwargs)
+        else FSDP(model, *args, **kwargs)
     )
 
 class DummyProcessGroup:
@@ -104,28 +193,31 @@ class DeterministicModel(torch.nn.Module):
         super().__init__()
         # keep everything deterministic for model initialization
         torch.manual_seed(0)
-        self.inner: Union[torch.nn.Linear, FullyShardedDataParallel] = \
+        self.inner: Union[torch.nn.Linear, FSDP] = \
             torch.nn.Linear(2, 2).cuda()
         if wrap_fsdp:
-            self.inner = FullyShardedDataParallel(self.inner, cpu_offload=cpu_offload)
+            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
         self.outer = torch.nn.Linear(2, 2).cuda()
 
     def forward(self, x):
         y = self.inner(x)
         return self.outer(y)
 
-class TransformerWithSharedParams(nn.Module):
+class TransformerWithSharedParams(FSDPTestModel):
     def __init__(
-        self, group, *args, d_vocab=23, d_model=16, add_bn=True,
-        fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs
+        self,
+        group: dist.ProcessGroup,
+        cuda_init_mode: CUDAInitMode,
+        add_bn: bool,
+        deterministic: bool,
     ):
         super().__init__()
         self.rank = group.rank()
         self.world_size = group.size()
-        torch.manual_seed(0)  # keep everything deterministic
-        assert (
-            d_vocab >= 12
-        ), "dim of vocab should be larger than 12, as we use torch.arange(12) as input"
+        if deterministic:
+            torch.manual_seed(0)
+        d_vocab = 23
+        d_model = 16
 
         self.embed_tokens = nn.Embedding(d_vocab, d_model)
         self.transformer = nn.Transformer(
@@ -142,12 +234,17 @@ class TransformerWithSharedParams(nn.Module):
         self.register_buffer(
             "vocab_bias", self.embed_tokens.weight.new_ones((d_model,))
         )
-        self.register_buffer("long_buffer", torch.zeros_like(self.vocab_bias, dtype=torch.long))  # type: ignore[arg-type]
+        self.register_buffer(
+            "long_buffer",
+            torch.zeros_like(self.vocab_bias, dtype=torch.long),
+        )  # type: ignore[arg-type]
 
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
-        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
-        self = _maybe_cuda(self, move_to_cuda)
+        if cuda_init_mode == CUDAInitMode.CUDA_BEFORE:
+            self = self.cuda()
+        if deterministic:
+            self.eval()
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
@@ -172,43 +269,95 @@ class TransformerWithSharedParams(nn.Module):
     def run_backward(self, loss):
         loss.backward()
 
+    @staticmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+        add_bn: bool = True,
+    ) -> Union[nn.Module, FSDP]:
+        """
+        Initializes a :class:`TransformerWithSharedParams` instance.
+
+        Args:
+            fsdp_init_mode (FSDPInitMode): If ``NO_FSDP``, then does not wrap
+                any modules with FSDP. If ``RECURSIVE``, then wraps with
+                top-level FSDP. By default, the top-level FSDP uses the
+                ``transformer_auto_wrap_policy()`` for encoder and decoder
+                layers, but a different auto wrap policy may be specified via
+                ``fsdp_kwargs``.
+            cuda_init_mode (CUDAInitMode): Determines model movement to CUDA.
+            fsdp_kwargs (Optional[Dict[str, Any]]): Optional keyword arguments
+                forwarded to the FSDP constructor.
+            deterministic (bool): Whether to make the model deterministic
+                across constructions.
+            add_bn (bool): Whether to include batch norm in the model.
+        """
+        if fsdp_kwargs is None:
+            fsdp_kwargs = {}
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            return TransformerWithSharedParams(group, cuda_init_mode, add_bn, deterministic)
+        elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
+            # Default to the `transformer_auto_wrap_policy()`
+            if "auto_wrap_policy" not in fsdp_kwargs:
+                auto_wrap_policy = functools.partial(
+                    transformer_auto_wrap_policy,
+                    transformer_layer_cls={
+                        TransformerEncoderLayer,
+                        TransformerDecoderLayer,
+                    },
+                )
+            else:
+                auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")
+            fsdp_model = FSDP(
+                TransformerWithSharedParams(group, cuda_init_mode, add_bn, deterministic),
+                group,
+                auto_wrap_policy=auto_wrap_policy,
+                **fsdp_kwargs,
+            )
+            if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+                fsdp_model = fsdp_model.cuda()
+            return fsdp_model
+        raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
+
     def get_ignored_modules(self):
         return [self.transformer]
 
 
-class NestedWrappedModule(nn.Module):
-    def __init__(self, group, wrap_fsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
+class NestedWrappedModule(FSDPTestModel):
+    def __init__(
+        self,
+        group: dist.ProcessGroup,
+        wrap_fsdp: bool,
+        cuda_init_mode: CUDAInitMode,
+        deterministic: bool,
+        **fsdp_kwargs,
+    ):
         super().__init__()
         self.rank = group.rank()
         self.world_size = group.size()
-        move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
+        move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
 
         def _maybe_wrap(layer):
             if wrap_fsdp:
-                return FullyShardedDataParallel(layer, group, *args, **kwargs)
+                return FSDP(layer, group, **fsdp_kwargs)
             return layer
 
-        torch.manual_seed(0)  # keep everything deterministic
-
-        if wrap_everything:
-            self.module = nn.Sequential(
-                _maybe_wrap(_maybe_cuda(nn.Linear(8, 4), move_to_cuda)),
-                _maybe_wrap(_maybe_cuda(nn.Linear(4, 16), move_to_cuda)),
-                _maybe_wrap(_maybe_cuda(nn.Linear(16, 4), move_to_cuda)),
-                _maybe_wrap(_maybe_cuda(nn.Linear(4, 8), move_to_cuda)),
-            )
-        else:
-            self.module = nn.Sequential(
-                _maybe_cuda(nn.Linear(8, 4), move_to_cuda),
-                _maybe_wrap(
-                    nn.Sequential(
-                        _maybe_wrap(_maybe_cuda(nn.Linear(4, 16), move_to_cuda)),
-                        _maybe_cuda(nn.Linear(16, 16), move_to_cuda),
-                    ),
+        if deterministic:
+            torch.manual_seed(0)
+        self.module = nn.Sequential(
+            _maybe_cuda(nn.Linear(8, 4), move_to_cuda),
+            _maybe_wrap(
+                nn.Sequential(
+                    _maybe_wrap(_maybe_cuda(nn.Linear(4, 16), move_to_cuda)),
+                    _maybe_cuda(nn.Linear(16, 16), move_to_cuda),
                 ),
-                _maybe_wrap(_maybe_cuda(nn.Linear(16, 4), move_to_cuda)),
-                _maybe_cuda(nn.Linear(4, 8), move_to_cuda),
-            )
+            ),
+            _maybe_wrap(_maybe_cuda(nn.Linear(16, 4), move_to_cuda)),
+            _maybe_cuda(nn.Linear(4, 8), move_to_cuda),
+        )
 
     def get_input(self, device):
         torch.manual_seed(1 + self.rank)  # keep everything deterministic
@@ -224,9 +373,94 @@ class NestedWrappedModule(nn.Module):
     def run_backward(self, loss):
         loss.backward()
 
+    @staticmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+    ) -> nn.Module:
+        """
+        Initializes a :class:`NestedWrappedModule` instance.
 
-class ModuleWithDelay(nn.Module):
-    def __init__(self, module, delay_after_loss_ms=0, delay_before_reduction_ms=0):
+        Args:
+            fsdp_init_mode (FSDPInitMode): If ``NO_FSDP``, then does not wrap
+                any modules with FSDP. If ``RECURSIVE``, then wraps some nested
+                modules with FSDP but not the top-level module. The model may
+                later be wrapped with a top-level FSDP external to this method
+                if desired.
+            cuda_init_mode (CUDAInitMode): Determines model movement to CUDA.
+            fsdp_kwargs (Optional[Dict[str, Any]]): Optional keyword arguments
+                forwarded to the FSDP constructor.
+            deterministic (bool): Whether to make the model deterministic
+                across constructions.
+        """
+        if fsdp_kwargs is None:
+            fsdp_kwargs = {}
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            return NestedWrappedModule(
+                group,
+                wrap_fsdp=False,
+                cuda_init_mode=cuda_init_mode,
+                deterministic=deterministic,
+            )
+        elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
+            # Does not wrap with top-level FSDP
+            fsdp_model = NestedWrappedModule(
+                group,
+                wrap_fsdp=True,
+                cuda_init_mode=cuda_init_mode,
+                deterministic=deterministic,
+                **fsdp_kwargs,
+            )
+            if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+                fsdp_model = fsdp_model.cuda()
+            return fsdp_model
+        raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
+
+
+class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
+    @staticmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+    ):
+        """
+        Initializes a :class:`NestedWrappedModule` instance, but unlike
+        :meth:`NestedWrappedModule.init`, for the ``RECURSIVE`` init mode, this
+        wraps with top-level FSDP and the ``always_wrap_policy()`` auto wrap
+        policy.
+        """
+        super_ = super(AlwaysWrapNestedWrappedModule, AlwaysWrapNestedWrappedModule)
+        model = super_.init(
+            group=group,
+            fsdp_init_mode=FSDPInitMode.NO_FSDP,
+            cuda_init_mode=cuda_init_mode,
+            fsdp_kwargs=fsdp_kwargs,
+            deterministic=deterministic,
+        )
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            return model
+        elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
+            fsdp_model = FSDP(model, auto_wrap_policy=always_wrap_policy, **fsdp_kwargs)
+            if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+                fsdp_model = fsdp_model.cuda()
+            return fsdp_model
+
+
+class ModuleWithDelay(FSDPTestModel):
+    """This class wraps a :class:`FSDPTestModel` to optionally add a delay
+    after computing the loss and/or before the gradient reduction."""
+    def __init__(
+        self,
+        module: nn.Module,
+        delay_after_loss_ms: int,
+        delay_before_reduction_ms: int,
+    ):
         super().__init__()
         self.delay_after_loss_ms = delay_after_loss_ms
         self.delay_before_reduction_ms = delay_before_reduction_ms
@@ -259,32 +493,53 @@ class ModuleWithDelay(nn.Module):
         ):
             self.module.run_backward(loss)
 
+    @staticmethod
+    def init(
+        module_class: Type[FSDPTestModel],
+        *model_args: Any,
+        delay_after_loss_ms: int,
+        delay_before_reduction_ms: int,
+        **model_kwargs: Any,
+    ):
+        """
+        Args:
+            module_class (Type[FSDPTestModel]): Wrapped module class to which
+                to add delays.
+            model_args: Positional arguments forwarded to the ``module_class``
+                ``init()``.
+            delay_after_loss_ms (int): Delay after computing the loss/before
+                the optimizer step (in ms).
+            delay_before_reduction_ms (int): Delay before reduce-scattering
+                gradients (in ms).
+            model_kwargs: Keyword arguments forwarded to the ``module_class``
+                ``init()``.
+        """
+        return ModuleWithDelay(
+            module_class.init(*model_args, **model_kwargs),
+            delay_after_loss_ms,
+            delay_before_reduction_ms,
+        )
 
 class NestedWrappedModuleWithDelay(ModuleWithDelay):
-    def __init__(
-        self,
-        group,
-        wrap_fsdp,
-        fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
-        cpu_offload=None,
-        backward_prefetch=None,
-        forward_prefetch=False,
-        sharding_strategy=None,
-        mixed_precision=None,
-        **kwargs
+    @staticmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode = CUDAInitMode.CUDA_AFTER,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+        delay_after_loss_ms: int = 0,
+        delay_before_reduction_ms: int = 0,
     ):
-        super().__init__(
-            NestedWrappedModule(
-                group,
-                wrap_fsdp,
-                fsdp_init_mode=fsdp_init_mode,
-                cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch,
-                sharding_strategy=sharding_strategy,
-                mixed_precision=mixed_precision,
-            ),
-            **kwargs
+        return super(NestedWrappedModuleWithDelay, NestedWrappedModuleWithDelay).init(
+            NestedWrappedModule,
+            group=group,
+            fsdp_init_mode=fsdp_init_mode,
+            cuda_init_mode=cuda_init_mode,
+            fsdp_kwargs=fsdp_kwargs,
+            deterministic=deterministic,
+            delay_after_loss_ms=delay_after_loss_ms,
+            delay_before_reduction_ms=delay_before_reduction_ms,
         )
 
 
@@ -298,14 +553,28 @@ class DummyDDP(nn.Module):
 
 
 class MixtureOfExperts(NestedWrappedModule):
-    def __init__(self, group, wrap_fsdp, *args, delay_before_free_ms=0, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, **kwargs):
-        super().__init__(group, wrap_fsdp)
+    def __init__(
+        self,
+        group: dist.ProcessGroup,
+        wrap_fsdp: bool,
+        cuda_init_mode: CUDAInitMode,
+        delay_before_free_ms: int,
+        deterministic: bool,
+        **fsdp_kwargs,
+    ):
+        super().__init__(
+            group=group,
+            wrap_fsdp=wrap_fsdp,
+            cuda_init_mode=cuda_init_mode,
+            deterministic=deterministic,
+        )
         self.group = group
         self.delay_before_free_ms = delay_before_free_ms
         self.wrap_fsdp = wrap_fsdp
-        self.move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
-        # "expert" params are different on each rank
-        torch.manual_seed(42 + group.rank())
+        self.move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
+        if deterministic:
+            # Give each rank different expert parameters
+            torch.manual_seed(42 + self.rank)
         d_expert = 23
         d_shared = 12
         d_input = 8
@@ -315,8 +584,9 @@ class MixtureOfExperts(NestedWrappedModule):
         for p in expert.parameters():
             p.expert = True  # type: ignore[attr-defined]
 
-        # everything else is shared
-        torch.manual_seed(0)
+        if deterministic:
+            # Keep all other parameters the same across ranks
+            torch.manual_seed(0)
 
         shared = _maybe_cuda(nn.Linear(d_shared, d_expert), self.move_to_cuda)
 
@@ -325,9 +595,8 @@ class MixtureOfExperts(NestedWrappedModule):
             expert_group = torch.distributed.new_group(
                 [group.rank()]
             )  # world size 1 means no shard
-            expert = FullyShardedDataParallel(expert, expert_group, **kwargs)  # type: ignore[assignment]
-
-            shared = FullyShardedDataParallel(shared, group, **kwargs)  # type: ignore[assignment]
+            expert = FSDP(expert, expert_group, **fsdp_kwargs)  # type: ignore[assignment]
+            shared = FSDP(shared, group, **fsdp_kwargs)  # type: ignore[assignment]
 
         self.module = nn.Sequential(
             _maybe_cuda(nn.Linear(d_input, d_shared), self.move_to_cuda),
@@ -339,7 +608,7 @@ class MixtureOfExperts(NestedWrappedModule):
     def forward(self, x):
         if self.delay_before_free_ms > 0:
             expert = self.module[2]
-            if isinstance(expert, FullyShardedDataParallel):
+            if isinstance(expert, FSDP):
                 orig_free_full_params = self.module[2]._free_full_params
 
                 def _free_full_params_with_delay(*args):
@@ -360,8 +629,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
     def run_backward(self, loss):
         loss.backward()
-
-        # manually reduce gradients if not wrapped in FullyShardedDataParallel
+        # Manually reduce gradients if not wrapped in FullyShardedDataParallel
         if not self.wrap_fsdp:
             with torch.no_grad():
                 for p in self.parameters():
@@ -369,6 +637,57 @@ class MixtureOfExperts(NestedWrappedModule):
                         continue  # these params don't need grad reduction
                     p.grad.div_(self.world_size)
                     torch.distributed.all_reduce(p.grad, group=self.group)
+
+    @staticmethod
+    def init(
+        group: dist.ProcessGroup,
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+        deterministic: bool = False,
+        delay_before_free_ms: int = 0,
+    ):
+        """
+        Initializes a :class:`MixtureOfExperts` instance.
+
+        Args:
+            fsdp_init_mode (FSDPInitMode): If ``NO_FSDP``, then does not wrap
+                any modules with FSDP. If ``RECURSIVE``, then wraps some nested
+                modules with FSDP, including the expert and shared layers, but
+                not the top-level module. The model may later be wrapped with a
+                top-level FSDP external to this method if desired.
+            cuda_init_mode (CUDAInitMode): Determines model movement to CUDA.
+            fsdp_kwargs (Optional[Dict[str, Any]]): Optional keyword arguments
+                forwarded to the FSDP constructor.
+            deterministic (bool): Whether to make the model deterministic
+                across constructions.
+            delay_before_free_ms (int): Delay before resharding expert
+                parameters in the forward pass (in ms).
+        """
+        if fsdp_kwargs is None:
+            fsdp_kwargs = {}
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            return MixtureOfExperts(
+                group,
+                wrap_fsdp=False,
+                cuda_init_mode=cuda_init_mode,
+                delay_before_free_ms=delay_before_free_ms,
+                deterministic=deterministic,
+            )
+        elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
+            # Does not wrap with top-level FSDP
+            fsdp_model = MixtureOfExperts(
+                group,
+                wrap_fsdp=True,
+                cuda_init_mode=cuda_init_mode,
+                delay_before_free_ms=delay_before_free_ms,
+                deterministic=deterministic,
+                **fsdp_kwargs,
+            )
+            if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+                fsdp_model = fsdp_model.cuda()
+            return fsdp_model
+        raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
 
 class FSDPTest(MultiProcessTestCase):
@@ -379,6 +698,10 @@ class FSDPTest(MultiProcessTestCase):
     @property
     def world_size(self):
         return torch.cuda.device_count() if torch.cuda.is_available() else 4
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
 
     @property
     def init_method(self):
@@ -392,6 +715,39 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
         self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
+
+    def run_subtests(
+        self,
+        subtest_config: Dict[str, List[Any]],
+        test_fn: Callable,
+        *test_args,
+        **test_kwargs: Any,
+    ):
+        """
+        Runs a test function given by ``test_fn`` as a subtest according to the
+        configurations specified by ``subtest_config``. This amortizes the
+        costly setup overhead (including process spawn and initializing the
+        process group) over the subtests.
+
+        Args:
+            subtest_config (Dict[str, List[Any]]): A mapping from subtest
+                keyword argument name to a list of its possible values.
+            test_fn (Callable): A callable that runs the actual test.
+            test_args: Positional arguments to pass to ``test_fn``.
+            test_kwargs: Keyword arguments to pass to ``test_fn``.
+        """
+        # Convert the config mapping to a list to have a fixed order
+        subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+        subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+        subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+        for values in itertools.product(*subtest_config_values):
+            # Map keyword to chosen value
+            subtest_kwargs = {
+                kwarg: value for kwarg, value in zip(subtest_config_keys, values)
+            }
+            with self.subTest(**subtest_kwargs):
+                test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            dist.barrier()
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -435,16 +791,16 @@ class FSDPTest(MultiProcessTestCase):
 
     def _train_for_several_steps(
         self,
-        model,
-        num_steps,
-        autocast,
-        lr=0.01,
-        fsdp_cpu_offload=None,
-        clip_norm=0.3,
-        norm_type=None,
-        save_model=False,
-        mixed_precision=None,
-        enable_sharded_grad_scaler=False,
+        model: nn.Module,
+        num_steps: int,
+        autocast: bool,
+        lr: float = 0.01,
+        fsdp_cpu_offload: Optional[CPUOffload] = None,
+        norm_type: Optional[Union[float, int]] = None,
+        save_model: bool = False,
+        mixed_precision: Optional[MixedPrecision] = None,
+        enable_sharded_grad_scaler: bool = False,
+        use_pure_fp16: bool = False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -458,14 +814,14 @@ class FSDPTest(MultiProcessTestCase):
             with torch.cuda.amp.autocast(enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
-                if mixed_precision and not isinstance(model, FullyShardedDataParallel):
+                if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
                     else:
                         input = tuple(x.half() for x in input)
                 output = model(*input)
                 # Post-forward, if CPU offloading model param should be on CPU.
-                if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
+                if cpu_offload_params and isinstance(model, FSDP):
                     for p in model.parameters():
                         # Params should always be on CPU, even if
                         # p._is_sharded=False
@@ -474,32 +830,35 @@ class FSDPTest(MultiProcessTestCase):
                 loss = model.module.get_loss(input, output).to(model_device)
             loss = sharded_grad_scaler.scale(loss)
 
-            if not mixed_precision:
+            if not mixed_precision and not use_pure_fp16:
                 assert (
                     loss.dtype == torch.float32
                 ), "loss data type should be float32, as the original \
                     parameter data type is float32."
             else:
+                if use_pure_fp16:
+                    self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
-                if isinstance(model, FullyShardedDataParallel):
+                elif isinstance(model, FSDP):
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
             model.module.run_backward(loss)
             if norm_type is not None:
-                if isinstance(model, FullyShardedDataParallel):
-                    model.clip_grad_norm_(clip_norm, norm_type)
+                max_norm = 0.3
+                if isinstance(model, FSDP):
+                    model.clip_grad_norm_(max_norm, norm_type)
                     total_norm_after_clip = _collect_total_grad_norm_fsdp(
                         model, norm_type, self.rank
                     )
                 else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm, norm_type)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, norm_type)
                     total_norm_after_clip = _collect_total_grad_norm_local(
                         model, norm_type
                     )
-                self.assertTrue(total_norm_after_clip <= clip_norm)
+                self.assertTrue(total_norm_after_clip <= max_norm)
             # Post-backward, if CPU offloading model params should be on CPU.
-            if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
+            if cpu_offload_params and isinstance(model, FSDP):
                 for p in model.parameters():
                     # Params should always be on CPU, even if
                     # p._is_sharded=False
@@ -514,160 +873,156 @@ class FSDPTest(MultiProcessTestCase):
                 # Zero params, if save/load state_dict did not work properly, this
                 # would break the parity test with DDP.
                 _zero_model(model)
-
                 model.load_state_dict(state_dict)
 
-        if isinstance(model, FullyShardedDataParallel):
+        if isinstance(model, FSDP):
             model._assert_state(TrainingState_.IDLE)
         return loss.detach()
 
-    def _test_identical_outputs(
+    def _test_fsdp_parity(
         self,
-        model_init_fn,
-        *args,
-        ref_ddp_fn=None,
-        num_steps=2,
-        fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
-        lr=0.01,
-        cpu_offload=CPUOffload(),
-        backward_prefetch=None,
-        forward_prefetch=False,
-        sharding_strategy=None,
-        mixed_precision=None,
-        save_model=True,
-        clip_norm=0.3,
-        norm_type=None,
-        enable_sharded_grad_scaler=False,
-        **kwargs
+        model_class: Type[FSDPTestModel],
+        fsdp_init_mode: FSDPInitMode,
+        cuda_init_mode: CUDAInitMode,
+        ref_init_fn: Optional[Callable] = None,
+        num_iters: int = 2,
+        save_model: bool = True,
+        cpu_offload: CPUOffload = CPUOffload(),
+        backward_prefetch: Optional[BackwardPrefetch] = None,
+        forward_prefetch: bool = False,
+        sharding_strategy: Optional[ShardingStrategy] = None,
+        mixed_precision: Optional[MixedPrecision] = None,
+        enable_sharded_grad_scaler: bool = False,
+        use_pure_fp16: bool = False,
+        norm_type: Optional[Union[float, int]] = None,
+        init_kwargs: Optional[Dict[str, Any]] = None,
+        **fsdp_kwargs,
     ):
-        group = dist.distributed_c10d._get_default_group()
-        rank = group.rank()
-        # Establish reference behavior with PyTorch DDP (+ optionally autocast).
-        model = model_init_fn(group=group, wrap_fsdp=False).cuda()
-        if ref_ddp_fn is None:
-            model = nn.parallel.DistributedDataParallel(
-                model, device_ids=[rank], output_device=rank
-            )
-        else:
-            model = ref_ddp_fn(model)
+        """
+        Tests FSDP training against a reference, which defaults to DDP but
+        may be customized with ``ref_init_fn``.
 
-        # DDP training
-        ref_loss = self._train_for_several_steps(
-            model, num_steps, autocast=mixed_precision is not None, lr=lr,
-            fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
-            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
+        Args:
+            model_class (Type[FSDPTestModel]): A model class that inherits from
+                ``FSDPTestModel``, which defines the expected interface.
+            fsdp_init_mode (FSDPInitMode): The mode to initialize the
+                FSDP-wrapped model. This should not be ``NO_FSDP``.
+            ref_init_fn (Optional[Callable]): A callable to invoke that wraps a
+                non-wrapped model to construct the reference model, where this
+                wrapper should provide data parallel semantics. If ``None``,
+                then the callable defaults to the DDP constructor.
+        """
+        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, "Expects an FSDP init mode that wraps with FSDP"
+        if init_kwargs is None:
+            init_kwargs = {}
+        lr = 1e-2
+        rank = self.process_group.rank()
+        # Establish reference behavior with DDP
+        model = model_class.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+            **init_kwargs,
         )
-        ref_full_params = list(model.parameters())
-
-        # Confirm we get the same behavior using FullyShardedDataParallel.
+        if ref_init_fn is None:
+            ref_model = DDP(model, device_ids=[rank], output_device=rank)
+        else:
+            ref_model = ref_init_fn(model)
+        if use_pure_fp16:
+            ref_model = ref_model.half()
+        ref_loss = self._train_for_several_steps(
+            ref_model,
+            num_iters,
+            autocast=mixed_precision is not None,
+            lr=lr,
+            fsdp_cpu_offload=cpu_offload,
+            mixed_precision=mixed_precision,
+            norm_type=norm_type,
+            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
+            use_pure_fp16=use_pure_fp16,
+        )
+        ddp_params = list(ref_model.parameters())
+        # Check against FSDP behavior
+        fsdp_kwargs.update(
+            {
+                "cpu_offload": cpu_offload,
+                "backward_prefetch": backward_prefetch,
+                "forward_prefetch": forward_prefetch,
+                "sharding_strategy": sharding_strategy,
+                "mixed_precision": mixed_precision,
+            }
+        )
         try:
-            model = model_init_fn(
-                group=group,
-                wrap_fsdp=True,
-                fsdp_init_mode=fsdp_init_mode,
-                cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch,
-                sharding_strategy=sharding_strategy,
-                mixed_precision=mixed_precision,
+            fsdp_model = model_class.init(
+                self.process_group,
+                fsdp_init_mode,
+                cuda_init_mode,
+                fsdp_kwargs,
+                deterministic=True,
+                **init_kwargs,
             )
         except Exception as e:
-            raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
-
-        cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
-        model = FullyShardedDataParallel(
-            model,
-            cpu_offload=cpu_offload,
-            backward_prefetch=backward_prefetch,
-            forward_prefetch=forward_prefetch,
-            sharding_strategy=sharding_strategy,
-            mixed_precision=mixed_precision,
-        )
-        # Call model.cuda() after init FSDP if specified.
-        if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
-            model = model.cuda()
-
-        # Note that we don't do this check for FSDPInitMode.CUDA_AFTER since we
-        # expect FSDP code to raise error that we check below, in the case of
-        # offload params.
-        if fsdp_init_mode != FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
-            for p in model.parameters():
-                # Should be on CPU regardless of if param is sharded.
-                self.assertEqual(p.device, torch.device("cpu"), f"Mismatch, cpu offload is {cpu_offload}")
-
-        only_check_err = fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params
-        ctx = (
+            raise ValueError(f"Initializing {model_class} raised error {str(e)}")
+        if not isinstance(fsdp_model, FSDP):
+            # Enforce that we wrap with top-level FSDP since we are comparing
+            # assuming a data parallel reference and some test models may not
+            # do so in their `init()` method
+            fsdp_model = FSDP(fsdp_model, self.process_group, **fsdp_kwargs)
+        if use_pure_fp16:
+            # Change the model parameter dtype after FSDP initialization
+            fsdp_model = fsdp_model.half()
+        if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+            fsdp_model = fsdp_model.cuda()
+        offload_params = cpu_offload is not None and cpu_offload.offload_params
+        # Offloading parameters with `CUDA_AFTER` should raise an error during
+        # lazy initialization due to the parameter devices not being CPU;
+        # otherwise, all parameter devices should be CPU
+        expects_device_error = offload_params and cuda_init_mode == CUDAInitMode.CUDA_AFTER
+        expects_cpu_device = offload_params and cuda_init_mode != CUDAInitMode.CUDA_AFTER
+        if expects_cpu_device:
+            cpu_device = torch.device("cpu")
+            for param in fsdp_model.parameters():
+                self.assertEqual(param.device, cpu_device)
+        context = (
             self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
-            if only_check_err else suppress()
+            if expects_device_error else suppress()
         )
-        with ctx:
-            # FSDP training
-            shard_loss = self._train_for_several_steps(
-                model, num_steps, autocast=False, lr=lr,
-                fsdp_cpu_offload=cpu_offload, save_model=save_model,
+        with context:
+            fsdp_loss = self._train_for_several_steps(
+                fsdp_model,
+                num_iters,
+                autocast=False,
+                lr=lr,
+                fsdp_cpu_offload=cpu_offload,
+                save_model=save_model,
                 mixed_precision=mixed_precision,
+                norm_type=norm_type,
                 enable_sharded_grad_scaler=enable_sharded_grad_scaler,
+                use_pure_fp16=use_pure_fp16,
             )
-        # We only check for errors in the case we have the following setup:
-        # model = FSDP(model, cpu_offload=True)
-        # model = model.cuda()
-        # so skip the rest of this logic.
-        if only_check_err:
+        # No need to check for parameter and loss parity if expecting an error
+        if expects_device_error:
             return
-        # If CPU offload, next call will change model params to GPU. Sanity
-        # check that params are on CPU before.
-        if cpu_offload.offload_params:
-            device_set = {p.device for p in model.parameters()}
+        # Check parameter devices are CPU if offloading to CPU before calling
+        # `get_full_params()`, which will cast the parameters to FP32
+        if offload_params:
+            for param in fsdp_model.parameters():
+                self.assertEqual(param.device, cpu_device)
+            fsdp_loss = fsdp_loss.cuda()
+        fsdp_unsharded_params = get_full_params(fsdp_model)
+        torch.testing.assert_allclose(ref_loss, fsdp_loss)
+        # Do not check for parameter parity if using mixed precision since (1)
+        # the DDP parameters are in FP16 (from `half()`) while the FSDP
+        # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
+        # the optimizer in FP16 while FSDP runs it in FP32
+        if mixed_precision is not None:
             self.assertEqual(
-                {torch.device("cpu")},
-                device_set,
-                f"Got device set {device_set}"
-            )
-        shard_full_params = get_full_params(model)
-
-        if cpu_offload.offload_params:
-            shard_loss = shard_loss.cuda()
-        torch.testing.assert_allclose(ref_loss, shard_loss)
-        # Note that we don't do parameter check when testing mixed precision,
-        # as FSDP will bring the full param back to fp32 but we did model.half()
-        # for DDP so they wouldn't be equal. Further, DDP + model.half() would
-        # run optimizer in reduced precision versus FSDP's full precision.
-        if not mixed_precision:
-            self.assertEqual(
-                ref_full_params,
-                shard_full_params,
+                ddp_params,
+                fsdp_unsharded_params,
                 exact_device=True,
-                msg="FullyShardedDataParallel didn't match PyTorch DDP",
+                msg="FSDP did not match DDP",
             )
-
-    def _get_wrapped_model(
-        self, group, cuda_first=False, ignore_modules=False, config=None,
-        **model_kwargs,
-    ) -> FullyShardedDataParallel:
-        if config is None:
-            config = {}
-        move_to_cuda = not (
-            "cpu_offload" in config and config["cpu_offload"].offload_params
-        )
-        transformer = TransformerWithSharedParams(group, **model_kwargs)
-        if cuda_first and move_to_cuda:
-            transformer = transformer.cuda()
-        if ignore_modules:
-            assert "ignored_modules" not in config, \
-                "Do not pass in `ignored_modules` via `config`"
-            config["ignored_modules"] = transformer.get_ignored_modules()
-        model = FullyShardedDataParallel(transformer, group, **config)
-        if not cuda_first and move_to_cuda:
-            model = model.cuda()
-        return model
-
-    def _get_nonwrapped_model(
-        self, group, **model_kwargs,
-    ) -> torch.nn.Module:
-        """Returns the non-wrapped model that is wrapped in
-        :meth:`_get_wrapped_model`. The model used in these two methods should
-        be kept in sync for tests that use both for parity comparisons."""
-        return TransformerWithSharedParams(group, **model_kwargs).cuda()
 
 
 class SkipModule(nn.Module):

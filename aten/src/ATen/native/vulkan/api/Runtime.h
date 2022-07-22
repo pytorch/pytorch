@@ -2,8 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
 namespace native {
@@ -35,7 +35,8 @@ class Runtime final {
  public:
   explicit Runtime(const RuntimeConfiguration);
 
-  // Do not allow copying. There should be only one global instance of this class.
+  // Do not allow copying. There should be only one global instance of this
+  // class.
   Runtime(const Runtime&) = delete;
   Runtime& operator=(const Runtime&) = delete;
 
@@ -73,7 +74,9 @@ class Runtime final {
   inline Adapter* get_adapter_p(uint32_t i) {
     TORCH_CHECK(
         i >= 0 && i < adapters_.size(),
-        "Pytorch Vulkan Runtime: Adapter at index ", i, " is not available!");
+        "Pytorch Vulkan Runtime: Adapter at index ",
+        i,
+        " is not available!");
     return adapters_[i].get();
   }
 
@@ -81,7 +84,8 @@ class Runtime final {
     return default_adapter_i_;
   }
 
-  using Selector = std::function<uint32_t (const std::vector<Runtime::DeviceMapping>&)>;
+  using Selector =
+      std::function<uint32_t(const std::vector<Runtime::DeviceMapping>&)>;
   uint32_t create_adapter(const Selector&);
 };
 
