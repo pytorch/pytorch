@@ -284,10 +284,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             "allow_tf32_cublas",
             &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
     py::class_<Inputs>(m, "_Inputs")
-        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_)
-        .def_readonly("dtypes", &Inputs::dtypes_);
-
-    py::class_<TensorMetadata>(m, "_TensorMetadata")
+        .def_readonly("dtypes", &Inputs::dtypes_)
         .def_property_readonly(
             "ivalues",
             [](const Inputs& inputs) {
@@ -297,6 +294,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
               }
               return list;
             })
+        .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
+
+    py::class_<TensorMetadata>(m, "_TensorMetadata")
         .def_property_readonly(
             "layout",
             [](const TensorMetadata& metadata) {
