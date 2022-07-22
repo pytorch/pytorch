@@ -4,6 +4,7 @@ import functools
 import os
 import re
 import textwrap
+import traceback
 import unittest
 
 import expecttest
@@ -11,7 +12,7 @@ import expecttest
 import torch
 from torch._C._autograd import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    skipIfRocm, TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF)
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -21,6 +22,16 @@ PRUNE_FUNCTIONS = {
     "cudaStreamIsCapturing": False,
     "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": False,
 }
+
+# ROCTracer is currently not producing events that profiler can extract. We
+# should bring it up to parity with CUPTI Kineto / profiler integration, but in
+# the mean time there is still utility in running tests but not checking that
+# the values match expected value.
+#  1) We will still catch runtime errors and assert failures
+#  2) We can diff the output to see how far we are from parity
+#
+# TODO: We also fail to capture events for Windows on some platforms.
+ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
 
 
 class ProfilerTree:
@@ -37,11 +48,14 @@ class ProfilerTree:
         """
 
         @functools.wraps(f)
-        def begin_unit_test_marker(self, replicates=5):
+        def begin_unit_test_marker(self, replicates=3):
             try:
                 for i in range(replicates):
                     self.tree_replicate = i
-                    return f(self)
+                    out = f(self)
+                    if self.tree_replicate is None:
+                        break
+                return out
             finally:
                 delattr(self, "tree_replicate")
         return begin_unit_test_marker
@@ -141,7 +155,7 @@ class ProfilerTree:
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
 class TestProfilerTree(TestCase):
-    def assertTreesMatch(self, actual: str, expected: str):
+    def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
         #   tracing. Observed differences include:
@@ -171,7 +185,15 @@ class TestProfilerTree(TestCase):
         if replicate:
             self.assertEqual(actual, expected)
         else:
-            self.assertExpectedInline(actual, expected, skip=1)
+            try:
+                self.assertExpectedInline(actual, expected, skip=1)
+            except AssertionError as e:
+                if allow_failure:
+                    self.tree_replicate = None
+                    msg = traceback.format_exception_only(type(e), e)[0]
+                    print(msg.split("AssertionError:")[-1])
+                else:
+                    raise
 
     @ProfilerTree.test
     def test_profiler_experimental_tree(self):
@@ -579,8 +601,6 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
-    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda(self):
         with torch.profiler.profile(profile_memory=True) as p:
@@ -672,12 +692,11 @@ class TestProfilerTree(TestCase):
               aten::add_
                 cudaLaunchKernel
                   void at::native::vectorized_elementwise_kernel<...>(...)
-            [memory]"""  # noqa: B950
+            [memory]""",  # noqa: B950
+            allow_failure=ALLOW_CUDA_FAILURE,
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
-    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_with_stream(self):
         streams = [torch.cuda.Stream() for _ in range(3)]
@@ -729,12 +748,12 @@ class TestProfilerTree(TestCase):
               cudaLaunchKernel
                 void at::native::vectorized_elementwise_kernel<...>(...)
               [memory]
-            [memory]"""
+            [memory]""",
+            allow_failure=ALLOW_CUDA_FAILURE,
         )
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    @unittest.skipIf(IS_WINDOWS, "TODO: In some cases Windows doesn't capture events.")
-    @skipIfRocm  # TODO: Unify or add ROCm tests
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
         model = torch.nn.modules.Linear(1, 1, device="cuda")
@@ -930,7 +949,8 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    ..."""  # noqa: B950
+                    ...""",  # noqa: B950
+            allow_failure=ALLOW_CUDA_FAILURE,
         )
 
 
