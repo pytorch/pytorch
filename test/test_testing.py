@@ -1775,6 +1775,7 @@ class TestImports(TestCase):
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
+                           "torch.ao.sparsity._experimental.",  # depends on pytorch_lightning, not user-facing
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
