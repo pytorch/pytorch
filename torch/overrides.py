@@ -1868,6 +1868,11 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def restore(self):
         return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
 
+    @classmethod
+    def push(cls, *args, **kwargs):
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):

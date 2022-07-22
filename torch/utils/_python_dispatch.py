@@ -2,6 +2,7 @@ import contextlib
 from typing import Iterator, Set
 import functools
 
+import warnings
 from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
@@ -166,6 +167,12 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     @contextlib.contextmanager
     def restore(self):
         return _restore_mode(self, mode_info=TorchDispatchModeInfo())
+
+    @classmethod
+    def push(cls, *args, **kwargs):
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
