@@ -1644,10 +1644,15 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
     return result
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
+    low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     sizes = ((2, 2), (2, 3, 2))
-    ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
+    if dtype in low_precision_dtypes:
+        # svdvals not supported for low precision dtypes
+        ords = ('fro', inf, -inf, 1, -1)
+    else:
+        ords = ('fro', 'nuc', inf, -inf, 1, -1, 2, -2)
     dims = ((-2, -1), (-1, 0))
 
     for size, ord, dim, keepdim in product(sizes, ords, dims, [True, False]):
@@ -6362,7 +6367,7 @@ def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
 
     # NOTE: primTorch is more strict about the type of the fill value argument
     # So we must cast it to the correct dtype
-    from torch._prims.utils import dtype_to_type
+    from torch._prims_common import dtype_to_type
     scalar_type = dtype_to_type(dtype)
 
     def drop_mode_argument(input, pad, mode=None, value=None):
@@ -6413,6 +6418,8 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
+        low = None
+        high = None
         if self.name in ['fft.hfft', 'fft.irfft',
                          '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
@@ -6422,11 +6429,15 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         elif self.name in ['fft.hfftn', 'fft.irfftn',
                            '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
+            # Adjusting the limits because the test would be flaky due to over-saturation of float16
+            # See: https://github.com/pytorch/pytorch/pull/81416
+            low = -1.0
+            high = 1.0
         else:
             shapes = ((2, 8, 16), (32,))
-        nd_tensor = partial(make_tensor, shapes[0], device=device,
+        nd_tensor = partial(make_tensor, shapes[0], device=device, low=low, high=high,
                             dtype=dtype, requires_grad=requires_grad)
-        oned_tensor = partial(make_tensor, shapes[1], device=device,
+        oned_tensor = partial(make_tensor, shapes[1], device=device, low=low, high=high,
                               dtype=dtype, requires_grad=requires_grad)
 
     if self.ndimensional == SpectralFuncType.ND:
@@ -12778,7 +12789,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,
@@ -13834,8 +13845,15 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-04, rtol=2e-04), }),
+                   'TestCompositeCompliance', 'test_operator', device_type='cuda'),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda')],
+                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=2e-05), }),
+                   'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
+                   active_if=TEST_CUDNN)],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -14414,6 +14432,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type='cpu'),
            )),
     OpInfo('nn.functional.max_unpool1d',
            variant_test_name='grad',
@@ -14446,6 +14466,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -14480,6 +14501,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
@@ -16845,8 +16867,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16861,8 +16881,6 @@ op_db: List[OpInfo] = [
                # 76571
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
                             dtypes=(torch.float16, torch.float32, torch.float64)),
-               DecorateInfo(unittest.skip("memory access error on some platforms"),
-                            'TestCommon', 'test_non_standard_bool_values', device_type='cuda'),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -16877,11 +16895,6 @@ op_db: List[OpInfo] = [
                # 76571
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
                             dtypes=(torch.float16, torch.float32, torch.float64)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            device_type='cuda'),
-               DecorateInfo(unittest.skip("memory access error on ROCm"), 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cuda',
-                            active_if=TEST_WITH_ROCM),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -17084,6 +17097,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -17209,6 +17224,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: new_empty is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
@@ -17239,6 +17256,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance',
+                            'test_operator'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
@@ -21358,6 +21377,26 @@ python_ref_db = [
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
         supports_nvfuser=False,  # clone_default
+    ),
+    PythonRefInfo(
+        "_refs.linalg.matrix_norm",
+        torch_opinfo_name="linalg.matrix_norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.norm",
+        torch_opinfo_name="linalg.norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
