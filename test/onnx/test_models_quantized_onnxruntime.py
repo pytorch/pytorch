@@ -3,9 +3,9 @@
 import os
 import unittest
 
+import onnx_test_common
 import parameterized
 import PIL
-import test_onnx_common
 
 import torch
 import torchvision
@@ -48,9 +48,9 @@ class _TopPredictor(nn.Module):
 @parameterized.parameterized_class(
     ("is_script",),
     [(True,), (False,)],
-    class_name_func=test_onnx_common.parameterize_class_name,
+    class_name_func=onnx_test_common.parameterize_class_name,
 )
-class TestQuantizedModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
+class TestQuantizedModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     def run_test(self, model, inputs, *args, **kwargs):
         model = _TopPredictor(model)
         return super().run_test(model, inputs, *args, **kwargs)
