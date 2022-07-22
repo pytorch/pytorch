@@ -12,13 +12,18 @@
 
 #pragma once
 
-#include <c10/core/SymInt.h>
+#include <c10/core/SymInt.h> // IWYU pragma: export
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <initializer_list>
+#include <iosfwd>
 #include <iterator>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {

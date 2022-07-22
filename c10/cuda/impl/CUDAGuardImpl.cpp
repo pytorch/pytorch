@@ -1,5 +1,8 @@
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 
+#include <c10/core/DeviceType.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+
 namespace c10 {
 namespace cuda {
 namespace impl {

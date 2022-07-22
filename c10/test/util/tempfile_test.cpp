@@ -1,7 +1,9 @@
-#include <c10/util/tempfile.h>
+#include <c10/util/tempfile.h> // IWYU pragma: associated
+
+#include <c10/util/Optional.h>
+
 #include <gtest/gtest.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #if !defined(_WIN32)
 TEST(TempFileTest, MatchesExpectedPattern) {

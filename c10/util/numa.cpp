@@ -1,6 +1,6 @@
 #include <c10/util/numa.h>
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Macros.h> // IWYU pragma: keep
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 

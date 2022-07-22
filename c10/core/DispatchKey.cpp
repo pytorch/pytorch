@@ -1,7 +1,10 @@
 #include <c10/core/DispatchKey.h>
+
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/Exception.h>
 
 #include <unordered_map>
+#include <utility>
 
 namespace c10 {
 

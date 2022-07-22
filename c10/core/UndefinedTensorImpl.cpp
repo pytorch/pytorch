@@ -1,5 +1,9 @@
 #include <c10/core/UndefinedTensorImpl.h>
+
+#include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/typeid.h>
 
 namespace c10 {
 

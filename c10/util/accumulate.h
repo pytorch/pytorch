@@ -3,10 +3,15 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
+#include <cstdint>
+#include <functional>
 #include <iterator>
 #include <numeric>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace c10 {
 

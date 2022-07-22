@@ -4,6 +4,9 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
 
+#include <cstdint>
+#include <type_traits>
+
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
 //
 // This manages two thread-local DispatchKeySets:

@@ -1,4 +1,4 @@
-#include <c10/util/Synchronized.h>
+#include <c10/util/Synchronized.h> // IWYU pragma: associated
 #include <gtest/gtest.h>
 
 #include <array>

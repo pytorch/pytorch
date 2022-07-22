@@ -1,4 +1,8 @@
 #include <c10/util/typeid.h>
+
+#include <c10/core/ScalarType.h>
+#include <c10/util/string_view.h>
+
 #include <gtest/gtest.h>
 
 using std::string;

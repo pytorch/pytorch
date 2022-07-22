@@ -7,6 +7,7 @@
 #include <c10/util/irange.h>
 
 #include <atomic>
+#include <type_traits>
 
 using std::string;
 

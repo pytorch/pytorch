@@ -1,5 +1,4 @@
 #include <c10/util/Array.h>
-#include <gtest/gtest.h>
 
 using c10::guts::array;
 using c10::guts::to_array;

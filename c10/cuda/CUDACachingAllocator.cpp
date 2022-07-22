@@ -1,24 +1,33 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/UniqueVoidPtr.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Registry.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/string_utils.h>
 
+#include <cuda.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
-#include <bitset>
+#include <cstdlib>
 #include <deque>
-#include <iterator>
-#include <map>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <regex>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace c10 {
@@ -154,6 +163,7 @@ void update_stat_array(
 
 struct Block;
 struct PrivatePool;
+
 typedef bool (*Comparison)(const Block*, const Block*);
 
 struct BlockPool {

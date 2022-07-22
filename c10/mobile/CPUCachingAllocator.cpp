@@ -1,6 +1,11 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 
 #include <c10/core/impl/alloc_cpu.h>
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/flat_hash_map.h>
+
+#include <utility>
 
 namespace c10 {
 

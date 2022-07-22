@@ -1,7 +1,10 @@
 #pragma once
 
-#include <c10/util/BFloat16-inl.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/math_compat.h>
+
+#include <cstdint>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")

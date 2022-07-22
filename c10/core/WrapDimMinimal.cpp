@@ -1,5 +1,7 @@
 #include <c10/core/WrapDimMinimal.h>
 
+#include <c10/util/Exception.h>
+
 namespace c10 {
 namespace detail {
 

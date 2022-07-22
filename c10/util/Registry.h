@@ -9,18 +9,19 @@
 // NB: This Registry works poorly when you have other namespaces.
 // Make all macro invocations from inside the at namespace.
 
+#include <c10/macros/Macros.h>
+#include <c10/util/Type.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <c10/macros/Macros.h>
-#include <c10/util/Type.h>
 
 namespace c10 {
 

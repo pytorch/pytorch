@@ -1,5 +1,13 @@
 #include <c10/core/thread_pool.h>
 
+#include <c10/util/Logging.h>
+#include <c10/util/Registry.h>
+
+#include <algorithm>
+#include <memory>
+#include <ostream>
+#include <stdexcept>
+
 namespace c10 {
 
 ThreadPool::ThreadPool(

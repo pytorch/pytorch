@@ -2,6 +2,8 @@
 
 #include <c10/macros/Macros.h>
 
+#include <iosfwd>
+
 /**
  * Android versions with libgnustl incorrectly handle thread_local C++
  * qualifier with composite types. NDK up to r17 version is affected.
@@ -35,9 +37,11 @@
 
 #if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 #include <c10/util/Exception.h>
-#include <errno.h>
+
 #include <pthread.h>
+#include <cerrno>
 #include <memory>
+
 namespace c10 {
 
 /**

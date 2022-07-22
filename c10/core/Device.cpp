@@ -1,15 +1,14 @@
 #include <c10/core/Device.h>
-#include <c10/macros/Macros.h>
+
 #include <c10/util/Exception.h>
+#include <c10/util/string_utils.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <exception>
-#include <ostream>
 #include <string>
-#include <tuple>
-#include <vector>
+#include <utility>
 
 namespace c10 {
 namespace {

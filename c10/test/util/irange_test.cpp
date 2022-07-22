@@ -1,8 +1,9 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-#include <c10/util/irange.h>
+#include <c10/util/irange.h> // IWYU pragma: associated
 
 #include <gtest/gtest.h>
+#include <vector>
 
 using namespace ::testing;
 

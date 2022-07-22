@@ -1,12 +1,13 @@
+#include <c10/util/order_preserving_flat_hash_map.h> // IWYU pragma: associated
+
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+
+#include <gtest/gtest.h>
 #include <algorithm>
 #include <unordered_set>
 #include <vector>
-
-#include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
-#include <c10/util/irange.h>
-#include <c10/util/order_preserving_flat_hash_map.h>
-#include <gtest/gtest.h>
 
 namespace {
 

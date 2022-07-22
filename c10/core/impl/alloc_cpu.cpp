@@ -6,6 +6,11 @@
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <ostream>
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,

@@ -1,16 +1,22 @@
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <cuda_runtime_api.h>
+#include <driver_types.h>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
-#include <mutex>
-#include <vector>
-
 #include <iostream>
+#include <memory>
+
 namespace c10 {
 namespace cuda {
 

@@ -10,11 +10,17 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
+
 #include <gtest/gtest.h>
-#include <stdarg.h>
+#include <cstdarg>
+#include <cstdlib>
+#include <iterator>
 #include <list>
+#include <type_traits>
+#include <utility>
 
 using c10::SmallVector;
 using c10::SmallVectorImpl;

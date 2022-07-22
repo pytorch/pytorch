@@ -1,7 +1,10 @@
-#include <gtest/gtest.h>
-
 #include <c10/core/SymInt.h>
 #include <c10/core/SymbolicIntNode.h>
+#include <c10/macros/Macros.h>
+
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <memory>
 
 using namespace c10;
 

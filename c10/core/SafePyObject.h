@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PyInterpreter.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
-#include <c10/util/python_stub.h>
+#include <c10/util/python_stub.h> // IWYU pragma: export
 
 namespace c10 {
 

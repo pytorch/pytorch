@@ -4,7 +4,9 @@
 // 1 bit for the sign, 8 bits for the exponent and 7 bits for the mantissa.
 
 #include <c10/macros/Macros.h>
+
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000

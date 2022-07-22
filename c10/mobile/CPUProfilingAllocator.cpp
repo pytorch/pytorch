@@ -1,11 +1,18 @@
-#include <climits>
-
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Exception.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <map>
+#include <memory>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace c10 {
 

@@ -2,10 +2,15 @@
 
 #include <c10/util/C++17.h>
 #include <c10/util/ConstexprCrc.h>
-#include <c10/util/IdWrapper.h>
+#include <c10/util/IdWrapper.h> // IWYU pragma: export
 #include <c10/util/string_view.h>
+
 #include <cinttypes>
 #include <functional>
+#include <iosfwd>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 
 namespace c10 {
 namespace util {

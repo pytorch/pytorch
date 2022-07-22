@@ -1,6 +1,9 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <utility>
 
 using c10::Error;
 

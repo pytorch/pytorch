@@ -10,7 +10,13 @@
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+
 #include <cuda_runtime_api.h>
+#include <driver_types.h>
+#include <cstdint>
+
 namespace c10 {
 namespace cuda {
 

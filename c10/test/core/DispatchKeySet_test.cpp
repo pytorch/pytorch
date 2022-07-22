@@ -1,11 +1,15 @@
-#include <gtest/gtest.h>
-
-#include <cstddef>
-#include <iterator>
-#include <unordered_set>
-
 #include <c10/core/DispatchKeySet.h>
+
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <string>
+#include <unordered_set>
 
 using namespace c10;
 

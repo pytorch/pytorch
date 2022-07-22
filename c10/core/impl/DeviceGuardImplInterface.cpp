@@ -1,5 +1,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
+#include <c10/core/DeviceType.h>
+
 namespace c10 {
 namespace impl {
 

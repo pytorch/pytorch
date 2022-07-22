@@ -1,16 +1,21 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+#include <c10/util/Optional.h>
+#include <c10/util/Registry.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/numa.h>
+#include <c10/util/thread_name.h>
+
+#include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
 #include <utility>
-
-#include <c10/util/Optional.h>
-#include <c10/util/intrusive_ptr.h>
-#include <c10/util/numa.h>
-#include <c10/util/thread_name.h>
+#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")

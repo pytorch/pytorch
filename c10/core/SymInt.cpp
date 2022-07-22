@@ -1,6 +1,7 @@
-
 #include <c10/core/SymInt.h>
+
 #include <c10/core/SymbolicIntNode.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 

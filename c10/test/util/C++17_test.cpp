@@ -1,5 +1,7 @@
 #include <c10/util/C++17.h>
+
 #include <gtest/gtest.h>
+#include <cstdint>
 
 namespace {
 

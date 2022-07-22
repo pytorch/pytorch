@@ -1,12 +1,18 @@
 #pragma once
 
-#include <stddef.h>
-#include <memory>
-
-#include <c10/core/Device.h>
+#include <c10/core/Device.h> // IWYU pragma: export
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/UniqueVoidPtr.h> // IWYU pragma: export
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iosfwd>
+#include <memory>
+#include <utility>
+
 
 namespace c10 {
 

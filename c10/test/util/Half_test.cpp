@@ -1,7 +1,9 @@
-#include <vector>
-
 #include <c10/util/Half.h>
+
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 
 namespace {
 namespace half_legacy_impl {

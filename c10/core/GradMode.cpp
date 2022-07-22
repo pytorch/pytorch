@@ -1,6 +1,6 @@
 #include <c10/core/GradMode.h>
 
-#include <stdexcept>
+#include <c10/core/AutogradState.h>
 
 namespace c10 {
 

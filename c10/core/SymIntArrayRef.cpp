@@ -1,4 +1,9 @@
 #include <c10/core/SymIntArrayRef.h>
+
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
+
+#include <cstdint>
 #include <iostream>
 
 namespace c10 {

@@ -1,20 +1,23 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/DefaultDtype.h>
-#include <c10/core/Device.h>
-#include <c10/core/DispatchKeySet.h>
-#include <c10/core/Layout.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeToTypeMeta.h>
-
+#include <c10/core/Backend.h> // IWYU pragma: export
+#include <c10/core/DefaultDtype.h> // IWYU pragma: export
+#include <c10/core/Device.h> // IWYU pragma: export
+#include <c10/core/DispatchKeySet.h> // IWYU pragma: export
+#include <c10/core/Layout.h> // IWYU pragma: export
+#include <c10/core/MemoryFormat.h> // IWYU pragma: export
+#include <c10/core/ScalarType.h> // IWYU pragma: export
+#include <c10/core/ScalarTypeToTypeMeta.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/typeid.h>
 
 #include <cstddef>
 #include <iosfwd>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace c10 {

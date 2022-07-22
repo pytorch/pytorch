@@ -1,7 +1,16 @@
 #include <c10/test/util/Macros.h>
+#include <c10/util/Array.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
+
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <cstdlib>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 using namespace c10::guts;
 

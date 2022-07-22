@@ -1,5 +1,10 @@
 #include <c10/core/CopyBytes.h>
+
+#include <c10/core/Device.h>
 #include <c10/util/Logging.h>
+
+#include <ostream>
+#include <string>
 
 namespace c10 {
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 ##===--- fix_includes.py - rewrite source files based on iwyu output ------===##
 #
@@ -194,6 +194,9 @@ class OrderedSet(object):
 
   def __len__(self):
     return len(self.storage)
+
+  def __str__(self):
+    return "OrderedSet([" + ', '.join(self) + "])"
 
 
 def _MayBeHeaderFile(filename):

@@ -1,5 +1,8 @@
 #include <c10/core/impl/SizesAndStrides.h>
 
+#include <c10/core/SymInt.h>
+#include <c10/util/Exception.h>
+
 namespace c10 {
 namespace impl {
 

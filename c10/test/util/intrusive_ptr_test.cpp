@@ -1,11 +1,13 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 using c10::intrusive_ptr;
 using c10::intrusive_ptr_target;

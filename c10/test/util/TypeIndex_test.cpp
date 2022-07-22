@@ -1,6 +1,11 @@
+#include <c10/util/TypeIndex.h> // IWYU pragma: associated
+
 #include <c10/util/Metaprogramming.h>
-#include <c10/util/TypeIndex.h>
+#include <c10/util/string_view.h>
+
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <functional>
 
 using c10::string_view;
 using c10::util::get_fully_qualified_type_name;

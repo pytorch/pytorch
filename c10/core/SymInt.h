@@ -3,6 +3,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
+
 namespace c10 {
 
 class SymbolicIntNode;

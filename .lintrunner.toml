@@ -76,7 +76,7 @@ is_formatter = true
 [[linter]]
 code = 'IWYU'
 include_patterns = [
-    'c10/util/*.cpp',
+    'c10/**/*.cpp',
 ]
 exclude_patterns = [
 ]
@@ -95,7 +95,7 @@ command = [
     'tools.linter.adapters.iwyu.adapter',
     '--binary=/usr/bin/iwyu_tool',
     '--build_dir=./build',
-    '--mapping_file=tools/linter/adapters/iwyu/system_headers.imp',
+    '--mapping_file=tools/linter/adapters/iwyu/library_mappings.imp',
     '--',
     '@{{PATHSFILE}}',
 ]

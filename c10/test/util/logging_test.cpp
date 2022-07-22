@@ -1,8 +1,15 @@
-#include <algorithm>
-
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/StringUtil.h>
+
 #include <gtest/gtest.h>
+#include <functional>
+#include <ostream>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace c10_test {
 

@@ -6,16 +6,19 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
+
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 // Forward declarations
 
 namespace c10 {
-struct IValue;
 class OperatorHandle;
-struct TensorImpl;
+struct IValue;
 struct SafePyObject;
+struct TensorImpl;
 } // namespace c10
 
 namespace torch {

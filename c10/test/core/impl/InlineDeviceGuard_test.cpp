@@ -1,7 +1,13 @@
-#include <gtest/gtest.h>
+#include <c10/core/impl/FakeGuardImpl.h> // IWYU pragma: associated
+#include <c10/core/impl/InlineDeviceGuard.h> // IWYU pragma: associated
 
-#include <c10/core/impl/FakeGuardImpl.h>
-#include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/Device.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Optional.h>
+
+#include <gtest/gtest.h>
+#include <initializer_list>
 
 using namespace c10;
 using namespace c10::impl;

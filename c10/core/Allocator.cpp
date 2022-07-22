@@ -1,5 +1,7 @@
 #include <c10/core/Allocator.h>
 
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 namespace c10 {

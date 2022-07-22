@@ -1,6 +1,9 @@
 #include <c10/util/TypeList.h>
+
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <memory>
+#include <type_traits>
 
 using namespace c10::guts::typelist;
 
@@ -102,8 +105,6 @@ static_assert(count_if<std::is_reference, typelist<>>::value == 0, "");
 } // namespace test_count_if
 
 namespace test_true_for_each_type {
-template <class>
-class Test;
 class MyClass {};
 static_assert(
     all<std::is_reference,
@@ -116,8 +117,6 @@ static_assert(all<std::is_reference, typelist<>>::value, "");
 } // namespace test_true_for_each_type
 
 namespace test_true_for_any_type {
-template <class>
-class Test;
 class MyClass {};
 static_assert(
     true_for_any_type<

@@ -1,7 +1,16 @@
-#include <gtest/gtest.h>
-
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/FakeGuardImpl.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
+#include <c10/util/irange.h>
+
+#include <gtest/gtest.h>
+#include <algorithm>
+#include <vector>
 
 using namespace c10;
 using namespace c10::impl;

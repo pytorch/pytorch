@@ -1,7 +1,12 @@
-#include <gtest/gtest.h>
-
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
+
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wself-assign-overloaded"

@@ -1,13 +1,17 @@
 #pragma once
 
-#include <algorithm>
-#include <cstdint>
-
 #include <c10/core/SymInt.h>
-#include <c10/core/SymIntArrayRef.h>
+#include <c10/core/SymIntArrayRef.h> // IWYU pragma: export
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 

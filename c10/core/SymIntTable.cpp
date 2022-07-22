@@ -1,4 +1,13 @@
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/SymbolicIntNode.h> // IWYU: associated
+#include <c10/util/Exception.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 namespace c10 {
 

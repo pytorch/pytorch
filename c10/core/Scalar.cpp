@@ -1,5 +1,9 @@
 #include <c10/core/Scalar.h>
 
+#include <c10/util/Exception.h>
+
+#include <cmath>
+
 namespace c10 {
 
 Scalar Scalar::operator-() const {

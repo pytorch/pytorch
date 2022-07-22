@@ -3,6 +3,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 #include <vector>

@@ -1,16 +1,19 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
-
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <cuda_runtime_api.h>
+#include <driver_types.h>
 
 namespace c10 {
 namespace cuda {

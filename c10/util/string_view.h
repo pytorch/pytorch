@@ -3,14 +3,18 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/reverse_iterator.h>
+
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <limits>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 
 #if __cpp_lib_string_view
 #include <string_view> // IWYU pragma: export
+
 #define C10_HAS_STD_STRING_VIEW() 1
 #define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
 #elif defined(__has_include)

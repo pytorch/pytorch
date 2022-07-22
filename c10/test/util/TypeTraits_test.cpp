@@ -1,5 +1,6 @@
 #include <c10/util/TypeTraits.h>
-#include <gtest/gtest.h>
+
+#include <cstddef>
 
 using namespace c10::guts;
 

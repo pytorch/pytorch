@@ -1,8 +1,8 @@
+#include <c10/util/Flags.h> // IWYU pragma: associated
+
 #include <gtest/gtest.h>
 
 #include <iostream>
-
-#include <c10/util/Flags.h>
 
 C10_DEFINE_bool(c10_flags_test_only_flag, true, "Only used in test.");
 

@@ -1,6 +1,12 @@
-#include <c10/util/string_view.h>
+#include <c10/util/string_view.h> // IWYU pragma: associated
+
+#include <c10/macros/Macros.h>
+#include <c10/util/reverse_iterator.h>
 
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include <type_traits>
+#include <utility>
 
 using c10::string_view;
 

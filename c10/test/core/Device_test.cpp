@@ -1,7 +1,9 @@
-#include <gtest/gtest.h>
-
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
+
+#include <gtest/gtest.h>
+#include <string>
+#include <vector>
 
 // -- Device -------------------------------------------------------
 

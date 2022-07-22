@@ -1,9 +1,16 @@
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/DeviceType.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/alloc_cpu.h>
+#include <c10/macros/Macros.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Flags.h>
+#include <c10/util/Logging.h>
+
+#include <ostream>
+#include <utility>
 
 // TODO: rename flag to C10
 C10_DEFINE_bool(

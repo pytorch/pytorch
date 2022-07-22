@@ -7,6 +7,14 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
+#include <new>
+#include <ostream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+
 namespace c10 {
 /**
  * either<A, B> is a tagged union that holds either an object of type A

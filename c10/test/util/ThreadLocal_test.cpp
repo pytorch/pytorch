@@ -1,7 +1,8 @@
-#include <c10/util/ThreadLocal.h>
-#include <gtest/gtest.h>
+#include <c10/util/ThreadLocal.h> // IWYU pragma: associated
 
+#include <gtest/gtest.h>
 #include <atomic>
+#include <string>
 #include <thread>
 
 namespace {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <type_traits>
 
 namespace c10 {
 

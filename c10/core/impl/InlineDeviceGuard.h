@@ -7,7 +7,11 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+
+#include <type_traits>
+#include <utility>
 
 namespace c10 {
 namespace impl {

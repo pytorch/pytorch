@@ -1,5 +1,6 @@
 #include <c10/core/InferenceMode.h>
-#include <stdexcept>
+
+#include <c10/core/AutogradState.h>
 
 namespace c10 {
 // Invariant:

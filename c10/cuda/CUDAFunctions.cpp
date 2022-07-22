@@ -1,5 +1,9 @@
 #include <c10/cuda/CUDAFunctions.h>
+
+#include <c10/core/Device.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <limits>
 

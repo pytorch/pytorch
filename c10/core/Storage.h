@@ -1,6 +1,12 @@
 #pragma once
 
-#include <c10/core/StorageImpl.h>
+#include <c10/core/StorageImpl.h> // IWYU pragma: export
+#include <c10/core/SymInt.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+
+#include <cstddef>
+#include <utility>
 
 namespace c10 {
 

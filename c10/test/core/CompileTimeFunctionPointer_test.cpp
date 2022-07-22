@@ -1,5 +1,7 @@
-#include <c10/core/CompileTimeFunctionPointer.h>
+#include <c10/core/CompileTimeFunctionPointer.h> // IWYU pragma: associated
+
 #include <gtest/gtest.h>
+#include <type_traits>
 
 namespace test_is_compile_time_function_pointer {
 static_assert(!c10::is_compile_time_function_pointer<void()>::value, "");

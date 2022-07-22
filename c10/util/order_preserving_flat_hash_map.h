@@ -18,15 +18,23 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
+#include <memory>
+#include <new>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
@@ -46,9 +54,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 namespace ska_ordered {
 
-struct prime_number_hash_policy;
-struct power_of_two_hash_policy;
 struct fibonacci_hash_policy;
+struct power_of_two_hash_policy;
+struct prime_number_hash_policy;
 
 namespace detailv3 {
 template <typename Result, typename Functor>

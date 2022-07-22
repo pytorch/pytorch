@@ -2,7 +2,9 @@
 #include <c10/util/irange.h>
 
 #include <benchmark/benchmark.h>
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 using c10::intrusive_ptr;
 using c10::intrusive_ptr_target;

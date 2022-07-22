@@ -1,5 +1,7 @@
 #include <c10/core/SafePyObject.h>
-#include <c10/core/TensorImpl.h>
+
+#include <c10/core/TensorImpl.h> // IWYU pragma: keep
+#include <c10/util/Exception.h>
 
 namespace c10 {
 

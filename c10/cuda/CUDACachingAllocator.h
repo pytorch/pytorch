@@ -4,10 +4,19 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+#include <c10/util/StringUtil.h>
 
+#include <driver_types.h>
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace c10 {
 

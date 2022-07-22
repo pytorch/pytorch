@@ -1,4 +1,4 @@
-#include <c10/util/ConstexprCrc.h>
+#include <c10/util/ConstexprCrc.h> // IWYU pragma: associated
 
 using c10::util::crc64;
 using c10::util::crc64_t;

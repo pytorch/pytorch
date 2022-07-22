@@ -1,9 +1,10 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-#include <c10/util/accumulate.h>
+#include <c10/util/accumulate.h> // IWYU pragma: associated
+
+#include <c10/util/Exception.h>
 
 #include <gtest/gtest.h>
-
 #include <list>
 #include <vector>
 

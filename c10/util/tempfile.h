@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
