@@ -2,6 +2,7 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <torch/library.h>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -10,11 +11,9 @@ namespace ops {
 namespace {
 
 bool broadcast_input(const Tensor& input1, const Tensor& input2) {
-  return (batch_size(input1) == batch_size(input2)) &&
-      (channels_size(input1) == channels_size(input2)) &&
-      ((height_size(input1) > 1 && height_size(input2) == 1) ||
-       (height_size(input2) > 1 && height_size(input1) == 1) ||
-       (height_size(input1) == height_size(input2))) &&
+  return ((height_size(input1) > 1 && height_size(input2) == 1) ||
+          (height_size(input2) > 1 && height_size(input1) == 1) ||
+          (height_size(input1) == height_size(input2))) &&
       ((width_size(input1) > 1 && width_size(input2) == 1) ||
        (width_size(input2) > 1 && width_size(input1) == 1) ||
        (width_size(input1) == width_size(input2)));
@@ -39,21 +38,32 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
 std::vector<int64_t> broadcast_size(
     const Tensor& input1,
     const Tensor& input2) {
-  std::vector<int64_t> out = {
-      batch_size(input1),
-      channels_size(input1),
-      height_size(input1),
-      width_size(input1)};
-  if (width_size(input1) > 1 && width_size(input2) == 1) {
-    out[3] = width_size(input1);
-  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
-    out[3] = width_size(input2);
+  // std::vector<in64_t> out = {}
+  std::vector<int64_t> out = {};
+  int input1_size = input1.sizes().size();
+  int input2_size = input2.sizes().size();
+  if (input1_size > input2_size) {
+    for (int i = 0; i < input1_size; i++) {
+      out.push_back(input1.sizes()[i]);
+    }
+  } else {
+    for (int i = 0; i < input2_size; i++) {
+      out.push_back(input2.sizes()[i]);
+    }
   }
 
-  if (height_size(input1) > 1 && height_size(input2) == 1) {
-    out[2] = height_size(input1);
-  } else if (height_size(input2) > 1 && height_size(input1) == 1) {
-    out[2] = height_size(input2);
+  if (width_size(input1) > 1 && width_size(input2) == 1) {
+    out[out.size() - 1] = width_size(input1);
+  } else if (width_size(input2) > 1 && width_size(input1) == 1) {
+    out[out.size() - 1] = width_size(input2);
+  }
+
+  if (out.size() > 1) {
+    if (height_size(input1) > 1 && height_size(input2) == 1) {
+      out[out.size() - 2] = height_size(input1);
+    } else if (height_size(input2) > 1 && height_size(input1) == 1) {
+      out[out.size() - 2] = height_size(input2);
+    }
   }
 
   return out;
