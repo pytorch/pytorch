@@ -53,6 +53,7 @@ except ImportError:
 
 class TestArgnumsPartial(TestCase):
     def test_invalid_argnum_type(self):
+        raise RuntimeError("testing failure")
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
