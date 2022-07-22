@@ -21,12 +21,12 @@ class Int8ConcatOp final : public Operator<CPUContext> {
       // Default to C axis
       axis_ = this->template GetSingleArgument<int>("axis", 3);
       CHECK_GE(axis_, 0);
-      CHECK_LT(axis_, 4);
+      TORCH_CHECK_LT(axis_, 4);
     } else if (
         this->template GetSingleArgument<string>("order", "") == "NCHW") {
       axis_ = this->template GetSingleArgument<int>("axis", 1);
       CHECK_GE(axis_, 0);
-      CHECK_LT(axis_, 4);
+      TORCH_CHECK_LT(axis_, 4);
     } else {
       axis_ = this->template GetSingleArgument<int>("axis", 0);
     }
