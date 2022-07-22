@@ -3000,6 +3000,7 @@ def arange(
 ) -> TensorLikeType:
     pass
 
+
 @overload
 def arange(
     start: NumberType,
@@ -3013,6 +3014,7 @@ def arange(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     pass
+
 
 @register_decomposition(torch.ops.aten.arange)
 @out_wrapper()
@@ -3052,7 +3054,7 @@ def arange(
             requires_grad=requires_grad,
         )
     else:
-        assert False
+        raise AssertionError()
 
 
 @register_decomposition(torch.ops.aten.linspace)
