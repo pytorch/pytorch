@@ -139,15 +139,9 @@ function checkout_install_torchdynamo() {
   popd
 }
 
-function checkout_install_functorch() {
-  local commit
-  commit=$(get_pinned_commit functorch)
-  pushd ..
-  git clone https://github.com/pytorch/functorch
+function install_functorch() {
   pushd functorch
-  git checkout "${commit}"
   time python setup.py develop
-  popd
   popd
 }
 
