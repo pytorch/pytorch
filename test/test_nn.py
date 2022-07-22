@@ -1600,6 +1600,50 @@ class TestNN(NNTestCase):
         self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4))
         self.assertEqual(nn.Sequential(l1).append(l2).append(l4), nn.Sequential(l1, l2, l4))
 
+    def test_Sequential_insert(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+
+        n1 = nn.Sequential(l1, l2, l3)
+        module_1 = nn.Linear(4, 5)
+        n2 = nn.Sequential(l1, module_1, l2, l3)
+        self.assertEqual(n1.insert(1, module_1), n2)
+
+        # test for negative support
+        n3 = nn.Sequential(l1, l2, l3)
+        module_2 = nn.Linear(5, 6)
+        n4 = nn.Sequential(l1, module_2, l2, l3)
+        self.assertEqual(n3.insert(-2, module_2), n4)
+
+    def test_Sequential_insert_fail_case(self):
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 4)
+
+        module = nn.Linear(5, 6)
+
+        # test for error case
+        n1 = nn.Sequential(l1, l2, l3)
+        with self.assertRaises(IndexError):
+            n1.insert(-5, module)
+
+        with self.assertRaises(AssertionError):
+            n1.insert(1, [nn.Linear(6, 7)])
+
+    def test_Sequential_extend(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n1 = nn.Sequential(l1, l2)
+        n2 = nn.Sequential(l3, l4)
+        n3 = nn.Sequential(l1, l2)
+        for l in n2:
+            n1.append(l)
+        n3.extend(n2)
+        self.assertEqual(n3, n1)
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -11727,9 +11771,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv1d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_autograd, grad_weight_autograd = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        grad_weight_functional = torch.nn.grad.conv1d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
 
         # Conv 2D
         input = torch.randn(1, 1, 5, 5, requires_grad=True)
@@ -11737,9 +11785,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv2d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        grad_weight_functional = torch.nn.grad.conv2d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
 
         # Conv 3D
         input = torch.randn(1, 1, 5, 5, 5, requires_grad=True)
@@ -11747,14 +11799,49 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = F.conv3d(input, weight, dilation=2)
         grad_output = torch.randn(output.shape)
 
-        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
         grad_input_functional = torch.nn.grad.conv3d_input(input.shape, weight, grad_output, dilation=2)
         self.assertEqual(grad_input_functional, grad_input_autograd)
 
-        # Warning for _grad_input_padding
-        with warnings.catch_warnings(record=True) as w:
-            torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
-        self.assertEqual(len(w), 1)
+        grad_weight_functional = torch.nn.grad.conv3d_weight(input, weight.shape, grad_output, dilation=2)
+        self.assertEqual(grad_weight_functional, grad_weight_autograd)
+
+    def test_functional_grad_conv2d(self):
+        BATCH_SIZE = 4
+        IN_CH = 8
+        OUT_CH = 16
+        SPATIAL = 32
+
+        def _test_conv2d(stride, kernel_size, groups, dilation):
+            padding = kernel_size // 2
+
+            input = torch.empty(BATCH_SIZE, IN_CH, SPATIAL, SPATIAL).uniform_(-8.0, 8.0).requires_grad_(True)
+
+            weight = torch.empty(OUT_CH, IN_CH // groups, kernel_size, kernel_size).uniform_(-4.0, 4.0).requires_grad_(True)
+
+            output = F.conv2d(input, weight,
+                              stride=stride, padding=padding, dilation=dilation, groups=groups)
+
+            grad_output = torch.randn(output.shape)
+
+            (grad_input_autograd, grad_weight_autograd) = torch.autograd.grad(output, (input, weight), grad_output)
+
+            grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output,
+                                                               stride=stride, padding=padding, dilation=dilation, groups=groups)
+            self.assertEqual(grad_input_functional, grad_input_autograd)
+
+            grad_weight_functional = torch.nn.grad.conv2d_weight(input, weight.shape, grad_output,
+                                                                 stride=stride, padding=padding, dilation=dilation, groups=groups)
+            self.assertEqual(grad_weight_functional, grad_weight_autograd)
+
+        strides = [1, 2]
+        kernel_sizes = [1, 3, 5]
+        groups = [1, 2, 4]
+        dilates = [1, 2]
+
+        for s, k, g, d in product(strides, kernel_sizes, groups, dilates):
+            _test_conv2d(s, k, g, d)
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
@@ -14236,28 +14323,6 @@ class TestNNDeviceType(NNTestCase):
             bias.requires_grad_(False)
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
-    @onlyCPU
-    def test_conv_contiguous_for_oneDNN(self):
-        for dtype in [torch.float, torch.bfloat16]:
-            conv = nn.Conv2d(
-                1,
-                128,
-                kernel_size=(5, 2),
-                stride=(2, 1),
-                padding=(0, 1),
-                dilation=(1, 1),
-                groups=1,
-                bias=True,
-                padding_mode='zeros').to(dtype=dtype)
-
-            x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
-            x = torch.transpose(x, 1, 4)
-            x2 = x[..., 0]
-            inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
-            backend_actual = torch._C._select_conv_backend(*inputs)
-            backend_expected = torch._C._ConvBackend.Slow2d
-            y = conv(x2)
-            self.assertEqual(backend_actual, backend_expected)
 
     def test_Dropout(self, device):
         input = torch.empty(1000)

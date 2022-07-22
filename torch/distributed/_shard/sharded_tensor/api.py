@@ -497,18 +497,20 @@ class ShardedTensor(torch.Tensor):
         if len(args) == 1:
             if isinstance(args[0], torch.dtype):
                 dtype_to = args[0]
+            elif isinstance(args[0], (str, int, torch.device)):
+                device_to = args[0]
             elif isinstance(args[0], torch.Tensor):
                 dtype_to = args[0].dtype
                 device_to = args[0].device
             else:
-                raise ValueError(f"ShardedTensor.to() have wrong arguments: {args}")
+                raise RuntimeError(f"ShardedTensor.to() have wrong arguments: {args}")
         elif len(args) == 2:
             device_to, dtype_to = args
         else:
             dtype_to = kwargs.get("dtype", current_dtype)
             device_to = kwargs.get("device", current_device)
 
-        device_to = torch.device(device_to) if isinstance(device_to, str) else device_to
+        device_to = torch.device(device_to) if isinstance(device_to, (str, int)) else device_to
 
         if device_to.type == "cuda":
             # if device_to set to cuda, set to current device even

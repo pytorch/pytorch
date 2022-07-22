@@ -1,4 +1,3 @@
-load("@fbsource//tools/build_defs:glob_defs.bzl", "glob")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
 # kineto code should be updated to not have to
@@ -36,9 +35,9 @@ def define_kineto():
         visibility = ["PUBLIC"],
         exported_deps = [
             ":base_logger",
-            ":fmt",
             ":libkineto_api",
             ":thread_util",
+            ":fmt",
         ],
     )
 
@@ -60,8 +59,8 @@ def define_kineto():
         exported_deps = [
             ":base_logger",
             ":config_loader",
-            ":fmt",
             ":thread_util",
+            ":fmt",
         ],
     )
 
@@ -101,9 +100,9 @@ def define_kineto():
             "kineto/libkineto/src/*.h",
         ]),
         exported_deps = [
-            ":fmt",
             ":logger",
             ":thread_util",
+            ":fmt",
         ],
     )
 
@@ -125,8 +124,8 @@ def define_kineto():
             "kineto/libkineto/src/LoggerCollector.h",
         ],
         exported_deps = [
-            ":fmt",
             ":thread_util",
+            ":fmt",
         ],
     )
 

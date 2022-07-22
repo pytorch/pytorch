@@ -1696,6 +1696,22 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
         st_cuda = st_cpu.to(device=torch.device("cuda"))
         self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        # non-kwarg device to
+        st_cuda = st_cpu.to(torch.device("cuda"))
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cpu = st_cuda.to(torch.device("cpu"))
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        # with string like device conversion
+        st_cpu = st_cuda.to("cpu")
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to("cuda")
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        # with int like device conversion
+        st_cpu = st_cuda.to("cpu")
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to(self.rank)
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+
         # test tensor to
         cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda")
         st_cuda = st.to(cuda_tensor)
