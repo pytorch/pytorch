@@ -16,7 +16,7 @@ from torch.utils._pytree import tree_map
 import re
 
 try:
-    import sympy  #noqa: F401
+    import sympy  # noqa: F401
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
