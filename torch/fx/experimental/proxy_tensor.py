@@ -70,14 +70,12 @@ def maybe_disable_fake_tensor_mode():
         return nullcontext()
 
 
-def proxy_call(func_overload, dispatch_mode, args, kwargs=None):
+def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
-        proxy_mode = enable_torch_dispatch_mode(dispatch_mode) if dispatch_mode else nullcontext()
-        with proxy_mode, torch.overrides.enable_reentrant_dispatch():
-            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+        return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
     if func_overload == aten._local_scalar_dense.default:
         t, = args
         assert not kwargs
@@ -205,7 +203,7 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        return proxy_call(func_overload, None, args, kwargs)
+        return proxy_call(func_overload, args, kwargs)
 
 
 class PythonKeyTracer(Tracer):
@@ -289,7 +287,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func_overload == aten.lift.default:
             return args[0]
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
-            return proxy_call(func_overload, self, args, kwargs)
+            return proxy_call(func_overload, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -405,7 +403,7 @@ a bug if you need this)""")
         if use_fake:  # type: ignore[attr-defined]
             args = pytree.tree_map(wrap_fake, args)
 
-        with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined] # noqa: B950
+        with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
         return t
 
