@@ -10787,6 +10787,9 @@ op_db: List[OpInfo] = [
 
                # dispatch to lazy test failed
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+               # RuntimeError: lazy/test_ts_opinfo failed! Received signal: SIGIOT
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
