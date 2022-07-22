@@ -73,9 +73,6 @@ jobs:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
 
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
-          time docker pull "${DOCKER_IMAGE}" >/dev/null
-
           export BUILD_LITE_INTERPRETER
           BUILD_LITE_INTERPRETER="1"
           if [[ "${BUILD_ENVIRONMENT}" == *"full-jit" ]]; then

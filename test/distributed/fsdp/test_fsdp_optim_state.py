@@ -7,13 +7,21 @@ from typing import Any, Dict, List, Tuple, Type
 
 import torch
 from torch import distributed as dist
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX, apply_activation_checkpointing_wrapper
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
     StateDictType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -275,9 +283,12 @@ class TestFSDPOptimState(FSDPTest):
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()
-        model = self._get_wrapped_model(group=group, cuda_first=True) if wrap \
-            else self._get_nonwrapped_model(group=group, cuda_first=True)
-        model.eval()  # disable dropout for determinism
+        model = TransformerWithSharedParams.init(
+            group,
+            FSDPInitMode.RECURSIVE if wrap else FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
         optim = optim_class(model.parameters(), lr=0.01)
         return model, optim, None
 
@@ -477,12 +488,21 @@ class TestFSDPOptimState(FSDPTest):
         device = torch.device("cuda")
         model = NestedModel().to(device)
         wrapped_model = NestedModel.wrap(model, ignore_modules=True)
+        # Add checkpointing to ensure optim_state_dict and state_dict strip out
+        # checkpointing prefixes.
+        apply_activation_checkpointing_wrapper(
+            model,
+            check_fn=lambda module: isinstance(module, torch.nn.Sequential)
+        )
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._step_model(model, optim, device)
         optim_state_dict = FSDP.full_optim_state_dict(wrapped_model, optim, rank0_only=False)
         with FSDP.state_dict_type(wrapped_model, StateDictType.FULL_STATE_DICT):
             state_dict = wrapped_model.state_dict()
         self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
+        # Check that checkpointing prefix was indeed stripped.
+        for key in optim_state_dict["state"]:
+            self.assertNotIn(_CHECKPOINT_PREFIX, key)
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):

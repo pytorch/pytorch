@@ -127,9 +127,7 @@ struct C10_API PyInterpreter {
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack,
-      // This is a Tensor subclass type object
-      const std::shared_ptr<SafePyObject>& type);
+      torch::jit::Stack* stack);
   using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
   using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
   using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
@@ -203,9 +201,8 @@ struct C10_API PyInterpreter {
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<SafePyObject>& type) const {
-    return (*dispatch_fn_)(this, op, stack, type);
+      torch::jit::Stack* stack) const {
+    return (*dispatch_fn_)(this, op, stack);
   }
 
   __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
