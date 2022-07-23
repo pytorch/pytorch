@@ -92,7 +92,12 @@ _ValueDescriptor = Literal[
 ]
 
 
-def _parse_arg(value, desc: Union[_ValueDescriptor, Literal["none"]], arg_name:Optional[str]=None, node_name:Optional[str]=None):
+def _parse_arg(
+    value,
+    desc: Union[_ValueDescriptor, Literal["none"]],
+    arg_name: Optional[str] = None,
+    node_name: Optional[str] = None,
+):
     if desc == "none":
         return value
     if desc == "v" or not _is_value(value):
@@ -508,7 +513,9 @@ def _onnx_opset_unsupported(op_name: str, current_opset: int, supported_opset: i
     )
 
 
-def _onnx_opset_unsupported_detailed(op_name: str, current_opset: int, supported_opset: int, reason: str):
+def _onnx_opset_unsupported_detailed(
+    op_name: str, current_opset: int, supported_opset: int, reason: str
+):
     raise RuntimeError(
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
