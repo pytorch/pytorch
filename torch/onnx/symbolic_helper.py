@@ -89,12 +89,13 @@ _ValueDescriptor = Literal[
     "b",
     "s",
     "t",
+    "none",
 ]
 
 
 def _parse_arg(
     value,
-    desc: Union[_ValueDescriptor, Literal["none"]],
+    desc: _ValueDescriptor,
     arg_name: Optional[str] = None,
     node_name: Optional[str] = None,
 ):
