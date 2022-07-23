@@ -1414,7 +1414,6 @@ cast_pytorch_to_onnx = {
     "Undefined": _C_onnx.TensorProtoDataType.UNDEFINED,
 }
 
-# Deprecated. Internally use _type_utils.ScalarType
 scalar_name_to_pytorch = {
     "uint8_t": "Byte",
     "int8_t": "Char",
@@ -1477,7 +1476,6 @@ scalar_type_to_pytorch_type = [
     torch.bfloat16,  # 15
 ]
 
-# Deprecated. Internally use _type_utils.ScalarType
 # source of truth is
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
 pytorch_name_to_type = {
@@ -1503,7 +1501,6 @@ def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
-# Deprecated. Internally use _type_utils.ScalarType
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],  # 0
     cast_pytorch_to_onnx["Char"],  # 1
