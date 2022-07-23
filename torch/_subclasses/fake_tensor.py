@@ -7,6 +7,7 @@ from functools import partial
 from typing import Callable, Union
 
 import torch
+import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -295,6 +296,7 @@ def in_kernel_invocation_manager(fake_mode):
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
+    has_sym_ints: bool
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device):
@@ -312,6 +314,7 @@ class FakeTensor(torch.Tensor):
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
+        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -321,6 +324,15 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+
+    def stride(self):
+        if self.has_sym_ints:
+            # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
+            # The reason this needs to be here instead of __torch_dispatch__ is that
+            # when aten.stride goes into __torch_dispatch__, it expects a list of
+            # concrete ints to be returned. So we need to short-circuit that entirely
+            return symbolic_shapes.create_contiguous(self.shape)
+        return super().stride()
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -460,12 +472,44 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        flat_arg_tensors = [
+            i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
+        ]
+        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        if has_symbolic_sizes:
+            # TODO: Find better approach for this
+            # Avoid circular import
+            from torch._decomp import decomposition_table
+            from torch._meta_registrations import meta_table
+
+            # TODO: hack, doesn't actually work.
+            # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
+            with enable_torch_dispatch_mode(
+                self
+            ), torch.overrides.enable_reentrant_dispatch():
+                if func in meta_table:
+                    r = meta_table[func](*args, **kwargs)
+                    return r
+                if func in decomposition_table:
+                    return decomposition_table[func](*args, **kwargs)
+
+            with no_dispatch():
+                if symbolic_shapes.is_symbolic_op(func):
+                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
+
         if "prims::" in func._schema.name:
             with no_dispatch():
                 return func(*args, **kwargs)
+
+        if has_symbolic_sizes:
+            constructors = [torch.ops.aten.empty.SymInt]
+            if func not in constructors:
+                raise RuntimeError(
+                    f"{func} - couldn't find symbolic meta function/decomposition"
+                )
 
         with no_dispatch():
             # TODO: apply as no_dispatch decorator
