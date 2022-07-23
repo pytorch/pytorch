@@ -1089,6 +1089,18 @@ Tensor zeros(IntArrayRef size,
   return result.zero_();
 }
 
+// TODO: Seems pretty bad that we have to have this separate function.
+Tensor zeros_symint(SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty_symint(size, options);
+  return result.zero_();
+}
+
 Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
