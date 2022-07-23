@@ -23,7 +23,7 @@ def create_contiguous(shape):
 
 
 def is_symbolic_op(func):
-    return func in [aten.sym_size.default, aten.dim.default, aten.is_contiguous.default, aten.stride]
+    return func in [aten.sym_size.default, aten.dim.default, aten.is_contiguous.default, aten.stride, aten.sym_numel.default]
 
 
 def handle_symbolic_op(func, args, kwargs):
@@ -32,6 +32,11 @@ def handle_symbolic_op(func, args, kwargs):
         return None
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
+    if func == torch.ops.aten.sym_numel.default:
+        res = 1
+        for s in args[0].shape:
+            res = res * s
+        return res
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True

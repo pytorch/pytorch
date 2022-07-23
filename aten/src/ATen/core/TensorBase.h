@@ -285,6 +285,10 @@ class TORCH_API TensorBase {
     return impl_->numel();
   }
 
+  c10::SymInt sym_numel() const {
+    return impl_->sym_numel();
+  }
+
   // Length of one array element in bytes.  This is the traditional
   // Numpy naming.
   size_t itemsize() const {

@@ -415,6 +415,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         sym_size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+        sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);

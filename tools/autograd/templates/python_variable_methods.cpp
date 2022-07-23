@@ -222,6 +222,7 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
+#include <iostream>
 static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -232,7 +233,12 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     return THPUtils_packInt64(self_.numel());
+     auto si = self_.sym_numel();
+     if (si.is_symbolic()) {
+       return py::cast(si.toSymbolicIntNode()).release().ptr();
+     } else {
+       return THPUtils_packInt64(si.data());
+     }
    }
    END_HANDLE_TH_ERRORS
 }

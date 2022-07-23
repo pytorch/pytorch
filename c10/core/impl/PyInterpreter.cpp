@@ -76,6 +76,14 @@ static c10::Layout noop_layout_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to call `layout` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::SymInt noop_sym_numel_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `sym_numel` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -88,6 +96,7 @@ void PyInterpreter::disarm() noexcept {
   sizes_fn_ = &noop_sizes_fn;
   sym_sizes_fn_ = &noop_sym_sizes_fn;
   layout_fn_ = &noop_layout_fn;
+  sym_numel_fn_ = &noop_sym_numel_fn;
 }
 
 } // namespace impl
