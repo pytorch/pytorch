@@ -16,11 +16,60 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
+from torch._subclasses import FakeTensor
+from .symbolic_shapes import ShapeEnv, magic_methods, reflectable_magic_methods
+import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+
+
+class ProxySymInt(object):
+    def __init__(self, sym_int, proxy):
+        assert isinstance(sym_int, torch._C.SymbolicIntNode) or isinstance(sym_int, int)
+        self.sym_int = sym_int
+        self.proxy = proxy
+
+    def wrap(self, num):
+        return ProxySymInt(num, num)
+
+    def __str__(self):
+        return f"ProxySymInt({self.sym_int})"
+
+    def __int__(self):
+        # Not sure how to make mypy support this lol
+        return int(self.sym_int)  # type: ignore[arg-type]
+
+    def __bool__(self):
+        return bool(self.sym_int)
+
+import operator
+
+def create_magic_impl(op):
+    def magic_impl(self, other):
+        def unwrap_proxy(x):
+            return x.proxy if isinstance(x, ProxySymInt) else x
+        out_proxy = op(unwrap_proxy(self), unwrap_proxy(other))
+
+        def unwrap_proxyint(x):
+            return x.sym_int if isinstance(x, ProxySymInt) else x
+        out_sym_int = op(unwrap_proxyint(self), unwrap_proxyint(other))
+        return ProxySymInt(out_sym_int, out_proxy)
+    return magic_impl
+
+for method in reflectable_magic_methods:
+    method_name = f'{method}'
+
+    op = getattr(operator, method_name)
+    setattr(ProxySymInt, f'r{method_name}', create_magic_impl(op))
+
+for method in magic_methods:
+    method_name = f'{method}'
+
+    op = getattr(operator, method_name)
+    setattr(ProxySymInt, method_name, create_magic_impl(op))
 
 
 @contextmanager
@@ -73,6 +122,7 @@ def maybe_disable_fake_tensor_mode():
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
+
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
@@ -92,6 +142,13 @@ def proxy_call(func_overload, args, kwargs=None):
     def unwrap_elem(e):
         if isinstance(e, ProxyTensor):
             return e.elem
+        if isinstance(e, torch._C.SymbolicIntNode):
+            if isinstance(e.get_pyobj(), ProxySymInt):
+                return e.get_pyobj().sym_int
+            else:
+                raise RuntimeError(f"Something has gone wrong, we are trying to put SymInt {e.get_pyobj()} into the graph,"
+                                   f"even though it's not a ProxySymInt. This is a bug.")
+
         return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
@@ -168,20 +225,43 @@ def proxy_call(func_overload, args, kwargs=None):
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
     elem: torch.Tensor
+    has_sym_ints: bool
 
 
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None, constant=None):
+        def create_proxy_symint(sym_int, new_proxy):
+            return torch._C.SymbolicIntNode.new_symint(ProxySymInt(sym_int, new_proxy))
+
+        has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
+        if has_sym_ints:
+            new_shape = []
+            for idx, s in enumerate(elem.shape):
+                if isinstance(s, torch._C.SymbolicIntNode):
+                    new_shape.append(create_proxy_symint(s, proxy.size(idx)))
+                else:
+                    assert isinstance(s, int)
+                    # If it's not an existing SymbolicIntNode, just pass the proxy as the int
+                    # _make_wrapper_subclass requires all inputs to be SymbolicIntNodes
+                    new_shape.append(create_proxy_symint(s, s))
+            # TODO: hack, since we currently don't support symbolic strides
+            new_strides = symbolic_shapes.create_contiguous(new_shape)
+        else:
+            new_shape = elem.shape
+            new_strides = elem.stride()
+
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
-            requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
+            new_shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
+            requires_grad=requires_grad if requires_grad is not None else False, strides=new_strides,
             storage_offset=elem.storage_offset()
         )
+        r.has_sym_ints = has_sym_ints
         return r
 
     def __init__(self, elem, proxy, *, requires_grad=None, constant=None):
-        if elem.is_sparse:
+        # TODO: hack since _extract_tensor_metadata currently tries to access stride
+        if elem.is_sparse or self.has_sym_ints:
             proxy.node.meta['tensor_meta'] = {}
         else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
@@ -191,6 +271,7 @@ class ProxyTensor(torch.Tensor):
         self.elem = elem
         self.proxy = proxy
         self.constant = constant
+
 
     def __deepcopy__(self, memo):
         return self.clone()
@@ -235,6 +316,10 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
+        elif isinstance(a, torch._C.SymbolicIntNode):
+            py_symint = a.get_pyobj()
+            assert isinstance(py_symint, ProxySymInt)
+            return py_symint.proxy.node
         return super().create_arg(a)
 
 
@@ -282,6 +367,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+        if symbolic_shapes.is_symbolic_op(func_overload):
+            return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
+
         func = func_overload.overloadpacket
         # We don't want to convert torch.tensor constants into tracing objects.
         if func_overload == aten.lift.default:
@@ -374,8 +462,8 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         with decompose(self.decomposition_table):
             return super().run(*args, **kwargs)
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
-    if use_fake and not trace_factory_functions:
+def make_fx(f, decomposition_table=None, trace_factory_functions=True, tracing_mode="real"):
+    if tracing_mode != "real" and not trace_factory_functions:
         raise ValueError("""\
 use_fake and not trace_factory_functions is not currently supported; if
 proxy tensor is not executed as a mode, fake tensors must not be executed
@@ -384,6 +472,8 @@ the traced graph module.)  However, non-mode execution of fake tensors
 is not currently supported (although, in principle, it could be; file
 a bug if you need this)""")
 
+    assert tracing_mode in ["real", "fake", "symbolic"]
+
     if decomposition_table is None:
         decomposition_table = {}
 
@@ -391,20 +481,49 @@ a bug if you need this)""")
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode = FakeTensorMode() if use_fake else nullcontext()
+        fake_tensor_mode: Any = nullcontext()
+        if tracing_mode == "real":
+            fake_tensor_mode = nullcontext()
+        elif tracing_mode == "fake":
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+        elif tracing_mode == "symbolic":
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+        else:
+            raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
+
         proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
 
-        def wrap_fake(x):
+        def wrap_fake_concrete(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
 
             return x
 
-        if use_fake:  # type: ignore[attr-defined]
-            args = pytree.tree_map(wrap_fake, args)
+        shape_env = ShapeEnv()
+
+        # todo: Figure out a more informative name for symints
+        def wrap_fake_symbolic(x, sym_shape):
+            if isinstance(x, torch.Tensor):
+                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device)
+                return val
+            return x
+
+        wrap_fn_map = {
+            "real": lambda x: x,
+            "fake": wrap_fake_concrete,
+        }
+        if tracing_mode == "symbolic":
+            flat_shapes = shape_env.create_shapes_for_args(args)
+            flat_args, spec = pytree.tree_flatten(args)
+            args = pytree.tree_unflatten(list(map(lambda a: wrap_fake_symbolic(a[0], a[1]), zip(flat_args, flat_shapes))), spec)
+        else:
+            args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+
+        # TODO: kind of a bad way to do it, should maybe figure out a better way
+        t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
