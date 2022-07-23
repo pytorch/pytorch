@@ -217,7 +217,7 @@ def meta_adaptive_avg_pool2d(self, output_size):
     return self.new_empty(self.shape[:-2] + tuple(output_size))
 
 
-@torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
+@register_meta(aten._adaptive_avg_pool3d.default)
 def meta_adaptive_avg_pool3d(self, output_size):
     check(
         self.ndim == 4 or self.ndim == 5,
@@ -226,7 +226,7 @@ def meta_adaptive_avg_pool3d(self, output_size):
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 
-@torch.library.impl(meta_lib, "repeat_interleave.Tensor")
+@register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
         raise RuntimeError("cannot repeat_interleave a meta tensor without output_size")
@@ -335,8 +335,7 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
-@torch.library.impl(meta_lib, "addbmm")
-@torch.library.impl(meta_lib, "addbmm.out")
+@register_meta([aten.addbmm.default, aten.addbmm.out])
 @out_wrapper()
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
@@ -530,8 +529,7 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
     return input.dtype
 
 
-@torch.library.impl(meta_lib, "nansum")
-@torch.library.impl(meta_lib, "nansum.out")
+@register_meta([aten.nansum.default, aten.nansum.out])
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
@@ -540,7 +538,7 @@ def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     return input.new_empty(output_shape, dtype=output_dtype)
 
 
-@torch.library.impl(meta_lib, "nanmedian")
+@register_meta(aten.nanmedian.default)
 def meta_nanmedian(input):
     output_shape = utils.compute_reduction_output_shape(
         input.shape, tuple(range(input.dim()))
@@ -548,8 +546,7 @@ def meta_nanmedian(input):
     return input.new_empty(output_shape)
 
 
-@torch.library.impl(meta_lib, "nanmedian.dim_values")
-@torch.library.impl(meta_lib, "nanmedian.dim")
+@register_meta([aten.nanmedian.dim, aten.nanmedian.dim_values])
 @out_wrapper("values", "indices")
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
@@ -559,7 +556,7 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     )
 
 
-@torch.library.impl(meta_lib, "nan_to_num")
+@register_meta([aten.nan_to_num.default])
 def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(self.shape)
 

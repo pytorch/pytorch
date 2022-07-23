@@ -393,6 +393,17 @@ Tensor new_empty(
   return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
+Tensor new_empty_symint(
+    const Tensor& self,
+    SymIntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt
+    ) {
+  return self.new_empty(asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 Tensor new_empty_strided(
     const Tensor& self,
     IntArrayRef size,
