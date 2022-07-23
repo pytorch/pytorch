@@ -254,13 +254,11 @@ void initPythonIRBindings(PyObject* module_) {
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
             bool val_use_external_data_format = false;
-            NodeNameMap onnx_node_names;
             std::tie(
                 model_proto,
                 export_map,
                 symbol_map,
-                val_use_external_data_format,
-                onnx_node_names) =
+                val_use_external_data_format) =
                 export_onnx(
                     g,
                     initializers,
@@ -290,8 +288,7 @@ void initPythonIRBindings(PyObject* module_) {
             return std::make_tuple(
                 py::bytes(graph),
                 python_serialized_export_map,
-                val_use_external_data_format,
-                onnx_node_names);
+                val_use_external_data_format);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,

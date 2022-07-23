@@ -992,28 +992,6 @@ def _pre_trace_quant_model(model, args):
     return model
 
 
-def _assign_onnx_node_name(graph, node_names):
-    """Takes in ONNX graph, and mapping from _C.Node to node name in exported ONNX ModelProto.
-
-    Returns:
-        graph (_C.Graph): A TorchScript IR Graph with ONNX nodes, where each _C.Node gets its name
-        in exported ONNX ModelProto assigned as attribute ``onnx_name``.
-    """
-
-    def n_fn(n, b_fn, node_names):
-        for b in n.blocks():
-            b_fn(b, node_names)
-        if n in node_names:
-            n.s_("onnx_name", node_names[n])
-
-    def b_fn(b, node_names):
-        for n in b.nodes():
-            n_fn(n, b_fn, node_names)
-
-    b_fn(graph, node_names)
-    return graph
-
-
 def _model_to_graph(
     model,
     args,
@@ -1126,10 +1104,6 @@ def _model_to_graph(
 
     params_dict = _C._jit_pass_filter_non_tensor_arguments(params_dict)
     _C._jit_decay_packed_param_input_types(graph)
-
-    # If output names lack a proper name and are identified only by their unique
-    # give them a legible name for debugging purposes
-    _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
 
@@ -1442,12 +1416,12 @@ def _export(
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
+            _C._jit_pass_onnx_assign_node_and_value_names(graph)
             if export_params:
                 (
                     proto,
                     export_map,
                     val_use_external_data_format,
-                    node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
                     opset_version,
@@ -1466,7 +1440,6 @@ def _export(
                     proto,
                     export_map,
                     val_use_external_data_format,
-                    node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,
@@ -1481,9 +1454,7 @@ def _export(
                     node_attr_to_name,
                 )
             if verbose:
-                torch.onnx.log(
-                    "Exported graph: ", _assign_onnx_node_name(graph, node_names)
-                )
+                torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:

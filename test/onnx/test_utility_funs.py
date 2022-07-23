@@ -1498,8 +1498,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
-    def test_onnx_intermediate_renaming(self):
-        class RenamedIntermediateModule(torch.nn.Module):
+    def test_onnx_node_naming(self):
+        class MainModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self._module_1 = torch.nn.Linear(10, 10)
@@ -1514,15 +1514,22 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 z = self._module_4(y * z)
                 return z
 
-        module = RenamedIntermediateModule()
+        module = MainModule()
 
-        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=["y"])
-        renamed_intermediate = 0
-        for n in g.nodes():
-            for v in n.inputs():
-                if v.debugName().startswith("onnx::Mul_"):
-                    renamed_intermediate += 1
-        self.assertEqual(renamed_intermediate, 2)
+        f = io.BytesIO()
+        torch.onnx.export(module, torch.ones(1, 10), f, output_names=["y"])
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+
+        [
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/storch.nn.modules.linear.Linear/Gemm",
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear1/Gemm",
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/Mul",
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear2/Gemm",
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/Mul1",
+            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear3/Gemm",
+        ]
+
+        node_names = [n.name for n in onnx_model.graph.node]
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):

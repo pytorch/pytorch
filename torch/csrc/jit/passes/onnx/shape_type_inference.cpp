@@ -357,13 +357,11 @@ void ConvertGraphToONNXProto(
   RawDataExportMap export_map;
   bool val_use_external_data_format;
   SymbolDimMap new_symbol_dim_map;
-  NodeNameMap node_names;
   std::tie(
       model_proto,
       export_map,
       new_symbol_dim_map,
-      val_use_external_data_format,
-      node_names) =
+      val_use_external_data_format) =
       export_onnx(
           graph,
           {},

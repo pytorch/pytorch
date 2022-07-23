@@ -234,10 +234,6 @@ class GraphEncoder {
     return use_external_data_format_;
   }
 
-  NodeNameMap get_onnx_node_names() {
-    return onnx_node_name_map_;
-  }
-
  private:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
@@ -384,7 +380,6 @@ class GraphEncoder {
   std::map<std::string, int> custom_opsets_;
   std::shared_ptr<Graph> graph_;
   NodeAttrNameMap node_attr_to_name_;
-  NodeNameMap onnx_node_name_map_;
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
   // tensor, beyond which the parameter is stored in a separate file (if
@@ -885,15 +880,24 @@ void GraphEncoder::EncodeNode(
         !node->kind().is_attr());
   }
   node_proto->set_op_type(node->kind().toUnqualString());
+  const auto node_name_attribute_symbol =
+      Symbol::attr(::torch::onnx::OnnxNodeNameAttribute);
   if (add_node_names) {
-    auto node_name =
-        node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
-    node_proto->set_name(node_name);
-    onnx_node_name_map_[node] = node_name;
+    if (node->hasAttribute(node_name_attribute_symbol)) {
+      auto node_name = node->s(node_name_attribute_symbol);
+      node_proto->set_name(node_name);
+    } else {
+      auto node_name =
+          node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+    }
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
+    if (attr_name == node_name_attribute_symbol) {
+      // Skip the node name attribute.
+      continue;
+    }
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {
@@ -1313,8 +1317,7 @@ std::tuple<
     std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
     RawDataExportMap,
     SymbolDimMap,
-    bool,
-    NodeNameMap>
+    bool>
 export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -1351,8 +1354,7 @@ export_onnx(
           graph_encoder.get_model_proto()),
       graph_encoder.get_raw_data_export_map(),
       graph_encoder.get_symbol_dim_param_map(),
-      graph_encoder.get_use_external_data_format(),
-      graph_encoder.get_onnx_node_names());
+      graph_encoder.get_use_external_data_format());
 }
 
 std::string serialize_model_proto_to_string(
