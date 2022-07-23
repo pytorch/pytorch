@@ -50,8 +50,8 @@ class FusionDefinition {
   FusionDefinition* enter();
   void exit();
 
-  void addInput(torch::jit::fuser::cuda::Val* input);
-  void addOutput(torch::jit::fuser::cuda::Val* output);
+  void addInput(NvfVal* input);
+  void addOutput(NvfVal* output);
 
   Scalar* defineScalar();
   Tensor* defineTensor();

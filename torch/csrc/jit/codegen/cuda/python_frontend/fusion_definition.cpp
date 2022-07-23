@@ -28,10 +28,10 @@ void FusionDefinition::exit() {
   prev_fusion_ = nullptr;
 }
 
-void FusionDefinition::addInput(torch::jit::fuser::cuda::Val* input) {
+void FusionDefinition::addInput(NvfVal* input) {
   fusionPtr()->addInput(input);
 }
-void FusionDefinition::addOutput(torch::jit::fuser::cuda::Val* output) {
+void FusionDefinition::addOutput(NvfVal* output) {
   fusionPtr()->addOutput(output);
 }
 
