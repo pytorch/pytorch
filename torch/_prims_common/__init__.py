@@ -388,6 +388,7 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
+    assert isinstance(length, int)
     assert length >= 0
 
 
