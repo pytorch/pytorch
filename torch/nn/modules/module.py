@@ -1318,17 +1318,18 @@ class Module:
                               "behavior.")
 
     def register_forward_pre_hook(
-        self, hook: Callable[..., None], prepend: bool = False
+        self, hook: Callable[..., None], prepend: bool = False, with_kwargs: bool = False
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
-            hook(module, input) -> None or modified input
+            hook(module, input, with_kwargs=False) -> None or modified input
 
-        The input contains only the positional arguments given to the module.
-        Keyword arguments won't be passed to the hooks and only to the ``forward``.
+        If ``with_kwargs`` is ``False`` the input and output contains only the
+        positional arguments given to the module.  Keyword arguments won't be
+        passed to the hooks and only to the ``forward``.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
@@ -1350,13 +1351,14 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
+        hook.with_kwargs = with_kwargs
         self._forward_pre_hooks[handle.id] = hook
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def register_forward_hook(
-        self, hook: Callable[..., None], prepend: bool = False
+        self, hook: Callable[..., None], prepend: bool = False, with_kwargs: bool = False
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
@@ -1388,6 +1390,7 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
+        hook.with_kwargs = with_kwargs
         self._forward_hooks[handle.id] = hook
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1431,11 +1434,14 @@ class Module:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
             for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
-                result = hook(self, input)
-                if result is not None:
-                    if not isinstance(result, tuple):
-                        result = (result,)
-                    input = result
+                if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
+                    input, kwargs = hook(mod, args, kwargs)
+                else:
+                    result = hook(self, input)
+                    if result is not None:
+                        if not isinstance(result, tuple):
+                            result = (result,)
+                        input = result
 
         bw_hook = None
         if full_backward_hooks or backward_pre_hooks:
@@ -1445,9 +1451,12 @@ class Module:
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
             for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
-                hook_result = hook(self, input, result)
-                if hook_result is not None:
-                    result = hook_result
+                if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
+                    input, kwargs = hook(self, input, result)
+                else:
+                    hook_result = hook(self, input, result)
+                    if hook_result is not None:
+                        result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
