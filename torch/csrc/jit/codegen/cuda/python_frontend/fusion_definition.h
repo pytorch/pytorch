@@ -1,5 +1,4 @@
 #pragma once
-
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_owner.h>
@@ -36,13 +35,7 @@ struct Scalar : State {
 // Manually applying the fusion guard via a context manager
 class FusionDefinition {
  public:
-  FusionDefinition(FusionOwner* fusion_owner)
-      : fusion_owner_(fusion_owner),
-        prev_fusion_(nullptr),
-        recording(),
-        recording_state(),
-        fusion_state(),
-        ops(this) {}
+  FusionDefinition(FusionOwner* fusion_owner);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -54,36 +47,31 @@ class FusionDefinition {
   FusionDefinition& operator=(FusionDefinition&& fd) = delete;
 
   // Context Manager Methods
-  FusionDefinition* enter() {
-    prev_fusion_ = FusionGuard::getCurFusion();
-    FusionGuard::setCurFusion(fusionPtr());
-    return this;
-  }
+  FusionDefinition* enter();
+  void exit();
 
-  void exit() {
-    FusionGuard::setCurFusion(prev_fusion_);
-    prev_fusion_ = nullptr;
-  }
+  void addInput(torch::jit::fuser::cuda::Val* input);
+  void addOutput(torch::jit::fuser::cuda::Val* output);
 
-  void addInput(torch::jit::fuser::cuda::Val* input) {
-    fusionPtr()->addInput(input);
-  }
-  void addOutput(torch::jit::fuser::cuda::Val* output) {
-    fusionPtr()->addOutput(output);
-  }
+  Scalar* defineScalar();
+  Tensor* defineTensor();
+  void defineRecord(RecordFunctor* record);
 
-  Fusion* fusionPtr() {
-    return fusion_owner_->fusionPtr();
-  }
+  NvfVal* getFusionState(size_t index) const;
+  void setFusionState(size_t index, NvfVal* val);
+
+  Fusion* fusionPtr();
 
  private:
   FusionOwner* fusion_owner_;
   Fusion* prev_fusion_;
+  
+  std::vector<std::unique_ptr<RecordFunctor>> recording_;
+  std::vector<std::unique_ptr<State>> recording_state_;
+
+  std::vector<NvfVal*> fusion_state_;
 
  public:
-  std::vector<std::unique_ptr<RecordFunctor>> recording;
-  std::vector<std::unique_ptr<State>> recording_state;
-  std::vector<NvfVal*> fusion_state;
 
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}

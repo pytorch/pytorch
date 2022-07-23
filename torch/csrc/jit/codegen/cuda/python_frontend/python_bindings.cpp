@@ -76,23 +76,18 @@ void initNvFuserPythonBindings(PyObject* module) {
              void* exc_type,
              void* exc_value,
              void* traceback) {
-            self.fusion_state.resize(self.recording_state.size(), nullptr);
-            for (auto& record : self.recording) {
-              auto functor = record.get();
-              (*functor)(self);
-            }
             self.exit();
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
-            self.recording.emplace_back(
+            self.defineRecord(
                 new nvfuser::OutputRecord<NvfVal>({output->index}));
           })
       .def(
           "add_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
-            self.recording.emplace_back(
+            self.defineRecord(
                 new nvfuser::OutputRecord<NvfTensorView>({output->index}));
           })
       .def(
@@ -104,10 +99,8 @@ void initNvFuserPythonBindings(PyObject* module) {
             ;
             std::vector<bool> contig_info(ndims, false);
 
-            nvfuser::Tensor* out =
-                new nvfuser::Tensor(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(new nvfuser::InputTensorRecord(
+            nvfuser::Tensor* out = self.defineTensor();
+            self.defineRecord(new nvfuser::InputTensorRecord(
                 {out->index},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
@@ -160,10 +153,8 @@ void initNvFuserPythonBindings(PyObject* module) {
               }
             }
 
-            nvfuser::Tensor* out =
-                new nvfuser::Tensor(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(new nvfuser::InputTensorRecord(
+            nvfuser::Tensor* out = self.defineTensor();
+            self.defineRecord(new nvfuser::InputTensorRecord(
                 {out->index},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
@@ -178,10 +169,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar* {
-            nvfuser::Scalar* out =
-                new nvfuser::Scalar(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(
+            nvfuser::Scalar* out = self.defineScalar();
+            self.defineRecord(
                 new nvfuser::
                     ConstantRecord<torch::jit::fuser::cuda::Double, double>(
                         {out->index}, val));
@@ -192,10 +181,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](nvfuser::FusionDefinition& self,
              c10::complex<double> val) -> nvfuser::Scalar* {
-            nvfuser::Scalar* out =
-                new nvfuser::Scalar(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(
+            nvfuser::Scalar* out = self.defineScalar();
+            self.defineRecord(
                 new nvfuser::ConstantRecord<
                     torch::jit::fuser::cuda::ComplexDouble,
                     c10::complex<double>>({out->index}, val));
@@ -205,10 +192,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar* {
-            nvfuser::Scalar* out =
-                new nvfuser::Scalar(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(
+            nvfuser::Scalar* out = self.defineScalar();
+            self.defineRecord(
                 new nvfuser::
                     ConstantRecord<torch::jit::fuser::cuda::Bool, bool>(
                         {out->index}, val));
@@ -218,10 +203,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar* {
-            nvfuser::Scalar* out =
-                new nvfuser::Scalar(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(
+            nvfuser::Scalar* out = self.defineScalar();
+            self.defineRecord(
                 new nvfuser::
                     ConstantRecord<torch::jit::fuser::cuda::Int, int64_t>(
                         {out->index}, val));
@@ -233,10 +216,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              NvfDataType dtype = torch::jit::fuser::cuda::DataType::Double)
               -> nvfuser::Scalar* {
-            nvfuser::Scalar* out =
-                new nvfuser::Scalar(self.recording_state.size());
-            self.recording_state.emplace_back(out);
-            self.recording.emplace_back(
+            nvfuser::Scalar* out = self.defineScalar();
+            self.defineRecord(
                 new nvfuser::ScalarRecord({out->index}, dtype));
             return out;
           },
@@ -249,38 +230,34 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   // ******************** INSERT OP BINDINGS BELOW HERE ********************
 
-#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)              \
-  nvf_ops.def(                                                        \
-      op_str,                                                         \
-      [](nvfuser::FusionDefinition::Operators& self,                  \
-         nvfuser::Tensor* input) -> nvfuser::Tensor* {                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                \
-            self.fusion_definition->recording_state.size());          \
-        self.fusion_definition->recording_state.emplace_back(output); \
-        self.fusion_definition->recording.emplace_back(               \
-            new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*>(    \
-                {input->index},                                       \
-                {output->index},                                      \
-                static_cast<NvfTensorView* (*)(NvfTensorView*)>(      \
-                    torch::jit::fuser::cuda::op_name)));              \
-        return output;                                                \
-      },                                                              \
-      py::return_value_policy::reference);                            \
-  nvf_ops.def(                                                        \
-      op_str,                                                         \
-      [](nvfuser::FusionDefinition::Operators& self,                  \
-         nvfuser::Scalar* input) -> nvfuser::Scalar* {                \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                \
-            self.fusion_definition->recording_state.size());          \
-        self.fusion_definition->recording_state.emplace_back(output); \
-        self.fusion_definition->recording.emplace_back(               \
-            new nvfuser::OpRecord<NvfVal*, NvfVal*>(                  \
-                {input->index},                                       \
-                {output->index},                                      \
-                static_cast<NvfVal* (*)(NvfVal*)>(                    \
-                    torch::jit::fuser::cuda::op_name)));              \
-        return output;                                                \
-      },                                                              \
+#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)                  \
+  nvf_ops.def(                                                            \
+      op_str,                                                             \
+      [](nvfuser::FusionDefinition::Operators& self,                      \
+         nvfuser::Tensor* input) -> nvfuser::Tensor* {                    \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
+        self.fusion_definition->defineRecord(                             \
+            new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*>(        \
+                {input->index},                                           \
+                {output->index},                                          \
+                static_cast<NvfTensorView* (*)(NvfTensorView*)>(          \
+                    torch::jit::fuser::cuda::op_name)));                  \
+        return output;                                                    \
+      },                                                                  \
+      py::return_value_policy::reference);                                \
+  nvf_ops.def(                                                            \
+      op_str,                                                             \
+      [](nvfuser::FusionDefinition::Operators& self,                      \
+         nvfuser::Scalar* input) -> nvfuser::Scalar* {                    \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar(); \
+        self.fusion_definition->defineRecord(                             \
+            new nvfuser::OpRecord<NvfVal*, NvfVal*>(                      \
+                {input->index},                                           \
+                {output->index},                                          \
+                static_cast<NvfVal* (*)(NvfVal*)>(                        \
+                    torch::jit::fuser::cuda::op_name)));                  \
+        return output;                                                    \
+      },                                                                  \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_UNARY_OP("abs", abs)
@@ -334,13 +311,11 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Tensor* arg1,                                               \
          nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord< \
-                                                       NvfTensorView*,        \
-                                                       NvfTensorView*,        \
-                                                       NvfTensorView*>(       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<           \
+                                             NvfTensorView*,                  \
+                                             NvfTensorView*,                  \
+                                             NvfTensorView*>(                 \
             {arg1->index, arg2->index},                                       \
             {output->index},                                                  \
             static_cast<NvfTensorView* (*)(NvfTensorView*, NvfTensorView*)>(  \
@@ -353,10 +328,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Tensor* arg1,                                               \
          nvfuser::Scalar* arg2) -> nvfuser::Tensor* {                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();     \
+        self.fusion_definition->defineRecord(                                 \
             new nvfuser::OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*>(   \
                 {arg1->index, arg2->index},                                   \
                 {output->index},                                              \
@@ -370,10 +343,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Scalar* arg1,                                               \
          nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();     \
+        self.fusion_definition->defineRecord(                                 \
             new nvfuser::OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*>(   \
                 {arg1->index, arg2->index},                                   \
                 {output->index},                                              \
@@ -387,10 +358,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Scalar* arg1,                                               \
          nvfuser::Scalar* arg2) -> nvfuser::Scalar* {                         \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(                       \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();     \
+        self.fusion_definition->defineRecord(                                 \
             new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*>(                 \
                 {arg1->index, arg2->index},                                   \
                 {output->index},                                              \
@@ -429,14 +398,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                \
          nvfuser::Tensor* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<  \
-                                                       NvfTensorView*,         \
-                                                       NvfTensorView*,         \
-                                                       NvfTensorView*,         \
-                                                       NvfVal*>(               \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<            \
+                                             NvfTensorView*,                   \
+                                             NvfTensorView*,                   \
+                                             NvfTensorView*,                   \
+                                             NvfVal*>(                         \
             {arg1->index, arg2->index, arg3->index},                           \
             {output->index},                                                   \
             static_cast<                                                       \
@@ -451,10 +418,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(                        \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
+        self.fusion_definition->defineRecord(                                  \
             new nvfuser::                                                      \
                 OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(    \
                     {arg1->index, arg2->index, arg3->index},                   \
@@ -471,10 +436,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                \
          nvfuser::Tensor* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(                        \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
+        self.fusion_definition->defineRecord(                                  \
             new nvfuser::                                                      \
                 OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*>(    \
                     {arg1->index, arg2->index, arg3->index},                   \
@@ -491,10 +454,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(                        \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
+        self.fusion_definition->defineRecord(                                  \
             new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(         \
                 {arg1->index, arg2->index, arg3->index},                       \
                 {output->index},                                               \
@@ -515,10 +476,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(                              \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();            \
+        self.fusion_definition->defineRecord(                                        \
             new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(               \
                 {arg1->index, arg2->index, arg3->index},                             \
                 {output->index},                                                     \
@@ -533,14 +492,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<        \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*>(              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*>(                        \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
             static_cast<                                                             \
@@ -555,14 +512,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<        \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*,               \
-                                                       NvfVal*>(                     \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*,                         \
+                                             NvfVal*>(                               \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
             static_cast<                                                             \
@@ -577,14 +532,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<        \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*,               \
-                                                       NvfVal*,                      \
-                                                       NvfTensorView*>(              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*,                         \
+                                             NvfVal*,                                \
+                                             NvfTensorView*>(                        \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
             static_cast<                                                             \
@@ -599,14 +552,12 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<        \
-                                                       NvfTensorView*,               \
-                                                       NvfVal*,                      \
-                                                       NvfTensorView*,               \
-                                                       NvfTensorView*>(              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
+                                             NvfTensorView*,                         \
+                                             NvfVal*,                                \
+                                             NvfTensorView*,                         \
+                                             NvfTensorView*>(                        \
             {arg1->index, arg2->index, arg3->index},                                 \
             {output->index},                                                         \
             static_cast<                                                             \
@@ -621,10 +572,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(                                        \
             new nvfuser::                                                            \
                 OpRecord<NvfTensorView*, NvfVal*, NvfVal*, NvfTensorView*>(          \
                     {arg1->index, arg2->index, arg3->index},                         \
@@ -641,10 +590,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                      \
          nvfuser::Scalar* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(                                        \
             new nvfuser::                                                            \
                 OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(          \
                     {arg1->index, arg2->index, arg3->index},                         \
@@ -661,10 +608,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                      \
          nvfuser::Tensor* arg2,                                                      \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                               \
-            self.fusion_definition->recording_state.size());                         \
-        self.fusion_definition->recording_state.emplace_back(output);                \
-        self.fusion_definition->recording.emplace_back(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
+        self.fusion_definition->defineRecord(                                        \
             new nvfuser::                                                            \
                 OpRecord<NvfTensorView*, NvfVal*, NvfTensorView*, NvfVal*>(          \
                     {arg1->index, arg2->index, arg3->index},                         \
@@ -687,10 +632,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(                        \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
+        self.fusion_definition->defineRecord(                                  \
             new nvfuser::OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*>(         \
                 {arg1->index, arg2->index, arg3->index},                       \
                 {output->index},                                               \
@@ -705,10 +648,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg1,                                                \
          nvfuser::Scalar* arg2,                                                \
          nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                         \
-            self.fusion_definition->recording_state.size());                   \
-        self.fusion_definition->recording_state.emplace_back(output);          \
-        self.fusion_definition->recording.emplace_back(                        \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
+        self.fusion_definition->defineRecord(                                  \
             new nvfuser::                                                      \
                 OpRecord<NvfTensorView*, NvfTensorView*, NvfVal*, NvfVal*>(    \
                     {arg1->index, arg2->index, arg3->index},                   \
@@ -732,10 +673,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                               \
          nvfuser::Scalar* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Scalar* {                                         \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(                                       \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                     \
+        self.fusion_definition->defineRecord(                                                 \
             new nvfuser::                                                                     \
                 OpRecord<NvfVal*, NvfVal*, NvfVal*, NvfVal*, NvfVal*>(                        \
                     {arg1->index, arg2->index, arg3->index, arg4->index},                     \
@@ -753,15 +692,13 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                               \
          nvfuser::Tensor* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*>(                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*>(                                 \
             {arg1->index, arg2->index, arg3->index, arg4->index},                             \
             {output->index},                                                                  \
             static_cast<                                                                      \
@@ -777,15 +714,13 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                               \
          nvfuser::Scalar* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfVal*,                               \
-                                                       NvfVal*>(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfVal*,                                         \
+                                             NvfVal*>(                                        \
             {arg1->index, arg2->index, arg3->index, arg4->index},                             \
             {output->index},                                                                  \
             static_cast<                                                                      \
@@ -801,15 +736,13 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                               \
          nvfuser::Tensor* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfVal*,                               \
-                                                       NvfTensorView*,                        \
-                                                       NvfVal*>(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfVal*,                                         \
+                                             NvfTensorView*,                                  \
+                                             NvfVal*>(                                        \
             {arg1->index, arg2->index, arg3->index, arg4->index},                             \
             {output->index},                                                                  \
             static_cast<                                                                      \
@@ -825,15 +758,13 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                               \
          nvfuser::Tensor* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
-                                                       NvfTensorView*,                        \
-                                                       NvfVal*,                               \
-                                                       NvfTensorView*,                        \
-                                                       NvfTensorView*,                        \
-                                                       NvfVal*>(                              \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
+                                             NvfTensorView*,                                  \
+                                             NvfVal*,                                         \
+                                             NvfTensorView*,                                  \
+                                             NvfTensorView*,                                  \
+                                             NvfVal*>(                                        \
             {arg1->index, arg2->index, arg3->index, arg4->index},                             \
             {output->index},                                                                  \
             static_cast<                                                                      \
@@ -849,10 +780,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                               \
          nvfuser::Tensor* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
                                                        NvfTensorView*,                        \
                                                        NvfVal*,                               \
                                                        NvfVal*,                               \
@@ -873,10 +802,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Scalar* arg2,                                                               \
          nvfuser::Scalar* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
                                                        NvfTensorView*,                        \
                                                        NvfTensorView*,                        \
                                                        NvfVal*,                               \
@@ -897,10 +824,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg2,                                                               \
          nvfuser::Scalar* arg3,                                                               \
          nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                         \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                                        \
-            self.fusion_definition->recording_state.size());                                  \
-        self.fusion_definition->recording_state.emplace_back(output);                         \
-        self.fusion_definition->recording.emplace_back(new nvfuser::OpRecord<                 \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                     \
+        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                           \
                                                        NvfTensorView*,                        \
                                                        NvfVal*,                               \
                                                        NvfTensorView*,                        \
@@ -918,31 +843,29 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP("addcmul", addcmul)
 #undef NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP
 
-#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)          \
-  nvf_ops.def(                                                        \
-      op_str,                                                         \
-      [](nvfuser::FusionDefinition::Operators& self,                  \
-         nvfuser::Tensor* arg,                                        \
-         const std::vector<int>& axes,                                \
-         bool keep_dim,                                               \
-         NvfDataType dtype) -> nvfuser::Tensor* {                     \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                \
-            self.fusion_definition->recording_state.size());          \
-        self.fusion_definition->recording_state.emplace_back(output); \
-        self.fusion_definition->recording.emplace_back(               \
-            new nvfuser::ReductionOpRecord(                           \
-                {arg->index},                                         \
-                {output->index},                                      \
-                torch::jit::fuser::cuda::op_name,                     \
-                axes,                                                 \
-                keep_dim,                                             \
-                dtype));                                              \
-        return output;                                                \
-      },                                                              \
-      py::arg("arg"),                                                 \
-      py::arg("axes"),                                                \
-      py::arg("keep_dim"),                                            \
-      py::arg("dtype") = torch::jit::fuser::cuda::DataType::Null,     \
+#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)              \
+  nvf_ops.def(                                                            \
+      op_str,                                                             \
+      [](nvfuser::FusionDefinition::Operators& self,                      \
+         nvfuser::Tensor* arg,                                            \
+         const std::vector<int>& axes,                                    \
+         bool keep_dim,                                                   \
+         NvfDataType dtype) -> nvfuser::Tensor* {                         \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
+        self.fusion_definition->defineRecord(                             \
+            new nvfuser::ReductionOpRecord(                               \
+                {arg->index},                                             \
+                {output->index},                                          \
+                torch::jit::fuser::cuda::op_name,                         \
+                axes,                                                     \
+                keep_dim,                                                 \
+                dtype));                                                  \
+        return output;                                                    \
+      },                                                                  \
+      py::arg("arg"),                                                     \
+      py::arg("axes"),                                                    \
+      py::arg("keep_dim"),                                                \
+      py::arg("dtype") = torch::jit::fuser::cuda::DataType::Null,         \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)
@@ -956,10 +879,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Tensor* arg,                                                \
          NvfDataType dtype) -> nvfuser::Tensor* {                             \
-        nvfuser::Tensor* output = new nvfuser::Tensor(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(                       \
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();     \
+        self.fusion_definition->defineRecord(                                 \
             new nvfuser::CastOpRecord<NvfTensorView*, NvfTensorView*>(        \
                 {arg->index},                                                 \
                 {output->index},                                              \
@@ -974,10 +895,8 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,                          \
          nvfuser::Scalar* arg,                                                \
          NvfDataType dtype) -> nvfuser::Scalar* {                             \
-        nvfuser::Scalar* output = new nvfuser::Scalar(                        \
-            self.fusion_definition->recording_state.size());                  \
-        self.fusion_definition->recording_state.emplace_back(output);         \
-        self.fusion_definition->recording.emplace_back(                       \
+        nvfuser::Scalar* output = self.fusion_definition->defineScalar();     \
+        self.fusion_definition->defineRecord(                                 \
             new nvfuser::CastOpRecord<NvfVal*, NvfVal*>(                      \
                 {arg->index},                                                 \
                 {output->index},                                              \
@@ -998,10 +917,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          std::vector<int>& axes,
          int64_t correction,
          bool keepdim) -> nvfuser::Tensor* {
-        nvfuser::Tensor* output =
-            new nvfuser::Tensor(self.fusion_definition->recording_state.size());
-        self.fusion_definition->recording_state.emplace_back(output);
-        self.fusion_definition->recording.emplace_back(
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(
             new nvfuser::VarianceOpRecord(
                 {arg->index}, {output->index}, axes, correction, keepdim));
         return output;
@@ -1014,10 +931,8 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor* arg,
          std::vector<int64_t>& output_shape,
          std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor* {
-        nvfuser::Tensor* output =
-            new nvfuser::Tensor(self.fusion_definition->recording_state.size());
-        self.fusion_definition->recording_state.emplace_back(output);
-        self.fusion_definition->recording.emplace_back(
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(
             new nvfuser::BroadcastOpRecord(
                 {arg->index}, {output->index}, output_shape, broadcast_dims));
         return output;

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 
 namespace nvfuser {
+
 struct RecordFunctor {
   RecordFunctor(std::vector<size_t> _args, std::vector<size_t> _outputs)
       : args(std::move(_args)), outputs(std::move(_outputs)) {}
@@ -32,7 +33,7 @@ struct InputTensorRecord : RecordFunctor {
                   .dtype(dtype)
                   .build();
 
-    fd.fusion_state.at(outputs.at(0)) = tv;
+    fd.setFusionState(outputs.at(0), tv);
     fd.addInput(tv);
   }
 
@@ -59,7 +60,7 @@ struct ScalarRecord : RecordFunctor {
       TORCH_CHECK(false, "Dtype is not supported:", dtype_);
     }
     fd.addInput(output);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -73,7 +74,7 @@ struct ConstantRecord : RecordFunctor {
 
   void operator()(FusionDefinition& fd) final {
     NvfVal* output = IrBuilder::create<ExprType>(value_);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -86,7 +87,7 @@ struct OutputRecord : RecordFunctor {
       : RecordFunctor(std::move(_args), {}) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto input = fd.fusion_state.at(args.at(0));
+    auto input = fd.getFusionState(args.at(0));
 
     // With C++17, this statement should be "if constexpr"
     if (std::is_same<OutputType, NvfTensorView>::value) {
@@ -107,7 +108,7 @@ struct BroadcastOpRecord : RecordFunctor {
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.fusion_state.at(args.at(0))->as<TensorView>();
+    auto arg = fd.getFusionState(args.at(0))->as<TensorView>();
 
     const auto arg_ndims = arg->domain()->noReductions().size();
     TORCH_CHECK(
@@ -135,7 +136,7 @@ struct BroadcastOpRecord : RecordFunctor {
     }
 
     auto output = torch::jit::fuser::cuda::broadcast(arg, is_broadcast_dim);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -155,9 +156,9 @@ struct CastOpRecord : RecordFunctor {
         dtype_(dtype) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = dynamic_cast<ArgType>(fd.fusion_state.at(args.at(0)));
+    auto arg = dynamic_cast<ArgType>(fd.getFusionState(args.at(0)));
     auto output = fusion_op_(dtype_, arg);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -181,7 +182,7 @@ struct OpRecord : RecordFunctor {
       std::index_sequence<Is...>) {
     return fusion_op_(
         dynamic_cast<typename std::tuple_element<Is, TupleType>::type>(
-            fd.fusion_state.at(args.at(Is)))...);
+            fd.getFusionState(args.at(Is)))...);
   }
 
   void operator()(FusionDefinition& fd) final {
@@ -190,7 +191,7 @@ struct OpRecord : RecordFunctor {
         std::make_index_sequence<std::tuple_size<arg_tuple_t>::value>();
     arg_tuple_t inputs;
     auto output = opFunc(fd, inputs, indices);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -214,9 +215,9 @@ struct ReductionOpRecord : RecordFunctor {
         dtype_(dtype) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.fusion_state.at(args.at(0))->as<NvfTensorView>();
+    auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
@@ -241,10 +242,10 @@ struct VarianceOpRecord : RecordFunctor {
         keep_dim_(keep_dim) {}
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.fusion_state.at(args.at(0))->as<NvfTensorView>();
+    auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
     auto output =
         torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
-    fd.fusion_state.at(outputs.at(0)) = output;
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
