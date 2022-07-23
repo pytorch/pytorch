@@ -57,6 +57,10 @@ class SymIntArrayRef final {
   /* implicit */ SymIntArrayRef(const std::vector<c10::SymInt>& Vec)
       : wrapped_symint_array_ref(Vec) {}
 
+  /* implicit */ constexpr SymIntArrayRef(
+      const std::initializer_list<c10::SymInt>& Vec)
+      : wrapped_symint_array_ref(Vec) {}
+
   /// Construct an SymIntArrayRef from a pointer and length.
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA SymIntArrayRef(
       const c10::SymInt* data,
