@@ -123,9 +123,9 @@ class FusionDefinition {
   std::vector<NvfVal*> fusion_state_;
 
  public:
-  //! The Operators are not directly defined in this header.  They are defined in the
-  //! python bindings through lambda functions so the user only needs to define new
-  //! operators in one place.
+  //! The Operators are not directly defined in this header.  They are defined
+  //! in the python bindings through lambda functions so the user only needs to
+  //! define new operators in one place.
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
 
