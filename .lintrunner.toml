@@ -689,7 +689,9 @@ code = 'UFMT'
 # currently enforced by BLACK linter
 include_patterns = [
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
+    'torch/package/**/*.py',
     'torch/_decomp/**/*.py',
     'torch/_lazy/**/*.py',
     'torch/_masked/**/*.py',
