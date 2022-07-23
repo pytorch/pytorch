@@ -11,6 +11,10 @@ namespace nvfuser {
 
 struct RecordFunctor;
 
+//! The State, child classes Tensor and Scalar, and the StateType enum
+//! are used to define state objects to encapsulate the recording of state
+//! in the FusionDefinition.
+
 enum class StateType {
   Tensor,
   Scalar,
@@ -20,10 +24,20 @@ enum class StateType {
 struct State {
   State(StateType _stype, size_t _index) : stype(_stype), index(_index) {}
 
+  //! StateType is either: Tensor or Scalar
   StateType stype;
+  //! A unique index to identifiy each recorded state item.
   size_t index;
 };
 
+//! The child classes are used to define separate function signtures in
+//! in the FusionDefintion to identify the appropriate Operator function.
+//!
+//! Example:
+//!
+//!   add(Tensor* arg1, Tensor* arg2) -> Tensor*
+//!   add(Tensor* arg1, Scalar* arg2) -> Tensor*
+//!   add(Scalar* arg1, Scalar* arg2) -> Scalar*
 struct Tensor : State {
   Tensor(size_t _index) : State(StateType::Tensor, _index) {}
 };
@@ -32,7 +46,22 @@ struct Scalar : State {
   Scalar(size_t _index) : State(StateType::Scalar, _index) {}
 };
 
-// Manually applying the fusion guard via a context manager
+//! FusionDefinition defines the C++ side of a Python Context manager to
+//! encapsulate the definition of fusion operations.
+//!
+//! The FusionDefinition records the state definitions and operations prior
+//! to exiting the context manager.  Upon exit, the operations are queried
+//! in a cache and the recorded records are used to build an nvFuser Fusion
+//! object if the definition missed in the cache.
+//!
+//! \todo Need to implement the cache portion. Currently, the Fusion object
+//! is always built.
+//!
+//! The nested Operators class was designed to allow the user to query all the
+//! available Operators in the FusionDefinition via python help.
+//!
+//! Example:
+//!   help(FusionDefinition.Operators)
 class FusionDefinition {
  public:
   FusionDefinition(FusionOwner* fusion_owner);
