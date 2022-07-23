@@ -2958,12 +2958,12 @@ def empty(
 @register_decomposition(torch.ops.aten.new_empty)
 def new_empty(
     a: TensorLikeType,
-    size: List[int],
+    size: ShapeType,
     *,
     dtype: Optional[torch.dtype] = None,
-    layout = None,
+    layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
-    pin_memory: Optional[bool] = None,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
 
     dtype = a.dtype if dtype is None else dtype
