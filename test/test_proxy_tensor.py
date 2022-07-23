@@ -752,7 +752,6 @@ symbolic_tensor_failures = {
     xfail('view', ''),  # Tensors of type TensorImpl do not have numel
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
-    xfail('xlogy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
 }
