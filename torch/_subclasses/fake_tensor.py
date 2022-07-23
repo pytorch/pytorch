@@ -177,7 +177,7 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
-def contructors(fake_mode, func, *args, **kwargs):
+def constructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
