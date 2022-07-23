@@ -352,7 +352,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                                (torch.tensor([5.0], device=local_device_id, dtype=dtype),)):
                     tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)]
 
-                    allreduce(tensors, c10d.make_nccl_premul_sum(factor))
+                    allreduce(tensors, c10d._make_nccl_premul_sum(factor))
 
                     f = factor if isinstance(factor, float) else factor[0]
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095

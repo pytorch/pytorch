@@ -560,13 +560,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   module
       .def(
-          "make_nccl_premul_sum",
+          "_make_nccl_premul_sum",
           &::c10d::makeNCCLPreMulSum<double>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "make_nccl_premul_sum",
+          "_make_nccl_premul_sum",
           &::c10d::makeNCCLPreMulSum<std::vector<at::Tensor>>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
