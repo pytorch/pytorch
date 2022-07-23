@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 namespace torch {
 namespace jit {
@@ -245,6 +246,14 @@ std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
   return result;
 }
 
+//! Variant of getMmaDomains that returns a set
+std::unordered_set<IterDomain*> getMmaDomainSet(
+    MmaOp* mma,
+    MmaDimension dimension) {
+  auto mma_domains = getMmaDomains(mma, dimension);
+  return {mma_domains.begin(), mma_domains.end()};
+}
+
 // [MMA dimension matching]
 // Returns all the axes that correspond to the given mma dimension. This is the
 //   first relaxation step on the mma check.
@@ -325,9 +334,10 @@ void validateMmaRootInnerMNK(
     int m,
     int n,
     int k) {
-  auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-  auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
-  auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+  auto mma = options.mmaOp();
+  auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+  auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
+  auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
   TORCH_CHECK(
       !m_dims.empty() && !n_dims.empty() && !k_dims.empty(),
@@ -354,8 +364,9 @@ void validateMmaRootInnerMNK(
 //!  swizzles to the right axes.
 //! This check will be relaxed as we build out the mma usage patterns.
 void validateMmaRootInnerMN(TensorView* tv, MmaOptions options, int m, int n) {
-  auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-  auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
+  auto mma = options.mmaOp();
+  auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+  auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
 
   TORCH_CHECK(
       !m_dims.empty() && !n_dims.empty(),
@@ -500,8 +511,9 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
   if (options.operand == MmaOptions::Operand::A) {
     TORCH_INTERNAL_ASSERT(tv->nDims() >= 2);
     // validation:
-    auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-    auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+    auto mma = options.mmaOp();
+    auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+    auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
     TORCH_INTERNAL_ASSERT(
         canValidateIsInnerDim(m_dims.back(), tv->axis(-2), 16),
@@ -532,8 +544,9 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
 
     tv->axis(-2)->parallelize(ParallelType::TIDx);
   } else if (options.operand == MmaOptions::Operand::B) {
-    auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
-    auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+    auto mma = options.mmaOp();
+    auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
+    auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
     // validation:
     TORCH_INTERNAL_ASSERT(
@@ -749,6 +762,76 @@ bool isMmaInitLoop(const kir::ForLoop* loop) {
 }
 
 } // namespace mma_util
+
+void scheduler_utils::matmul_utils::canonicalizeMmaTvOrdering(TensorView* tv) {
+  std::unordered_set<IterDomain*> root_id_set{
+      tv->getMaybeRFactorDomain().begin(), tv->getMaybeRFactorDomain().end()};
+
+  auto mma = dynamic_cast<MmaOp*>(tv->definition());
+  TORCH_CHECK(
+      mma != nullptr, "canonicalizeMmaTvOrdering : only support mma op output");
+
+  auto m_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::M);
+  auto n_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::N);
+  auto k_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::K);
+
+  std::vector<int> batch_pos, prev_reduction_pos, m_pos, n_pos, k_pos;
+
+  auto ndims = tv->nDims();
+
+  for (auto idx : c10::irange(ndims)) {
+    auto id = tv->axis(idx);
+    TORCH_CHECK(root_id_set.count(id), id->toString(), " not a root id.");
+
+    // Categorize each original iterdomain position
+    if (m_id_set.count(id)) {
+      m_pos.push_back(idx);
+    } else if (n_id_set.count(id)) {
+      n_pos.push_back(idx);
+    } else if (k_id_set.count(id)) {
+      k_pos.push_back(idx);
+    } else if (id->isReduction()) {
+      prev_reduction_pos.push_back(idx);
+    } else {
+      batch_pos.push_back(idx);
+    }
+  }
+
+  // Collect all mma id's, other id's would be either
+  //  batch or incoming reduction.
+
+  // Ordering map from old position to new position
+  //  that we wil build using the position vectors.
+  std::unordered_map<int, int> order_map;
+
+  // Running position counter keeping track of the
+  //  current insert position in order_map.
+  int current_pos = 0;
+
+  // Utility to insert the ordered pos sequences to
+  //  the ordering map.
+  auto insert_to_order_map =
+      [&order_map, &current_pos](const std::vector<int>& original_pos) {
+        for (auto pos : original_pos) {
+          order_map[pos] = current_pos++;
+        }
+      };
+
+  // Order the categories, while keeping the original
+  //  intra-category ordering.
+  insert_to_order_map(batch_pos);
+  insert_to_order_map(prev_reduction_pos);
+  insert_to_order_map(m_pos);
+  insert_to_order_map(n_pos);
+  insert_to_order_map(k_pos);
+
+  // Validate that all of the root ids are covered by
+  //  the inserted categories.
+  TORCH_INTERNAL_ASSERT(current_pos == ndims, "Id not completely categorized");
+
+  // Apply the new ordering
+  tv->reorder(order_map);
+}
 
 } // namespace cuda
 } // namespace fuser

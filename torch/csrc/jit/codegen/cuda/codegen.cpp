@@ -971,13 +971,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  std::string genArchString(MmaOptions options) {
+  std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
-    if (isVolta(options.macro)) {
+    if (isVolta(macro)) {
       ss << "Volta";
-    } else if (isTuring(options.macro)) {
+    } else if (isTuring(macro)) {
       ss << "Turing";
-    } else if (isAmpere(options.macro)) {
+    } else if (isAmpere(macro)) {
       ss << "Ampere";
     } else {
       TORCH_INTERNAL_ASSERT(false, "mma macro unknown arch");
@@ -988,7 +988,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   std::string genMmaOp(const MmaOp* mma, bool init = false) {
     std::stringstream ss;
     auto options = mma->options();
-    ss << genArchString(options) << "::";
+    ss << genArchString(options.macro) << "::";
     if (init) {
       ss << "init";
     }

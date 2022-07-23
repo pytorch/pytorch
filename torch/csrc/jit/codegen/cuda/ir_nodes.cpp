@@ -630,7 +630,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init,
-    MmaOptions options)
+    OptionsInMma options)
     : MmaOp(passkey, out, in_a, in_b, init) {
   options_ = options;
 }

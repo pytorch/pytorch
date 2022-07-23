@@ -338,6 +338,22 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 //! Fused Matmul operation
 class TORCH_CUDA_CU_API MmaOp : public Expr {
  public:
+  // This is a temporary data structure to for the
+  //  scheduling specific parameters that we still need
+  //  to store on an mma node. Eventually will only be
+  //  the mma macro type that will stay on the IR node
+  //  after additional cleaning ups.
+  struct OptionsInMma {
+    MmaOptions::MacroType macro = MmaOptions::MacroType::NoMMA;
+    MmaOptions::MmaInputLayout operand_layout = MmaOptions::MmaInputLayout::TT;
+    int accumulator_stride = 0;
+
+    bool operator==(const OptionsInMma& other) const {
+      return macro == other.macro && operand_layout == other.operand_layout &&
+          accumulator_stride == other.accumulator_stride;
+    }
+  };
+
   MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
 
   MmaOp(
@@ -346,7 +362,7 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
       Val* in_a,
       Val* in_b,
       Val* init,
-      MmaOptions options);
+      OptionsInMma options);
 
   MmaOp(const MmaOp* src, IrCloner* ir_cloner);
 
@@ -379,7 +395,15 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   }
 
   void configureOptions(MmaOptions options) {
-    options_ = options;
+    options_ = OptionsInMma();
+    TORCH_INTERNAL_ASSERT(
+        options.macro != MmaOptions::MacroType::NoMMA,
+        "Un-configured mma type from options.");
+    TORCH_INTERNAL_ASSERT(
+        options.accumulator_stride > 0, "Un-configured accumulator stride.");
+    options_->accumulator_stride = options.accumulator_stride;
+    options_->macro = options.macro;
+    options_->operand_layout = options.operand_layout;
   }
 
  private:
@@ -387,7 +411,7 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   Val* const in_a_ = nullptr;
   Val* const in_b_ = nullptr;
   Val* const init_ = nullptr;
-  c10::optional<MmaOptions> options_ = c10::nullopt;
+  c10::optional<OptionsInMma> options_ = c10::nullopt;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {

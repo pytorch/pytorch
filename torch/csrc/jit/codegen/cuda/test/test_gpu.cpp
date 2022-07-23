@@ -24778,6 +24778,31 @@ TEST_F(NVFuserTest, FusionInlineRepro1803_CUDA) {
   TORCH_CHECK(tvs.var_sum->getComputeAtPosition() == 1);
 }
 
+// Unit test for the transform selection logic
+TEST_F(NVFuserTest, FusionBoundedDirectionSelection1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeContigTensor(2);
+
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 5);
+  tv3->split(-1, 8);
+
+  scheduler_utils::BoundedDirectionalTransformPropagator::backward(
+      tv3, -1, {tv0, tv2});
+
+  // Check that the splits are replayed on tv1, even though tv2
+  //  is part of the boundary.
+  TORCH_INTERNAL_ASSERT(
+      tv2->nDims() == 4, "Propagator didn't propagate to tv2");
+}
+
 TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());

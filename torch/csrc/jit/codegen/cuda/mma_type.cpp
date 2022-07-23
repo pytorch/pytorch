@@ -7,6 +7,16 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+MmaOp* MmaOptions::mmaOp() const {
+  TORCH_INTERNAL_ASSERT(
+      accumulator_tv != nullptr && accumulator_tv->definition() != nullptr,
+      "Invalid accumulator_tv.");
+  auto mma_op = dynamic_cast<MmaOp*>(accumulator_tv->definition());
+  TORCH_INTERNAL_ASSERT(
+      mma_op != nullptr, "accumulator tv not an output of mma op");
+  return mma_op;
+}
+
 MmaBuilder::MmaBuilder(
     MmaOptions::MacroType macro,
     MatMulTileOptions gemm_tile) {
@@ -41,7 +51,7 @@ MmaBuilder& MmaBuilder::operand(MmaOptions::Operand a_or_b) {
 // TODO: validate op config
 MmaOptions MmaBuilder::build() const {
   TORCH_CHECK(
-      option_.mma_op != nullptr,
+      option_.accumulator_tv != nullptr,
       "Please configure accumulator tv before using swizzle options.")
   return option_;
 }
@@ -60,9 +70,10 @@ void MmaBuilder::accumulatorTv(TensorView* tv) {
   TORCH_CHECK(
       tv->getMemoryType() == MemoryType::Local, "Mma only outputs to register");
   TORCH_CHECK(tv->definition(), "Input cannot be accumulator tv");
-  auto mma = dynamic_cast<MmaOp*>(tv->definition());
-  TORCH_CHECK(mma, "Requires mma op output for reduction tv");
-  option_.mma_op = mma;
+  TORCH_CHECK(
+      tv->definition()->isA<MmaOp>(),
+      "Requires mma op output for reduction tv");
+  option_.accumulator_tv = tv;
 }
 
 namespace {
