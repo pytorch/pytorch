@@ -326,7 +326,7 @@ def meta_conv(
         )
     out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
     mem_fmt = pick_memory_format()
-    out = out.to(memory_format=mem_fmt)
+    out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
 
