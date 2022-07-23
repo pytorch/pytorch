@@ -15,16 +15,17 @@ from torch.distributed._shard.sharding_spec._internals import (
     _check_shard_metadata_pair_overlap,
 )
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
 
 from .metadata import (
-    BytesStorageMetadata,
     BytesWriteRequest,
     TensorReadRequest,
-    ShardStorageMetadata,
-    ShardedTensorStorageMetadata,
-    TensorStorageMetadata,
     TensorWriteRequest,
+    ChunkStorageMetadata,
+    TensorStorageMetadata,
+    BytesStorageMetadata,
+    MetadataIndex,
 )
 
 def _trim(tensor: torch.Tensor) -> torch.Tensor:
@@ -101,34 +102,29 @@ def _shards_get_overlap_region_wrt_saved_tensor(
 
     return narrows
 
+def _chunk_to_shard_md(chunk_md: ChunkStorageMetadata) -> ShardMetadata:
+    return ShardMetadata(
+        shard_offsets=list(chunk_md.offsets),
+        shard_sizes=list(chunk_md.sizes)
+    )
 
-def _get_sharded_tensor_element_size(tensor: ShardedTensor) -> int:
-    if len(tensor.local_shards()) > 0:
-        test_tensor = tensor.local_shards()[0].tensor
-    else:
-        dtype = tensor.metadata().tensor_properties.dtype
-        test_tensor = torch.empty((1,), dtype=dtype)
-
-    return test_tensor.element_size()
+def _shard_md_to_chunk(chunk_md: ShardMetadata) -> ChunkStorageMetadata:
+    return ChunkStorageMetadata(
+        offsets=torch.Size(chunk_md.shard_offsets),
+        sizes=torch.Size(chunk_md.shard_sizes),
+        size_in_bytes=-1,
+    )
 
 
 def _compute_sharded_tensor_md(
     tensor: ShardedTensor,
-    shard_to_storage_key: Dict[str, str]
-) -> ShardedTensorStorageMetadata:
-    smd = []
-    for shard_md in tensor.metadata().shards_metadata:
-        shard_storage_key = shard_to_storage_key[_get_shard_key(shard_md)]
+) -> TensorStorageMetadata:
+    smd = [_shard_md_to_chunk(sm) for sm in tensor.metadata().shards_metadata]
 
-        one_smd = ShardStorageMetadata(
-            shard_metadata=shard_md,
-            storage_key=shard_storage_key,
-        )
-        smd.append(one_smd)
-
-    return ShardedTensorStorageMetadata(
-        tensor_metadata=tensor.metadata(),
-        storage_metadata=smd,
+    return TensorStorageMetadata(
+        properties=tensor.metadata().tensor_properties,
+        size=torch.Size(tensor.metadata().size),
+        chunks=smd,
     )
 
 
@@ -151,10 +147,11 @@ def _get_shard_storage_key(
 
 
 def _prepare_sharded_tensor_write(
+    fqn: str,
     sharded_tensor: ShardedTensor,
     storage_key: str,
     storage_key_to_fqn: Dict[str, str]
-) -> Tuple[List[TensorWriteRequest], ShardedTensorStorageMetadata]:
+) -> Tuple[List[TensorWriteRequest], TensorStorageMetadata, Dict[MetadataIndex, str]]:
     """
     Prepare sharded tensor write.
 
@@ -172,10 +169,12 @@ def _prepare_sharded_tensor_write(
     """
     write_requests = []
     shard_to_storage_key: Dict[str, str] = dict()
+    storage_md = {}
 
     for shard_md in sharded_tensor.metadata().shards_metadata:
         shard_storage_key = _get_shard_storage_key(storage_key, shard_md, storage_key_to_fqn)
         shard_to_storage_key[_get_shard_key(shard_md)] = shard_storage_key
+        storage_md[MetadataIndex(fqn, shard_md.shard_offsets)] = shard_storage_key
 
     for shard in sharded_tensor.local_shards():
         tensor = shard.tensor.detach()
@@ -186,13 +185,14 @@ def _prepare_sharded_tensor_write(
             storage_key=shard_storage_key,
         )
         write_requests.append(wr)
-    return write_requests, _compute_sharded_tensor_md(
-        sharded_tensor, shard_to_storage_key
-    )
+    return write_requests, _compute_sharded_tensor_md(sharded_tensor), storage_md
 
 
 def _prepare_sharded_tensor_read(
-    metadata: ShardedTensorStorageMetadata, sharded_tensor_out: ShardedTensor
+    fqn: str,
+    storage_metadata: Dict[MetadataIndex, str],
+    metadata: TensorStorageMetadata,
+    sharded_tensor_out: ShardedTensor
 ) -> List[TensorReadRequest]:
     """
     Prepare sharded tensor read.
@@ -208,18 +208,23 @@ def _prepare_sharded_tensor_read(
         tensor.
     """
     return _prepare_generic_tensor_read(
-        metadata.storage_metadata,
-        sharded_tensor_out.local_shards())
+        fqn,
+        metadata.chunks,
+        sharded_tensor_out.local_shards(),
+        storage_metadata)
 
 def _prepare_generic_tensor_read(
-    checkpoint_shards: List[ShardStorageMetadata], local_shards: List[Shard]
+    fqn: str,
+    checkpoint_shards: List[ChunkStorageMetadata],
+    local_shards: List[Shard],
+    storage_metadata: Dict[MetadataIndex, str]
 ) -> List[TensorReadRequest]:
     read_reqs = []
     # this is a naive quadratic algo that can be optimized later
     for shard in local_shards:
         # scan all mds looking for chunks
         for storage_md in checkpoint_shards:
-            shard_md_from_storage = storage_md.shard_metadata
+            shard_md_from_storage = _chunk_to_shard_md(storage_md)
 
             # do they overlap?
             if not _check_shard_metadata_pair_overlap(
@@ -227,7 +232,7 @@ def _prepare_generic_tensor_read(
             ):
                 continue
 
-            storage_key = storage_md.storage_key
+            storage_key = storage_metadata[MetadataIndex(fqn, storage_md.offsets)]
             target_tensor = shard.tensor.detach()
             offsets = []
             lengths = []
@@ -257,36 +262,52 @@ def _prepare_generic_tensor_read(
             )
     return read_reqs
 
-def _compute_tensor_md(storage_key: str, tensor: Tensor) -> TensorStorageMetadata:
+
+def _tensor_props_for(tensor: torch.Tensor) -> TensorProperties:
+    return TensorProperties(
+        dtype=tensor.dtype,
+        layout=tensor.layout,
+        requires_grad=tensor.requires_grad,
+        memory_format=torch.contiguous_format,
+        pin_memory=tensor.is_pinned()
+    )
+
+def _compute_tensor_md(tensor: Tensor) -> TensorStorageMetadata:
     return TensorStorageMetadata(
-        storage_key=storage_key,
-        size=tensor.size()
+        properties=_tensor_props_for(tensor),
+        size=tensor.size(),
+        chunks=[ChunkStorageMetadata(
+            offsets=torch.Size([0] * len(tensor.shape)),
+            sizes=tensor.size(),
+            size_in_bytes=-1,
+        )]
+
     )
 
 def _prepare_tensor_write(
     tensor: Tensor, fqn: str, storage_key_to_fqn: Dict[str, str]
-) -> Tuple[List[TensorWriteRequest], TensorStorageMetadata]:
+) -> Tuple[List[TensorWriteRequest], TensorStorageMetadata, Dict[MetadataIndex, str]]:
     storage_key = _create_storage_key(storage_key_to_fqn, fqn)
-
+    storage_md = {MetadataIndex(fqn, [0] * len(tensor.shape)): storage_key}
     write_reqs = [
         TensorWriteRequest(
             tensor=_trim(tensor),
             storage_key=storage_key,
         )
     ]
-    return (write_reqs, _compute_tensor_md(storage_key, tensor))
+    return (write_reqs, _compute_tensor_md(tensor), storage_md)
 
 
-def _compute_bytes_md(storage_key: str, bytes: io.BytesIO) -> BytesStorageMetadata:
+def _compute_bytes_md(bytes: io.BytesIO) -> BytesStorageMetadata:
     return BytesStorageMetadata(
-        storage_key=storage_key,
-        length=len(bytes.getbuffer())
+        size_in_bytes=len(bytes.getbuffer())
     )
 
 def _prepare_bytes_write(
     bytes: io.BytesIO, fqn: str, storage_key_to_fqn: Dict[str, str]
-) -> Tuple[List[BytesWriteRequest], BytesStorageMetadata]:
+) -> Tuple[List[BytesWriteRequest], BytesStorageMetadata, Dict[MetadataIndex, str]]:
     storage_key = _create_storage_key(storage_key_to_fqn, fqn)
+    storage_md = {MetadataIndex(fqn): storage_key}
 
     write_reqs = [
         BytesWriteRequest(
@@ -294,4 +315,4 @@ def _prepare_bytes_write(
             storage_key=storage_key,
         )
     ]
-    return (write_reqs, _compute_bytes_md(storage_key, bytes))
+    return (write_reqs, _compute_bytes_md(bytes), storage_md)
