@@ -28,13 +28,6 @@ void FusionDefinition::exit() {
   prev_fusion_ = nullptr;
 }
 
-void FusionDefinition::addInput(NvfVal* input) {
-  fusionPtr()->addInput(input);
-}
-void FusionDefinition::addOutput(NvfVal* output) {
-  fusionPtr()->addOutput(output);
-}
-
 Scalar* FusionDefinition::defineScalar() {
   Scalar* out = new nvfuser::Scalar(recording_state_.size());
   recording_state_.emplace_back(out);
@@ -47,6 +40,13 @@ Tensor* FusionDefinition::defineTensor() {
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   recording_.emplace_back(record);
+}
+
+void FusionDefinition::addInput(NvfVal* input) {
+  fusionPtr()->addInput(input);
+}
+void FusionDefinition::addOutput(NvfVal* output) {
+  fusionPtr()->addOutput(output);
 }
 
 NvfVal* FusionDefinition::getFusionState(size_t index) const {

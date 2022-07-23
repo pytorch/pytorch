@@ -3,7 +3,9 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_owner.h>
 
+//! nvFuser Fusion IR Types
 using NvfDataType = torch::jit::fuser::cuda::DataType;
+using NvfFusion = torch::jit::fuser::cuda::Fusion;
 using NvfTensorView = torch::jit::fuser::cuda::TensorView;
 using NvfVal = torch::jit::fuser::cuda::Val;
 
@@ -75,32 +77,55 @@ class FusionDefinition {
   FusionDefinition& operator=(const FusionDefinition& fd) = delete;
   FusionDefinition& operator=(FusionDefinition&& fd) = delete;
 
-  // Context Manager Methods
+  //! Enter Python Context Manager
   FusionDefinition* enter();
+  //! Exit Python Context Manager -- Triggers cache lookup
   void exit();
 
-  void addInput(NvfVal* input);
-  void addOutput(NvfVal* output);
+  //! These methods are used to record the FusionDefinition for cache lookup
 
+  //! Defines a Scalar State Record
   Scalar* defineScalar();
+  //! Defines a Tensor State Record
   Tensor* defineTensor();
+  //! Defines a Record that records the operation required to
+  //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
 
+  //! These methods are used to replay the operations for building the
+  //! nvFuser Fusion IR on a cache miss.
+
+  //! Adds a Tensor/Scalar input to the Fusion object
+  void addInput(NvfVal* input);
+  //! Adds a Tensor/Scalar output to the Fusion object
+  void addOutput(NvfVal* output);
+  //! Gets a Fusion IR Tensor/Scalar object
   NvfVal* getFusionState(size_t index) const;
+  //! Sets a Fusion IR Tensor/Scalar object
   void setFusionState(size_t index, NvfVal* val);
 
-  Fusion* fusionPtr();
+  //! A pointer to the nvFuser Fusion IR Oject
+  NvfFusion* fusionPtr();
 
  private:
+  // \todo These items will be replaced by a FusionManager instead of a cache
+  // for an individual fusion object
   FusionOwner* fusion_owner_;
-  Fusion* prev_fusion_;
+  NvfFusion* prev_fusion_;
 
+  //! A vector of record operations in the FusionDefintion
   std::vector<std::unique_ptr<RecordFunctor>> recording_;
+  //! A vector of state (Tensor/Scalar) recorded in the FusionDefinition
   std::vector<std::unique_ptr<State>> recording_state_;
 
+  //! A vector of nvFuser Fusion IR TensorViews/Vals for building the Fusion
+  //! IR graph.
   std::vector<NvfVal*> fusion_state_;
 
  public:
+  //! The Operators are not directly defined in this header.  They are defined in the
+  //! python bindings through lambda functions so the user only needs to define new
+  //! operators in one place.
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
 
