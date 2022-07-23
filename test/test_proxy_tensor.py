@@ -15,6 +15,8 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 import re
 
+aten = torch.ops.aten
+
 try:
     import sympy  # noqa: F401
     HAS_SYMPY = True
@@ -174,7 +176,7 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f)(torch.randn(3))
         self.assertTrue(
             any(
-                node.target == torch.ops.aten.randn.default
+                node.target == aten.randn.default
                 for node in traced.graph.nodes
             )
         )
@@ -186,7 +188,7 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
         self.assertFalse(
             any(
-                node.target == torch.ops.aten.randn.default
+                node.target == aten.randn.default
                 for node in traced.graph.nodes
             )
         )
