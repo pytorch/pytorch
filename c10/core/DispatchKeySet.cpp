@@ -28,6 +28,7 @@ constexpr DispatchKeySet non_functional_backend_dispatch_keyset =
     backend_dispatch_keyset
         // XLA and LazyTensor are currently the only 2 backends in core
         // that use functionalization pass in eager mode.
+        .remove(DispatchKey::Sparse)
         .remove_backend(BackendComponent::XLABit)
         .remove_backend(BackendComponent::LazyBit);
 
