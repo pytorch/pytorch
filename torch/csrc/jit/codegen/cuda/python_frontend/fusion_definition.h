@@ -65,14 +65,13 @@ class FusionDefinition {
  private:
   FusionOwner* fusion_owner_;
   Fusion* prev_fusion_;
-  
+
   std::vector<std::unique_ptr<RecordFunctor>> recording_;
   std::vector<std::unique_ptr<State>> recording_state_;
 
   std::vector<NvfVal*> fusion_state_;
 
  public:
-
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
 

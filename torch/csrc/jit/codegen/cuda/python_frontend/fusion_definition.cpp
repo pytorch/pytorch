@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
 namespace nvfuser {
-  
+
 FusionDefinition::FusionDefinition(FusionOwner* fusion_owner)
     : fusion_owner_(fusion_owner),
       prev_fusion_(nullptr),
@@ -11,7 +11,7 @@ FusionDefinition::FusionDefinition(FusionOwner* fusion_owner)
       recording_state_(),
       fusion_state_(),
       ops(this) {}
-  
+
 FusionDefinition* FusionDefinition::enter() {
   prev_fusion_ = FusionGuard::getCurFusion();
   FusionGuard::setCurFusion(fusionPtr());
