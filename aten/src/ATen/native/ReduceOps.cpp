@@ -1079,10 +1079,6 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<Scal
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 Tensor& sum_out(const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
@@ -1347,11 +1343,8 @@ void impl_func_norm(
     bool keepdim,
     optional<ScalarType> opt_dtype,
     const Tensor& result) {
-  TORCH_WARN_ONCE(
-    "at::norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.vector_norm` instead"
-  );
+  // Left this implementation without deprecating it as it is called in a number of places
+  // in the codebase. We should swap those by linalg_vector_norm
   auto p = opt_p.has_value() ? opt_p.get() : Scalar(2.0).to<double>();
   at::linalg_vector_norm_out(const_cast<Tensor&>(result), self, p, dim, keepdim, opt_dtype);
 }

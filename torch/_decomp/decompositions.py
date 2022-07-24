@@ -1206,3 +1206,96 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
+
+
+@register_decomposition(
+    [
+        aten.norm.Scalar,
+        aten.norm.ScalarOpt_dim,
+        aten.norm.ScalarOpt_dtype,
+        aten.norm.ScalarOpt_dim_dtype,
+    ]
+)
+@out_wrapper()
+@reduction_complex_to_real
+def norm(
+    self: Tensor,
+    p: Optional[float] = None,
+    dim: List[int] = None,
+    keepdim: bool = False,
+    dtype: Optional[torch.dtype] = None,
+):
+    if p is None:
+        p = 2.0
+    return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
+
+
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@pw_cast_for_opmath
+def upsample_bilinear2d_vec(
+    input: Tensor,
+    output_size: Optional[List[int]],
+    align_corners: bool,
+    scale_factors: Optional[List[float]],
+) -> Tensor:
+    # get dimensions of original image
+    n_batch, n_channels, in_h, in_w = input.shape
+
+    if output_size is not None:
+        out_h = float(output_size[0])
+        out_w = float(output_size[1])
+    elif scale_factors is not None:
+        out_h = in_h * scale_factors[0]
+        out_w = in_w * scale_factors[1]
+
+    # Calculate horizontal and vertical scaling factor
+    if out_h > 1:
+        if align_corners:
+            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
+        else:
+            h_scale_factor = in_h / out_h
+    else:
+        h_scale_factor = 0.0
+
+    if out_w > 1:
+        if align_corners:
+            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
+        else:
+            w_scale_factor = in_w / out_w
+    else:
+        w_scale_factor = 0.0
+
+    i = torch.arange(int(out_h), dtype=input.dtype, device=input.device)
+    j = torch.arange(int(out_w), dtype=input.dtype, device=input.device)
+
+    if align_corners:
+        x = h_scale_factor * i
+        y = w_scale_factor * j
+    else:
+        x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
+        y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
+
+    x_floor = torch.floor(x).to(torch.int64)
+    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
+    y_floor = torch.floor(y).to(torch.int64)
+    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+
+    x_view = x.unsqueeze(1)
+    x_floor_view = x_floor.unsqueeze(1)
+    x_ceil_view = x_ceil.unsqueeze(1)
+
+    v1 = input[:, :, x_floor_view, y_floor]
+    v2 = input[:, :, x_ceil_view, y_floor]
+    v3 = input[:, :, x_floor_view, y_ceil]
+    v4 = input[:, :, x_ceil_view, y_ceil]
+
+    xscale2 = x_view - x_floor_view
+    xscale1 = 1.0 - xscale2
+
+    yscale2 = y - y_floor
+    yscale1 = 1.0 - yscale2
+
+    q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
+    q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
+    result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+    return result

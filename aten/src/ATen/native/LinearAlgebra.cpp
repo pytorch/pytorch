@@ -2682,11 +2682,14 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_WARN_ONCE(
-    "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
+  }
   // This frobenius norm is just wrong, but well
   TORCH_CHECK(dim.size() <= 2,
               "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
@@ -2699,11 +2702,14 @@ Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  TORCH_WARN_ONCE(
-    "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
+  }
   TORCH_CHECK(dim.size() <= 2,
               "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
   return at::norm_out(result, self, 2., dim, keepdim);
@@ -2714,38 +2720,50 @@ Tensor &frobenius_norm_out(const Tensor& self,
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
-  TORCH_WARN_ONCE(
-    "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
   return at::linalg_matrix_norm(self, "nuc", IntArrayRef({-2, -1}), keepdim);
 }
 
 Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
   return at::linalg_matrix_norm_out(result, self, "nuc", IntArrayRef({-2, -1}), keepdim);
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_WARN_ONCE(
-    "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
   return at::linalg_matrix_norm(self, "nuc", dim, keepdim);
 }
 
 Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
-    "It will be removed in a future PyTorch release. Please use ",
-    "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
-  );
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
   return at::linalg_matrix_norm_out(result, self, "nuc", dim, keepdim);
 }
 
