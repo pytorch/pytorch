@@ -20,8 +20,8 @@ struct RecordFunctor {
       : args(std::move(_args)), outputs(std::move(_outputs)) {}
   virtual ~RecordFunctor() = default;
 
-  // Abstraction for an operation to build this record's nvFuser Fusion IR
-  // piece if the recording has a cache miss.
+  //! Abstraction for an operation to build this record's nvFuser Fusion IR
+  //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) = 0;
 
   //! Inputs that are indices into the FusionDefinition's Recorded State.
@@ -81,11 +81,11 @@ struct OpRecord : RecordFunctor {
   }
 
  private:
-  // An nvFuser Arith Operation function signature
+  //! An nvFuser Arith Operation function signature
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
-//! Specialized RecordFunctor for the broadcast_in_dim operation.
+//! Specialized Record Functor for the FusionDefinition's broadcast_in_dim op.
 
 struct BroadcastOpRecord : RecordFunctor {
   BroadcastOpRecord(
@@ -158,7 +158,9 @@ struct CastOpRecord : RecordFunctor {
   }
 
  private:
+  //! nvFuser arith function signature
   std::function<OutType(NvfDataType, ArgType)> fusion_op_;
+  //! Type to cast to.
   NvfDataType dtype_;
 };
 
@@ -206,8 +208,14 @@ struct InputTensorRecord : RecordFunctor {
     fd.addInput(tv);
   }
 
+  //! A vector of tensor dimension sizes.
+  //! This vector only captures sizes of -1 or 1 to indicate a symbolic
+  //! dimension (-1) or a broadcast dimension (1).
   std::vector<int64_t> symbolic_sizes;
+  //! A vector to indicate whether the a tensor dimension is contiguous
+  //! with the dimension just to its right.
   std::vector<bool> contiguous_info;
+  //! Tensor data type.
   NvfDataType dtype;
 };
 
@@ -231,7 +239,7 @@ struct OutputRecord : RecordFunctor {
   }
 };
 
-//! Specialized Record Functor for recording FusionDefinition sum/min/max ops.
+//! Specialized Record Functor for the FusionDefinition's sum/min/max ops.
 
 struct ReductionOpRecord : RecordFunctor {
   ReductionOpRecord(
@@ -257,11 +265,15 @@ struct ReductionOpRecord : RecordFunctor {
   }
 
  private:
+  //! nvFuser arith function signature for a given reduction operation
   std::function<
       NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>
       fusion_op_;
+  //! The tensor dimensions to reduce 
   std::vector<int> axes_;
+  //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
+  //! The output data type.
   NvfDataType dtype_;
 };
 
@@ -290,10 +302,11 @@ struct ScalarRecord : RecordFunctor {
   }
 
  private:
+  //! Scalar data type.
   NvfDataType dtype_;
 };
 
-//! Specialized Record Functor for recording FusionDefinition the var op.
+//! Specialized Record Functor for the FusionDefinition's var op.
 
 struct VarianceOpRecord : RecordFunctor {
   VarianceOpRecord(
@@ -316,8 +329,11 @@ struct VarianceOpRecord : RecordFunctor {
   }
 
  private:
+  //! Dimensions of tensor to reduce for variance calculation
   std::vector<int> axes_;
+  //! Bessel's correction value
   int64_t correction_;
+  //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
 };
 

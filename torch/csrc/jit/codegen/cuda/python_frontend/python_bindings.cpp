@@ -18,11 +18,10 @@ namespace jit {
 void initNvFuserPythonBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  //! Top Level nvFuser Python submodule
   auto nvfuser = m.def_submodule("_nvfuser");
 
-  // DataTypes supported by NVFuser in Fusion Definition
-  // Types not related to values found in fusion defintions
-  // were purposely left out.
+  //! DataTypes supported by nvFuser in the FusionDefinition
   py::enum_<NvfDataType>(nvfuser, "DataType")
       .value("Double", NvfDataType::Double)
       .value("Float", NvfDataType::Float)
@@ -35,8 +34,10 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", NvfDataType::ComplexDouble)
       .value("Null", NvfDataType::Null);
 
-  // Binding an object that owns a FusionExecutorCache instance and provides an
-  // interface
+  //! Binding an object that owns a FusionExecutorCache instance and provides
+  //! an interface
+  //! \todo This object will be removed when a FusionManager is added
+  //! containing a cache.
   py::class_<nvfuser::FusionOwner> fusion(nvfuser, "Fusion");
   fusion.def(py::init<>())
       .def(
@@ -54,13 +55,14 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.printKernel();
       });
 
+  //! These are the FusionDefinition supported object types that are either
+  //! defined as inputs or the output of an operation.
   py::class_<nvfuser::Tensor>(nvfuser, "Tensor");
   py::class_<nvfuser::Scalar>(nvfuser, "Scalar");
 
-  // C++ Side of Context Manager used to mimic the FusionGuard as a way
-  // to programatically distinguish code used to define the Fusion instead
-  // of having the user mysteriously create an object prior to adding definition
-  // code where the object is not used.
+  //! The FusionDefinition is a context manager in Python where the user will
+  //! define the set the operations and connections between operations for nvFuser
+  //! to create.
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
   fusion_def.def(py::init<nvfuser::FusionOwner*>())
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
@@ -219,6 +221,14 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Double,
           py::return_value_policy::reference);
 
+  //! The Operators class is a nested class of FusionDefinition to allow the
+  //! user to query the class for the list of operators.
+  //!
+  //! Example:
+  //!   help(FusionDefinition.Operators)
+  //! 
+  //! Additional operators are expected to be defined below as needed.  They
+  //! may require defining a new RecordFunctor child class if they are unique.
   py::class_<nvfuser::FusionDefinition::Operators> nvf_ops(
       fusion_def, "Operators");
   nvf_ops.def(py::init<nvfuser::FusionDefinition*>());
