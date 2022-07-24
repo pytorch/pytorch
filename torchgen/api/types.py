@@ -1,18 +1,19 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional, Sequence, Set, TypeVar, Union
+
 from torchgen.model import (
     Argument,
+    BackendIndex,
+    BaseTy,
     FunctionSchema,
     NativeFunction,
-    BackendIndex,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    ScalarType,
     SelfArgument,
     TensorOptionsArguments,
-    BaseTy,
-    ScalarType,
 )
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
-from enum import Enum
 
 _T = TypeVar("_T")
 
@@ -752,8 +753,8 @@ def kernel_signature(
 from torchgen.api import (
     cpp,
     dispatcher,
-    native,
-    translate,
     functionalization,
+    native,
     structured,
+    translate,
 )

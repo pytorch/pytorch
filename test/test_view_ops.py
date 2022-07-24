@@ -1,5 +1,4 @@
 # Owner(s): ["module: tests"]
-
 import torch
 import numpy as np
 
@@ -11,7 +10,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
-    numpy_to_torch_dtype_dict,
+    numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
@@ -127,6 +126,7 @@ class TestViewOps(TestCase):
         s = t.conj()
         self.assertTrue(s is t)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
@@ -475,6 +475,8 @@ class TestViewOps(TestCase):
         v[0] = 0
         self.assertEqual(t[2, 0], v[0])
 
+    # Lazy hasn't implemented unbind yet.
+    @onlyNativeDeviceTypes
     def test_unbind_view(self, device) -> None:
         t = torch.zeros((5, 5), device=device)
         tup = torch.unbind(t)
@@ -505,6 +507,9 @@ class TestViewOps(TestCase):
         stacked = torch.randn(3, 10, 10, dtype=torch.double, requires_grad=True)
         gradcheck(lambda x: x.unbind(), (stacked,), check_forward_ad=True)
 
+    # TODO: Fix this test for LTC. There is an interaction with dynamic shapes here that is broken,
+    # causing asserts to trigger.
+    @onlyNativeDeviceTypes
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
@@ -718,6 +723,8 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @skipMeta
+    # self.is_view_of reports false positives for lazy
+    @onlyNativeDeviceTypes
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
@@ -744,6 +751,8 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 1], v[6])
 
     @skipMeta
+    # self.is_view_of reports false positives for lazy
+    @onlyNativeDeviceTypes
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
@@ -752,6 +761,9 @@ class TestViewOps(TestCase):
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
 
+    # This test use as_strided to construct a tensor with overlapping memory,
+    # which is not handled by the functionalization pass.
+    @onlyNativeDeviceTypes
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim
@@ -1016,6 +1028,7 @@ class TestOldViewOps(TestCase):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_expand(self, device):
         tensor = torch.rand(1, 8, 1, device=device)
         tensor2 = torch.rand(5, device=device)
@@ -1257,6 +1270,7 @@ class TestOldViewOps(TestCase):
             tensor.chunk(-2)
 
     # TODO: make work on CUDA, too
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyCPU
     def test_unsqueeze(self, device) -> None:
         x = torch.randn(2, 3, 4)
@@ -1820,7 +1834,7 @@ class TestOldViewOps(TestCase):
         t.crow_indices()
         t.col_indices()
 
-instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True)
 instantiate_device_type_tests(TestOldViewOps, globals())
 
 if __name__ == '__main__':

@@ -218,7 +218,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
         for (const auto i : c10::irange(size)) {
-          acc = ops.reduce(acc, *(data_t*)in, begin + i);
+          acc = ops.reduce(acc, c10::load<data_t>(in), begin + i);
           in += stride;
         }
       }, {begin, end});
