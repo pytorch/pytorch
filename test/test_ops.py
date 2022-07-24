@@ -31,12 +31,14 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     first_sample,
     parametrize,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
     _NOTHING,
     UnaryUfuncInfo,
     ReductionOpInfo,
+    ReductionPythonRefInfo,
     SpectralFuncInfo,
     ops_and_refs,
     python_ref_db,
@@ -65,7 +67,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
-from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -95,6 +97,7 @@ _ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -361,7 +364,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -377,9 +380,7 @@ class TestCommon(TestCase):
             try:
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                continue
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -389,11 +390,13 @@ class TestCommon(TestCase):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
+    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
+                continue
+            if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
@@ -490,7 +493,7 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        self._ref_test_helper(lambda: TorchRefsMode.push(strict=True), device, dtype, op)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -511,7 +514,7 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten', 'nvfuser'])
     def test_python_ref_executor(self, device, dtype, op, executor):
         # TODO: Not all dtypes are supported with nvfuser
-        from torch._prims.utils import _torch_dtype_to_nvfuser_dtype_map
+        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
         if executor == "nvfuser" and dtype not in _torch_dtype_to_nvfuser_dtype_map:
             raise unittest.SkipTest(f"nvfuser doesn't support dtype {dtype}")
 
@@ -522,16 +525,28 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and not op.supports_nvfuser:
             raise unittest.SkipTest(f"{op.name} doesn't support nvfuser")
 
+        # nvFuser doesn't support reduction operations on 0-dim tensors yet
+        skip_zero_dim = False
+        if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
+            skip_zero_dim = True
+
+        # skip zero-dim tensors for some composites of reduction operations
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax"]
+        if executor == "nvfuser" and op.name in normalization_ops:
+            skip_zero_dim = True
+
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
+        executor = "strictly_nvfuser" if executor == "nvfuser" else executor
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(
             contextlib.nullcontext,
             device,
             dtype,
             op,
-            skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_dim=skip_zero_dim,
         )
 
     @skipMeta
@@ -548,7 +563,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.utils.get_prim_fake_mode()
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1205,8 +1220,8 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_with_mode(op, args, kwargs)
-            composite_compliance.check_all_permutations(op, args, kwargs)
+            composite_compliance.check_with_mode(op, args, kwargs, self.assertEqual)
+            composite_compliance.check_all_permutations(op, args, kwargs, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1218,7 +1233,12 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs)
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
+            composite_compliance.check_backward_formula(
+                op.get_op(), args, kwargs,
+                sample.output_process_fn_grad,
+                op.gradcheck_wrapper, self.assertEqual)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1236,9 +1256,13 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_forward_ad_formula(op, args, kwargs)
+            # We pass assertEqual so that decorators like `toleranceOverride`
+            # actually work (otherwise they silently do nothing!)
+            composite_compliance.check_forward_ad_formula(
+                op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
+@skipIfSlowGradcheckEnv
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1427,7 +1451,7 @@ class TestMathBits(TestCase):
         )
 
 # input strides and size may have been altered due to the result of an inplace op
-def test_inplace_view(func, input, rs, input_size, input_strides):
+def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
     # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
@@ -1448,18 +1472,20 @@ def test_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
+@skipIfSlowGradcheckEnv
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
             old_size = args[0].size()
             old_stride = args[0].stride()
             rs = func(*args, **kwargs)
-            test_inplace_view(func, args[0], rs, old_size, old_stride)
+            check_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
             rs = func(*args, **kwargs)
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@skipIfSlowGradcheckEnv
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1471,20 +1497,21 @@ class TestTags(TestCase):
             if isinstance(input, torch.Tensor):
                 old_size = input.size()
                 old_stride = input.stride()
-                with push_torch_dispatch_mode(TestTagsMode):
+                with TestTagsMode():
                     rs = op(input, *sample.args, **sample.kwargs)
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
-                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+                check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
+@skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
-    ref_ops_names = itertools.chain.from_iterable(
-        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls)
+    ref_ops_names = tuple(itertools.chain.from_iterable(
+        [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
     ref_db_names = set(ref_op.name for ref_op in python_ref_db)
 
     # TODO: References that do not have an entry in python_ref_db
@@ -1501,8 +1528,71 @@ class TestRefsOpsInfo(TestCase):
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
+        '_refs.scalar_tensor',
+        '_refs.trunc_divide',
         '_refs.zeros',
         '_refs.zeros_like'
+    }
+
+    not_in_decomp_table = {
+        # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
+        '_refs.nn.functional.mse_loss',
+        '_refs.masked_fill',
+        '_refs.transpose',
+        '_refs.var',
+        # these are not aten ops?
+        '_refs.broadcast_shapes',
+        '_refs.broadcast_tensors',
+        '_refs.nn.functional.tanhshrink',
+        '_refs.swap_axes',
+        # CompositeImplicitAutograd
+        '_refs.allclose',
+        '_refs.atleast_1d',
+        '_refs.atleast_2d',
+        '_refs.atleast_3d',
+        '_refs.broadcast_to',
+        '_refs.chunk',
+        '_refs.column_stack',
+        '_refs.contiguous',
+        '_refs.dsplit',
+        '_refs.dstack',
+        '_refs.fill',
+        '_refs.flatten',
+        '_refs.fliplr',
+        '_refs.flipud',
+        '_refs.float_power',
+        '_refs.hsplit',
+        '_refs.hstack',
+        '_refs.isclose',
+        '_refs.isfinite',
+        '_refs.narrow',
+        '_refs.positive',
+        '_refs.ravel',
+        '_refs.reshape',
+        '_refs.square',
+        '_refs.tensor_split',
+        '_refs.true_divide',
+        '_refs.trunc_divide',
+        '_refs.vsplit',
+        '_refs.vstack',
+        # ref implementation missing kwargs
+        '_refs.empty',  # missing "pin_memory"
+        '_refs.empty_like',  # missing "layout"
+        '_refs.full',  # missing "layout"
+        '_refs.full_like',  # missing "layout"
+        '_refs.ones',  # missing "layout"
+        '_refs.ones_like',  # missing "layout"
+        '_refs.round',  # missing "decimals"
+        '_refs.scalar_tensor',  # missing "layout"
+        '_refs.zeros',  # missing "layout"
+        '_refs.zeros_like',  # missing "layout"
+        # other
+        '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
+        '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
+        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
+        '_refs.equal',  # 'bool' object has no attribute 'dtype'
+        '_refs.conj',  # Calls _prims.conj
     }
 
     @parametrize("op", ref_ops_names)
@@ -1510,6 +1600,20 @@ class TestRefsOpsInfo(TestCase):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         self.assertIn(op, self.ref_db_names)
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_decomp_table(self, op):
+        path = op.split('.')
+        module_path = '.'.join(path[:-1])
+        op_name = path[-1]
+        op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+
+        if op in self.not_in_decomp_table:
+            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
+                             f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
+        else:
+            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
+                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (
@@ -1549,7 +1653,6 @@ fake_skips = (
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
-    "index_select",
     "combinations",
     "linalg.lstsq",
     "masked_select",
@@ -1562,8 +1665,11 @@ dynamic_output_op_tests = (
 # some inputs invoke dynamic output shape operators, some do not
 sometimes_dynamic_output_op_test = (
     "__getitem__",
+    "index_select",
 )
 
+
+@skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)
@@ -1606,9 +1712,7 @@ class TestFakeTensorNonErroring(TestCase):
                     prims.utils.compare_tensor_meta(fake_out, real_out)
                 self.assertTrue(name not in dynamic_output_op_tests)
 
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                pass
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)

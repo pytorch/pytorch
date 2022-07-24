@@ -6,6 +6,7 @@ from torch import _weight_norm, norm_except_dim
 from typing import Any, TypeVar
 from ..modules import Module
 
+__all__ = ['WeightNorm', 'weight_norm', 'remove_weight_norm']
 
 class WeightNorm(object):
     name: str
