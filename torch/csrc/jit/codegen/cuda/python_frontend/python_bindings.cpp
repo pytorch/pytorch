@@ -23,7 +23,6 @@ void initNvFuserPythonBindings(PyObject* module) {
   // DataTypes supported by NVFuser in Fusion Definition
   // Types not related to values found in fusion defintions
   // were purposely left out.
-  // NOTE: DataType was ambiguous under torch::jit without full qualification.
   py::enum_<NvfDataType>(nvfuser, "DataType")
       .value("Double", NvfDataType::Double)
       .value("Float", NvfDataType::Float)
