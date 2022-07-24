@@ -289,6 +289,61 @@ class TestProxyTensor(TestCase):
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
 
+# TODO: Need to test the guards themselves specifically as well
+@skipIfNoSympy
+class TestSymbolicTracing(TestCase):
+    def _test_dynamic(self, fn, trace_inputs, test_inputs):
+        """
+        Tests fn traced with trace_inputs against test_inputs
+        Also returns shape env
+        """
+        trace_inputs = [torch.randn(shape) for shape in trace_inputs]
+        traced_f = make_fx(fn, tracing_mode="symbolic")(*trace_inputs)
+        for input in test_inputs:
+            input = [torch.randn(shape) for shape in input]
+            self.assertEqual(traced_f(*input), fn(*input))
+        return traced_f.shape_env
+
+
+    def test_unary(self):
+        def f(x):
+            assert x.shape[0] < 20
+            return x.cos()
+        test_inputs = []
+        test_inputs.append([(2, 5)])
+        test_inputs.append([(6, 8)])
+        shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
+        assert len(shape_env.guards) == 1
+
+    def test_binary_broadcast(self):
+        def f(a, b):
+            c = a * b
+            return c
+
+        test_inputs = []
+        test_inputs.append([(1, 5), (3, 1)])
+        test_inputs.append([(1, 4), (4, 1)])
+        shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
+        assert len(shape_env.guards) == 0
+
+    def test_cat(self):
+        def f(a, b):
+            val = torch.mul(a, b)
+            out = torch.cat([val, val])
+            if out.shape[0] * out.shape[1] > 20:
+                out = out.cos()
+            return out
+
+        test_inputs = []
+        test_inputs.append([(1, 5), (6, 1)])
+        test_inputs.append([(1, 4), (3, 1)])
+        shape_env = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
+        assert len(shape_env.guards) == 1
+
 make_fx_failures = {
     # unknown
     xfail('allclose'),
