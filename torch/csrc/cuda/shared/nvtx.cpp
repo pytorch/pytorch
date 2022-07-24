@@ -1,3 +1,6 @@
+#ifdef _WIN32
+#include <wchar.h> // _wgetenv for nvtx
+#endif
 #include <nvToolsExt.h>
 #include <torch/csrc/utils/pybind.h>
 

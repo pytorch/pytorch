@@ -3,7 +3,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
-#include <mutex>  // for std::call_once
 
 namespace at {
 namespace cuda {

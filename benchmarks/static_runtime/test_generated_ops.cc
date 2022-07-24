@@ -4349,7 +4349,7 @@ TEST(StaticRuntime, autogen_take_along_dim) {
   )IR";
 
   auto self0 = at::rand({6, 6, 6});
-  auto indices0 = at::argsort(self0, 1);
+  auto indices0 = at::argsort(self0, 1, true);
   auto dim0 = 1;
   std::vector<IValue> args{self0, indices0, dim0};
   testStaticRuntime(
@@ -4361,7 +4361,7 @@ TEST(StaticRuntime, autogen_take_along_dim) {
       /*check_resize=*/true);
 
   auto self1 = at::rand({22, 22, 22});
-  auto indices1 = at::argsort(self1, 1);
+  auto indices1 = at::argsort(self1, 1, true);
   auto dim1 = 1;
   std::vector<IValue> args2{self1, indices1, dim1};
   testStaticRuntime(
@@ -7770,16 +7770,17 @@ TEST(StaticRuntime, autogen_linalg_cond) {
 
 TEST(StaticRuntime, autogen_linalg_solve) {
   const std::string script = R"IR(
-    graph(%input: Tensor, %other: Tensor):
+    graph(%A: Tensor, %B: Tensor, %left: bool):
         %bias: None = prim::Constant()
-        %ret = aten::linalg_solve(%input, %other)
+        %ret = aten::linalg_solve(%A, %B, %left)
         %cloned = aten::clone(%ret, %bias)
         return (%cloned)
   )IR";
 
-  auto input0 = at::rand({6, 6, 6});
-  auto other0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{input0, other0};
+  auto A0 = at::rand({6, 6, 6});
+  auto B0 = at::rand({6, 6, 6});
+  auto left0 = false;
+  std::vector<IValue> args{A0, B0, left0};
   testStaticRuntime(
       script,
       args,
@@ -7788,9 +7789,10 @@ TEST(StaticRuntime, autogen_linalg_solve) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto input1 = at::rand({22, 22, 22});
-  auto other1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{input1, other1};
+  auto A1 = at::rand({22, 22, 22});
+  auto B1 = at::rand({22, 22, 22});
+  auto left1 = false;
+  std::vector<IValue> args2{A1, B1, left1};
   testStaticRuntime(
       script,
       args,

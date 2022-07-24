@@ -11,7 +11,7 @@ import warnings
 from torch._six import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, torch_to_numpy_dtype_dict)
+    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
     dtypesIfCUDA, largeTensorTest)
@@ -63,6 +63,7 @@ class TestShapeOps(TestCase):
                 self.assertEqual(x.select(dim, i), res2[i])
 
     # TODO: update to work on CUDA, too?
+    @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
     @onlyCPU
     def test_tolist(self, device):
         list0D = []
@@ -475,6 +476,7 @@ class TestShapeOps(TestCase):
 
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
+    @largeTensorTest("81GB", "cpu")  # even for CUDA test, sufficient system memory is required
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
@@ -546,6 +548,7 @@ class TestShapeOps(TestCase):
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
 
+    @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
     @dtypes(torch.cfloat, torch.cdouble)
     def test_complex_rot90(self, device, dtype):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
