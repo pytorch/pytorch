@@ -146,6 +146,10 @@ bool isTensorScalarFillOp(const Expr* expr);
 TORCH_CUDA_CU_API std::vector<Expr*> flattenScopedExprs(
     const std::vector<Expr*>& loop_nests);
 
+//! Returns the concretized iterdomain according to
+//!  the exact compute at map.
+IterDomain* caMapExactConcreteId(IterDomain* id);
+
 } // namespace ir_utils
 
 namespace loop_utils {

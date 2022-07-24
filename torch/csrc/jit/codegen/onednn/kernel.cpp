@@ -251,7 +251,7 @@ void LlgaKernel::run(Stack& stack) {
 
   // Even in case of concurrent threads, the kernel would be initialized once.
   // TODO: Try not using an atomic lock
-  std::call_once(
+  c10::call_once(
       initialized_flag,
       [&](const TensorArgs& inputs) {
         GRAPH_DEBUG("Initializing input logical tensors");

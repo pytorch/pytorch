@@ -15,12 +15,177 @@
 
 namespace at { namespace native {
 
-// In alignment with default sort on a c++ map, this function
-// will permute key and value tensors identically, and
-// in such a way that the 'key' tensor is ordered numerically
-void sortKeyValueInplace(const TensorBase& key,
-                         const TensorBase& value,
-                         int dim, bool dir) {
+template <typename T>
+static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
+  int minGridSize;
+  int blockSize;
+  C10_CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
+      &minGridSize,
+      &blockSize,
+      kernel,
+      /*dynamicSMemSize=*/0,
+      max_block_size));
+  return minGridSize;
+}
+
+// For very small sorts, use bitonicSortKVInPlace which performs
+// better because it can sort multiple arrays within the same block of
+// threads, improving occupancy.
+//
+// TODO: cub in CUDA 11.6 has a WarpMergeSort primitive that could
+// replace the bitonic sort here.
+struct SmallBitonicSort {
+  template <int A, typename K, typename V, typename IndexType>
+  void sort(
+      at::cuda::detail::TensorInfo<K, IndexType> keyInfo,
+      IndexType keySlices,
+      IndexType keySliceSize,
+      IndexType keySliceStride,
+      at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
+      IndexType valueSliceStride,
+      bool descending) {
+    constexpr int sort_size = 32;
+    constexpr int max_block_y = 16;
+    constexpr int items_per_thread = 2;
+    static_assert(sort_size % items_per_thread == 0, "");
+    constexpr int block_x = sort_size / items_per_thread;
+
+    TORCH_INTERNAL_ASSERT(keySliceSize <= sort_size);
+
+    // Scale batch size down if the grid would be too small
+    const auto min_grid = minimum_grid_for_occupancy(
+        bitonicSortKVInPlace<
+            A, -1, block_x, max_block_y,
+            K, V, LTOp<K, true>, IndexType>,
+        block_x * max_block_y);
+    const auto max_batch = std::max(IndexType{1}, keySlices / min_grid);
+    const int block_y = std::min(IndexType(max_block_y), max_batch);
+    dim3 block(block_x, block_y);
+
+    dim3 grid;
+    const int grid_count = (keySlices + block_y - 1) / block_y;
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(grid_count, grid),
+                          "Too many slices to sort");
+    const auto stream = at::cuda::getCurrentCUDAStream();
+
+    if (descending) {
+      bitonicSortKVInPlace<A, -1, block_x, max_block_y>
+        <<<grid, block, 0, stream>>>(
+          keyInfo,
+          keySlices,
+          keySliceSize,
+          keySliceStride,
+          valueInfo,
+          valueSliceStride,
+          GTOp<K, true>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      bitonicSortKVInPlace<A, -1, block_x, max_block_y>
+        <<<grid, block, 0, stream>>>(
+          keyInfo,
+          keySlices,
+          keySliceSize,
+          keySliceStride,
+          valueInfo,
+          valueSliceStride,
+          LTOp<K, true>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  }
+};
+
+// For medium sizes (32 < n <= 4096) use radixSortKVInplace for better
+// performance than the bitonic sort kernel.
+struct MediumRadixSort {
+
+  template <int A, typename K, typename V, typename IndexType>
+  void sort(
+      at::cuda::detail::TensorInfo<K, IndexType> keyInfo,
+      IndexType keySlices,
+      IndexType keySliceSize,
+      IndexType keySliceStride,
+      at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
+      IndexType valueSliceStride,
+      bool descending) {
+
+#define HANDLE_CASE(SIZE, ITEMS_PER_THREAD)         \
+    fixed_size_sort<A, SIZE, ITEMS_PER_THREAD>(     \
+        keyInfo,                                    \
+        keySlices,                                  \
+        keySliceSize,                               \
+        keySliceStride,                             \
+        valueInfo,                                  \
+        valueSliceStride,                           \
+        descending)
+
+    int64_t ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
+    TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 4096);
+    switch (ceilPowerOf2) {
+      case 4096:
+        HANDLE_CASE(4096, 32);
+        break;
+      case 2048:
+        HANDLE_CASE(2048, 32);
+        break;
+      case 1024:
+      case 512:
+      case 256:
+        HANDLE_CASE(1024, 32);
+        break;
+      case 128:
+      case 64:
+        HANDLE_CASE(128, 4);
+        break;
+      case 32:
+      case 16:
+      case 8:
+      case 4:
+      case 2:
+        HANDLE_CASE(32, 2);
+        break;
+      case 1:
+        /* Nothing to do, data already sorted */
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+#undef HANDLE_CASE
+
+  }
+
+  template <int A, int sort_size, int items_per_thread,
+            typename K, typename V, typename IndexType>
+  void fixed_size_sort(
+      at::cuda::detail::TensorInfo<K, IndexType> keyInfo,
+      IndexType keySlices,
+      IndexType keySliceSize,
+      IndexType keySliceStride,
+      at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
+      IndexType valueSliceStride,
+      bool descending) {
+    static_assert(sort_size % items_per_thread == 0, "");
+    constexpr int block = sort_size / items_per_thread;
+    dim3 grid;
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid),
+                          "Too many slices to sort");
+
+    const auto stream = at::cuda::getCurrentCUDAStream();
+    radixSortKVInPlace<A, -1, block, items_per_thread>
+        <<<grid, block, 0, stream>>>(
+          keyInfo,
+          keySlices,
+          keySliceSize,
+          keySliceStride,
+          valueInfo,
+          valueSliceStride,
+          descending);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+};
+
+template <typename Sorter>
+void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
+                int dim, bool descending) {
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");
   int dims = value.dim();
@@ -36,85 +201,15 @@ void sortKeyValueInplace(const TensorBase& key,
   int64_t keySliceSize = key.size(dim);
   ptrdiff_t keySlices = inElements / keySliceSize;
 
-  // The amount of shared memory and block size is based on
-  // 2^ceil(lg(n)); we choose that sorting implementation for a given
-  // size.
-  int64_t ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
-
-  // FIXME: We'd have to find some other trick with Thrust to perform a
-  // vectorized (key, value) sort by slice segment
-  TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 2048, "sortKeyValueInplace only works for sizes <= 2048 at present");
-
-  // The grid is based on the number of independent slices that we
-  // have to sort; one block per slice
-  dim3 grid;
-  TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid), "Too many slices to sort");
-
-#define HANDLE_CASE(TYPE, A, SIZE)                                      \
-  do {                                                                  \
-    int blockSize = SIZE / 2;                                           \
-    if (blockSize < 1) {                                                \
-      blockSize = 1;                                                    \
-    }                                                                   \
-                                                                        \
-    dim3 block(blockSize);                                              \
-                                                                        \
-    if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-          GTOp<scalar_t, true>, TYPE, SIZE>                           \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
-          keyInfo,                                                      \
-          keySlices,                                                    \
-          (TYPE) keySliceSize,                                          \
-          (TYPE) keyInfo.strides[collapseKeyDim],                       \
-          valueInfo,                                                    \
-          (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTOp<scalar_t, true>());                                    \
-      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
-    } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-      LTOp<scalar_t, true>, TYPE, SIZE>                               \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
-          keyInfo,                                                      \
-          keySlices,                                                    \
-          (TYPE) keySliceSize,                                          \
-          (TYPE) keyInfo.strides[collapseKeyDim],                       \
-          valueInfo,                                                    \
-          (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTOp<scalar_t, true>());                                    \
-      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
-    }                                                                   \
-  } while (0)
-
-#define HANDLE_SORT_CASE(TYPE, A)                       \
-  {                                                     \
-    switch (ceilPowerOf2) {                             \
-      case 2048:                                        \
-      HANDLE_CASE(TYPE, A, 2048);                       \
-      break;                                            \
-      case 1024:                                        \
-      case 512:                                         \
-      case 256:                                         \
-      HANDLE_CASE(TYPE, A, 1024);                       \
-      break;                                            \
-      case 128:                                         \
-      case 64:                                          \
-      HANDLE_CASE(TYPE, A, 128);                        \
-      break;                                            \
-      case 32:                                          \
-      case 16:                                          \
-      case 8:                                           \
-      case 4:                                           \
-      case 2:                                           \
-      HANDLE_CASE(TYPE, A, 32);                         \
-      break;                                            \
-      case 1:                                           \
-      /* Nothing to do, data already sorted */          \
-      break;                                            \
-      default:                                          \
-      TORCH_INTERNAL_ASSERT(false);                     \
-    }                                                   \
-  }
+#define HANDLE_SORT_CASE(TYPE, A)                   \
+  sorter.template sort<A>(                          \
+      keyInfo,                                      \
+      (TYPE) keySlices,                             \
+      (TYPE) keySliceSize,                          \
+      (TYPE) keyInfo.strides[collapseKeyDim],       \
+      valueInfo,                                    \
+      (TYPE) valueInfo.strides[collapseValueDim],   \
+      descending)
 
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
@@ -168,225 +263,21 @@ void sortKeyValueInplace(const TensorBase& key,
       HANDLE_SORT_CASE(uint64_t, -1);
     }
   });
-#undef HANDLE_CASE
 #undef HANDLE_SORT_CASE
-#undef HANDLE_A_CASE
 }
 
-namespace {
-
-struct offset_t {
-  int stride;
-  int begin;
-  __device__ int operator[](int i) {
-    return stride * (begin + i);
+void sortKeyValueInplace(
+    const TensorBase& key,
+    const TensorBase& value,
+    int dim,
+    bool descending,
+    bool stable) {
+  if (!stable && key.size(dim) <= 32) {
+    // NOTE: Bitonic sort is unstable
+    sortCommon(SmallBitonicSort{}, key, value, dim, descending);
+  } else {
+    sortCommon(MediumRadixSort{}, key, value, dim, descending);
   }
-};
-
-}
-
-namespace {
-
-// Segmented sort by full sort algorithm:.
-// Say we are sorting a (2, 3) tensor. We have in flattened form:
-// values       0.4 1.2 5.3 6.2 1.3 2.3
-// indices        0   1   2   0   1   2
-// segment_id     0   0   0   1   1   1
-
-// First we sort by values, globally:
-// values       6.2 5.3 2.3 1.2 1.3 0.4
-// indices        0   2   2   1   1   0
-// segment_id     1   0   1   0   1   0
-
-// Then we stable sort by segment id:
-// values       5.3 1.2 0.4 6.2 2.3 1.3
-// indices        2   1   0   0   2   1
-// segment_id     0   0   0   1   1   1
-
-// This method can only work if the slice we are sorting (`dim`) is
-// innermost, and both values and indices are contiguous. We do this
-// by re-arranging the input into this form as needed, which will
-// unfortunately allocate memory if the request is not in this form.
-// Vectorized sort is slower than iterated sort if the number of
-// slices is small (since we're sorting twice, instead of invoking a
-// smaller sort `numSlices` times), but the cub sort
-// implementation here is a catch-all, so we're not looking for
-// efficiency, but instead correctness.
-
-template<typename scalar_t>
-__global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64_t *index, const int2 *i_s_ptr, int nsegments, int nsort) {
-  CUDA_KERNEL_LOOP(i, nsegments * nsort) {
-    int segment = i / nsort;
-    int j = i % nsort;
-
-    int offset = segment * nsort;
-    const scalar_t *in_ = in + offset;
-    scalar_t *out_ = out + offset;
-    int64_t *index_ = index + offset;
-    const int2 *i_s_ptr_ = i_s_ptr + offset;
-
-    int idx = i_s_ptr_[j].y;
-    index_[j] = idx;
-    out_[j] = in_[idx];
-  }
-}
-
-
-C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
-__global__ void fill_index_and_segment_kernel(
-    int2 *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
-  CUDA_KERNEL_LOOP(idx, numel) {
-    auto div_mod = nsort_divider.divmod(idx);
-    auto segment = static_cast<int>(div_mod.div);
-    auto sort = static_cast<int>(div_mod.mod);
-    data[idx] = int2{segment, sort};
-  }
-}
-
-C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
-__global__ void fill_reverse_indices_kernel(
-    int64_t *data, int numel, at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
-  CUDA_KERNEL_LOOP(idx, numel) {
-    data[idx] = nsort_divider.mod(idx);
-  }
-}
-
-template<typename scalar_t>
-inline void segmented_sort_large_segments(
-    const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
-    const scalar_t * self_ptr, scalar_t * values_ptr, int64_t * indices_ptr
-  ) {
-  using namespace at::cuda::detail;
-  auto allocator = at::cuda::getCUDADeviceAllocator();
-  auto stream = at::cuda::getCurrentCUDAStream();
-  dim3 block = CUDA_NUM_THREADS;
-  dim3 grid = GET_BLOCKS(nsort);
-  c10::DeviceArray<int64_t> indices(*allocator, nsort);
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-      indices.get(), nsort, nsort_divider);
-  const int64_t *initial_indices = indices.get();
-
-  for (auto i: c10::irange(nsegments)){
-    at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
-        self_ptr, values_ptr, initial_indices, indices_ptr,
-        nsort, descending);
-    indices_ptr += nsort;
-    self_ptr += nsort;
-    values_ptr += nsort;
-  }
-}
-
-template<typename scalar_t>
-inline void segmented_sort_pairs_by_full_sort(
-  const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
-  const scalar_t *const self_ptr, scalar_t *const values_ptr, int64_t *const indices_ptr
-) {
-  int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
-
-  const auto numel = nsort * nsegments;
-  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto indices_and_segment = cuda_allocator->allocate(numel * sizeof(int2));
-  auto i_s_ptr = static_cast<int2 *>(indices_and_segment.get());
-
-  using namespace at::cuda::detail;
-  dim3 block = CUDA_NUM_THREADS;
-  dim3 grid = GET_BLOCKS(numel);
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-  fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
-      i_s_ptr, numel, nsort_divider);
-
-  auto indices_and_segment2 = cuda_allocator->allocate(nsegments * nsort * sizeof(int2));
-  auto i_s_ptr2 = static_cast<int2 *>(indices_and_segment2.get());
-
-  at::cuda::cub::radix_sort_pairs<scalar_t, int2>(
-    self_ptr, nullptr, i_s_ptr, i_s_ptr2,
-    n, descending);
-
-  TORCH_INTERNAL_ASSERT(segment_bits <= 32);
-
-  // sort on lower 32bits, i.e. segment index
-  at::cuda::cub::radix_sort_keys<int64_t>(
-    reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
-    n, false, 0, segment_bits);
-
-  sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-    self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
-}
-
-template<typename scalar_t>
-void segmented_sort_pairs(
-    int64_t nsegments, int64_t nsort, int64_t n, bool descending,
-    const scalar_t *self_ptr, scalar_t *values_ptr, int64_t *indices_ptr) {
-  const auto numel = nsort * nsegments;
-  auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
-  auto reverse_indices = cuda_allocator->allocate(numel * sizeof(int64_t));
-  int64_t *reverse_indices_ptr = static_cast<int64_t *>(reverse_indices.get());
-
-  using namespace at::cuda::detail;
-  dim3 block = CUDA_NUM_THREADS;
-  dim3 grid = GET_BLOCKS(numel);
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-      reverse_indices_ptr, numel, nsort_divider);
-
-  at::cuda::cub::segmented_sort_pairs(self_ptr, values_ptr,
-                                      reverse_indices_ptr, indices_ptr, n, nsegments,
-                                      offset_t{(int)nsort, 0}, offset_t{(int)nsort, 1}, descending);
-}
-
-}  // namespace
-
-void launch_stable_sort_kernel(
-    const TensorBase &self, int64_t dim, bool descending,
-    const TensorBase &values, const TensorBase &indices) {
-  const auto numel = self.numel();
-  if (numel == 0) {
-    return;
-  }
-
-  int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
-  int64_t nsort = self.size(dim);
-  int64_t nbatch = (numel_or_intmax / nsort) * nsort;
-  TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
-  int64_t *indices_ptr = indices.data_ptr<int64_t>();
-
-#if (defined(USE_ROCM) && ROCM_VERSION < 40500)
-  constexpr bool is_rocm_bf16_sort_unsupported = true;
-#else
-  constexpr bool is_rocm_bf16_sort_unsupported = false;
-#endif
-
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&]{
-    c10::guts::if_constexpr<!(is_rocm_bf16_sort_unsupported && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
-      const scalar_t *self_ptr = self.data_ptr<scalar_t>();
-      scalar_t *values_ptr = values.data_ptr<scalar_t>();
-      int64_t remaining = _(numel);
-      while (remaining > 0) {
-        int64_t n = std::min(remaining, nbatch);
-        int64_t nsegments = n / nsort;
-
-        if (nsegments == 1 || nsort >= 1000000) { //rough heuristics where even a single sort occupies GPU
-          segmented_sort_large_segments(
-              nsegments, nsort, n, descending,
-              self_ptr, values_ptr, indices_ptr);
-        } else if (nsegments < 128) {
-          segmented_sort_pairs_by_full_sort(nsegments, nsort, n, descending,
-            self_ptr, values_ptr, indices_ptr);
-        } else {
-          segmented_sort_pairs(nsegments, nsort, n, descending,
-                               self_ptr, values_ptr, indices_ptr);
-        }
-
-        remaining -= n;
-        self_ptr += n;
-        values_ptr += n;
-        indices_ptr += n;
-      }
-    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm < 4.5"); });
-  });
 }
 
 }}  // namespace at::native
