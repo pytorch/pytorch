@@ -836,7 +836,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                                              NvfTensorView*,                                  \
                                              NvfVal*,                                         \
                                              NvfVal*>(                                        \
-            {arg1->index, arg2->index, arg3->index},                                          \
+            {arg1->index, arg2->index, arg3->index, arg4->index},                             \
             {output->index},                                                                  \
             static_cast<                                                                      \
                 NvfTensorView* (*)(NvfVal*, NvfTensorView*, NvfVal*, NvfVal*)>(               \
