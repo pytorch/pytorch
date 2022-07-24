@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
+#include <ATen/InferSize.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/Resize.h>
 
@@ -53,6 +54,8 @@ void resize_out_helper(const at::TensorList& dst, const at::TensorList& src) {
 
 
 ${CompositeViewCopyKernel_Definitions}
+
+${SymIntViewCopyKernel_Definitions}
 
 ${GeneratedCompositeFunctional_Definitions}
 

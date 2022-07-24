@@ -292,7 +292,6 @@ void MemoryPlanner::allocate() {
 }
 
 void MemoryPlanner::deallocate() {
-  deallocateManagedTensors();
   for (auto& iv : borrowed_ivalues_needing_incref_) {
     auto old = std::move(*iv);
     *iv = IValue(old);
@@ -306,6 +305,13 @@ void MemoryPlanner::deallocate() {
   for (auto& iv : unmanaged_borrowed_ivalues_) {
     c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(*iv);
   }
+  // It's important to call this function after all other owning refs
+  // of the managed StorageImpls are cleaned up. It can reset the
+  // the StorageImpl's refcount to (# tensors in storage group),
+  // so destructing any owning refs afterwards will bring the refcount
+  // lower than expected and trigger the debug assertion in
+  // ~intrusive_ptr_target.
+  deallocateManagedTensors();
   buffer_ = {};
 }
 
