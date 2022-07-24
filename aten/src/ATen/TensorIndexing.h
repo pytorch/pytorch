@@ -640,7 +640,7 @@ static inline Tensor get_item(
       tensorIndices,
       disable_slice_optimization,
       self_device,
-      *self_sizes);
+      self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]

@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/mobile/train/optim/sgd.h>
 #include <torch/csrc/jit/mobile/train/random.h>
 #include <torch/csrc/jit/mobile/train/sequential.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/data/dataloader.h>
 #include <torch/torch.h>
@@ -172,9 +173,9 @@ TEST(MobileTest, SaveParametersDefaultsToZip) {
   EXPECT_EQ(ss_data.str()[3], '\x04');
 }
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   // Save some empty parameters using flatbuffer.
+  register_flatbuffer_all();
   std::map<std::string, at::Tensor> empty_parameters;
   std::stringstream ss_data;
   _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
@@ -188,34 +189,10 @@ TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   EXPECT_EQ(ss_data.str()[6], 'M');
   EXPECT_EQ(ss_data.str()[7], 'F');
 }
-#else // !defined(ENABLE_FLATBUFFER)
-TEST(MobileTest, SaveParametersThrowsWithoutFlatbufferSupport) {
-  // Some empty parameters to try saving.
-  std::map<std::string, at::Tensor> empty_parameters;
-  std::stringstream ss_data;
 
-  // Save using flatbuffers should fail when support isn't compiled in. Make
-  // sure we get the exception that explicitly mentions the lack of flatbuffer
-  // support.
-  try {
-    _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
-    FAIL() << "_save_parameters should have thrown";
-  } catch (const ::c10::Error& e) {
-    static const std::string kExpectedSubstring =
-        "build hasn't enabled flatbuffer";
-    EXPECT_TRUE(
-        std::string(e.msg()).find(kExpectedSubstring) != std::string::npos)
-        << "Exception message does not contain expected substring \""
-        << kExpectedSubstring << "\": actual message \"" << e.msg() << "\"";
-  } catch (...) {
-    FAIL() << "Unexpected exception type";
-  }
-}
-#endif // !defined(ENABLE_FLATBUFFER)
-
-#if defined(ENABLE_FLATBUFFER)
 TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
   // Create some simple parameters to save.
+  register_flatbuffer_all();
   std::map<std::string, at::Tensor> input_params;
   input_params["four_by_ones"] = 4 * torch::ones({});
   input_params["three_by_ones"] = 3 * torch::ones({});
@@ -244,33 +221,6 @@ TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
         output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
   }
 }
-#else // !defined(ENABLE_FLATBUFFER)
-TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
-  // Create some data that looks like a flatbuffer header.
-  std::stringstream data;
-  data << "abcd"
-       << "PTMF" // Flatbuffer magic
-       << "ijkl";
-
-  // Loading the "flatbuffer" data should fail. Make sure we see the expected
-  // exception, not just any exception; since this isn't properly-formed
-  // flatbuffer data, any attempt to parse it might throw a different error type
-  // or message, but we don't expect anyone to try parsing it.
-  try {
-    _load_parameters(data);
-    FAIL() << "_load_parameters should have thrown";
-  } catch (const ::c10::Error& e) {
-    static const std::string kExpectedSubstring =
-        "build hasn't enabled flatbuffer";
-    EXPECT_TRUE(
-        std::string(e.msg()).find(kExpectedSubstring) != std::string::npos)
-        << "Exception message does not contain expected substring \""
-        << kExpectedSubstring << "\": actual message \"" << e.msg() << "\"";
-  } catch (...) {
-    FAIL() << "Unexpected exception type";
-  }
-}
-#endif // !defined(ENABLE_FLATBUFFER)
 
 TEST(MobileTest, LoadParametersUnexpectedFormatShouldThrow) {
   // Manually create some data that doesn't look like a ZIP or Flatbuffer file.

@@ -1,12 +1,13 @@
 import contextlib
 import os
 import typing
-from typing import Iterator, Optional, Sequence
 import unittest
 import unittest.mock
+from typing import Iterator, Optional, Sequence
+
+import tools.setup_helpers.cmake
 
 import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
-import tools.setup_helpers.cmake
 
 
 T = typing.TypeVar("T")
