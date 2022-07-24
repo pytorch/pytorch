@@ -278,8 +278,16 @@ class TestProxyTensor(TestCase):
         buffers = dict(model.named_buffers())
         fx_f = make_fx(f)(input, params, buffers)
         # fx may change the order of parameters in list, so using set() to compare
-        self.assertIn(fx_f(input, params, buffers)[0], f(input, params, buffers))
-        self.assertIn(fx_f(input, params, buffers)[1], f(input, params, buffers))
+        self.assertTrue(
+            torch.allclose(fx_f(input, params, buffers)[0], f(input, params, buffers)[0], atol=1e-03)
+            or
+            torch.allclose(fx_f(input, params, buffers)[0], f(input, params, buffers)[1], atol=1e-03)
+        )
+        self.assertTrue(
+            torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[0], atol=1e-03)
+            or
+            torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
+        )
 
 make_fx_failures = {
     # unknown
