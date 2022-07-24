@@ -1,13 +1,14 @@
+import functools
+from enum import Enum
+from typing import Callable, List, Optional, Tuple
+
 import torch
+import torch._prims_common as utils
+import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from enum import Enum
-from typing import Tuple, Optional, List, Callable
-import torch.nn.functional as F
-import functools
-from torch.utils._pytree import tree_map, tree_flatten
-import torch._prims.utils as utils
-from torch._prims.wrappers import out_wrapper_multi
+from torch._prims_common.wrappers import out_wrapper
+from torch.utils._pytree import tree_flatten, tree_map
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -28,9 +29,12 @@ class Reduction(Enum):
 def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        flat_args = [x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)]
-        computation_dtype, result_dtype = utils.elementwise_dtypes(*flat_args,
-                                                                   type_promotion_kind=type_promotion)
+        flat_args = [
+            x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)
+        ]
+        computation_dtype, result_dtype = utils.elementwise_dtypes(
+            *flat_args, type_promotion_kind=type_promotion
+        )
 
         # TODO: pretty sure this is not quite right
         def increase_prec(x):
@@ -50,9 +54,16 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
 
     return inner
 
-pw_cast_for_opmath = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
-reduction_complex_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
-pw_cast_for_int_to_real = functools.partial(type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+
+pw_cast_for_opmath = functools.partial(
+    type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+reduction_complex_to_real = functools.partial(
+    type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+)
+pw_cast_for_int_to_real = functools.partial(
+    type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
@@ -78,6 +89,7 @@ def sigmoid_backward(out_grad: Tensor, y: Tensor):
 def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float):
     z = (x * beta).exp()
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
+
 
 @register_decomposition(aten.elu)
 @pw_cast_for_opmath
@@ -189,7 +201,7 @@ def gelu_backward(grad: Tensor, self: Tensor, approximate: str = "none"):
     M_SQRT2 = 1.41421356237309504880
     M_SQRT1_2 = 0.70710678118654752440
     M_2_SQRTPI = 1.12837916709551257390
-    if approximate == 'tanh':
+    if approximate == "tanh":
         kBeta = M_SQRT2 * M_2_SQRTPI * 0.5
         kKappa = 0.044715
         x_sq = self * self
@@ -281,7 +293,9 @@ def rrelu_with_noise_backward(
         return grad_output.mul(noise)
     else:
         negative_slope = (lower + upper) / 2
-        return aten.leaky_relu_backward(grad_output, self, negative_slope, self_is_result)
+        return aten.leaky_relu_backward(
+            grad_output, self, negative_slope, self_is_result
+        )
 
 
 @register_decomposition(aten.log_sigmoid_backward)
@@ -313,10 +327,12 @@ def to_real_dtype(dtype: torch.dtype):
     elif dtype == torch.complex128:
         return torch.float64
 
+
 # TODO: None of these loss castings are quite correct, see
 # https://github.com/pytorch/pytorch/issues/76870. Also, the ATen kernels
 # perform the pointwise portion in opmath, but don't maintain it between the
 # pointwise portion and the reduction
+
 
 @register_decomposition(aten.mse_loss)
 @pw_cast_for_opmath
@@ -365,13 +381,13 @@ def huber_loss_backward(
 
 
 def _nll_loss_backward(
-        grad_output: Tensor,
-        self: Tensor,
-        target: Tensor,
-        weight: Optional[Tensor],
-        reduction: int,
-        ignore_index: int,
-        total_weight: Tensor,
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+    total_weight: Tensor,
 ) -> Tensor:
     channel_dim = 0 if self.dim() < 2 else 1
     if reduction == Reduction.MEAN.value:
@@ -404,12 +420,16 @@ def glu_backward(grad_output: Tensor, self: Tensor, dim: int) -> Tensor:
     assert self.dim() > 0, "glu does not support 0-dimensional tensors"
     wrap_dim = utils.canonicalize_dim(self.dim(), dim)
     nIn = self.size(wrap_dim)
-    assert nIn % 2 == 0, f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+    assert (
+        nIn % 2 == 0
+    ), f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
     inputSize = nIn // 2
     firstHalf = self.narrow(wrap_dim, 0, inputSize)
     secondHalf = self.narrow(wrap_dim, inputSize, inputSize)
     gradInputFirstHalf = torch.sigmoid(secondHalf)
-    gradInputSecondHalf = (1.0 - gradInputFirstHalf) * gradInputFirstHalf * firstHalf * grad_output
+    gradInputSecondHalf = (
+        (1.0 - gradInputFirstHalf) * gradInputFirstHalf * firstHalf * grad_output
+    )
     gradInputFirstHalf = gradInputFirstHalf * grad_output
     return torch.cat([gradInputFirstHalf, gradInputSecondHalf], dim=wrap_dim)
 
@@ -452,7 +472,9 @@ def nll_loss_backward(
             grad_output.dim() <= 1 and grad_output.numel() == 1
         ), f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
 
-    return _nll_loss_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight)
+    return _nll_loss_backward(
+        grad_output, self, target, weight, reduction, ignore_index, total_weight
+    )
 
 
 @register_decomposition(aten.nll_loss2d_backward)
@@ -473,18 +495,20 @@ def nll_loss2d_backward(
         target.dim() == 3
     ), f"only batches of spatial targets supported (3D tensors) but got targets of dimension: {target.dim()}"
 
-    assert(
-        self.shape[0] == target.shape[0] and self.shape[2] == target.shape[1] and self.shape[3] == target.shape[2]
+    assert (
+        self.shape[0] == target.shape[0]
+        and self.shape[2] == target.shape[1]
+        and self.shape[3] == target.shape[2]
     ), f"size mismatch (got input: {self.shape}, target: {target.shape}"
 
-    assert (
-        total_weight.numel() == 1
-    ), (
+    assert total_weight.numel() == 1, (
         "expected total_weight to be a single element tensor, "
         f"got: {total_weight.shape} ( {total_weight.numel()}, elements)"
     )
 
-    return _nll_loss_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight)
+    return _nll_loss_backward(
+        grad_output, self, target, weight, reduction, ignore_index, total_weight
+    )
 
 
 @register_decomposition(aten.binary_cross_entropy)
@@ -725,6 +749,7 @@ def embedding(
 
     return weight.index_select(0, indices.reshape(-1)).view(size)
 
+
 # TODO: Correct the type promotion semantics
 @register_decomposition(aten.embedding_dense_backward)
 def embedding_dense_backward(
@@ -735,9 +760,9 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.view(numel, grad_output.size(-1))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.view(numel)
+    indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
@@ -798,6 +823,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
         return out
     return beta * self + out
 
+
 # This computes the mean and variance along the specifized normalization dims,
 # then normalizes along those dims. Finally, it returns the mean and variance of
 # the normalized dims. Note that it intentionally leaves outputs upcasted.
@@ -811,40 +837,8 @@ def normalize(input, norm_dims, eps):
     mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
     rstd = torch.rsqrt(biased_var + eps)
 
-    out = ((input - mean) * rstd)
+    out = (input - mean) * rstd
     return out, mean, rstd
-
-
-@register_decomposition(aten.native_layer_norm.default)
-def native_layer_norm(
-    input: Tensor,
-    normalized_shape: List[int],
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-
-    axis = input.dim() - len(normalized_shape)
-    if prod(list(input.shape[:axis])) == 0:
-        mean = input.new_zeros((0,), dtype=computation_dtype)
-        rstd = input.new_zeros((0,), dtype=computation_dtype)
-        out = input
-    else:
-        reduction_dims = list(range(axis, input.dim()))
-        out, mean, rstd = normalize(input, reduction_dims, eps)
-
-        if weight is not None:
-            out = out * weight
-        if bias is not None:
-            out = out + bias
-
-        out = out.to(dtype=input.dtype)
-
-    if input.device.type == 'cpu':
-        mean = mean.to(dtype=input.dtype)
-        rstd = rstd.to(dtype=input.dtype)
-    return (out, mean, rstd)
 
 
 @register_decomposition(aten.native_group_norm.default, disable_meta=True)
@@ -945,9 +939,7 @@ def native_layer_norm_backward(
 
     if output_mask[1] and weight_cast is not None:
         if len(outer_dim_indices) > 0:
-            d_weight = torch.sum(
-                grad_out_cast * x_hat, outer_dim_indices, False
-            )
+            d_weight = torch.sum(grad_out_cast * x_hat, outer_dim_indices, False)
         else:
             d_weight = grad_out_cast * x_hat
 
@@ -957,7 +949,11 @@ def native_layer_norm_backward(
         else:
             d_bias = grad_out_cast
 
-    return _maybe_cast(d_input, input.dtype), _maybe_cast(d_weight, input.dtype), _maybe_cast(d_bias, input.dtype)
+    return (
+        _maybe_cast(d_input, input.dtype),
+        _maybe_cast(d_weight, input.dtype),
+        _maybe_cast(d_bias, input.dtype),
+    )
 
 
 @register_decomposition(aten.native_batch_norm)
@@ -985,7 +981,9 @@ def native_batch_norm(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (n / (n - 1))
+            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
+                n / (n - 1)
+            )
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
@@ -1002,7 +1000,7 @@ def native_batch_norm(
             save_rstd = input.new_zeros((0,))
         mean = _unsqueeze_to_dim(mean, input.dim() - 1)
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
-        output = ((input - mean) * invstd)
+        output = (input - mean) * invstd
 
     if weight is None:
         weight = input.new_ones(())
@@ -1013,20 +1011,10 @@ def native_batch_norm(
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
     output = output * weight + bias
-    if input.device.type == 'cpu':
+    if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
-
-
-@register_decomposition(aten.clamp_min)
-def clamp_min(self: Tensor, min: float):
-    return torch.clamp(self, min=min)
-
-
-@register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, max: float):
-    return torch.clamp(self, max=max)
 
 
 @register_decomposition(aten._fused_dropout)
@@ -1037,19 +1025,18 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten.logical_not)
-def logical_not(self: Tensor) -> Tensor:
-    return ~self.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
-    return aten.where(aten.isnan(self),
-                      self,
-                      aten.where(self == aten.new_zeros(self, ()),
-                                 aten.new_zeros(self, ()),
-                                 self * aten.log(other)))
+    return aten.where(
+        aten.isnan(self),
+        self,
+        aten.where(
+            self == aten.new_zeros(self, ()),
+            aten.new_zeros(self, ()),
+            self * aten.log(other),
+        ),
+    )
 
 
 @register_decomposition(aten.var.correction)
@@ -1104,8 +1091,10 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach, disable_meta=True)
-def detach_decomposition(x):
+@register_decomposition(
+    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
+)
+def nop_decomposition(x):
     return x
 
 
@@ -1133,7 +1122,12 @@ def cudnn_batch_norm(
     # Cudnn return running mean and variance when training is True
     if training:
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
-    return (a, input.new_zeros((0,)), input.new_zeros((0,)), input.new_zeros((0,), dtype=torch.uint8))
+    return (
+        a,
+        input.new_zeros((0,)),
+        input.new_zeros((0,)),
+        input.new_zeros((0,), dtype=torch.uint8),
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
@@ -1193,19 +1187,16 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
+    maxes_squeezed = torch.masked_fill(
+        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
+    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
 
-@register_decomposition(aten.trace.default)
-def trace(self: Tensor) -> Tensor:
-    return torch.sum(torch.diag(self))
-
-
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
-@out_wrapper_multi('output', 'buffer')
+@out_wrapper("output", "buffer")
 @pw_cast_for_opmath
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
@@ -1215,6 +1206,7 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
+
 
 # The implementation matches torch.ops.aten.norm
 # torch.ops.aten.norm only supports numeric p, does not support Frobenius norm or nuclear norm
@@ -1227,9 +1219,9 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
 
     if p == 0:
         return (self != 0).sum(dim, keepdim=keepdim)
-    elif p == float('inf'):
+    elif p == float("inf"):
         return self.abs().amax(dim, keepdim=keepdim)
-    elif p == -float('inf'):
+    elif p == -float("inf"):
         return self.abs().amin(dim, keepdim=keepdim)
 
     def fast_pow(x, ord):
@@ -1246,3 +1238,74 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
         self = self.abs()
 
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
+
+
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@pw_cast_for_opmath
+def upsample_bilinear2d_vec(
+    input: Tensor,
+    output_size: Optional[List[int]],
+    align_corners: bool,
+    scale_factors: Optional[List[float]],
+) -> Tensor:
+    # get dimensions of original image
+    n_batch, n_channels, in_h, in_w = input.shape
+
+    if output_size is not None:
+        out_h = float(output_size[0])
+        out_w = float(output_size[1])
+    elif scale_factors is not None:
+        out_h = in_h * scale_factors[0]
+        out_w = in_w * scale_factors[1]
+
+    # Calculate horizontal and vertical scaling factor
+    if out_h > 1:
+        if align_corners:
+            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
+        else:
+            h_scale_factor = in_h / out_h
+    else:
+        h_scale_factor = 0.0
+
+    if out_w > 1:
+        if align_corners:
+            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
+        else:
+            w_scale_factor = in_w / out_w
+    else:
+        w_scale_factor = 0.0
+
+    i = torch.arange(int(out_h), dtype=input.dtype, device=input.device)
+    j = torch.arange(int(out_w), dtype=input.dtype, device=input.device)
+
+    if align_corners:
+        x = h_scale_factor * i
+        y = w_scale_factor * j
+    else:
+        x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
+        y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
+
+    x_floor = torch.floor(x).to(torch.int64)
+    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
+    y_floor = torch.floor(y).to(torch.int64)
+    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+
+    x_view = x.unsqueeze(1)
+    x_floor_view = x_floor.unsqueeze(1)
+    x_ceil_view = x_ceil.unsqueeze(1)
+
+    v1 = input[:, :, x_floor_view, y_floor]
+    v2 = input[:, :, x_ceil_view, y_floor]
+    v3 = input[:, :, x_floor_view, y_ceil]
+    v4 = input[:, :, x_ceil_view, y_ceil]
+
+    xscale2 = x_view - x_floor_view
+    xscale1 = 1.0 - xscale2
+
+    yscale2 = y - y_floor
+    yscale1 = 1.0 - yscale2
+
+    q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
+    q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
+    result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+    return result

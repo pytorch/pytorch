@@ -1,45 +1,39 @@
-import pathlib
 import argparse
 import os
+import pathlib
 import re
-import yaml
-from collections import namedtuple, Counter
+from collections import Counter, namedtuple
 from typing import (
     Any,
-    List,
-    Dict,
-    Tuple,
-    Union,
-    Sequence,
-    Optional,
     Callable,
+    Dict,
     Iterable,
     Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
     Type,
+    Union,
 )
-from torchgen.api.types import BaseCppType
-from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
-from torchgen.gen import (
-    get_grouped_native_functions,
-    parse_native_yaml,
-    NamespaceHelper,
-)
+
+import yaml
+
+import torchgen.dest as dest
 
 from torchgen.api.lazy import setValueT
+from torchgen.api.types import BaseCppType
+from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
+from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
-from torchgen.model import (
-    NativeFunction,
-    NativeFunctionsGroup,
-    OperatorName,
-)
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, YamlLoader, FileManager
-import torchgen.dest as dest
+from torchgen.utils import concatMap, FileManager, NamespaceHelper, YamlLoader
 from .gen_backend_stubs import (
-    parse_backend_yaml,
     error_on_missing_kernels,
-    gen_dispatchkey_nativefunc_headers,
     gen_dispatcher_registrations,
+    gen_dispatchkey_nativefunc_headers,
+    parse_backend_yaml,
 )
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -160,6 +154,39 @@ Please add declare this function in {shape_inference_hdr}:\n
 and implement it in the the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
+
+
+# Some helper functions for the codegen.
+def get_ltc_helper_fns() -> str:
+    return """\
+at::Tensor to_meta(const at::Tensor& tensor) {
+  // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
+  if (!tensor.defined()) return tensor;
+  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
+/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
+/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  // needs to handle wrapped numbers, so dtype promotion works properly.
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  return out;
+}
+c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return to_meta(*tensor);
+  }
+  return c10::nullopt;
+}
+
+std::vector<at::Tensor> to_meta(const at::TensorList& t_list) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& i : c10::irange(t_list.size())) {
+    outs.push_back(to_meta(t_list[i]));
+  }
+  return outs;
+}
+"""
 
 
 class default_args:
@@ -436,6 +463,9 @@ def run_gen_lazy_tensor(
                     tensor_class_hdr,
                     shape_inference_hdr,
                     "ATen/Functions.h",
+                    "ATen/native/TensorConversions.h",
+                    "ATen/NativeFunctions.h",
+                    "ATen/CompositeExplicitAutogradNonFunctionalFunctions.h",
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
@@ -452,6 +482,7 @@ def run_gen_lazy_tensor(
                     else []
                 )
             ],
+            "helper_fns": get_ltc_helper_fns(),
             "native_functions_include": "",
             "namespace_prologue": ns_helper.prologue,
             "namespace_epilogue": ns_helper.epilogue,

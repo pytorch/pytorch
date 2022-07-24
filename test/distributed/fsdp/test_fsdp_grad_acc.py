@@ -12,7 +12,12 @@ from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -118,15 +123,18 @@ class TestGradAcc(FSDPTest):
             torch.backends.cuda.matmul.allow_tf32 = False
 
             # Initialize the FSDP model and optimizer
-            group = dist.distributed_c10d._get_default_group()
-            fsdp_model: FSDP = self._get_wrapped_model(
-                group, cuda_first=False, add_bn=False,
-                config={
-                    "cpu_offload": cpu_offload,
-                    "backward_prefetch": backward_prefetch,
-                },
-            )  # disable BN since the test uses varying batch sizes
-            fsdp_model.eval()  # disable dropout
+            fsdp_kwargs = {
+                "cpu_offload": cpu_offload,
+                "backward_prefetch": backward_prefetch,
+            }
+            fsdp_model: FSDP = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_AFTER,
+                fsdp_kwargs,
+                deterministic=True,
+                add_bn=False,  # disable BN since the test uses varying batch sizes
+            )
             device = torch.device("cuda")
             optim = torch.optim.SGD(
                 fsdp_model.parameters(), lr=0.01, momentum=0.9,

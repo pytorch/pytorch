@@ -16,19 +16,19 @@ The figure below demonstrates building blocks of the c10d and DDP package and sh
 
 Process groups (PG) take care of communications across processes. It is up to users to decide how to place processes, e.g., on the same machine or across machines. PG exposes a set of communication APIs, e.g., send, recv, broadcast, allgather, allreduce, etc.
 
-Source Code: [ProcessGroup.cpp](../lib/c10d/ProcessGroup.cpp) and  [ProcessGroup.hpp](../lib/c10d/ProcessGroup.hpp)
+Source Code: [ProcessGroup.cpp](../csrc/distributed/c10d/ProcessGroup.cpp) and  [ProcessGroup.hpp](../csrc/distributed/c10d/ProcessGroup.hpp)
 
 #### Process Group Backends
 
-We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../lib/c10d/ProcessGroupNCCL.hpp)
+We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../csrc/distributed/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../csrc/distributed/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../csrc/distributed/c10d/ProcessGroupNCCL.hpp)
 
 #### Store
 
-Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../lib/c10d/Store.hpp) for the interface and [FileStore.hpp](../lib/c10d/FileStore.hpp), [TCPStore.hpp](../lib/c10d/TCPStore.hpp) and [PrefixStore.hpp](../lib/c10d/PrefixStore.hpp) for implementations.)
+Processes discover each other through a rendezvous process on a common Store (See [Store.hpp](../csrc/distributed/c10d/Store.hpp) for the interface and [FileStore.hpp](../csrc/distributed/c10d/FileStore.hpp), [TCPStore.hpp](../csrc/distributed/c10d/TCPStore.hpp) and [PrefixStore.hpp](../csrc/distributed/c10d/PrefixStore.hpp) for implementations.)
 
 ### Distributed Data Parallel
 
-DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../lib/c10d/reducer.cpp) and [comm.cpp](../lib/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
+DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../csrc/distributed/c10d/reducer.cpp) and [comm.cpp](../csrc/distributed/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
 
 ### Onboarding Tasks
 
