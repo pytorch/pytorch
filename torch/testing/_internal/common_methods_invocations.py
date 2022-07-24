@@ -16557,6 +16557,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16579,6 +16580,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
            aten_name='linalg_svdvals',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
