@@ -186,11 +186,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// of the new input.
   uint32_t add_input_metadata(
       const at::TensorOptions& options,
-      c10::SymIntArrayRef shape,
+      at::IntArrayRef shape,
       bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
-    auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
+    auto meta_shape = MetadataShape{c10::in_place_type<at::DimVector>, shape};
     input_metadata_.emplace_back(options, meta_shape, is_tensor_subclass);
     return input_nr;
   }
