@@ -61,8 +61,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   py::class_<nvfuser::Scalar>(nvfuser, "Scalar");
 
   //! The FusionDefinition is a context manager in Python where the user will
-  //! define the set the operations and connections between operations for nvFuser
-  //! to create.
+  //! define the set the operations and connections between operations for
+  //! nvFuser to create.
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
   fusion_def.def(py::init<nvfuser::FusionOwner*>())
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
@@ -226,7 +226,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   //!
   //! Example:
   //!   help(FusionDefinition.Operators)
-  //! 
+  //!
   //! Additional operators are expected to be defined below as needed.  They
   //! may require defining a new RecordFunctor child class if they are unique.
   py::class_<nvfuser::FusionDefinition::Operators> nvf_ops(

@@ -269,7 +269,7 @@ struct ReductionOpRecord : RecordFunctor {
   std::function<
       NvfTensorView*(NvfTensorView*, std::vector<int>&, bool, NvfDataType)>
       fusion_op_;
-  //! The tensor dimensions to reduce 
+  //! The tensor dimensions to reduce
   std::vector<int> axes_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
