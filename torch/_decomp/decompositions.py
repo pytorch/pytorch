@@ -1208,14 +1208,7 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     return min - torch.log1p(z), buffer
 
 
-@register_decomposition(
-    [
-        aten.norm.Scalar,
-        aten.norm.ScalarOpt_dim,
-        aten.norm.ScalarOpt_dtype,
-        aten.norm.ScalarOpt_dim_dtype,
-    ]
-)
+@register_decomposition(aten.norm)
 @out_wrapper()
 @reduction_complex_to_real
 def norm(
