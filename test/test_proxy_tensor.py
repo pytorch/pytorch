@@ -295,7 +295,16 @@ class TestProxyTensor(TestCase):
         params = dict(model.named_parameters())
         fx_f = make_fx(f)(input, params)
         # fx may change the order of parameters in list, so using set() to compare
-        self.assertEqual(set(fx_f(input, params)), set(f(input, params)))
+        self.assertTrue(
+            torch.allclose(fx_f(input, params)[0], f(input, params)[0])
+            or
+            torch.allclose(fx_f(input, params)[0], f(input, params)[1])
+        )
+        self.assertTrue(
+            torch.allclose(fx_f(input, params)[1], f(input, params)[0])
+            or
+            torch.allclose(fx_f(input, params)[1], f(input, params)[1])
+        )
 
     def test_make_fx_model_fwd_bwd_wgtupdate(self, device):
         class Foo(torch.nn.Module):
@@ -321,6 +330,7 @@ class TestProxyTensor(TestCase):
         buffers = dict(model.named_buffers())
         fx_f = make_fx(f)(input, params, buffers)
         # fx may change the order of parameters in list, so using set() to compare
+        # also there is a numerical difference in results so changing atol from 1e-08 to 1e-03
         self.assertTrue(
             torch.allclose(fx_f(input, params, buffers)[0], f(input, params, buffers)[0], atol=1e-03)
             or
