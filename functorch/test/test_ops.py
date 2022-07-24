@@ -1279,6 +1279,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
@@ -1293,14 +1294,15 @@ class TestOperators(TestCase):
 
         # numerical inconsistencies, look like bugs
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
-        skip('__rmatmul__', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('matmul', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but windows
-        skip('nn.functional.conv_transpose3d', dtypes=(torch.float32,)),  # only fails on cpu only linux
+        skip('__rmatmul__'),  # flaky needs investigation
+        skip('matmul'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose3d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose2d'),  # flaky needs investigation
+        skip('nn.functional.conv_transpose1d'),  # flaky needs investigation
         skip('nn.functional.layer_norm', dtypes=(torch.float32,), device_type='cpu'),  # fails on windows
         skip('linalg.lu_factor', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
     })
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
