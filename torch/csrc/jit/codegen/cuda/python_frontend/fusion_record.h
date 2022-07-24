@@ -99,7 +99,7 @@ struct BroadcastOpRecord : RecordFunctor {
   ~BroadcastOpRecord() final = default;
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->as<TensorView>();
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
 
     const auto arg_ndims = arg->domain()->noReductions().size();
     TORCH_CHECK(
@@ -232,7 +232,7 @@ struct OutputRecord : RecordFunctor {
 
     // With C++17, this statement should be "if constexpr"
     if (std::is_same<OutputType, NvfTensorView>::value) {
-      fd.addOutput(input->as<NvfTensorView>());
+      fd.addOutput(input->template as<NvfTensorView>());
     } else {
       fd.addOutput(input);
     }
@@ -259,7 +259,7 @@ struct ReductionOpRecord : RecordFunctor {
   ~ReductionOpRecord() final = default;
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
+    auto arg = fd.getFusionState(args.at(0))->template as<NvfTensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs.at(0), output);
   }
