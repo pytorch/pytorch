@@ -671,7 +671,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
 //     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
 //         otherwise, the second return value is unspecified
-//     is_causal (bool): If true, assumes causal attention masking and ignores the value of attn_mask.
+//     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
 //         TODO: Consider removing this flag before promoting this function to the public API. It's possible
 //         to get specialized support for causal masks (and other types of masking e.g. local attention / block
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
