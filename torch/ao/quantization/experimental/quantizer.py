@@ -57,7 +57,10 @@ class APoTQuantizer():
         result: fp representation of input Tensor
     """
     def dequantize(self, apot_tensor) -> Tensor:
+        orig_size = apot_tensor.data.size()
         apot_tensor_data = apot_tensor.data.flatten()
+
+        print(apot_tensor_data)
 
         # map apot_to_float over tensor2quantize elements
         result_temp = np.empty(shape=apot_tensor_data.size())
@@ -65,7 +68,9 @@ class APoTQuantizer():
             new_ele = apot_to_float(apot_tensor_data[i], self.quantization_levels, self.level_indices)
             result_temp[i] = new_ele
 
-        result = torch.from_numpy(result_temp)
+        result = torch.from_numpy(result_temp).reshape(orig_size)
+
+        print(result)
 
         return result
 
