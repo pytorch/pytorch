@@ -3390,7 +3390,6 @@ class TestSparse(TestCase):
         out = torch.sparse.softmax(t, 0)
         self.assertEqual(out.to_dense(), torch.zeros_like(t))
 
-
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
