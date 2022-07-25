@@ -2532,12 +2532,21 @@ class TestSparseCSR(TestCase):
             # CSC to CSC conversion is supported
             if layout_a is torch.sparse_csc and layout_b is torch.sparse_csc:
                 expect_error = False
+            if layout_a is torch.sparse_bsc and layout_b is torch.sparse_csc:
+                expect_error = False
             if expect_error:
                 with self.assertRaises(RuntimeError):
                     b = self._convert_to_layout(a, layout_a)
                     self._convert_to_layout(b, layout_b)
             else:
-                b = self._convert_to_layout(a, layout_a)
+                if layout_a is torch.sparse_bsc:
+                    # workaround no dense<->bsc
+                    b_bsr = self._convert_to_layout(a.transpose(0, 1).contiguous(), torch.sparse_bsr)
+                    # bsr of the tranpose is bsc of this
+                    b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(), b_bsr.col_indices(), b_bsr.values().transpose(-2, -1).contiguous(), size=(b_bsr.shape[-1], b_bsr.shape[-2]))
+                    torch._validate_sparse_compressed_tensor_args(b.ccol_indices(), b.row_indices(), b.values(), b.shape, b.layout)
+                else:
+                    b = self._convert_to_layout(a, layout_a)
                 c = self._convert_to_layout(b, layout_b)
                 if (layout_a is not torch.sparse_bsr and layout_b is not torch.sparse_bsr):
                     self.assertEqual(a.to_dense(), c.to_dense())
