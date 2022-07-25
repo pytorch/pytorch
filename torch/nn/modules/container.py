@@ -117,6 +117,9 @@ class Sequential(Module):
         else:
             key = self._get_item_by_idx(self._modules.keys(), idx)
             delattr(self, key)
+        # To preserve numbering
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -134,6 +137,11 @@ class Sequential(Module):
             raise ValueError('add operator supports only objects '
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
 
     def __iadd__(self, other) -> 'Sequential':
         if isinstance(other, Sequential):
@@ -329,6 +337,11 @@ class ModuleList(Module):
         """
         self.add_module(str(len(self)), module)
         return self
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
 
     def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
