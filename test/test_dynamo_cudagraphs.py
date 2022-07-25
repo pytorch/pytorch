@@ -1,19 +1,17 @@
 # Owner(s): ["module: cuda graphs"]
 
+import functools
 import sys
-import torch
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
 
 from unittest.mock import patch
-import functools
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 try:
+    import functorch  # noqa: F401
     import torchdynamo
     from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
-    import functorch  # noqa: F401
 
     TEST_DYNAMO = True
 except ImportError:
