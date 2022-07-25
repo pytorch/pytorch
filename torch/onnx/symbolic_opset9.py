@@ -2247,8 +2247,7 @@ def _layer_norm_returns_normalized_input_mean_rstd(
         # rdenominator = 1 / sqrt(variance + eps)
         rdenominator = reciprocal(g, denominator)
         return normalized, mean, rdenominator
-    else:
-        return normalized, None, None
+    return normalized, None, None
 
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
