@@ -8,9 +8,9 @@ import copy
 from ...sparsifier import utils
 from torch.nn.utils import parametrize
 import sys
+import warnings
 
 if not sys.warnoptions:
-    import warnings
     warnings.simplefilter("once")
 
 __all__ = ['BaseDataSparsifier']
