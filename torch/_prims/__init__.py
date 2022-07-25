@@ -2485,7 +2485,6 @@ _arange_doc = """
 
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
-# TODO: currently don't support complex numbers
 def _arange_meta(
     start: NumberType,
     end: NumberType,
@@ -2518,8 +2517,6 @@ def _arange_meta(
         dtype = torch.int64
     else:
         dtype = torch.get_default_dtype()
-        if all(isinstance(arg, complex) for arg in (start, end, step)):
-            dtype = utils.corresponding_complex_dtype(dtype)
     device = _get_default_device() if device is None else device
     shape = (math.ceil((end - start) / step),)
     strides = utils.make_contiguous_strides_for(shape)
