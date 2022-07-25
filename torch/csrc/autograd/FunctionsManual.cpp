@@ -1295,25 +1295,19 @@ Tensor sparse_sparse_matmul_backward(
 Tensor renorm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Scalar& p_s,
+    const Scalar& p,
     int64_t dim,
     const Scalar& maxnorm) {
-  auto self_sizes = self.sizes();
-  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
-  at::DimVector reduce_dims(self_sizes.size());
+  auto n = self.dim();
+  dim = c10::maybe_wrap_dim(dim, n);
+  auto reduce_dims = at::DimVector(n);
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-  auto dtype = self.scalar_type();
-  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
-  const auto p = p_s.toDouble();
 
-  Tensor norm;
-  if (acc_type != dtype) {
-    norm = at::linalg_vector_norm(
-        self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
-  } else {
-    norm = at::linalg_vector_norm(self, p, reduce_dims, /*keepdim=*/true);
-  }
+  auto acc_type =
+      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto norm = at::linalg_vector_norm(
+      self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
   const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
