@@ -3100,6 +3100,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(DivModule(), (x, y))
         self.run_test(PowModule(), (x, z))
 
+    def test_mul_bool(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mul(x, y)
+
+        x_t = torch.tensor([True, False, True, False])
+        y_t = torch.tensor([True, True, False, False])
+        z_t = torch.tensor([1.0, 2.0, 3.0, 0.0])
+        self.run_test(MyModel(), (x_t, y_t))
+        self.run_test(MyModel(), (x_t, z_t))
+        self.run_test(MyModel(), (z_t, y_t))
+
     # fmod was added in version 10
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfUnsupportedMaxOpsetVersion(13)
