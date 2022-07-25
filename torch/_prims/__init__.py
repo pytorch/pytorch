@@ -264,7 +264,7 @@ def TensorMeta(
     else:
         return FakeTensor(
             mode,
-            torch.empty(shape, dtype=dtype, device="meta"),
+            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
             device,
         )
 
@@ -1559,7 +1559,6 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
         idx for idx in range(len(new_shape)) if idx not in dimensions
     ]
     return broadcast_in_dim(a, new_shape, broadcast_dimensions)
-
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
 pyslice: Type[slice] = slice  # type: ignore[has-type]
