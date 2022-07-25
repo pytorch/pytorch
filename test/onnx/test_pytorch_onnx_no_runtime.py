@@ -6,16 +6,16 @@ import contextlib
 import io
 import itertools
 import unittest
-from typing import Dict, Optional, Type, Callable, Iterable, Tuple, Union, List
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
 import onnx
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import symbolic_helper, utils, symbolic_registry
+from torch.onnx import symbolic_helper, symbolic_registry, utils
 from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
-import torch.nn.functional as F
 
 
 def export_to_onnx(

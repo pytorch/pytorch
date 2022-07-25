@@ -26,14 +26,14 @@ Tensor upsample_nearest2d(
   const auto v_input_sizes = v_input.sizes();
 
   vTensor v_output{
-    context,
-    {
-      v_input_sizes[Layout::Activation4D::batch],
-      v_input_sizes[Layout::Activation4D::channels],
-      output_sizes[Layout::Parameter::height],
-      output_sizes[Layout::Parameter::width],
-    },
-    input_arg.options(),
+      context,
+      {
+          v_input_sizes[Layout::Activation4D::batch],
+          v_input_sizes[Layout::Activation4D::channels],
+          output_sizes[Layout::Parameter::height],
+          output_sizes[Layout::Parameter::width],
+      },
+      input_arg.options(),
   };
 
   const struct Block final {
@@ -41,35 +41,31 @@ Tensor upsample_nearest2d(
     uint32_t _;
     ivec2 iextents;
     vec2 scale;
-  } block {
-    v_output.extents(),
-    0u,
-    {
-      safe_downcast<int32_t>(input_arg.size(Layout::Activation4D::width) - 1),
-      safe_downcast<int32_t>(input_arg.size(Layout::Activation4D::height) - 1),
-    },
-    {
-      compute_scales_value<float>(
-          scales_w,
-          v_input_sizes[Layout::Activation4D::width],
-          output_sizes[Layout::Parameter::width]),
-      compute_scales_value<float>(
-          scales_h,
-          v_input_sizes[Layout::Activation4D::height],
-          output_sizes[Layout::Parameter::height]),
-    },
+  } block{
+      v_output.extents(),
+      0u,
+      {
+          safe_downcast<int32_t>(
+              input_arg.size(Layout::Activation4D::width) - 1),
+          safe_downcast<int32_t>(
+              input_arg.size(Layout::Activation4D::height) - 1),
+      },
+      {
+          compute_scales_value<float>(
+              scales_w,
+              v_input_sizes[Layout::Activation4D::width],
+              output_sizes[Layout::Parameter::width]),
+          compute_scales_value<float>(
+              scales_h,
+              v_input_sizes[Layout::Activation4D::height],
+              output_sizes[Layout::Parameter::height]),
+      },
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(upsample_nearest2d),
       // pipeline barrier
@@ -85,9 +81,7 @@ Tensor upsample_nearest2d(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 
@@ -97,7 +91,9 @@ Tensor upsample_nearest2d(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::upsample_nearest2d"), TORCH_FN(upsample_nearest2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::upsample_nearest2d"),
+      TORCH_FN(upsample_nearest2d));
 }
 
 #endif /* USE_VULKAN_API */

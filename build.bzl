@@ -14,6 +14,7 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
+        copts = ["-fexceptions"],
         tags = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
@@ -192,6 +193,9 @@ GENERATED_CPP = [
     "RegisterCompositeImplicitAutograd.cpp",
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
+    "RegisterQuantizedMeta.cpp",
+    "RegisterNestedTensorMeta.cpp",
+    "RegisterSparseMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
     "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
