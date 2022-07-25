@@ -24,6 +24,7 @@
 
 #include <tuple>
 #include <vector>
+#include "c10/core/Layout.h"
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -436,7 +437,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_sparse() || self_.is_sparse_csr()) {
+  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+      self_.layout() == kSparseBsc) {
     throw TypeError("Cannot assign to a sparse tensor");
   }
   OptionalDeviceGuard device_guard(device_of(self_));
