@@ -80,10 +80,18 @@ static int getNumThreads(int nElem) {
   return threadSizes[4];
 }
 
+int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
+  /* Return the number of entries in the dense part of a sparse tensor.
+     `sizes` is a vector of sparse tensor dimensions.
+     `sparse_dim` is the dimension of the sparse part of a sparse tensor.
+   */
+  return c10::multiply_integers(sizes.begin() + sparse_dim, sizes.end());
+}
+
 template <typename scalar_t, bool LogSoftMax>
 __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t* sorted_pool_indices,
-    int64_t size,
+    int64_t pool_size,
     int64_t* pool_sizes,
     int64_t* pool_offsets,
     int64_t nvalues,
@@ -103,7 +111,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
   int index = tid + blkid * blksz;
   int step = blksz * gridsz;
 
-  while (index < size) {
+  while (index < pool_size) {
     int64_t offset = pool_offsets[index];
     int64_t* pool_indices = sorted_pool_indices + offset;
     int64_t pool_indices_size = pool_sizes[index];
@@ -408,7 +416,7 @@ void cuda_sparse_coo_softmax(
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
-  auto nvalues = values.numel() / nnz;
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
   /* Prepare accessors */
   auto values_2 = values.view({nnz, nvalues});
@@ -429,17 +437,23 @@ void cuda_sparse_coo_softmax(
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
-  cuda_sparse_coo_softmax_kernel<scalar_t, LogSoftMax>
-      <<<grid_size, block_size, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          pool_size,
-          pool_sizes.data_ptr<int64_t>(),
-          pool_offsets.data_ptr<int64_t>(),
-          nvalues,
-          mx_buffer.data_ptr<scalar_t>(),
-          values_accessor,
-          out_values_accessor);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  // If either nvalues or pool_size are zero, then cuda_sparse_coo_softmax_kernel
+  // won't actually perform any computation. Further, they will be
+  // invalid configuration parameters for the launch. So let's not
+  // launch a kernel unless both are non-zero.
+  if (nvalues > 0 && pool_size > 0) {
+    cuda_sparse_coo_softmax_kernel<scalar_t, LogSoftMax>
+        <<<grid_size, block_size, 0, stream>>>(
+            sorted_indices.data_ptr<int64_t>(),
+            pool_size,
+            pool_sizes.data_ptr<int64_t>(),
+            pool_offsets.data_ptr<int64_t>(),
+            nvalues,
+            mx_buffer.data_ptr<scalar_t>(),
+            values_accessor,
+            out_values_accessor);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 template <typename scalar_t, bool LogSoftMax>
