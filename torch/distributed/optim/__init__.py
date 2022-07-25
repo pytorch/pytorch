@@ -18,6 +18,8 @@ from .functional_rprop import _FunctionalRprop
 from .functional_adamax import _FunctionalAdamax
 from .utils import as_functional_optim
 
+from .overlapped import OverlappedAdam, OverlappedAdamW, OverlappedSGD
+
 
 # DistributedOptimizer imports torch.distributed.rpc names, so gate availability
 # based on RPC being available.
