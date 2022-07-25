@@ -290,13 +290,19 @@ class ModelReportVisualizer:
                 Default = "", results in all the modules in the reports to be visible in the table
 
         Returns a dictionary with two keys:
-            (Dict[strList[List[Any]]]) A dict containing two keys:
+            (Dict[str, Tuple[List, List]]) A dict containing two keys:
             "tensor_level_info", "channel_level_info"
                 Each key maps to a tuple with:
                     A list of the headers of each table
                     A list of lists containing the table information row by row
                     The 0th index row will contain the headers of the columns
                     The rest of the rows will contain data
+
+        Example Use:
+            >>> mod_report_visualizer.generate_filtered_tables(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                ) # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
@@ -314,15 +320,23 @@ class ModelReportVisualizer:
                 feature_data = filtered_data[module_fqn][feature_name]
 
                 # if it is only a single value, is tensor, otherwise per channel
-                try:
-                    iterator = iter(feature_data)
-                except TypeError:
-                    # means is per-tensor
-                    tensor_features.add(feature_name)
-                else:
+                if isinstance(feature_data, torch.Tensor):
+                    # see what the size of shape is
+                    if len(feature_data.shape) == 0:
+                        # single value
+                        # means is per-tensor
+                        tensor_features.add(feature_name)
+                    else:
+                        # works means per channel
+                        channel_features.add(feature_name)
+                        num_channels = len(feature_data)
+                elif isinstance(feature_data, list):
                     # works means per channel
                     channel_features.add(feature_name)
                     num_channels = len(feature_data)
+                else:
+                    # means is per-tensor
+                    tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
         tensor_features_list: List[str] = sorted(list(tensor_features))
@@ -373,8 +387,13 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Expected Use:
-            >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
+        Example Use:
+            >>> mod_report_visualizer.generate_table_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # prints out neatly formatted table with per_channel_min info for
+                all modules in block 1 of the model
         """
         pass
 
@@ -392,9 +411,14 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Expected Use:
-            >>> # the code below both returns the info and diplays the plot
-            >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
+        Example Use:
+            >>> mod_report_visualizer.generate_plot_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # outputs line plot of per_channel_min information for all modules in block1 of model
+                each channel gets it's own line, and it's plotted across the in-order modules
+                on the x-axis
         """
         pass
 
@@ -412,8 +436,13 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Expected Use:
-            >>> # displays the histogram
-            >>> model_report_visualizer.generate_histogram_visualization(*filters) # displays the histogram
+        Example Use:
+            >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # outputs histogram of per_channel_min information for all modules in block1 of model
+                information is gathered across all channels for all modules in block 1 for the
+                per_channel_min and is displayed in a histogram of equally sized bins
         """
         pass
