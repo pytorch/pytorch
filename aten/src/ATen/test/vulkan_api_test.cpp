@@ -3421,6 +3421,160 @@ TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   }, ::c10::Error);
 }
 
+TEST_F(VulkanAPITest, stack_invalid_inputs) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Act: Vulkan stack expects at least one tensor
+  EXPECT_THROW({
+    at::stack({}, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack expects dim = 0
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 1);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack expects 2 dimensional inputs
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan stack inputs must have matching sizes
+  EXPECT_THROW({
+    at::stack({
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        at::rand({6, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
+  }, ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, stack_1_tensor) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_2_tensors) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_3_tensors) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_4_tensors) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu4 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 0);
+  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_from_1_to_20_tensors) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  std::vector<at::Tensor> tensors_cpu = {};
+  std::vector<at::Tensor> tensors_vulkan = {};
+
+  for (const auto i : c10::irange(20)) {
+    at::Tensor in_cpu = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    tensors_cpu.emplace_back(in_cpu);
+    tensors_vulkan.emplace_back(in_cpu.vulkan());
+    at::Tensor out_cpu = at::stack(tensors_cpu, 0);
+    at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      std::cout << "Error when stacking " << i << " tensors" << std::endl;
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+    ASSERT_TRUE(check);
+  }
+}
+
 TEST_F(VulkanAPITest, clone_success) {
   // Arrange
   std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
