@@ -117,6 +117,18 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         else:
             return getattr(self._container, name)
 
+    def _convert_mask(self, states, sparse_coo=True):
+        r"""Converts the mask to sparse coo or dense tensors depending on the `sparse_coo` argument.
+        """
+        states = copy.deepcopy(states)
+        for _, state in states.items():
+            if sparse_coo:
+                state['mask'] = state['mask'].to_sparse_coo()
+            else:
+                state['mask'] = state['mask'].to_dense()
+
+        return states
+
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -127,8 +139,9 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         * container_state_dict - the state dictionary of the internal
             container model used for sparsification
         """
+        state = self._convert_mask(self.state)
         return {
-            'state': self.state,
+            'state': state,
             'data_groups': self.data_groups,
             '_container': self._container.state_dict()
         }
@@ -160,8 +173,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             else:
                 raise RuntimeError(f"Error loading {name}")
 
-            param = nn.Parameter(data, requires_grad=False)
-            setattr(self._container, name, param)
+            self._container.register_buffer(name=name, tensor=data)
 
             if parametrized:
                 # register parameter if parametrized
@@ -181,6 +193,8 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         states = copy.deepcopy(state_dict['state'])
         data_groups = copy.deepcopy(state_dict['data_groups'])
         container_state_dict = copy.deepcopy(state_dict['_container'])
+
+        states = self._convert_mask(states, sparse_coo=False)  # convert sparse coo mask to dense
         if strict:
             # if strict load -> then reset container
             self._container = _Container()
@@ -197,14 +211,16 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         if '_container' in state:  # If container object is in state then load model
             container_dict = state.pop('_container')
             self._container = _Container()
+            state['state'] = self._convert_mask(state['state'], sparse_coo=False)  # convert sparse coo mask to dense
             self._load_container_from_state(state['state'], state['data_groups'], container_dict)
 
         self.__dict__.update(state)
 
     def __getstate__(self):
+        state = self._convert_mask(self.state)
         return {
             'defaults': self.defaults,
-            'state': self.state,
+            'state': state,
             'data_groups': self.data_groups,
             '_container': self._container.state_dict()
         }
