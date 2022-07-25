@@ -25,6 +25,12 @@ Tensor quantized_add(
     const double scale,
     const int64_t zero_point);
 
+Tensor quantized_sub(
+    const Tensor& self_arg,
+    const Tensor& other_arg,
+    const double scale,
+    const int64_t zero_point);
+
 Tensor conv2d(
     const Tensor& input_,
     const Tensor& weight,
