@@ -3028,7 +3028,6 @@ def arange(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     assert (a is not None and b is not None) or (a is not None and b is None)
-    # arange(start, end, step)
     if a is not None and b is not None:
         return prims.arange(
             a,
