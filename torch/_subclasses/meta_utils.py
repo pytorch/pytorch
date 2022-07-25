@@ -208,20 +208,6 @@ class MetaConverter:
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-<<<<<<< HEAD
-            if any([
-                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
-                t.is_nested, torch._is_functional_tensor(t),
-                # these are supported in meta conversion but the fallbacks
-                # don't work
-                t.is_neg(), t.is_conj(),
-                # conjugate fallback does not support meta tensors
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]):
-=======
             if any(
                 [
                     t.is_sparse_csr,
@@ -234,15 +220,12 @@ class MetaConverter:
                     # don't work
                     t.is_neg(),
                     t.is_conj(),
-                    # conjugate fallback does not support meta tensors
-                    t.dtype in (torch.complex128, torch.complex64, torch.complex32),
-                    t.device.type in ("lazy", "meta"),
+                     t.device.type in ("lazy", "meta"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
                     # torch._C._is_batched(t),
                 ]
             ):
->>>>>>> 6691ed7884743f675c38f809366e95177b1f288b
                 # TODO: sparse should support meta
                 # NB technically to('meta') does work but our logging
                 # instrumentation will see the meta conversions and the

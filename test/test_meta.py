@@ -449,9 +449,6 @@ meta_function_expected_failures = {
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
     torch.mvlgamma : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.nn.functional.conv_transpose1d : {f64, i64, f32},
-    torch.nn.functional.conv_transpose2d : {f64, i64, f32},
-    torch.nn.functional.conv_transpose3d : {f64, i64, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f64, bf16, f32},
     torch.nn.functional.grid_sample : {f64, f32},
@@ -669,7 +666,6 @@ meta_dispatch_expected_failures = {
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
     aten.to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._convolution.default : {c64, i64, bf16, f32, f64, c128},
     aten._ctc_loss.default : {f32, f64},
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
@@ -681,7 +677,6 @@ meta_dispatch_expected_failures = {
     aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.col2im.default : {c64, f32, f64, c128},
-    aten.convolution.default : {c64, i64, bf16, f32, f64, c128},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_2d.default : {f32, f64},
@@ -736,7 +731,6 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cuda'] = {
-    aten._convolution.default: {f16, c32},
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
