@@ -836,8 +836,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         abortedComms_.emplace(abortedCommId);
         const auto& storeKey = getNcclAbortedCommStoreKey(abortedCommId);
         auto rankStr = std::to_string(rank_);
-        store_->set(
-            storeKey,rankStr);
+        store_->set(storeKey, rankStr);
         LOG(INFO) << "[Rank " << rank_
                   << "] Watchdog wrote aborted communicator id to store: "
                   << storeKey;
