@@ -427,7 +427,7 @@ Tensor eye(int64_t n, int64_t m,
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  auto tensor = at::empty({0}, options); // to be resized
+  auto tensor = at::empty({n, m}, options);
   return at::eye_out(tensor, n, m);
 }
 
