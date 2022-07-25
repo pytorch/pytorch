@@ -449,6 +449,11 @@ def gh_get_team_members(org: str, name: str) -> List[str]:
         rc += [member["login"] for member in team_members["nodes"]]
     return rc
 
+def get_check_run_name_prefix(workflow_run: Any) -> str:
+    if workflow_run is None:
+        return ""
+    else:
+        return f'{workflow_run["workflow"]["name"]} / '
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -631,7 +636,9 @@ class GitHubPR:
                     for checkrun_node in checkruns["nodes"]:
                         if checkrun_node["conclusion"] == 'FAILURE':
                             has_failing_check = True
-                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                        conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                            checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                        )
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
                                         name=self.project,
@@ -972,7 +979,9 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
                 for checkrun_node in checkruns["nodes"]:
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    )
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
                     rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
                                     name=project,
