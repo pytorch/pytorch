@@ -12,6 +12,7 @@ from torch.distributed._shard.api import (
 )
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
+    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.sharded_tensor import (
     empty,
@@ -126,7 +127,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         previous_sharded_weight = sharded_weight.clone()
         previous_sharded_bias = sharded_linear.bias.clone()
         sharded_optim = ShardedOptimizer(
-            dict(sharded_linear.named_parameters()),
+            dict(named_params_with_sharded_tensor(sharded_linear)),
             torch.optim.SGD,
             lr=0.1,
         )
@@ -191,7 +192,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def test_sharded_linear_errors(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
             fc1 = torch.nn.Linear(10, 10).cuda(self.rank)
-            shard_parameter(fc1, "weight", spec)
             shard_parameter(fc1, "bias", spec)
             with self.assertRaisesRegex(TypeError, 'bias needs to be torch.Tensor'):
                 fc1(torch.rand(10, 10).cuda(self.rank))

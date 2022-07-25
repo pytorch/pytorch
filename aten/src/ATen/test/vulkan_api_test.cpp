@@ -2712,6 +2712,76 @@ TEST_F(VulkanAPITest, unbind_3d_depth_large) {
   test_unbind({100, 1, 144}, 0);
 }
 
+TEST_F(VulkanAPITest, view_explicit) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const std::array<int64_t, 4> shape{7, 8, 9, 1};
+
+  const auto out_cpu = in_cpu.view(shape);
+  const auto out_vulkan = in_vulkan.view(shape);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, view_inferred) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand({7, 11, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const std::array<int64_t, 3> shape{7, 11, -1};
+
+  const auto out_cpu = in_cpu.view(shape);
+  const auto out_vulkan = in_vulkan.view(shape);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, view_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Act: only one dimension can be inferred
+  EXPECT_THROW({
+    at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan().view({7, -1, -1});
+  }, ::std::runtime_error);
+
+  // Act: invalid shape dimension
+  EXPECT_THROW({
+    at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan().view({7, 8, -2});
+  }, ::c10::Error);
+
+  // Act: incompatible shape
+  EXPECT_THROW({
+    at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan().view({7, 70});
+  }, ::std::runtime_error);
+}
+
 #if !defined(__APPLE__)
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_samefeature_success) {
   // Guard
@@ -4081,6 +4151,54 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, 1.0, train, bidirectional, batch_first);
   }, ::c10::Error);
+}
+
+void test_linear(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape) {
+  c10::InferenceMode mode;
+
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto input_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight = at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias = at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto out_cpu = at::linear(input_cpu, weight, bias);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::create_linear_context",
+      "",
+      weight.t(), bias);
+
+  auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_linear_context",
+      "",
+      input_cpu.vulkan(), prepack[0]);
+
+  auto out_vulkan = vulkan_output[0].toTensor();
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, linear_2d) {
+  test_linear({1, 37}, {41, 37}, {41});
+}
+
+TEST_F(VulkanAPITest, linear_3d) {
+  test_linear({1, 1, 37}, {41, 37}, {41});
+}
+
+TEST_F(VulkanAPITest, linear_4d) {
+  test_linear({1, 1, 1, 37}, {41, 37}, {41});
 }
 
 TEST_F(VulkanAPITest, lstm_success) {
