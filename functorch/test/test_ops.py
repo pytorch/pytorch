@@ -915,7 +915,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('index_put', ''),
-        xfail('matrix_exp'),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),

@@ -469,4 +469,5 @@ inline VmapDimVector range(int64_t start, int64_t stop) {
   return dims;
 }
 
+std::tuple<Tensor, Tensor> _binary_pointwise_helper(const Tensor&, optional<int64_t>, const Tensor&, optional<int64_t>);
 }}
