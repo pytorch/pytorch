@@ -593,6 +593,7 @@ include_patterns = [
     'torch/_meta_registrations.py',
     'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
@@ -688,7 +689,16 @@ code = 'UFMT'
 # currently enforced by BLACK linter
 include_patterns = [
     'test/onnx/**/*.py',
+    'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
+    'torch/package/**/*.py',
+    'torch/_decomp/**/*.py',
+    'torch/_lazy/**/*.py',
+    'torch/_masked/**/*.py',
+    'torch/_prims/**/*.py',
+    'torch/_refs/**/*.py',
+    'torch/_subclasses/**/*.py',
+    'torch/_*.py',
     'torchgen/**/*.py',
 ]
 command = [
@@ -699,6 +709,7 @@ command = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
+    'torch/__init__.py',  # Skip this file to format because it's part of the public API
 ]
 init_command = [
     'python3',
