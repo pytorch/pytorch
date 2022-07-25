@@ -1710,7 +1710,6 @@ aten::mm""")
             with profile(with_stack=True) as prof:
                 model(x)
             pattern = Conv2dBiasFollowedByBatchNorm2dPattern(prof)
-            tensorboard_trace_handler("/scratch/davidchencsl/work/log")(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
