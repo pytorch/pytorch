@@ -205,7 +205,7 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     return list(list_node.inputs())
 
 
-def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value]:
+def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
         raise errors.SymbolicValueError(
@@ -495,7 +495,9 @@ def _get_tensor_dim_size(x: _C.Value, dim: int):
 
 def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     if dim == -1:
-        return dim + _get_tensor_rank(x)
+        tensor_rank = _get_tensor_rank(x)
+        assert tensor_rank is not None
+        return dim + tensor_rank
     # If dim is not given, it defaults to the first dimension found with the size 3
     if dim is None:
         sizes = _get_tensor_sizes(x)
@@ -719,6 +721,7 @@ def _squeeze_helper(g, input, axes_i):
         )
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
+    assert axes_rank is not None
     if axes_rank > 1:
         raise errors.SymbolicValueError(
             "For Squeeze axses as input, the axes rank must be one in ONNX spec.", input

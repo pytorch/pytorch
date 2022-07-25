@@ -556,7 +556,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return v is not None and v != u
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
         dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
@@ -708,9 +708,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
                 return symbolic_helper._unimplemented(name, "dtype")
             return symbolic(g, self)
 
-        dim_desc = "is" if allow_multi_dim_support else "i"
-
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")
+        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -770,6 +768,7 @@ def t(g, self):
 
 def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
+    assert ndim is not None
     perm = list(reversed(range(0, ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
@@ -2408,7 +2407,9 @@ def bucketize(g, self, boundaries, out_int32=False, right=False):
     new_shape = g.op("Concat", g.op("Shape", boundaries), g.op("Shape", self), axis_i=0)
     # Unsqueeze step is performed to respect ONNX's numpy style broadcasting for comparison ops
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
-    unsqueeze_axes = list(range(1, symbolic_helper._get_tensor_rank(self) + 1))
+    tensor_rank = symbolic_helper._get_tensor_rank(self)
+    assert tensor_rank is not None
+    unsqueeze_axes = list(range(1, tensor_rank + 1))
     expanded_boundaries = expand(
         g,
         symbolic_helper._unsqueeze_helper(g, boundaries, unsqueeze_axes),
@@ -2750,7 +2751,7 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return empty(g, sizes, dtype, layout, device, pin_memory)
@@ -2835,7 +2836,7 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return zeros(g, sizes, dtype, layout, device, pin_memory)
@@ -2877,7 +2878,7 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return ones(g, sizes, dtype, layout, device, pin_memory)
@@ -2937,9 +2938,8 @@ def full_like(
 def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
-        dtype = self_dtype
         dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
+            symbolic_helper.cast_pytorch_to_onnx[self_dtype]
         )
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
@@ -3069,7 +3069,7 @@ def hardshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     lambd_op = g.op(
@@ -3098,7 +3098,7 @@ def softshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     lambd_op = g.op(
@@ -4187,9 +4187,11 @@ def scatter_add(g, self, dim, index, src):
     dtype = symbolic_helper.scalar_type_to_onnx.index(
         symbolic_helper.cast_pytorch_to_onnx[dtype]
     )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+    # FIXME(justinchuby): Type mismatch reported by mypy
+    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]  # type: ignore
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
+        assert dtype is not None
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
     else:
         dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
@@ -5109,6 +5111,7 @@ def movedim(g, self, source, destination):
         return self
 
     self_rank = symbolic_helper._get_tensor_rank(self)
+    assert self_rank is not None
 
     perm = list(range(self_rank))
 
@@ -5135,7 +5138,7 @@ def fill(g, self, value):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
 
@@ -5254,6 +5257,7 @@ def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # Currently we ignore the 'compute_mode' variable as we use default to
     # using matrix multiplication to calculate the euclidean distance
     rank = symbolic_helper._get_tensor_rank(x1)
+    assert rank is not None
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
     broadcasted_x2 = symbolic_helper._unsqueeze_helper(g, x2, [rank - 2])
     return pairwise_distance(
@@ -5378,7 +5382,7 @@ class Prim:
         dtype = symbolic_helper._try_get_scalar_type(self)
         if dtype is None:
             dtype = "Float"
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
         return g.op("Constant", value_t=torch.tensor(dtype))

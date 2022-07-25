@@ -199,8 +199,11 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
+    ty = symbolic_helper._try_get_scalar_type(self, other)
+    assert ty is not None
+    lower_type = ty.lower()
+    # TODO(justinchuby): Remove the g.constant method
+    C = g.constant(0, [1], lower_type)
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
         return _cast_to_type(
