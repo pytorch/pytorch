@@ -36,7 +36,8 @@ static std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& bas
 }
 
 // initializes the MTLBuffers for tesnsor data and runs the MPSGraph for the view op
-static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter)
+static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
+                            bool needsScatter, bool requires_sync = false)
 {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
@@ -71,7 +72,8 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
+                            requires_sync ? SyncType::COMMIT : SyncType::NONE);
   }
   return output;
 }
@@ -225,18 +227,20 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
     return Tensor();
   }
 
+  bool requires_sync = false;
   Tensor output;
-  if (!dst.has_storage())
+  if (!dst.has_storage()) {
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
-
-  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
+    requires_sync = true;
+  }
+  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
 {
   ViewCachedGraph* cachedGraph = createViewGraph(output, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
+  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
 }
 
 } // namespace mps
