@@ -4635,9 +4635,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = torch.nn.utils.weight_norm(m)
 
         # Check that the computed result is correct for at least a very simple sample
-        a = torch.Tensor([[1,2],[3,4]])
-        b = torch.Tensor([[5],[6]])
-        self.assertEqual(torch._weight_norm(a,b,dim=1), a * b / a.norm(dim=0))
+        a = torch.Tensor([[1, 2], [3, 4]])
+        b = torch.Tensor([[5], [6]])
+        self.assertEqual(torch._weight_norm(a, b, dim=1), a * b / a.norm(dim=0))
 
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
