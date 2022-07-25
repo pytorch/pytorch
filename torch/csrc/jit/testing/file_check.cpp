@@ -30,7 +30,7 @@ namespace testing {
 
 enum CheckType {
   CHECK,
-  TORCH_CHECK_NEXT,
+  CHECK_NEXT,
   CHECK_SAME,
   CHECK_NOT,
   CHECK_COUNT,
@@ -65,7 +65,7 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
     case CHECK:
       out << "CHECK";
       break;
-    case TORCH_CHECK_NEXT:
+    case CHECK_NEXT:
       out << "CHECK-NEXT";
       break;
     case CHECK_SAME:
@@ -432,7 +432,7 @@ struct FileCheckImpl {
         start_range = pos;
         end_range = pos + check.search_str_.size();
       } break;
-      case TORCH_CHECK_NEXT: {
+      case CHECK_NEXT: {
         auto line_end = assertFind(source, "\n", start_range, check);
         auto pos = assertFind(source, check.search_str_, line_end + 1, check);
         assertNotFind(SourceRange(source, line_end + 1, pos), "\n", check);
