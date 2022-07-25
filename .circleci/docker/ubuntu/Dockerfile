@@ -151,3 +151,4 @@ ENV CUDA_PATH /usr/local/cuda
 
 USER jenkins
 CMD ["bash"]
+#XXX
