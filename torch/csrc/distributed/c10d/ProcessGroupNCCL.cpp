@@ -466,12 +466,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           const auto& storeKey = getNcclAbortedCommStoreKey(
               buildNcclUniqueIdStr(ncclComm->getNcclId()));
           auto rankStr = std::to_string(rank_);
-          store_->set(
-              storeKey,
-              std::vector<uint8_t>(
-                  reinterpret_cast<const uint8_t*>(rankStr.data()),
-                  reinterpret_cast<const uint8_t*>(rankStr.data()) +
-                      rankStr.size()));
+          store_->set(storeKey, rankStr);
           LOG(INFO) << "[Rank " << rank_
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
@@ -842,11 +837,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         const auto& storeKey = getNcclAbortedCommStoreKey(abortedCommId);
         auto rankStr = std::to_string(rank_);
         store_->set(
-            storeKey,
-            std::vector<uint8_t>(
-                reinterpret_cast<const uint8_t*>(rankStr.data()),
-                reinterpret_cast<const uint8_t*>(rankStr.data()) +
-                    rankStr.size()));
+            storeKey,rankStr);
         LOG(INFO) << "[Rank " << rank_
                   << "] Watchdog wrote aborted communicator id to store: "
                   << storeKey;
