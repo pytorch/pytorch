@@ -29,6 +29,34 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+class TorchDynamoUseCases(unittest.TestCase):
+
+
+    def test_reshape(self):
+        """
+        In this example, we prove that some nodes must
+        always have a fixed shape regardless of the input
+        """
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Dyn):
+                y = x.view(100)
+                tmp = y.size()[0]
+                return tmp
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        dim = z3.Int(4)
+        self.assertEqual(s.model()[dim], 100)
+        # print(s.model()[dim])
+
 
 class HFOperations(unittest.TestCase):
 
