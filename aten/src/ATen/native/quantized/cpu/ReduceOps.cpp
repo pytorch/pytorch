@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -153,25 +153,6 @@ Tensor mean_quantized_cpu(
   return result;
 }
 
-Tensor mean_quantized_cpu(
-    const Tensor& self,
-    DimnameList dim,
-    bool keepdim,
-    optional<ScalarType> dtype) {
-  return mean_quantized_cpu(
-      self, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& mean_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& self,
-    DimnameList dim,
-    bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
-  return mean_out_quantized_cpu(
-      self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
-}
-
 // qstd
 inline bool is_std_inner_dim_fast_path(
     const Tensor& self,
@@ -225,25 +206,6 @@ Tensor std_quantized_cpu(
   Tensor result;
   std_out_quantized_cpu(self, dim, unbiased, keepdim, result);
   return result;
-}
-
-Tensor std_quantized_cpu(
-    const Tensor& self,
-    DimnameList dim,
-    optional<int64_t> unbiased,
-    bool keepdim) {
-  return std_quantized_cpu(
-      self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-Tensor& std_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& self,
-    DimnameList dim,
-    optional<int64_t> unbiased,
-    bool keepdim) {
-  return std_out_quantized_cpu(
-      self, dimnames_to_positions(self, dim), unbiased, keepdim, result);
 }
 
 } // namespace native

@@ -648,7 +648,7 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                elif t.startswith('int'):
                     func_args.append(0)
                 elif t in {'Stream'}:
                     func_args.append(torch.Stream())

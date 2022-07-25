@@ -164,7 +164,6 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DimVector.h>
-#include <ATen/core/Dimname.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>

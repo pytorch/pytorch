@@ -100,8 +100,7 @@ namespace impl {
     c10::ScalarType,
     c10::Device,
     c10::Layout,
-    c10::MemoryFormat,
-    at::Dimname
+    c10::MemoryFormat
   >;
 
   // We have an unboxed functor in hand that takes C++ arguments, and

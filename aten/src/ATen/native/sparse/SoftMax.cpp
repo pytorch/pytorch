@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorUtils.h>
@@ -626,10 +626,6 @@ Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, c10::optional<S
   return result;
 }
 
-Tensor _sparse_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::_sparse_softmax(self, dimname_to_position(self, dim), dtype);
-}
-
 Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -651,10 +647,6 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, c10::option
   }();
   namedinference::propagate_names(result, input_);
   return result;
-}
-
-Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
 }

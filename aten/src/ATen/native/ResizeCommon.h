@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <c10/util/irange.h>
 
 namespace at { namespace native {

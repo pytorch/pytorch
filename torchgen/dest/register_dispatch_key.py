@@ -554,7 +554,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-    TensorOptions options, DimnameList names
+    TensorOptions options
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
     if (!names.empty()) {{

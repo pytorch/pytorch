@@ -18,7 +18,7 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/dlpack.h>
@@ -1478,11 +1478,6 @@ Tensor tensor_ctor(
         /*copy_numpy=*/true,
         /*type_inference=*/type_inference,
         pin_memory);
-    auto names = r.toDimnameListOptional(5);
-    if (names) {
-      at::namedinference::propagate_names(
-          new_tensor, *names, /*validate_names=*/true);
-    }
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;

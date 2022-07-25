@@ -3,7 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
@@ -400,25 +400,6 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   }
 }
 
-Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
-}
-
-Tensor cat(TensorList tensors, Dimname dim) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
-}
-
-// torch.concat, alias for torch.cat
-Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
-}
-
-Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
-}
-
 Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
   return at::cat_out(result, tensors, dim);
 }
@@ -810,20 +791,6 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   no_names_guard.reset();
   namedinference::propagate_names_if_nonempty(result, outnames);
   return result;
-}
-
-Tensor diagonal(const Tensor& self, Dimname outdim, Dimname dim1, Dimname dim2, int64_t offset) {
-  auto result = at::diagonal(
-      self,
-      offset,
-      dimname_to_position(self, dim1),
-      dimname_to_position(self, dim2));
-  // This is slower than it needs to be because there is no way to modify
-  // the names of a tensor in-place right now. In the future we should consider
-  // offering that functionality.
-  std::vector<Dimname> new_names = result.names().vec();
-  new_names[new_names.size() - 1] = outdim;
-  return result.refine_names(new_names);
 }
 
 Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
@@ -1393,10 +1360,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-    if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
-                     self.sizes(), " at dimension ", self.names()[dim]);
-    }
     TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
@@ -1421,10 +1384,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
-}
-
-Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  return at::select(self, dimname_to_position(self, dim), index);
 }
 
 Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
@@ -2464,12 +2423,6 @@ static Tensor& propagate_transposed_names(
   return result;
 }
 
-Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
-  return at::transpose(
-      self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
-}
-
-
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(
       !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
@@ -2839,105 +2792,8 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   return native::reshape(self, shape);
 }
 
-Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
-  auto outnames = self.names().vec();
-  outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
-  outnames.insert(outnames.begin() + start_dim, out_dim);
-
-  Tensor result;
-  {
-    NoNamesGuard guard;
-    result = native::flatten(self, start_dim, end_dim);
-  }
-  internal_set_names_inplace(result, outnames);
-  return result;
-}
-
-Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname out_dim) {
-  auto start_pos = dimname_to_position(self, start_dim);
-  auto end_pos  = dimname_to_position(self, end_dim);
-  return native::flatten(self, start_pos, end_pos, out_dim);
-}
-
-Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
-  auto positions = dimnames_to_positions(self, dims);
-  TORCH_CHECK(positions.size() > 0,
-      "flatten(tensor, dims, out_dim): dims cannot be empty");
-  for (const auto i : c10::irange(positions.size() - 1)) {
-    if (positions[i] + 1 == positions[i + 1]) continue;
-    TORCH_CHECK(positions[i] + 1 == positions[i + 1],
-        "flatten(tensor, dims, out_dim): dims ", dims, " must be consecutive ",
-        "in Tensor", self.names());
-  }
-  return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
-}
-
 Tensor ravel(const Tensor& self) {
   return self.contiguous().view(-1);
-}
-
-static inline void handle_unflatten_exception(const std::runtime_error &e,
-                                              const Tensor &self,
-                                              int64_t dim,
-                                              IntArrayRef sizes,
-                                              c10::optional <DimnameList> names) {
-  if (!strstr(e.what(), "is invalid for input of size")) {
-    TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
-  }
-
-  if (self.has_names()) {
-    TORCH_CHECK(false,
-                "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
-
-  } else {
-    TORCH_CHECK(false,
-                "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.size(dim), ") in the input tensor");
-  }
-}
-
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
-  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
-  if (self.has_names()) {
-    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
-  }
-
-  DimVector inferred_size;
-  try {
-    inferred_size = at::infer_size_dv(sizes, self.size(dim));
-  } catch (const std::runtime_error& e) {
-    // at::infer_size would throw std::runtime_error for invalid size,
-    // catch the runtime_error and display the error message in a more user-friendly way
-    // for both tensors and named tensors
-    handle_unflatten_exception(e, self, dim, sizes, names);
-  }
-
-  DimVector shape(self.sizes().begin(), self.sizes().end());
-  shape.erase(shape.begin() + dim);
-  shape.insert(shape.begin() + dim, inferred_size.begin(), inferred_size.end());
-
-  Tensor result;
-  {
-    NoNamesGuard guard;
-    result = self.view(shape);
-  }
-
-  if (names) {
-    auto outnames = self.names().vec();
-    outnames.erase(outnames.begin() + dim);
-    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
-    at::internal_set_names_inplace(result, outnames);
-  }
-
-  return result;
-}
-
-Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
-  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
@@ -2956,10 +2812,6 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
     tensors[i] = self.select(dim, i);
   }
   return tensors;
-}
-
-std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
-  return at::unbind(self, dimname_to_position(self, dim));
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {

@@ -12,7 +12,7 @@
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>

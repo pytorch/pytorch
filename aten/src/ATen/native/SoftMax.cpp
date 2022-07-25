@@ -6,7 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
-#include <ATen/NamedTensorUtils.h>
+
 
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
@@ -551,14 +551,6 @@ DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
 DEFINE_DISPATCH(log_softmax_kernel);
-
-Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::softmax(self, dimname_to_position(self, dim), dtype);
-}
-
-Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
-}
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
   TORCH_CHECK(

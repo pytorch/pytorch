@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/native/Pool.h>
 
 
@@ -66,15 +66,14 @@ bool ceil_mode) {
     outputHeight, outputWidth, memory_format);
 
   /* resize output and indices */
-  DimnameList maybe_names = input.has_names() ? input.names() : DimnameList{};
   if (input.ndimension() == 3) {
-    set_output_raw_strided(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output_raw_strided(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format));
     /* indices will contain the locations for each output point */
-    set_output_raw_strided(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output_raw_strided(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong));
   } else {
-    set_output_raw_strided(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output_raw_strided(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format));
     /* indices will contain the locations for each output point */
-    set_output_raw_strided(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output_raw_strided(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong));
   }
 }
 
@@ -144,8 +143,7 @@ const Tensor& indices) {
     outputHeight_for_shape_check, outputWidth_for_shape_check,
     memory_format);
 
-  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
-             input.has_names() ? input.names() : DimnameList{});
+  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 } // namespace meta
 

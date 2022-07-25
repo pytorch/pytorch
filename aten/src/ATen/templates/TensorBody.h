@@ -130,7 +130,7 @@ class TORCH_API Tensor: public TensorBase {
     }
   }
 
-  // Aliased by Dimname overloads, so need explicit using
+  // Probably doesn't need to be explicit but just for safety
   using TensorBase::size;
   using TensorBase::sym_size;
   using TensorBase::stride;

@@ -714,12 +714,6 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
-    c10::optional<at::DimnameList> value) {
-  TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
-}
-void addInputs(
-    Node* n,
-    const char* name,
     const c10::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }

@@ -2,7 +2,7 @@
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>

@@ -15,7 +15,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/native/UnaryOps.h>
 
 #include <algorithm>
@@ -179,29 +179,6 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
 Tensor empty_symint_cpu(c10::SymIntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   return at::native::empty_cpu(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
-Tensor empty(
-    IntArrayRef size,
-    c10::optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    optional<MemoryFormat> optional_memory_format) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  if (!names.has_value()) {
-    return at::empty(size, options, optional_memory_format);
-  }
-  TORCH_CHECK(options.layout() == Layout::Strided,
-      "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
-      "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options, optional_memory_format);
-  internal_set_names_inplace(result, names);
-  return result;
 }
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
@@ -1474,104 +1451,6 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   }
   return self;
 }
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In the short term, these exist.
-// In the long term, we should move DimnameList into TensorOptions to avoid
-// having these overloads.
-
-Tensor full(
-    IntArrayRef size,
-    const Scalar& fill_value,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-
-  TORCH_CHECK(options.layout() != kSparse,
-    "full(...) is not implemented for sparse layout");
-
-  auto result = at::empty(size, names, infer_full_options(fill_value, options));
-  return result.fill_(fill_value);
-}
-
-Tensor ones(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-
-  return native::full(
-      size, /*fill_value=*/1., names, dtype, layout, device, pin_memory);
-}
-
-Tensor zeros(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  return native::full(size, /*fill_value=*/0., names, dtype, layout, device, pin_memory);
-}
-
-Tensor randn(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  return native::randn(size, c10::nullopt, names, dtype, layout, device, pin_memory);
-}
-
-Tensor randn(
-    IntArrayRef size,
-    c10::optional<Generator> generator,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  auto result = at::empty(size, names, options);
-  return result.normal_(0, 1, generator);
-}
-
-Tensor rand(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  return native::rand(size, c10::nullopt, names, dtype, layout, device, pin_memory);
-}
-
-Tensor rand(
-    IntArrayRef size,
-    c10::optional<Generator> generator,
-    optional<DimnameList> names,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  auto result = at::empty(size, names, options);
-  return result.uniform_(0, 1, generator);
-}
-
 
 DEFINE_DISPATCH(kaiser_window_stub);
 

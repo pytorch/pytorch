@@ -227,14 +227,6 @@ class TORCH_API TensorBase {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  c10::optional<DimnameList> opt_names() const {
-    return impl::get_opt_names(unsafeGetTensorImpl());
-  }
-  // See impl::get_names in ATen/NamedTensor.h for docs.
-  DimnameList names() const {
-    return impl::get_names(unsafeGetTensorImpl());
-  }
   int64_t ndimension() const {
     return dim();
   }

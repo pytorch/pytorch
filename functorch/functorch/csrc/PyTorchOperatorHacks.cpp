@@ -8,7 +8,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
-#include <ATen/NamedTensorUtils.h>
+
 #include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at { namespace functorch {

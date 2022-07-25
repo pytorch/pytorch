@@ -1849,12 +1849,6 @@ struct getTypePtr_<c10::string_view> final {
     return StringType::get();
   }
 };
-template <>
-struct getTypePtr_<at::Dimname> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
   static const auto& call() {

@@ -10,7 +10,6 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
@@ -513,9 +512,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
             at::empty_like(op.tensor(),
                            op.tensor_base().options().dtype(common_dtype_),
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT)));
-        if (!names_.empty()) {
-          namedinference::propagate_names(op.tensor_base(), names_);
-        }
         op.current_dtype = common_dtype_;
         op.target_dtype = common_dtype_;
       }
@@ -1520,7 +1516,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
-void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
@@ -1587,7 +1583,7 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
 // This is the "traditional" implementation of set_output.  On TensorIterator
 // instances, it is invoked directly from various call sites in this file.  No
 // funny business.
-void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
@@ -1606,10 +1602,6 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
       } else if (options.memory_format_opt().has_value()) {
         op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
       }
-  }
-  if (!names.empty()) {
-    TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    namedinference::propagate_names(op.tensor_base(), names);
   }
 }
 

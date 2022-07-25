@@ -212,18 +212,6 @@ enum class PyInterpreterStatus {
 
 } // namespace impl
 
-struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface(){};
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::clone");
-  };
-  virtual int64_t slow_dim() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::slow_dim");
-  };
-};
-
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented whenever
@@ -1510,28 +1498,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
-  /**
-   * Set the pointer to named tensor metadata.
-   */
-  void set_named_tensor_meta(
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
-    TORCH_WARN_ONCE(
-        "Named tensors and all their associated APIs are an experimental feature ",
-        "and subject to change. Please do not use them for anything important ",
-        "until they are released as stable.");
-#ifdef DEBUG
-    if (named_tensor_meta) {
-      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
-    }
-#endif
-    named_tensor_meta_ = std::move(named_tensor_meta);
-    if (named_tensor_meta_ == nullptr) {
-      key_set_ = key_set_.remove(DispatchKey::Named);
-    } else {
-      key_set_ = key_set_.add(DispatchKey::Named);
-    }
-  }
-
   void set_python_dispatch(bool k) {
     if (k) {
       key_set_ = key_set_.add(c10::python_ks);
@@ -1542,21 +1508,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_python_dispatch() const {
     return key_set_.has_all(c10::python_ks);
-  }
-
-  /**
-   * Return the pointer to named tensor metadata.
-   */
-  const c10::NamedTensorMetaInterface* named_tensor_meta() const {
-    return named_tensor_meta_.get();
-  }
-
-  c10::NamedTensorMetaInterface* named_tensor_meta() {
-    return named_tensor_meta_.get();
-  }
-
-  bool has_named_tensor_meta() const {
-    return named_tensor_meta_ != nullptr;
   }
 
   // NOTE [ TensorImpl Shallow-Copying ]
@@ -2407,8 +2358,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
  protected:
-  std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
-
   c10::VariableVersion version_counter_;
 
   // This field contains the interpreter tag for this object.  See

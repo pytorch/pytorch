@@ -22,7 +22,6 @@ fi
 ./extension_backend_test
 ./lazy_tensor_test
 ./tensor_iterator_test
-./Dimname_test
 ./Dict_test
 ./NamedTensor_test
 ./cpu_generator_test

@@ -101,7 +101,6 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   static PythonArgParser parser({
     "size(int64_t dim)",
     "size()",
-    "size(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
@@ -136,7 +135,6 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   static PythonArgParser parser({
     "stride(int64_t dim)",
     "stride()",
-    "stride(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;

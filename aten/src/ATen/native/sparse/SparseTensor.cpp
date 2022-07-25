@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
-#include <ATen/NamedTensorUtils.h>
+
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
