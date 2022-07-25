@@ -725,7 +725,6 @@ Tensor empty_like_sparse_csr(
 Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self.layout(), "select()", []() { return; });
-  ;
   TORCH_CHECK_INDEX(
       self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -779,11 +778,11 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         });
   } else {
     TORCH_CHECK(
-        self.is_sparse_csr(),
-        "select(): selecting non-batch dimensions is currently only supported for CSR tensors.");
+        self.layout() == kSparseCsr || self.layout() == kSparseCsc,
+        "select(): selecting non-batch dimensions is currently only supported for non-blocked sparse compressed layouts tensors.");
     TORCH_CHECK(
         self.dim() == 2,
-        "select(): selecting rows or columns is not implemented for batched sparse CSR tensors.")
+        "select(): selecting rows or columns is not implemented for batched sparse compressed tensors.")
     // Converting to COO and calling select is slighly slower than operating on
     // the CSR indices directly for constructing a COO vector, however current
     // version is more readable and easier to understand.
