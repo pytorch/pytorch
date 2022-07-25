@@ -14,7 +14,6 @@ void _check_layer_norm_inputs(
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight /* optional */,
     const c10::optional<Tensor>& bias /* optional */) {
-
   const auto normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
@@ -60,7 +59,6 @@ Tensor layer_norm(
     const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-
   _check_layer_norm_inputs(input_arg, normalized_shape, weight_opt, bias_opt);
 
   TORCH_CHECK(
@@ -83,9 +81,11 @@ Tensor layer_norm(
       weight_opt->defined() && bias_opt->defined(),
       "Vulkan layernorm expects weight and bias arguments");
 
-  const auto volume = c10::multiply_integers(v_input_sizes.cbegin(), v_input_sizes.end());
+  const auto volume =
+      c10::multiply_integers(v_input_sizes.cbegin(), v_input_sizes.end());
 
-  const Tensor weight = weight_opt->is_vulkan() ? *weight_opt : weight_opt->vulkan();
+  const Tensor weight =
+      weight_opt->is_vulkan() ? *weight_opt : weight_opt->vulkan();
   const vTensor& v_weight = convert(weight);
 
   const Tensor bias = bias_opt->is_vulkan() ? *bias_opt : bias_opt->vulkan();
@@ -94,9 +94,9 @@ Tensor layer_norm(
   api::Context* const context = api::context();
 
   vTensor v_output{
-    context,
-    v_input_sizes,
-    v_input.options(),
+      context,
+      v_input_sizes,
+      v_input.options(),
   };
 
   const struct Block final {
@@ -104,25 +104,16 @@ Tensor layer_norm(
     int32_t volume;
     int32_t last_texel_end_offset;
     float epsilon;
-  } block {
-    v_input.extents(),
-    safe_downcast<int32_t>(volume),
-    safe_downcast<int32_t>((v_input_sizes[input_arg.dim() - 3] - 1) % 4),
-    safe_downcast<float>(eps)
-  };
+  } block{
+      v_input.extents(),
+      safe_downcast<int32_t>(volume),
+      safe_downcast<int32_t>((v_input_sizes[input_arg.dim() - 3] - 1) % 4),
+      safe_downcast<float>(eps)};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(layernorm),
       // pipeline barrier
@@ -138,15 +129,9 @@ Tensor layer_norm(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_weight.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
-      v_bias.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

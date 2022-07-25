@@ -667,6 +667,10 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
+        .view_as(input);
+  }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return grad * (result / input).conj();
@@ -691,6 +695,9 @@ Tensor prod_backward(
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
+  }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 
   Tensor zero_mask = (input == 0);
@@ -1875,59 +1882,6 @@ Tensor infinitely_differentiable_logit_backward(
         at::empty({}, self.options())
             .fill_(std::numeric_limits<double>::quiet_NaN()));
   }
-}
-
-Tensor kl_div_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  auto result =
-      kl_div_backward(grad, input, target, at::Reduction::None, log_target);
-  if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
-  }
-  return result;
-}
-
-// Compute derivatives for targets.
-Tensor kl_div_target_backward(
-    Tensor grad_output,
-    Tensor self,
-    Tensor target,
-    int64_t reduction,
-    bool log_target) {
-  Tensor grad_target;
-  if (!log_target) {
-    if (!areAnyTensorSubclassLike({self, target}) &&
-        !grad_output._is_zerotensor()) {
-      grad_target = grad_output.mul(target.log().add_(1).sub_(self))
-                        .masked_fill_(target == 0, 0.);
-    } else {
-      grad_target = grad_output.mul(target.log().add(1).sub(self))
-                        .masked_fill(target == 0, 0.);
-    }
-  } else {
-    if (!areAnyTensorSubclassLike({self, target})) {
-      grad_target =
-          grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
-    } else {
-      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
-    }
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
-    } else {
-      grad_target.div(target.numel());
-    }
-  }
-
-  return grad_target;
 }
 
 Tensor binary_cross_entropy_target_backward(

@@ -11137,12 +11137,12 @@ dedent """
         def randint():
             return torch.randint(0, 5, [1, 2])
         out = randint()
-        self.assertEqual(out.dtype, torch.double)
-        # although the type should be int here, testing that the runtime dtype
-        # and shape analysis dtype is the same.
+        self.assertEqual(out.dtype, torch.int64)
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
-                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+            FileCheck().check("Long(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Double(*, *, requires_grad=0, device=cpu)") \
+                       .run(randint.graph_for())
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
@@ -11241,14 +11241,12 @@ dedent """
         def randint():
             return torch.randint(0, 5, [1, 2])
 
-        # although the type should be int here, testing that the runtime dtype
-        # and shape analysis dtype is the same.
         with enable_profiling_mode_for_profiling_tests():
             with num_profiled_runs(1):
                 out = randint()
                 graph_str = torch.jit.last_executed_optimized_graph()
-                self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("profiled_type=Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(graph_str)
+                self.assertEqual(out.dtype, torch.int64)
+                FileCheck().check("profiled_type=Long(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(graph_str)
 
 
     def test_erase_number_types(self):
@@ -16134,6 +16132,22 @@ dedent """
                 return x[(1,)]
 
         self.checkModule(MyModule(), (torch.ones(2, 3),))
+
+    def test_context_manager(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                p = x + y
+                q = p + 2.0
+                return q
+
+        x = torch.randn(3, 2, dtype=torch.float)
+        y = torch.randn(3, 2, dtype=torch.float)
+        for fuser_name in ['fuser0', 'fuser1', 'none']:
+            with torch.jit.fuser(fuser_name):
+                self.checkModule(MyModule(), (x, y))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

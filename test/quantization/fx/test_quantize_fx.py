@@ -18,7 +18,7 @@ from torch.ao.quantization import is_activation_post_process
 from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
-    convert_to_reference,
+    convert_to_reference_fx,
     prepare_qat_fx,
     fuse_fx,
 )
@@ -1046,7 +1046,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {'': qconfig}
         example_inputs = (torch.rand(1, 1),)
         prepared = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
-        quantized = convert_to_reference(prepared)
+        quantized = convert_to_reference_fx(prepared)
         qparams = (quantized._scale_0, quantized._zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -1226,7 +1226,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     m = ModuleClass(*module_constructor_inputs).eval()
                     qconfig_dict = {"": float16_dynamic_qconfig}
                     m = prepare_fx(m, qconfig_dict, example_inputs=inputs)
-                    convert_fn = convert_to_reference if is_reference else convert_fx
+                    convert_fn = convert_to_reference_fx if is_reference else convert_fx
                     m = convert_fn(m)
                     self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
@@ -1858,6 +1858,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
+    # TODO: move QConfigMapping tests to test/quantization/core
     def test_qconfig_mapping_set_global(self):
         qconfig = get_default_qconfig()
         qconfig_mapping = QConfigMapping()
@@ -4017,7 +4018,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
-            m_reference = convert_to_reference(m_copy)
+            m_reference = convert_to_reference_fx(m_copy)
 
             # checks for non-reference quantized model
             node_occurrence = {
@@ -4071,7 +4072,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
                 ), weight=torch.ao.quantization.default_per_channel_weight_observer)},
             example_inputs=example_inputs)
-        m = convert_to_reference(m)
+        m = convert_to_reference_fx(m)
         m(*example_inputs)
 
     def test_preserve_tuple(self):
@@ -4105,7 +4106,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, {"": default_qconfig}, example_inputs=(torch.randn(1),))
         m_copy = copy.deepcopy(m)
         m = convert_fx(m)
-        m_ref = convert_to_reference(m_copy)
+        m_ref = convert_to_reference_fx(m_copy)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
             ns.call_method("dequantize"): 1
@@ -4286,7 +4287,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=example_inputs)
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
-            m_ref = convert_to_reference(m_copy)
+            m_ref = convert_to_reference_fx(m_copy)
             result = m(*example_inputs)
             result_ref = m_ref(*example_inputs)
             self.assertTrue(torch.equal(result, result_ref))
@@ -4324,7 +4325,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=(data,))
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
-            m_ref = convert_to_reference(m_copy)
+            m_ref = convert_to_reference_fx(m_copy)
             result = m(data)
             result_ref = m_ref(data)
             self.assertTrue(torch.equal(result, result_ref))
@@ -4416,7 +4417,7 @@ class TestQuantizeFx(QuantizationTestCase):
             data = self.img_data_dict[dim][0][0]
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=(data,))
             m_ref = copy.deepcopy(m)
-            m_ref = convert_to_reference(m_ref)
+            m_ref = convert_to_reference_fx(m_ref)
             m = convert_fx(m)
             out_ref = m_ref(data)
             out = m(data)
@@ -4637,7 +4638,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(found_stack_trace)
 
         # test reference model
-        mq = convert_to_reference(copy.deepcopy(mp))
+        mq = convert_to_reference_fx(copy.deepcopy(mp))
         found_stack_trace = False
         for n in mq.graph.nodes:
             if n.op == 'call_module' and n.target == 'linear':
@@ -5782,6 +5783,28 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_impl(nn.LeakyReLU, F.leaky_relu, nnq.LeakyReLU, torch.ops.quantized.leaky_relu)
 
+    def test_prelu(self):
+        class M(torch.nn.Module):
+            def __init__(self, num_param: int):
+                super(M, self).__init__()
+                self.op = torch.nn.PReLU(num_parameters=num_param)
+
+            def forward(self, input):
+                return self.op(input)
+
+        X = [[torch.randn(4, 4, 4, 4, dtype=torch.float)]]
+        options = itertools.product([1, 4], self.static_quant_types, [True, False])
+        quantized_nodes = {
+            # is_reference
+            True: ns.call_module(torch.nn.PReLU),
+            False: ns.call_module(torch.nn.quantized.PReLU),
+        }
+
+        for num_parameter, quant_type, is_reference in options:
+            self.checkGraphModeFxOp(
+                M(num_parameter), X, quant_type, quantized_nodes[is_reference],
+                is_reference=is_reference)
+
     def _test_norm_impl(
             self, float_module, float_op, op_args, data, quantized_module, quantized_op,
             skip_op_arg_for_functional=False):
@@ -5946,7 +5969,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M(module, functional).eval()
         m_prep = prepare_fx(m, qconfig_dict, prepare_custom_qconfig_dict)
         m_prep(data)
-        convert_fn = convert_to_reference if is_reference else convert_fx
+        convert_fn = convert_to_reference_fx if is_reference else convert_fx
         m_quant = convert_fn(m_prep, is_reference=is_reference)
         m_quant(data)
 
@@ -6116,7 +6139,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M().eval()
         m_prep = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         m_prep(*example_inputs)
-        convert_fn = convert_to_reference if is_reference else convert_fx
+        convert_fn = convert_to_reference_fx if is_reference else convert_fx
         m_quant = convert_fn(m_prep)
         m_quant(*example_inputs)
 
@@ -6340,7 +6363,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {'': default_qconfig}
         prepared = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         # not runnable
-        quantized = convert_to_reference(prepared)
+        quantized = convert_to_reference_fx(prepared)
 
 
     @skipIfNoFBGEMM
@@ -6575,7 +6598,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 qconfig_mapping = get_default_qat_qconfig_mapping()
                 prepare = prepare_qat_fx
                 fq_count = 10
-
             # nothing to fuse so skipping the fuse step
             m_copy = copy.deepcopy(m)
             example_inputs = (torch.rand(3, 3, 3, 3),)
@@ -6594,7 +6616,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_occurrence=count_check)
             # not runnable
             quantized = convert_fx(prepared)
-            quantized_reference = convert_to_reference(prepared_copy)
+            quantized_reference = convert_to_reference_fx(prepared_copy)
 
             # This checks that the dequantize from the output of first conv
             # is being propagated to the end, so that we don't insert extra
@@ -7097,7 +7119,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
         model_prepared = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
         model_prepared(*example_inputs)
-        model_quantized = convert_to_reference(model_prepared)
+        model_quantized = convert_to_reference_fx(model_prepared)
         out = model_quantized(*example_inputs)
         self.assertEqual(out.device.type, 'cuda')
 
@@ -7125,7 +7147,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model_prepared = prepare_fx(model, qconfig_dict, example_inputs=(input,))
             model_prepared(input)
             model_prepared.to(device_after)
-            model_quantized = convert_to_reference(model_prepared)
+            model_quantized = convert_to_reference_fx(model_prepared)
             out = model_quantized(input.to(device_after))
             self.assertEqual(out.device.type, device_after)
 
@@ -7155,7 +7177,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 del model_prepared_first
                 model_prepared_second.load_state_dict(state_dict)
                 model_prepared_second.to(device_after)
-                model_quantized = convert_to_reference(model_prepared_second)
+                model_quantized = convert_to_reference_fx(model_prepared_second)
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
 

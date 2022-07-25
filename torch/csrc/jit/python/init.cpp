@@ -1,6 +1,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/schema_info.h>
 
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
@@ -103,8 +104,6 @@
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
-#include <ATen/core/function_schema.h>
-
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
@@ -121,11 +120,14 @@
 namespace torch {
 namespace jit {
 
-using ::c10::AliasInfo;
-using ::c10::Argument;
-using ::c10::FunctionSchema;
+using c10::AliasInfo;
+using c10::Argument;
+using c10::FunctionSchema;
+using c10::SchemaArgType;
+using c10::SchemaArgument;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
+using torch::utils::SchemaInfo;
 
 static std::shared_ptr<c10::SymbolicIntNode> toSymIntNode(
     std::shared_ptr<c10::SymbolicIntNode> a,
@@ -213,6 +215,16 @@ class PythonSymbolicIntNode : public c10::SymbolicIntNode {
     return dispatch_common_(__FUNCTION__, other);
   }
 
+  virtual std::shared_ptr<SymbolicIntNode> le(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  virtual std::shared_ptr<SymbolicIntNode> ge(
+      const std::shared_ptr<SymbolicIntNode>& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -231,6 +243,12 @@ bool loadPythonClasses() {
   // PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
+}
+
+bool isEmptyContainer(const py::handle self) {
+  bool is_empty_list =
+      PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr());
+  return is_empty_list;
 }
 } // anonymous namespace
 
@@ -1258,6 +1276,20 @@ void initJITBindings(PyObject* module) {
             return a->lt(snb);
           })
       .def(
+          "__le__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->le(snb);
+          })
+      .def(
+          "__ge__",
+          [](std::shared_ptr<c10::SymbolicIntNode> a,
+             py::object b) -> std::shared_ptr<c10::SymbolicIntNode> {
+            auto snb = toSymIntNode(a, b);
+            return a->ge(snb);
+          })
+      .def(
           "__bool__",
           [](std::shared_ptr<c10::SymbolicIntNode> a) { return a->bool_(); })
       .def(
@@ -1638,7 +1670,79 @@ void initJITBindings(PyObject* module) {
     }
     return type.value();
   });
-
+  py::enum_<SchemaArgType>(m, "_SchemaArgType")
+      .value("input", SchemaArgType::input)
+      .value("output", SchemaArgType::output);
+  py::class_<SchemaArgument>(m, "_SchemaArgument")
+      .def(py::init<SchemaArgType, size_t>())
+      .def_readwrite("type", &SchemaArgument::type)
+      .def_readwrite("index", &SchemaArgument::index);
+  py::class_<SchemaInfo>(m, "_SchemaInfo")
+      .def(py::init<FunctionSchema>())
+      .def("is_mutable", [](SchemaInfo& self) { return self.is_mutable(); })
+      .def(
+          "is_mutable",
+          [](SchemaInfo& self, const SchemaArgument& argument) {
+            return self.is_mutable(argument);
+          })
+      .def(
+          "is_mutable",
+          [](SchemaInfo& self, const std::string& name) {
+            return self.is_mutable(name);
+          })
+      .def(
+          "may_alias",
+          [](SchemaInfo& self,
+             const SchemaArgument& lhs,
+             const SchemaArgument& rhs) { return self.may_alias(lhs, rhs); })
+      .def(
+          "may_contain_alias",
+          [](SchemaInfo& self,
+             const SchemaArgument& lhs,
+             const SchemaArgument& rhs) {
+            return self.may_contain_alias(lhs, rhs);
+          })
+      .def(
+          "add_argument_value",
+          [](SchemaInfo& self,
+             const std::string& name,
+             const py::object& value) {
+            if (isEmptyContainer(value)) {
+              return;
+            }
+            // For normalization purposes there is an inconsistency within
+            // torch.fx that turns all arguments named "self" into "input". Thus
+            // this check ensures that those arguments are checked correctly.
+            if (name == "input" && !self.hasInputArgumentNamed("input")) {
+              self.addArgumentValue("self", toTypeInferredIValue(value));
+            } else {
+              self.addArgumentValue(name, toTypeInferredIValue(value));
+            }
+          })
+      .def("add_argument_values", [](SchemaInfo& self, const py::dict& values) {
+        std::unordered_map<std::string, IValue> value_map;
+        for (const auto& key_pair : values) {
+          IValue key = toTypeInferredIValue(key_pair.first);
+          if (isEmptyContainer(key_pair.second)) {
+            continue;
+          }
+          IValue value = toTypeInferredIValue(key_pair.second);
+          TORCH_INTERNAL_ASSERT(
+              key.isString(),
+              "Add argument value keys types should be strings.");
+          // For normalization purposes there is an inconsistency within
+          // torch.fx that
+          // turns all arguments named "self" into "input". Thus this check
+          // ensures that those arguments are checked correctly.
+          if (key.toStringRef() == "input" &&
+              !self.hasInputArgumentNamed("input")) {
+            self.addArgumentValue("self", value);
+          } else {
+            value_map[key.toStringRef()] = value;
+          }
+        }
+        self.addArgumentValues(value_map);
+      });
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
@@ -1805,8 +1909,17 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
-  m.def("_is_alias_of", [](const at::Tensor& self, const at::Tensor& other) {
-    return self.is_alias_of(other);
+  m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
+    if (isEmptyContainer(self) || isEmptyContainer(other)) {
+      return false;
+    }
+    return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
+  });
+  m.def("_overlaps", [](const py::object& self, const py::object& other) {
+    if (isEmptyContainer(self) || isEmptyContainer(other)) {
+      return true;
+    }
+    return toTypeInferredIValue(self).overlaps(toTypeInferredIValue(other));
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
