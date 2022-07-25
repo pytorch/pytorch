@@ -714,6 +714,10 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
     aten.empty.SymInt: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
+    # TODO this related to FakeTensor not tracking storage_offset. should be
+    # removed once that is fixed. cannot be an XFAIL because it actually succeeds
+    # for some inputs where the storage_offset is actually 0
+    aten.unbind.int: {c64, c32, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32}
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)

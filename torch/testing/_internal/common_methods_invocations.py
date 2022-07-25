@@ -17513,8 +17513,6 @@ op_db: List[OpInfo] = [
                # to bellow failing. For complex those tests are disabled so we need to exclude them
                DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta",
                             dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16)),
-               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta",
-                            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16)),
            )),
     OpInfo('vstack',
            aliases=('row_stack',),
