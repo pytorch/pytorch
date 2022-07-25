@@ -36,7 +36,6 @@ def get_latest_commits() -> List[str]:
         ],
         encoding="ascii",
     ).splitlines()
-
     return commits
 
 def query_commits(commits: List[str], qlambda: Any) -> Any:
