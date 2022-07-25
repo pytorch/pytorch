@@ -15,7 +15,7 @@ class VulkanOpContext final : public torch::jit::CustomClassHolder {
     return VulkanOpContext(source_args);
   }
 
-  VulkanOpContext(c10::impl::GenericList source_args)
+  explicit VulkanOpContext(c10::impl::GenericList source_args)
       : source_args_{source_args}, packed_args_{c10::AnyType::get()} {}
 
  private:
