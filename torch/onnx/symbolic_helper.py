@@ -439,7 +439,7 @@ def _is_tensor_list(x: _C.Value) -> bool:
     if not _is_list(x):
         return False
     x_type = x.type()
-    typing.cast(_C.ListType, x_type)
+    x_type = typing.cast(_C.ListType, x_type)
     return isinstance(x_type.getElementType(), _C.TensorType)
 
 
@@ -452,8 +452,8 @@ def _is_scalar_list(x: _C.Value) -> bool:
     if not _is_list(x):
         return False
     x_type = x.type()
-    typing.cast(_C.ListType, x_type)
-    element_type = str(x.type().getElementType())
+    x_type = typing.cast(_C.ListType, x_type)
+    element_type = str(x_type.getElementType())
     return element_type in scalar_name_to_pytorch.keys() and (
         scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys()
     )
@@ -470,7 +470,7 @@ def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
     x_type = x.type()
-    typing.cast(_C.TensorType, x_type)
+    x_type = typing.cast(_C.TensorType, x_type)
     return x_type.dim()
 
 
@@ -1295,7 +1295,9 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
-    input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
+    input_scalar_type = tensor.type().scalarType()
+    assert input_scalar_type is not None
+    input_qdtype = cast_pytorch_to_onnx[input_scalar_type]
     if qdtype is None:
         if input_qdtype is not None:
             qdtype = input_qdtype
