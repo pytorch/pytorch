@@ -723,9 +723,9 @@ Tensor empty_like_sparse_csr(
 }
 
 Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
-  TORCH_CHECK(
-      self.layout() == kSparseCsr || self.layout() == kSparseBsr,
-      "select(): currently only supports the SparseCsr and SparseBsr layout.");
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(), "select()", []() { return; });
+  ;
   TORCH_CHECK_INDEX(
       self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -752,26 +752,31 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
 
   // Selecting batch dimension
   if (dim < self.dim() - 2) {
-    if (self.layout() == kSparseBsr) {
-      return at::native::_sparse_bsr_tensor_unsafe(
-          self.crow_indices().select(dim, index),
-          self.col_indices().select(dim, index),
-          self.values().select(dim, index),
-          new_sizes,
-          optTypeMetaToScalarType(options.dtype_opt()),
-          options.layout_opt(),
-          options.device_opt(),
-          options.pinned_memory_opt());
-    }
-    return at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().select(dim, index),
-        self.col_indices().select(dim, index),
-        self.values().select(dim, index),
-        new_sizes,
-        optTypeMetaToScalarType(options.dtype_opt()),
-        options.layout_opt(),
-        options.device_opt(),
-        options.pinned_memory_opt());
+    return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+        self.layout(),
+        "select",
+        [&]() {
+          return at::native::_sparse_compressed_tensor_unsafe(
+              self.crow_indices().select(dim, index),
+              self.col_indices().select(dim, index),
+              self.values().select(dim, index),
+              new_sizes,
+              optTypeMetaToScalarType(options.dtype_opt()),
+              options.layout_opt(),
+              options.device_opt(),
+              options.pinned_memory_opt());
+        },
+        [&]() {
+          return at::native::_sparse_compressed_tensor_unsafe(
+              self.ccol_indices().select(dim, index),
+              self.row_indices().select(dim, index),
+              self.values().select(dim, index),
+              new_sizes,
+              optTypeMetaToScalarType(options.dtype_opt()),
+              options.layout_opt(),
+              options.device_opt(),
+              options.pinned_memory_opt());
+        });
   } else {
     TORCH_CHECK(
         self.is_sparse_csr(),

@@ -960,6 +960,65 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse[0, 0, 0] = 99.0
 
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_sparse_csc_select(self, device, dtype, index_dtype):
+        shape = (3, 6, 10)
+        nnz = 6
+        sparse = self.genSparseCSCTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+        # select from batch dimensions
+        sparse_selected02 = sparse.select(0, 2)
+        expected_sparse_selected02 = torch.sparse_csc_tensor(sparse.ccol_indices().select(0, 2).contiguous(),
+                                                             sparse.row_indices().select(0, 2).contiguous(),
+                                                             sparse.values().select(0, 2).contiguous(),
+                                                             size=(6, 10),
+                                                             dtype=dtype,
+                                                             device=device)
+        self.assertEqual(expected_sparse_selected02, sparse_selected02)
+
+        msg = "selecting non-batch dimensions is currently only supported for CSR tensors"
+        # selecting from rows or columns for batched CSR is not yet implemented
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse.select(-2, 0)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse.select(-1, 0)
+
+        # assigning to sparse via indexing is disabled
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse[0, 0, 0] = 99.0
+
+
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_sparse_bsc_select(self, device, dtype, index_dtype):
+        shape = (3, 6, 10)
+        nnz = 6
+        sparse = self.genSparseBSCTensor(shape, (2, 2), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+        # select from batch dimensions
+        sparse_selected02 = sparse.select(0, 2)
+        expected_sparse_selected02 = torch.sparse_bsc_tensor(sparse.ccol_indices().select(0, 2).contiguous(),
+                                                             sparse.row_indices().select(0, 2).contiguous(),
+                                                             sparse.values().select(0, 2).contiguous(),
+                                                             size=(6, 10),
+                                                             dtype=dtype,
+                                                             device=device)
+        self.assertEqual(expected_sparse_selected02, sparse_selected02)
+
+        msg = "selecting non-batch dimensions is currently only supported for CSR tensors"
+        # selecting from rows or columns for batched CSR is not yet implemented
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse.select(-2, 0)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse.select(-1, 0)
+
+        # assigning to sparse via indexing is disabled
+        with self.assertRaisesRegex(RuntimeError, msg):
+            sparse[0, 0, 0] = 99.0
+
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
