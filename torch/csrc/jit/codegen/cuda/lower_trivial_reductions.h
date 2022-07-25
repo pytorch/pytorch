@@ -21,9 +21,6 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
 
   bool isDerived(IterDomain* id) const;
 
-  // TODO: Not used, cleanup
-  bool isDerivedFromRoot(IterDomain* id) const;
-
  private:
   //! IterDomains that are derived only from trivial
   //! reductons. Included domains are not limited to reduction axes as

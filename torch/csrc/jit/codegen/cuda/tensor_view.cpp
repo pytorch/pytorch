@@ -735,11 +735,10 @@ TensorView* TensorView::multiOutputRfactorHelper(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
   // Hack:
-  // Semantically we should always keep the outputs of welfordOp scheduled
-  // the same but the user end cannot guarantee that.
-  // In order to guarantee that the rFactor is defined meaningfully the
-  // scheduling of the output TV that got the rfactor call is force replayed
-  // towards the other two
+  // Semantically we should always keep the outputs of multi reduction ops
+  // scheduled the same but the user end cannot guarantee that. In order to
+  // guarantee that the rFactor is defined meaningfully the scheduling of the
+  // output TV that got the rfactor call is force replayed towards the other two
 
   if (!sameAs(tv)) {
     auto root = tv->getRootDomain();
@@ -758,7 +757,7 @@ TensorView* TensorView::multiOutputRfactorHelper(
     std::vector<IterDomain*> new_id;
     for (auto id : domain()->domain()) {
       TORCH_INTERNAL_ASSERT(
-          replay.getReplay().count(id), "Welford Replay Failed");
+          replay.getReplay().count(id), "Multi-output reduction replay failed");
       new_id.push_back(replay.getReplay().at(id));
     }
 
@@ -795,12 +794,11 @@ std::vector<TensorView*> TensorView::rFactor(
   TORCH_CHECK(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
   TORCH_CHECK(
-      definition() != nullptr &&
-          (definition()->getExprType() == ExprType::GroupedReductionOp ||
-           definition()->getExprType() == ExprType::WelfordOp),
-      "Error rfactoring welford ",
+      definition() != nullptr && ir_utils::isReductionOp(definition()),
+      "Error rfactoring multi-output reduction op ",
       this,
-      " its definition is either a nullptr or not a GroupedReductionOp or a WelfordOp.");
+      " its definition is either a nullptr or not a GroupedReductionOp or a multi-output reduction op.");
+
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 

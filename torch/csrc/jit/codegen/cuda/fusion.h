@@ -110,9 +110,6 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! Register output as an output of the fusion
   void addOutput(Val* output);
 
-  //! Register output as an output of the fusion
-  void addOutput(WelfordResult& output);
-
   //! Deregister input as an input of the fusion
   void removeInput(Val* input);
 

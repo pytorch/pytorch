@@ -107,8 +107,6 @@ class TORCH_CUDA_CU_API WelfordResult {
       TensorView* in_avg,
       TensorView* in_var_sum,
       TensorView* in_n);
-
-  WelfordResult rFactor(const std::vector<int>& axes);
 };
 
 //! Welford operator on specified axes. This is currently the only scan op with

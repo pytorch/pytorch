@@ -196,7 +196,6 @@ std::pair<bool, bool> canonicalDimReduction(
 
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
-// (WelfordOp)
 TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(
     Fusion* fusion,
     bool ignore_trivial = true);

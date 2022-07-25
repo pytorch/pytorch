@@ -588,7 +588,7 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   TransformPropagator propagator(tv0);
   MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
 
-  auto tvs_rf = tvs.rFactor({-5, -4, -3, -2, -1});
+  ir_utils::rfactorHelper(tvs.avg, {-5, -4, -3, -2, -1});
 
   tv0->computeAt(tv29, 2);
   tv1->computeAt(tv29, 2);

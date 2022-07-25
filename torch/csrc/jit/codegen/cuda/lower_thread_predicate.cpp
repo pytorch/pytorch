@@ -210,11 +210,11 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
     auto tv_inp = inp->as<TensorView>();
 
-    // Change for welford Op, we want the users of all outputs of welfordOp
-    //  to use a single predicate name.
+    // If tv_inp was an output of a multi-output expression, just change it to a
+    // consistent sibling to use a single predicate name.
     if (auto tv_def = tv_inp->definition()) {
-      if (auto wop = dynamic_cast<WelfordOp*>(tv_def)) {
-        tv_inp = wop->out()->as<TensorView>();
+      if (tv_def->outputs().size() > 1) {
+        tv_inp = ir_utils::getTvOutput(tv_def);
       }
     }
 

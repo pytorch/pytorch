@@ -307,6 +307,12 @@ TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
 
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+
 template <typename T>
 std::string toString(const T& nodes) {
   std::stringstream ss;

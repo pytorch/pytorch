@@ -239,8 +239,8 @@ class SchedulerTopologyChecker {
   static bool hasPostReductionBCast(Fusion* fusion) {
     auto all_vals = fusion->usedMathVals();
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
-      // Welford can have 2 outputs, so do this on all found reduction tensor
-      // views
+      // Reductions can have multiple outputs, so do this on all found reduction
+      // tensor views
       if (tv->hasReduction() && !tv->isFusionInput()) {
         auto tv_chains = tvChains(DependencyCheck::getAllUseChains(tv));
         // Propagate forward from reduction through all uses of the reduction
@@ -301,18 +301,17 @@ class SchedulerTopologyChecker {
 
     // When checking post reduction vals, we need to make sure
     //  we are really checking paths starting from all outputs
-    //  of multi-output reductions, i.e. welford. The reduction_tv
-    //  vector is assumed to only have one of them.
+    //  of multi-output reductions, i.e. welford/grouped reduction. The
+    //  reduction_tv vector is assumed to only have one of them.
     std::unordered_set<Val*> reduction_tv_set(
         reduction_tvs.begin(), reduction_tvs.end());
 
     for (auto red : reduction_tvs) {
       if (red->definition()) {
-        if (auto wop = dynamic_cast<WelfordOp*>(red->definition())) {
-          for (auto wop_output : wop->outputs()) {
-            if (wop_output->isA<TensorView>()) {
-              reduction_tv_set.insert(wop_output);
-            }
+        if (ir_utils::isReductionOp(red->definition())) {
+          auto outs = red->definition()->outputs();
+          for (auto out_tv : ir_utils::filterByType<TensorView>(outs)) {
+            reduction_tv_set.insert(out_tv);
           }
         }
       }
@@ -988,9 +987,8 @@ class PointWiseScheduler : public SchedulerEntry {
 
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
-    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
 
-    if (!reduction_ops.empty() || !welford_ops.empty()) {
+    if (!reduction_ops.empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::PointWise, "no support for reduction ops");
       return false;
@@ -1052,15 +1050,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
 
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
-    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
-    // For persistent schedule we want welford translated to average and
-    // standard deviation reductions.
-    if (welford_ops.begin() != welford_ops.end()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "no support for un-translated welford");
-      return false;
-    }
 
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {

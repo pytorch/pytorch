@@ -183,14 +183,13 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
-bool isReductionOp(const Expr* expr) {
-  // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
-}
-
-bool isReductionTvOp(const Expr* expr) {
-  return isTvOp(expr) && isReductionOp(expr);
+TensorView* getTvInput(const Expr* expr) {
+  for (auto inp : expr->inputs()) {
+    if (auto tv = getTv(inp)) {
+      return tv;
+    }
+  }
+  return nullptr;
 }
 
 bool isScalarOp(const Expr* expr) {

@@ -12898,7 +12898,7 @@ TEST_F(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
   fusion.addOutput(tv_N);
 
   tv_avg->split(1, 4);
-  auto rtvs = tvs.rFactor({2});
+  ir_utils::rfactorHelper(tvs.avg, {2});
   tv1->computeAt(tv_avg, -1);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -17294,17 +17294,17 @@ TEST_F(NVFuserTest, FusionPredicateElimination5_CUDA) {
   tvs2.avg->split(0, 4);
   TransformPropagatorWithCheck propagator(tvs2.avg);
   MaxRootDomainInfoSpanningTree(tvs2.avg).traverse(&propagator);
-  auto rtvs2 = tvs2.rFactor({1});
+  auto avg_rf = ir_utils::rfactorHelper(tvs2.avg, {1});
 
-  rtvs2.avg->axis(0)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(rtvs2.avg);
+  avg_rf->axis(0)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(avg_rf);
 
   GpuLower gpulw(&fusion);
 
   // The first per-thread welford needs to be predicated as the N
   // input is different from its init value. The second welford op
   // does not need a predicate.
-  TORCH_CHECK(PredicatedChecker::isPredicated(rtvs2.avg, gpulw));
+  TORCH_CHECK(PredicatedChecker::isPredicated(avg_rf, gpulw));
   TORCH_CHECK(!PredicatedChecker::isPredicated(tvs2.avg, gpulw));
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -24288,13 +24288,14 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   tvs.n->split(1, 2);
   tvs.n->split(1, 3);
 
-  auto tvs2 = tvs.rFactor({1, 4});
+  auto var_sum_rf = ir_utils::rfactorHelper(tvs.var_sum, {1, 4});
 
-  TransformPropagatorWithCheck propagator(tvs2.var_sum);
-  MaxRootDomainInfoSpanningTree(tvs2.var_sum).traverse(&propagator);
+  TransformPropagatorWithCheck propagator(var_sum_rf);
+  MaxRootDomainInfoSpanningTree(var_sum_rf).traverse(&propagator);
 
-  std::vector<TensorView*> siblings[] = {
-      {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
+  auto rf_tvs = ir_utils::producerTvsOf(tvs.var_sum);
+
+  std::vector<TensorView*> siblings[] = {{tvs.avg, tvs.var_sum, tvs.n}, rf_tvs};
   for (auto tensors : siblings) {
     for (auto t1 : tensors) {
       for (auto t2 : tensors) {
@@ -24324,7 +24325,7 @@ TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
   tvs.n->split(1, 2);
   tvs.n->split(1, 3);
 
-  auto tvs2 = tvs.rFactor({1, 4});
+  auto var_sum_rf = ir_utils::rfactorHelper(tvs.var_sum, {1, 4});
 
   struct DisableTv0 : public MaxInfoSpanningTree::Selector {
     TensorView* tv0;
@@ -24347,13 +24348,15 @@ TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
     using DisableTv0::DisableTv0;
   } selector2(tv0);
 
-  TransformPropagatorWithCheck propagator(tvs2.var_sum);
-  MaxRootDomainInfoSpanningTree good_path(tvs2.var_sum, &selector1);
-  MaxRootDomainInfoSpanningTree bad_path(tvs2.var_sum, &selector2);
+  TransformPropagatorWithCheck propagator(var_sum_rf);
+  MaxRootDomainInfoSpanningTree good_path(var_sum_rf, &selector1);
+  MaxRootDomainInfoSpanningTree bad_path(var_sum_rf, &selector2);
+
+  auto rf_tvs = ir_utils::producerTvsOf(tvs.var_sum);
 
   auto check = [&]() {
     std::vector<TensorView*> siblings[] = {
-        {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
+        {tvs.avg, tvs.var_sum, tvs.n}, rf_tvs};
     for (auto tensors : siblings) {
       for (auto t1 : tensors) {
         for (auto t2 : tensors) {
