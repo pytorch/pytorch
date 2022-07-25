@@ -154,6 +154,59 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(x0.grad, x_s_0)
             self.assertEqual(x1.grad, x_s_1)
 
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        def test_reduce_scatter_non_contiguous(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
+            c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
+            device = torch.device(f"cuda:{self.rank}")
+
+            class NonContiguousGrad(torch.autograd.Function):
+
+                @staticmethod
+                def forward(ctx, input):
+                    return input
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    # Make grad non-contiguous
+                    return grad_output.clone().transpose(0, 1)
+
+            x0 = torch.rand(5, 5, device=device, requires_grad=True)
+            x1 = torch.rand(5, 5, device=device, requires_grad=True)
+            y = torch.empty(5, 5, device=device)
+
+            y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
+            NonContiguousGrad.apply(y).sum().backward()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        def test_all_gather_base(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
+
+            device = torch.device(f"cuda:{self.rank}")
+            x = torch.ones(5, 5, device=device) + self.rank
+            x.requires_grad = True
+
+            output = torch.empty(5 * self.world_size, 5, device=device)
+            output = torch.distributed.nn.functional._all_gather_base(output, x)
+            self.assertEqual(output.size(), torch.Size((5 * self.world_size, 5)))
+
+            for idx in range(self.world_size):
+                self.assertEqual(output[5 * idx : 5 * (idx + 1)], torch.ones(5, 5, device=device) + idx)
+
+            y = torch.sum(output.view(self.world_size, 5, 5), axis=0)
+            z = y.sin().sum()
+            z.backward()
+
+            x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
+            self.assertEqual(x.grad, x_s)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -645,6 +645,14 @@ class JitTestCase(JitCommonTestCase):
 
         return sm
 
+class NoTracerWarnContextManager(object):
+    def __enter__(self):
+        self.prev = torch._C._jit_get_tracer_state_warn()
+        torch._C._jit_set_tracer_state_warn(False)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_tracer_state_warn(self.prev)
+
 @contextmanager
 def inline_everything_mode(should_inline):
     old = torch._C._jit_get_inline_everything_mode()

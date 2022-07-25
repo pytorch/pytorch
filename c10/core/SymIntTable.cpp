@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-int64_t SymIntTable::addNode(std::shared_ptr<SymbolicIntNode> sin) {
+uint64_t SymIntTable::addNode(std::shared_ptr<SymbolicIntNode> sin) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto index = nodes_.size();
   nodes_.push_back(sin);
@@ -25,4 +25,5 @@ SymIntTable& getSymIntTable() {
   static SymIntTable sit;
   return sit;
 }
+
 } // namespace c10

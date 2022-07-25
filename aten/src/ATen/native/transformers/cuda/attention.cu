@@ -317,6 +317,16 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
   auto T = qkv.is_nested()
       ? NestedTensor_get_max_size(*get_nested_tensor_impl(qkv))[0]
       : qkv.size(1);
+  if (qkv.is_nested()) {
+    // Don't mess with non-nested case for now since it's not set up to fiddle
+    // with mask size.
+
+    // Round T up to next multiple of 8 so as to be able to utilize Tensor
+    // cores. Otherwise, sometimes with padding, *no* row will have the maximum
+    // sequence length and so we'll have a non-divisible-by-8 dimension even if
+    // the model author chose a multiple of 8.
+    T = T + (8 - (T % 8)) % 8;
+  }
   auto _3D = qkv_bias.size(0);
   auto D = _3D / 3;
   TORCH_CHECK(D % num_head == 0);

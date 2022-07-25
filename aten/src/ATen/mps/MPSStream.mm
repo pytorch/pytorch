@@ -5,6 +5,8 @@
 namespace at {
 namespace mps {
 
+#define USE_MPSCOMMANDBUFFER 1
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -13,11 +15,16 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", NULL);
+  _executionDescriptor = [MPSGraphExecutionDescriptor new];
+  _executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
+                                             MPSGraphTensorData *> * resultsDictionary,
+                                             NSError * _Nullable error) { };
 }
 
 MPSStream::~MPSStream() {
-  [_commandQueue autorelease];
+  [_commandQueue release];
   _commandQueue = nil;
+  [_executionDescriptor release];
 
   assert(_commandBuffer == nil);
 }
@@ -41,9 +48,13 @@ void MPSStream::synchronize() {
 }
 
 void MPSStream::commit(bool doFlush) {
+#if USE_MPSCOMMANDBUFFER
+  [commandBuffer() commitAndContinue];
+#else
   if (doFlush) {
     flush();
   }
+#endif
 }
 
 void MPSStream::commitAndWait() {
@@ -52,6 +63,11 @@ void MPSStream::commitAndWait() {
   [_commandBuffer waitUntilCompleted];
   [_commandBuffer release];
   _commandBuffer = nil;
+}
+
+void MPSStream::commitAndContinue() {
+  assert(_commandBuffer);
+  [_commandBuffer commitAndContinue];
 }
 
 void MPSStream::flush() {
@@ -69,6 +85,61 @@ void MPSStream::_flush(bool commitAndWait) const {
     [_commandBuffer waitUntilCompleted];
   }
   [_commandBuffer release];
+}
+
+void MPSStream::copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
+                    size_t length, size_t srcOffset, size_t dstOffset, SyncType syncType) {
+  dispatch_sync(_serialQueue, ^() {
+    @autoreleasepool {
+      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+
+      [blitEncoder copyFromBuffer:srcBuffer
+                     sourceOffset:(NSUInteger)srcOffset
+                         toBuffer:dstBuffer
+                destinationOffset:(NSUInteger)dstOffset
+                             size:(NSUInteger)length];
+      [blitEncoder endEncoding];
+      switch(syncType) {
+        case SyncType::NONE:
+          // typically in GPU to GPU copies we won't commit explicitly
+          break;
+        case SyncType::COMMIT:
+          commit(true);
+          break;
+        case SyncType::COMMIT_AND_WAIT:
+          commitAndWait();
+          break;
+        case SyncType::COMMIT_AND_CONTINUE:
+          commitAndContinue();
+          break;
+      }
+    }
+  });
+}
+
+void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer, size_t length,
+                              size_t srcOffset, size_t dstOffset, bool non_blocking) {
+  copy(srcBuffer, dstBuffer, length, srcOffset, dstOffset,
+       !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
+}
+
+void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
+  dispatch_sync(_serialQueue, ^() {
+#if USE_MPSCOMMANDBUFFER
+    [mpsGraph encodeToCommandBuffer:commandBuffer()
+                              feeds:feeds
+                   targetOperations:nil
+                  resultsDictionary:results
+                executionDescriptor:_executionDescriptor];
+#else
+    commit(true);
+    [mpsGraph runAsyncWithMTLCommandQueue:_commandQueue
+                                    feeds:feeds
+                         targetOperations:nil
+                        resultsDictionary:results
+                      executionDescriptor:_executionDescriptor];
+#endif
+ });
 }
 
 //-----------------------------------------------------------------

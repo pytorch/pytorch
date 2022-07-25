@@ -23,11 +23,14 @@ runs:
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
+        retry () {
+          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+        }
         echo "${GITHUB_WORKSPACE}"
         if [ -z "${NO_SUDO}" ]; then
-          sudo rm -rf "${GITHUB_WORKSPACE}"
+          retry sudo rm -rf "${GITHUB_WORKSPACE}"
         else
-          rm -rf "${GITHUB_WORKSPACE}"
+          retry rm -rf "${GITHUB_WORKSPACE}"
         fi
         mkdir "${GITHUB_WORKSPACE}"
 
