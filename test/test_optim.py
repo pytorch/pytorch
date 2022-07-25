@@ -2680,7 +2680,12 @@ class TestSWAUtils(TestCase):
 
 instantiate_parametrized_tests(TestLRScheduler)
 
+
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
+    # Ignored is the list of values in `opt_differentiable_state`, we do this
+    # for `gradcheck` to correctly track the state tensors as function inputs
+    # because otherwise it can't unpack the values in the `opt_differentiable_state`
+    # dict
     p = p.clone()
     p.grad = grad
     opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
