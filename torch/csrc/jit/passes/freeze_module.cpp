@@ -264,6 +264,16 @@ class AttributePropagator {
     if (preservedAttrs_.count(attr)) {
       return false;
     }
+
+    // IValue::getSubValues will fail if the IValue contains unsupported types
+    // (e.g. Capsules). In those cases ivalue.overlaps() will fail.
+    IValue::HashAliasedIValues subvalues;
+    try {
+      attr.getSubValues(subvalues);
+    } catch (const c10::Error& e) {
+      return false;
+    }
+
     if (!attr.type()->cast<ClassType>()) {
       for (auto& ivalue : preservedAttrs_) {
         if (!ivalue.isObject() && ivalue.overlaps(attr)) {
