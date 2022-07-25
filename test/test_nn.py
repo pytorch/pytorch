@@ -20525,49 +20525,6 @@ torch.cuda.synchronize()
                 t, output_size = inp
                 m(output_size)(t)
 
-    @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.double, torch.float, torch.half)
-    @parametrize_test("attn_mask_dim,is_causal",
-                      [(None, False), (2, False), (2, True), (3, False), (3, True)],
-                      name_fn=lambda dim, is_causal: (f"{dim}D_{'causal_' if is_causal else ''}attn_mask"
-                                                      if dim is not None else "no_attn_mask"))
-    @parametrize_test("dropout_p", [0.0, 0.2, 0.5])
-    def test_scaled_dot_product_attention(self, device, dtype, attn_mask_dim, is_causal, dropout_p):
-        # This test compares python and C++ implementations of SDP.
-        N, L, S, E = 5, 4, 3, 6
-        query = torch.randn(N, L, E, device=device, dtype=dtype)
-        key = torch.randn(N, S, E, device=device, dtype=dtype)
-        value = torch.randn(N, S, E, device=device, dtype=dtype)
-
-        attn_mask = None
-        if attn_mask_dim is not None:
-            assert attn_mask_dim in [2, 3]
-            mask_size = (L, S) if attn_mask_dim == 2 else (N, L, S)
-            attn_mask = (torch.ones(mask_size, device=device, dtype=torch.bool).tril() if is_causal
-                         else torch.randint(0, 2, size=mask_size, device=device, dtype=torch.bool))
-
-        with freeze_rng_state():
-            # Python impl only supports float mask.
-            attn_mask_float = attn_mask
-            if attn_mask_float is not None:
-                attn_mask_float = torch.zeros_like(attn_mask, dtype=query.dtype)
-                attn_mask_float.masked_fill_(attn_mask.logical_not(), float("-inf"))
-            expected = F._scaled_dot_product_attention(
-                query, key, value, attn_mask=attn_mask_float, dropout_p=dropout_p)
-
-        with freeze_rng_state():
-            # Ensure attn_mask is ignored when is_causal=True by setting it to garbage.
-            if is_causal:
-                attn_mask = torch.zeros_like(attn_mask)
-            need_attn_weights: bool = True
-            actual = torch.ops.aten._scaled_dot_product_attention(
-                query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
-
-        # freeze_rng_state() doesn't seem to work outside of CPU, so dropout makes the results incomparable.
-        # TODO: Do this skipping in a nicer way once the granular test skipping logic lands.
-        if dropout_p == 0.0 or device == 'cpu':
-            self.assertEqual(actual, expected)
-
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):

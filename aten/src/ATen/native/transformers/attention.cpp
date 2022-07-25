@@ -696,6 +696,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
     const auto embed_size = query_.size(-1);
     const auto query = query_ / ::sqrt(static_cast<double>(embed_size));
     if (is_causal) {
+        TORCH_CHECK(!attn_mask.has_value(),
+                "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
         const auto L = query.size(-2), S = key.size(-2);
         attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
