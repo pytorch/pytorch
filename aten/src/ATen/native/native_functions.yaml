@@ -4389,9 +4389,6 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: softmax
-    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4416,6 +4413,8 @@
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   structured_delegate: _softmax_backward_data.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_softmax_backward
 
 - func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5443,7 +5442,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
-    SparseCPU, SparseCUDA: zero_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
   autogen: zero, zero.out
@@ -6475,6 +6474,8 @@
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: put
 
 - func: index_add.out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10894,6 +10895,7 @@
   dispatch:
     CompositeExplicitAutograd: isinf
     SparseCPU, SparseCUDA: isinf_sparse
+    SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()
