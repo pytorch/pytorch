@@ -10,11 +10,14 @@ from torch._C._onnx import (
     TrainingMode,
 )
 
-from . import (
+from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
+    symbolic_opset7,
+    symbolic_opset8,
+    symbolic_opset9,
     symbolic_opset10,
     symbolic_opset11,
     symbolic_opset12,
@@ -22,9 +25,6 @@ from . import (
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
-    symbolic_opset7,
-    symbolic_opset8,
-    symbolic_opset9,
     symbolic_registry,
     utils,
 )
