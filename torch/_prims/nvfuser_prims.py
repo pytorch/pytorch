@@ -1,9 +1,9 @@
-# Module for defining "primitive" operations executable by the nvFuser.
-# This list exists to decouple main set of primitives from the ones that
-# provide a lowering of the op to nvFuser’s Python interface.
-# Mostly torch.ops.nvprims is a subset of the primitives in torch.ops.prims,
-# but some additional primitives can be added in the future for the corresponding
-# higher-level torch/aten functions.
+# Module for defining "primitive" operations executable by the nvFuser. This
+# list exists to decouple main set of primitives from the ones that provide a
+# lowering of the op to nvFuser’s Python interface. Mostly torch.ops.nvprims is
+# a subset of the primitives in torch.ops.prims, but some additional primitives
+# can be added in the future for the corresponding higher-level torch/aten
+# functions.
 
 from typing import Any, Dict
 
