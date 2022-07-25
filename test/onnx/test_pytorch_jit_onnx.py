@@ -2,6 +2,7 @@
 import onnxruntime
 
 import torch
+from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
@@ -106,6 +107,29 @@ class _TestJITIRToONNX:
         x = torch.randn(8, 1, 5, 5)
         w = torch.randn(4, 1, 3, 3)
         self.run_test(graph_ir, (x, w))
+
+    def test_log_softmax(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=0]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2)
+        self.run_test(graph_ir, (x,))
+
+    @skipIfNoCuda
+    def test_log_softmax_half_to_float(self):
+        graph_ir = """
+        graph(%x: Tensor):
+          %half_to_float: bool = prim::Constant[value=1]()
+          %dim: int = prim::Constant[value=1]()
+          %y = aten::_log_softmax(%x, %dim, %half_to_float)
+          return (%y)
+        """
+        x = torch.randn(5, 2).half().to("cuda")
+        self.run_test(graph_ir, (x,))
 
 
 def MakeTestCase(opset_version: int) -> type:
