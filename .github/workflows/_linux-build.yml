@@ -135,7 +135,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5

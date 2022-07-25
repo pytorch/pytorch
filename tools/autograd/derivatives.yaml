@@ -277,7 +277,7 @@
   output_differentiability: [False]
 
 - name: acosh(Tensor self) -> Tensor
-# Save one rsqrt in the real case by using that for x real and positive sqrt(x*y) = sqrt(x)*sqrt(y) (not true in the compelx case)
+# Save one rsqrt in the real case by using that for x real and positive sqrt(x*y) = sqrt(x)*sqrt(y) (not true in the complex case)
   self: "self.is_complex() ? grad * ((self + 1).rsqrt() * (self - 1).rsqrt()).conj() : grad * (self * self - 1).rsqrt()"
   result: auto_element_wise
 
@@ -538,7 +538,7 @@
   result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
+  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
   result: self_t / other
 
 - name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
@@ -547,7 +547,7 @@
   result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other_p - other_t * (self_p / other_p) / other_p"
 
 - name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
-  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
+  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type(), rounding_mode)
   result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other"
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -1113,7 +1113,7 @@
   result: other_t * self_p + self_t * other_p
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
+  self: mul_tensor_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
   result: self_t * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
@@ -1267,11 +1267,11 @@
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result, dim, keepdim) * self_t.conj()).sum(dim, keepdim).conj()
 
-- name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
+- name: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
-  result: auto_linear  # It is affine, but sure
+  result: self_t.put(index, source_t, accumulate)
 
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
@@ -1575,7 +1575,7 @@
   result: auto_linear
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: zeros_like(self).put_(index, grad, true)
+  self: take_backward(grad, self, index)
   index: non_differentiable
   result: auto_linear
 
@@ -1678,7 +1678,12 @@
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
-  self: not_implemented("lift")
+  self: grad
+  result: auto_linear
+
+- name: lift_fresh(Tensor(a) self) -> Tensor(a)
+  self: grad
+  result: auto_linear
 
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
@@ -1814,11 +1819,6 @@
 - name: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
-
-- name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction, log_target)
-  target: kl_div_target_backward(grad, self, target, reduction, log_target)
-  result: apply_loss_reduction(kl_div_backward(self_t, self_p, target_p, at::Reduction::None, log_target) +  kl_div_target_backward(target_t, self_p, target_p, at::Reduction::None, log_target), reduction)
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
@@ -2297,11 +2297,6 @@
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad)
   result: at::where((self_p > min_val).logical_and(self_p < max_val), grad_output_t, at::zeros({}, result.options()).expand_as(result))
-
-- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
-  self: zeros_like(grad)
-  target: zeros_like(grad)
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)

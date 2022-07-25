@@ -1,13 +1,14 @@
 # mypy: ignore-errors
-
+import copy
 import itertools
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT, MAX_TENSOR_RANK
-from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar
+from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar, \
+    Transpose
 from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcProduct, CanReshape
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F, GetItem
+from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F, GetItem, GetItemTensor, IndexSelect
 from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_precision, op_leq, op_matching
 from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_neq
 from torch.fx.experimental.migrate_gradual_types.operation import op_mul, op_add, op_sub, op_div, op_mod
@@ -25,6 +26,65 @@ def register_transformation_rule(call_target):
         _TRANSFORMATION_RULES[call_target] = fn
         return fn
     return register
+
+
+def valid_index(index, dims):
+    """
+    Given a list of dimensions, checks if an index is valid in the list
+    """
+    try:
+        dims[index]
+        return T()
+    except IndexError:
+        return F()
+
+
+@register_transformation_rule(Transpose)
+def transform_transpose(constraint, counter):
+    """
+    Similar to a sequence of two index-selects
+    """
+    dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
+    is_valid_index1 = valid_index(constraint.index1, dims)
+    is_valid_index2 = valid_index(constraint.index2, dims)
+    new_dims = copy.deepcopy(dims)
+    nat_constraints = gen_nat_constraints(dims)
+
+    if is_valid_index1 == T() and is_valid_index2 == T():
+        new_dims[constraint.index1] = dims[constraint.index2]
+        new_dims[constraint.index2] = dims[constraint.index1]
+
+    transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+                                   *nat_constraints,
+                                   is_valid_index1, is_valid_index2,
+                                   BinConstraintT(constraint.output, TensorType(new_dims), op_eq)])
+    return transformed_constraint, counter
+
+
+@register_transformation_rule(IndexSelect)
+def transform_index_select(constraint, counter):
+    """
+    The constraints consider the given tensor size, checks if the index is valid
+    and if so, generates a constraint for replacing the input dimension
+    with the required dimension
+    """
+    dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
+    is_valid_index = valid_index(constraint.index, dims)
+    nat_constraints = gen_nat_constraints(dims)
+
+    # if the index is valid then replace the input dimension with the new dimension
+    # otherwise the dimension will not be replaced and the clause will contain False
+    if is_valid_index == T():
+        new_dims = copy.deepcopy((dims))
+        new_dims[constraint.index] = constraint.dim_replace
+
+    transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+                                   *nat_constraints,
+                                   is_valid_index,
+                                   BinConstraintT(constraint.output, TensorType(new_dims), op_eq)])
+
+    # print(constraints)
+    return transformed_constraint, counter
 
 
 @register_transformation_rule(GetItem)
@@ -46,11 +106,9 @@ def transform_get_item(constraint, counter):
     dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
     nat_constraints = gen_nat_constraints(dims)
 
-    try:
-        dims[constraint.index]
-        is_valid_index = T()
-    except IndexError:
-        is_valid_index = F()
+
+    is_valid_index = valid_index(constraint.index, dims)
+
     all_constraints = [BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
                        *nat_constraints,
                        is_valid_index]
@@ -61,6 +119,81 @@ def transform_get_item(constraint, counter):
         all_constraints.append(BinConstraintD(constraint.res, dims[constraint.index], op_eq))
 
     return Conj(all_constraints), counter
+
+def valid_index_tensor(index, dims):
+    """
+    if the slice instances exceed the length of the dimensions
+    then this is a type error so we return False
+    """
+    slice_count = 0
+    for s in index:
+        if isinstance(s, slice):
+            slice_count += 1
+    if slice_count > len(dims):
+        return F()
+    else:
+        return T()
+
+@register_transformation_rule(GetItemTensor)
+def transform_get_item_tensor(constraint, counter):
+    """
+    When the index is a tuple, then the output will be a tensor
+    TODO: we have to check if this is the case for all HF models
+
+    The cases we are covrering here are a tuple with one of:
+     - slice with default argument
+     - None
+
+     None appends 1 to the input tensor dimensions
+     so each occurrence of 'None' increases the rank by 1
+
+     slice with default arguments does not change the rank
+    """
+    assert isinstance(constraint.index_tuple, tuple)
+
+
+    # generate a result tensor of the expected size
+    dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
+    nat_constraints = gen_nat_constraints(dims)
+
+    # generate a place-holder list of the right rank
+    # where "slice" does not contribute to the rank and "None" does
+    none_c = constraint.index_tuple.count(None)
+    resulting_tensor_dims = (none_c + len(dims)) * [None]
+
+    dim_index = 0
+    for i in range(len(constraint.index_tuple)):
+
+        # append 1 to the right location of the resulting tensor
+        if constraint.index_tuple[i] is None:
+            resulting_tensor_dims[i] = 1
+
+        elif constraint.index_tuple[i] == slice(None, None, None):
+            pass
+
+        else:
+            raise NotImplementedError('Method not yet implemented')
+
+    # append the remaining dimensions to the right location
+    dim_index = 0
+    for i in range(len(resulting_tensor_dims)):
+        if resulting_tensor_dims[i] is None:
+            resulting_tensor_dims[i] = dims[dim_index]
+            dim_index += 1
+
+    # check if the index is valid
+    is_valid_index = valid_index_tensor(constraint.index_tuple, dims)
+
+    # check if the resulting tensor is within bounds
+    if len(resulting_tensor_dims) > 4:
+        return F(), counter
+
+    else:
+        constraints = [BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+                       BinConstraintT(constraint.res, TensorType(resulting_tensor_dims), op_eq),
+                       *nat_constraints,
+                       is_valid_index]
+        return Conj(constraints), counter
 
 
 @register_transformation_rule(BinConstraintT)
@@ -115,7 +248,7 @@ def generate_binconstraint_t(constraint, counter):
 
     elif constraint.op == op_leq:
         assert isinstance(constraint.rhs, int)
-        disj = []
+        disj = [BinConstraintT(constraint.lhs, Dyn, op_eq)]
         for i in range(1, constraint.rhs + 1):
             dims = []
             for j in range(1, i + 1):

@@ -25,71 +25,73 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .context import with_native_function_with_differentiability_info
-from .gen_trace_type import (
-    MANUAL_BACKEND,
-    MANUAL_AUTOGRAD_AND_TRACER,
-    declare_returned_variables,
-    tie_return_values,
-    get_return_value,
-    type_wrapper_name,
-)
-from .gen_inplace_or_view_type import (
-    get_view_info,
-    is_tensor_type,
-    is_tensor_list_type,
-    unpack_args,
-    get_base_name,
-    use_derived,
-    modifies_arguments,
-    WRAPPER_REGISTRATION,
-    TMP_VAR,
-    METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE,
-    gen_formals,
-    ALL_VIEW_FUNCTIONS,
-    unpacked_name,
-    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
-)
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from torchgen.api.types import (
-    Binding,
-    DispatcherSignature,
-    BaseCType,
-    intArrayRefT,
-    tensorT,
-    tensorListT,
-    MutRefCType,
-    OptionalCType,
-    ListCType,
-    SpecialArgName,
-    scalarT,
-    stringT,
-    TupleCType,
-    VectorCType,
-)
+from torchgen.api import cpp
 from torchgen.api.autograd import (
     DifferentiableInput,
-    NativeFunctionWithDifferentiabilityInfo,
-    SavedAttribute,
     dispatch_strategy,
     gen_differentiable_outputs,
     is_differentiable,
+    NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute,
 )
-from torchgen.api import cpp
+
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    DispatcherSignature,
+    intArrayRefT,
+    ListCType,
+    MutRefCType,
+    OptionalCType,
+    scalarT,
+    SpecialArgName,
+    stringT,
+    tensorListT,
+    tensorT,
+    TupleCType,
+    VectorCType,
+)
 from torchgen.code_template import CodeTemplate
 from torchgen.context import native_function_manager, with_native_function
-from torchgen.utils import mapMaybe, FileManager
 from torchgen.model import (
     Argument,
+    BaseType,
+    ListType,
     NativeFunction,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    ListType,
 )
-from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
+from torchgen.utils import FileManager, mapMaybe
+
+from .context import with_native_function_with_differentiability_info
+from .gen_inplace_or_view_type import (
+    ALL_VIEW_FUNCTIONS,
+    ASSIGN_RETURN_VALUE,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
+    gen_formals,
+    get_base_name,
+    get_view_info,
+    is_tensor_list_type,
+    is_tensor_type,
+    METHOD_DEFINITION,
+    modifies_arguments,
+    TMP_VAR,
+    unpack_args,
+    unpacked_name,
+    use_derived,
+    WRAPPER_REGISTRATION,
+)
+from .gen_trace_type import (
+    declare_returned_variables,
+    get_return_value,
+    MANUAL_AUTOGRAD_AND_TRACER,
+    MANUAL_BACKEND,
+    tie_return_values,
+    type_wrapper_name,
+)
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -149,6 +151,7 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    "fill",
     "t",
     "view",
     "reshape",
@@ -285,6 +288,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad2d",
     "replication_pad3d",
     "take",
+    "put",
     "put_",
     "_to_copy",
     "replication_pad1d_backward",
@@ -514,6 +518,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    "lift_fresh",
+    "lift_fresh_copy",
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",

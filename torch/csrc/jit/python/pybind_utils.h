@@ -731,6 +731,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
+  } else if (ivalue.isGenerator()) {
+    return py::cast(ivalue.toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {

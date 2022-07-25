@@ -113,7 +113,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       mergeCommit {
         oid
       }
-      commits_with_authors:commits(first: 100) {
+      commits_with_authors: commits(first: 100) {
         ...CommitAuthors
         totalCount
       }
@@ -139,7 +139,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reviews(last: 100) {
-       ...PRReviews
+        ...PRReviews
       }
       comments(last: 5) {
         nodes {
@@ -200,6 +200,62 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+GH_GET_COMMIT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
+query ($owner: String!, $name: String!, $commit: String) {
+  repository(name: $name, owner: $owner) {
+    object(expression: $commit) {
+      ... on Commit {
+        checkSuites {
+          ...PRCheckSuites
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_COMMIT_NEXT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
+query ($owner: String!, $name: String!, $commit: String, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    object(expression: $commit) {
+      ... on Commit {
+        oid
+        checkSuites(first: 10, after: $cursor) {
+          ...PRCheckSuites
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_COMMIT_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $cs_cursor: String, $cr_cursor: String!, $commit: String) {
+  repository(name: $name, owner: $owner) {
+    object(expression: $commit) {
+      ... on Commit {
+        oid
+        checkSuites(first: 1, after: $cs_cursor) {
+          nodes {
+            checkRuns(first: 100, after: $cr_cursor) {
+              nodes {
+                name
+                conclusion
+                detailsUrl
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 GH_GET_PR_NEXT_CHECK_RUNS = """
 query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_cursor: String!) {
   repository(name: $name, owner: $owner) {
@@ -230,7 +286,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
   }
 }
 """
-
 
 GH_GET_PR_PREV_COMMENTS = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
@@ -376,6 +431,9 @@ def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
 
+def gh_get_land_check_info(org: str, proj: str, commit: str) -> Any:
+    rc = gh_graphql(GH_GET_COMMIT_CHECKSUITES, name=proj, owner=org, commit=commit)
+    return rc["data"]["repository"]["object"]
 
 @lru_cache(maxsize=None)
 def gh_get_team_members(org: str, name: str) -> List[str]:
@@ -391,6 +449,11 @@ def gh_get_team_members(org: str, name: str) -> List[str]:
         rc += [member["login"] for member in team_members["nodes"]]
     return rc
 
+def get_check_run_name_prefix(workflow_run: Any) -> str:
+    if workflow_run is None:
+        return ""
+    else:
+        return f'{workflow_run["workflow"]["name"]} / '
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -573,7 +636,9 @@ class GitHubPR:
                     for checkrun_node in checkruns["nodes"]:
                         if checkrun_node["conclusion"] == 'FAILURE':
                             has_failing_check = True
-                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                        conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                            checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                        )
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
                                         name=self.project,
@@ -700,7 +765,6 @@ class GitHubPR:
 
     def merge_ghstack_into(self, repo: GitRepo, force: bool, comment_id: Optional[int] = None) -> None:
         assert self.is_ghstack_pr()
-        approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -781,8 +845,9 @@ class GitHubPR:
         repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
         gh_post_pr_comment(self.org, self.project, self.pr_num,
-                           'Successfully started land time checks.' +
-                           f' See progress here: https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}')
+                           '@pytorchbot successfully started a merge and created land time checks.' +
+                           f' See merge status [here]({os.getenv("GH_RUN_URL")}) ' +
+                           'and land check progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})')
         return commit
 
 
@@ -897,6 +962,54 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
+def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[str, Tuple[str, str]]:
+    land_check_info = gh_get_land_check_info(org, project, commit)
+    checksuites = land_check_info["checkSuites"]
+    conclusions = {}
+
+    def add_conclusions(edges: List[Dict[str, Dict[str, Any]]]) -> None:
+        for edge_idx, edge in enumerate(edges):
+            node = edge["node"]
+            workflow_run = node["workflowRun"]
+            checkruns = node["checkRuns"]
+            if workflow_run is not None:
+                conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+            has_failing_check = False
+            while checkruns is not None:
+                for checkrun_node in checkruns["nodes"]:
+                    if checkrun_node["conclusion"] == 'FAILURE':
+                        has_failing_check = True
+                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    )
+                if bool(checkruns["pageInfo"]["hasNextPage"]):
+                    rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
+                                    name=project,
+                                    owner=org,
+                                    cs_cursor=edges[edge_idx - 1]["cursor"] if edge_idx > 0 else None,
+                                    cr_cursor=checkruns["pageInfo"]["endCursor"],
+                                    commit=commit)
+                    checkruns = rc["data"]["repository"]["object"]["checkSuites"]["nodes"][-1]["checkRuns"]
+                else:
+                    checkruns = None
+            # Github doesn't set conclusion to failure if a job is still pending
+            if workflow_run is not None and has_failing_check:
+                conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
+
+    add_conclusions(checksuites["edges"])
+    while bool(checksuites["pageInfo"]["hasNextPage"]):
+        rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECKSUITES,
+                        name=project,
+                        owner=org,
+                        commit=commit,
+                        cursor=checksuites["edges"][-1]["cursor"])
+        info = rc["data"]["repository"]["object"]
+        checksuites = info["checkSuites"]
+        add_conclusions(checksuites["edges"])
+
+    return conclusions
+
+
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
@@ -910,7 +1023,7 @@ def pr_get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
 
 
 def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
-    return pr_get_checks_with_lambda(pr, lambda x: x == "FAILURE")
+    return pr_get_checks_with_lambda(pr, lambda x: x in ["FAILURE", "STARTUP_FAILURE"])
 
 
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
@@ -980,19 +1093,11 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
                 )
     return
 
-def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[str, str]]:
-    [owner, name] = repo.gh_owner_and_name()
-    checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
-    check_run_conclusions = {}
-    if len(checks['check_runs']) == 0:
+def validate_land_time_checks(org: str, project: str, commit: str) -> None:
+    checks = get_land_checkrun_conclusions(org, project, commit)
+    if(len(checks) == 0):
         raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
-    for check_run in checks['check_runs']:
-        check_run_conclusions[check_run['name']] = (check_run['conclusion'],
-                                                    check_run['html_url'])
-    return check_run_conclusions
 
-def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
-    checks = fetch_check_run_conclusions(repo, commit)
     [pending_checks, failed_checks] = categorize_checks(checks, checks)
 
     if len(failed_checks) > 0:
@@ -1009,7 +1114,9 @@ def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
             pending_checks.append((checkname, None))
         elif check_runs[checkname][0] is None:
             pending_checks.append((checkname, check_runs[checkname][1]))
-        elif check_runs[checkname][0].upper() != 'SUCCESS' and check_runs[checkname][0].upper() != 'SKIPPED':
+        elif (check_runs[checkname][0].upper() != 'SUCCESS'
+              and check_runs[checkname][0].upper() != 'SKIPPED'
+              and check_runs[checkname][0].upper() != 'NEUTRAL'):
             failed_checks.append((checkname, check_runs[checkname][1]))
     return (pending_checks, failed_checks)
 
@@ -1034,7 +1141,7 @@ def merge(pr_num: int, repo: GitRepo,
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
-        commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+        land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
     start_time = time.time()
     last_exception = ''
@@ -1052,6 +1159,13 @@ def merge(pr_num: int, repo: GitRepo,
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
 
+            # HACK until GitHub will be better about surfacing those
+            startup_failures = pr_get_checks_with_lambda(pr, lambda x: x == "STARTUP_FAILURE")
+            if len(startup_failures) > 0:
+                raise RuntimeError(f"{len(failing)} STARTUP failures reported, please check workflows syntax! " +
+                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in startup_failures[:5]))
+            # END of HACK
+
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
@@ -1059,7 +1173,7 @@ def merge(pr_num: int, repo: GitRepo,
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             if land_checks:
-                validate_land_time_checks(repo, commit)
+                validate_land_time_checks(org, project, land_check_commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
@@ -1087,10 +1201,10 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
-
-    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
-    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
-    gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+    if not args.land_checks:
+        msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+        msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
