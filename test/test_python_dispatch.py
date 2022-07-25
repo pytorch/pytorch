@@ -1712,7 +1712,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.stride.default'"
+            err_msg = "no implementation found for 'torch.ops.aten.stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.stride()
