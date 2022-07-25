@@ -461,7 +461,7 @@ class _SplitterBase:
             for arg_dtypes_tuple, kwarg_dtypes_tuple in dtypes:
                 reports += f"{t}: ({arg_dtypes_tuple}, {dict(kwarg_dtypes_tuple)})\n"
 
-        print(reports)
+        _LOGGER.info(reports)
 
         # Return reports for testing purpose
         return reports
@@ -571,7 +571,7 @@ class _SplitterBase:
 
         reports += f"\nTheoretical max qps (bounds by PCIe bandwidth) for this model is {max_qps},"
         reports += f" bottleneck is submodule {bottleneck_module}."
-        print(reports)
+        _LOGGER.info(reports)
 
         # return the reports for testing purposes
         return reports
@@ -790,7 +790,7 @@ class _SplitterBase:
                 if len(subgraph.nodes) >= self.settings.min_acc_module_size:
                     result.append(subgraph)
                 else:
-                    print(
+                    _LOGGER.info(
                         "Eliminating acc subgraph because it's smaller than the threshold: "
                         f"{len(subgraph.nodes)} < {self.settings.min_acc_module_size}"
                     )
@@ -831,7 +831,7 @@ class _SplitterBase:
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
-        print(f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs")
+        _LOGGER.info(f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs")
         self.tag(subgraphs)
         return self.split()
 
