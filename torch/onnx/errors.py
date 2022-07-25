@@ -59,8 +59,11 @@ class SymbolicValueError(OnnxExporterError):
         message = (
             f"{msg}  [Caused by the value '{value}' (type '{value.type()}') in the "
             f"TorchScript graph. The containing node has kind '{value.node().kind()}'.] "
-            f"\n    (node defined in {value.node().sourceRange() or 'unknown source code location'})"
         )
+
+        code_location = value.node().sourceRange()
+        if code_location:
+            message += f"\n    (node defined in {code_location})"
 
         try:
             # Add its input and output to the message.
