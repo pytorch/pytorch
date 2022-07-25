@@ -78,6 +78,19 @@ class _TestJITIRToONNX:
         b = torch.randn(2, 3)
         self.run_test(graph_ir, (a, b))
 
+    def test_add_sub_with_graph_inputs(self):
+        for op in ["add", "sub", "rsub"]:
+            graph_ir = f"""
+            graph(%1 : Float(2, 3),
+                  %2 : Float(2, 3),
+                  %3 : int):
+              %4 : Float(2, 3) = aten::{op}(%1, %2, %3)
+              return (%4)
+            """
+            a = torch.randn(2, 3)
+            b = torch.randn(2, 3)
+            self.run_test(graph_ir, (a, b, 2))
+
     def test_convolution(self):
         graph_ir = """
         graph(%1 : Tensor,

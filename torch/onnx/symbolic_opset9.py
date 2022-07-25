@@ -355,17 +355,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("add", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("sub", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
