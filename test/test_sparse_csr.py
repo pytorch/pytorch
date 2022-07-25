@@ -2442,15 +2442,21 @@ class TestSparseCSR(TestCase):
             self.assertEqual(to_dense(transpose), subject_dense)
 
         def check_dim_type_mismatch_throws(subject, name0, dim0, name1, dim1):
-            mismatch_name = f"{dim0}\({name0}\) and {dim1}\({name1}\)"
-            err = "transpose\(\): can only transpose dimensions of the same type \(Batch, Sparse, Dense\), got " + mismatch_name
+            mismatch_name = f"{dim0}\\({name0}\\) and {dim1}\\({name1}\\)"
+            err = r"transpose\(\): can only transpose dimensions of the same type \(Batch, Sparse, Dense\), got " + mismatch_name
 
             with self.assertRaisesRegex(RuntimeError, err):
                 subject.transpose(dim0, dim1)
 
         def run_test(shape, nnz, index_type, n_dense, blocksize=()):
-            subject = self.genSparseCompressedTensor(
-                shape, nnz, layout=layout, device=device, index_dtype=index_type, blocksize=blocksize, dense_dims=n_dense, dtype=dtype)
+            subject = self.genSparseCompressedTensor(shape,
+                                                     nnz,
+                                                     layout=layout,
+                                                     device=device,
+                                                     index_dtype=index_type,
+                                                     blocksize=blocksize,
+                                                     dense_dims=n_dense,
+                                                     dtype=dtype)
 
 
             sparse0 = len(shape) - n_dense - 1
@@ -2516,7 +2522,6 @@ class TestSparseCSR(TestCase):
                 run_test(shape, 0, index_dtype, n_dense)
                 run_test(shape, max(sparse_shape), index_dtype, n_dense)
                 run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense)
-
 
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
@@ -2603,7 +2608,10 @@ class TestSparseCSR(TestCase):
                     # workaround no dense<->bsc
                     b_bsr = self._convert_to_layout(a.transpose(0, 1).contiguous(), torch.sparse_bsr)
                     # bsr of the transpose is bsc of this
-                    b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(), b_bsr.col_indices(), b_bsr.values().transpose(-2, -1).contiguous(), size=(b_bsr.shape[-1], b_bsr.shape[-2]))
+                    b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(),
+                                                        b_bsr.col_indices(),
+                                                        b_bsr.values().transpose(-2, -1).contiguous(),
+                                                        size=(b_bsr.shape[-1], b_bsr.shape[-2]))
                     torch._validate_sparse_compressed_tensor_args(b.ccol_indices(), b.row_indices(), b.values(), b.shape, b.layout)
                 else:
                     b = self._convert_to_layout(a, layout_a)
@@ -2673,17 +2681,7 @@ class TestSparseCSR(TestCase):
             for i in range(batch_len):
                 batch_idx = tuple(np.unravel_index(i, batch_shape))
                 _test_matrix(pt_tensor[batch_idx], dense[batch_idx], layout, blocksize)
-            # todo: check whole conversion once to_dense impl for n-d batched-bsr
-            # take 3d slices of dense/sparse to convert/compare for now
-            if dense.dim() > 3:
-                part_dim = dense.dim() - 3
-                part_shape = batch_shape[:part_dim]
-                len_partition = functools.reduce(lambda x, y: x * y, part_shape, 1)
-                for i in range(len_partition):
-                    part_idx = tuple(np.unravel_index(i, part_shape))
-                    self.assertEqual(dense[part_idx], pt_tensor[part_idx].to_dense())
-            else:
-                self.assertEqual(dense, pt_tensor.to_dense())
+            self.assertEqual(dense, pt_tensor.to_dense())
 
         # Verify exception when given 0 sized batch
         for shape, blocksize in itertools.product(shapes, blocksizes):

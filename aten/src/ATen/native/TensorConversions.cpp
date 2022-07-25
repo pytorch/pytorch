@@ -8,7 +8,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
-#include "ATen/core/ATen_fwd.h"
+#include <ATen/core/ATen_fwd.h>
 
 namespace at {
 namespace native {
