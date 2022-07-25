@@ -47,7 +47,7 @@ struct OpRecord : RecordFunctor {
       std::function<OutType(ArgTypes...)> fusion_op)
       : RecordFunctor(std::move(_args), std::move(_outputs)),
         fusion_op_(fusion_op) {}
-  ~OpRecord() final = default;
+  virtual ~OpRecord() = default;
 
   //! The variadic set of indices for the number of args for this op are
   //! deduced by providing the index_sequence as a parameter.  Similarly,
@@ -96,7 +96,7 @@ struct BroadcastOpRecord : RecordFunctor {
       : RecordFunctor(std::move(_args), std::move(_outputs)),
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
-  ~BroadcastOpRecord() final = default;
+  virtual ~BroadcastOpRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
@@ -149,7 +149,7 @@ struct CastOpRecord : RecordFunctor {
       : RecordFunctor(std::move(_args), std::move(_outputs)),
         fusion_op_(fusion_op),
         dtype_(dtype) {}
-  ~CastOpRecord() final = default;
+  virtual ~CastOpRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto arg = dynamic_cast<ArgType>(fd.getFusionState(args.at(0)));
@@ -170,7 +170,7 @@ template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
   ConstantRecord(std::vector<size_t> _outputs, ValueType val)
       : RecordFunctor({}, std::move(_outputs)), value_(val) {}
-  ~ConstantRecord() final = default;
+  virtual ~ConstantRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     NvfVal* output = IrBuilder::create<ExprType>(value_);
@@ -194,7 +194,7 @@ struct InputTensorRecord : RecordFunctor {
         symbolic_sizes(std::move(_symbolic_sizes)),
         contiguous_info(std::move(_contiguous_info)),
         dtype(_dtype) {}
-  ~InputTensorRecord() final = default;
+  virtual ~InputTensorRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto tv = TensorViewBuilder()
@@ -225,7 +225,7 @@ template <class OutputType>
 struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<size_t> _args)
       : RecordFunctor(std::move(_args), {}) {}
-  ~OutputRecord() final = default;
+  virtual ~OutputRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto input = fd.getFusionState(args.at(0));
@@ -256,7 +256,7 @@ struct ReductionOpRecord : RecordFunctor {
         axes_(std::move(axes)),
         keep_dim_(keep_dim),
         dtype_(dtype) {}
-  ~ReductionOpRecord() final = default;
+  virtual ~ReductionOpRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->template as<NvfTensorView>();
@@ -282,7 +282,7 @@ struct ReductionOpRecord : RecordFunctor {
 struct ScalarRecord : RecordFunctor {
   ScalarRecord(std::vector<size_t> _outputs, NvfDataType dtype)
       : RecordFunctor({}, std::move(_outputs)), dtype_(dtype) {}
-  ~ScalarRecord() final = default;
+  virtual ~ScalarRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     NvfVal* output = nullptr;
@@ -319,7 +319,7 @@ struct VarianceOpRecord : RecordFunctor {
         axes_(axes),
         correction_(correction),
         keep_dim_(keep_dim) {}
-  ~VarianceOpRecord() final = default;
+  virtual ~VarianceOpRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
     auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
