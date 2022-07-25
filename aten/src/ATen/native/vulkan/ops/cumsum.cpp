@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -16,20 +15,16 @@ Tensor cumsum(
     const int64_t dim,
     const c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
-    input_arg.dim() <= 4,
-    "Vulkan cumsum expects input dimension <= 4!");
+      input_arg.dim() <= 4, "Vulkan cumsum expects input dimension <= 4!");
 
   TORCH_CHECK(
-    batch_size(input_arg) == 1,
-    "Vulkan cumsum expects batch size <= 1!");
+      batch_size(input_arg) == 1, "Vulkan cumsum expects batch size <= 1!");
 
-  TORCH_CHECK(
-    dim < 4,
-    "Vulkan cumsum expects dim < 4!");
+  TORCH_CHECK(dim < 4, "Vulkan cumsum expects dim < 4!");
 
-  if(dim<=1) {
-      // TODO: dim<0, dim=0, dim=1(z axis)
-      TORCH_CHECK(false, "Not implemented!");
+  if (dim <= 1) {
+    // TODO: dim<0, dim=0, dim=1(z axis)
+    TORCH_CHECK(false, "Not implemented!");
   }
 
   api::Context* const context = api::context();
@@ -38,27 +33,21 @@ Tensor cumsum(
   const vTensor& v_input = convert(input);
 
   vTensor v_output{
-    context,
-    input_arg.sizes(),
-    input_arg.options(),
+      context,
+      input_arg.sizes(),
+      input_arg.options(),
   };
 
   const struct Block final {
     int32_t axis;
-  } block {
-    (3-safe_downcast<int32_t>(dim)),
+  } block{
+      (3 - safe_downcast<int32_t>(dim)),
   };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(cumsum),
       // pipeline barrier
@@ -72,11 +61,9 @@ Tensor cumsum(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      v_input.image(
-          pipeline_barrier,
-          api::PipelineStage::Compute),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

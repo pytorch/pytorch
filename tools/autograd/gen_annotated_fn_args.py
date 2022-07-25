@@ -14,26 +14,28 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/testing/_internal/generated
 """
 
-from collections import defaultdict
 import argparse
 import os
 import textwrap
+from collections import defaultdict
 
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+
+import torchgen.api.python as python
+from torchgen.context import with_native_function
 
 from torchgen.gen import parse_native_yaml
-from torchgen.utils import FileManager
-from torchgen.context import with_native_function
 from torchgen.model import BaseOperatorName, NativeFunction
-import torchgen.api.python as python
+from torchgen.utils import FileManager
+
 from .gen_python_functions import (
-    should_generate_py_binding,
-    is_py_torch_function,
-    is_py_nn_function,
-    is_py_linalg_function,
-    is_py_variable_method,
-    is_py_special_function,
     is_py_fft_function,
+    is_py_linalg_function,
+    is_py_nn_function,
+    is_py_special_function,
+    is_py_torch_function,
+    is_py_variable_method,
+    should_generate_py_binding,
 )
 
 

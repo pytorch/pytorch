@@ -1,6 +1,5 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
@@ -9,150 +8,6 @@ namespace vulkan {
 namespace ops {
 
 namespace {
-
-api::utils::uvec3 image_extents(IntArrayRef);
-bool requires_image(IntArrayRef);
-
-VkFormat vk_format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
-    case kFloat:
-    #ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-    #else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-    #endif /* USE_VULKAN_FP16_INFERENCE */
-
-    default:
-      TORCH_CHECK(
-          false,
-          "Vulkan tensor format not supported!");
-  }
-
-  return VK_FORMAT_UNDEFINED;
-}
-
-VkExtent3D vk_extent(const api::utils::uvec3& extent) {
-  return {
-    extent.data[0u],
-    extent.data[1u],
-    extent.data[2u],
-  };
-}
-
-api::MemoryAccessFlags access(
-    const VkAccessFlags vk_access) {
-  api::MemoryAccessFlags access = 0u;
-
-  constexpr VkAccessFlags kRead =
-      VK_ACCESS_HOST_READ_BIT |
-      VK_ACCESS_MEMORY_READ_BIT |
-      VK_ACCESS_SHADER_READ_BIT |
-      VK_ACCESS_TRANSFER_READ_BIT |
-      VK_ACCESS_UNIFORM_READ_BIT;
-
-  constexpr VkAccessFlags kWrite =
-      VK_ACCESS_HOST_WRITE_BIT |
-      VK_ACCESS_MEMORY_WRITE_BIT |
-      VK_ACCESS_SHADER_WRITE_BIT |
-      VK_ACCESS_TRANSFER_WRITE_BIT;
-
-  if (vk_access & kRead) {
-    access |= api::MemoryAccessType::READ;
-  }
-
-  if (vk_access & kWrite) {
-    access |= api::MemoryAccessType::WRITE;
-  }
-
-  return access;
-}
-
-VkAccessFlags vk_access(
-    const api::PipelineStageFlags stage,
-    const api::MemoryAccessFlags access) {
-  VkAccessFlags vk_access = 0u;
-
-  if (access & api::MemoryAccessType::READ) {
-    if (stage & api::PipelineStage::Compute) {
-      vk_access |= VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    if (stage & api::PipelineStage::Host) {
-      vk_access |= VK_ACCESS_HOST_READ_BIT;
-    }
-
-    if (stage & api::PipelineStage::Transfer) {
-      vk_access |= VK_ACCESS_TRANSFER_READ_BIT;
-    }
-  }
-
-  if (access & api::MemoryAccessType::WRITE) {
-    if (stage & api::PipelineStage::Compute) {
-      vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
-    }
-
-    if (stage & api::PipelineStage::Host) {
-      vk_access |= VK_ACCESS_HOST_WRITE_BIT;
-    }
-
-    if (stage & api::PipelineStage::Transfer) {
-      vk_access |= VK_ACCESS_TRANSFER_WRITE_BIT;
-    }
-  }
-
-  return vk_access;
-}
-
-VkImageLayout vk_layout(
-    const api::PipelineStageFlags stage,
-    const api::MemoryAccessFlags access) {
-  switch (stage) {
-
-    case api::PipelineStage::Compute:
-      switch (access) {
-        case api::MemoryAccessType::READ:
-          return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        default:
-          return VK_IMAGE_LAYOUT_GENERAL;
-      } break;
-
-    case api::PipelineStage::Transfer:
-      switch (access) {
-        case api::MemoryAccessType::READ:
-          return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-
-        case api::MemoryAccessType::WRITE:
-          return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
-        default:
-          TORCH_INTERNAL_ASSERT(false, "Invalid!");
-      } break;
-
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid!");
-  }
-
-  return VK_IMAGE_LAYOUT_UNDEFINED;
-}
-
-VkPipelineStageFlags vk_stage(
-    const api::PipelineStageFlags stage) {
-  VkPipelineStageFlags vk_stage = 0u;
-
-  if (stage & api::PipelineStage::Compute) {
-    vk_stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-  }
-
-  if (stage & api::PipelineStage::Host) {
-    vk_stage |= VK_PIPELINE_STAGE_HOST_BIT;
-  }
-
-  if (stage & api::PipelineStage::Transfer) {
-    vk_stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
-  }
-
-  return vk_stage;
-}
 
 api::utils::uvec3 image_extents(const IntArrayRef sizes) {
   int64_t width = 1;
@@ -188,52 +43,11 @@ api::utils::uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    api::utils::safe_downcast<uint32_t>(width),
-    api::utils::safe_downcast<uint32_t>(height),
-    api::utils::safe_downcast<uint32_t>(api::utils::div_up(depth, INT64_C(4))),
+      api::utils::safe_downcast<uint32_t>(width),
+      api::utils::safe_downcast<uint32_t>(height),
+      api::utils::safe_downcast<uint32_t>(
+          api::utils::div_up(depth, INT64_C(4))),
   };
-}
-
-enum class Barrier {
-  None,
-  Exectution,
-  Memory,
-};
-
-Barrier categorize(
-    const VkAccessFlags vk_src_access,
-    const VkAccessFlags vk_dst_access) {
-  if (0u == vk_src_access) {
-    return Barrier::None;
-  }
-
-  const api::MemoryAccessFlags src_access = access(vk_src_access);
-  const api::MemoryAccessFlags dst_access = access(vk_dst_access);
-
-  if ((src_access & api::MemoryAccessType::READ) == src_access) {
-    if ((dst_access & api::MemoryAccessType::READ) == dst_access) {
-      // RAR (Read after Read)
-      return Barrier::None;
-    }
-
-    // WAR (Write after Read)
-    return Barrier::Exectution;
-  }
-
-  // RAW (Read after Write), or WAW (Write after Write)
-  return Barrier::Memory;
-};
-
-Barrier categorize(
-    const VkAccessFlags vk_src_access,
-    const VkAccessFlags vk_dst_access,
-    const VkImageLayout vk_src_layout,
-    const VkImageLayout vk_dst_layout) {
-  if (vk_src_layout != vk_dst_layout) {
-    return Barrier::Memory;
-  }
-
-  return categorize(vk_src_access, vk_dst_access);
 }
 
 } // namespace
@@ -246,16 +60,24 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : view_(new vTensorStorage{
-      context,
-      sizes,
-      options,
-    }) {
-}
+    : view_(new vTensorStorage{
+          context,
+          sizes,
+          options,
+      }) {}
+
+vTensor::vTensor(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options,
+    double q_scale,
+    int64_t q_zero_point)
+    : view_(
+          new vTensorStorage{context, sizes, options, q_scale, q_zero_point}) {}
 
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
-    const api::PipelineStageFlags stage) const & {
+    const api::PipelineStageFlags stage) const& {
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
 
   return view_->image_;
@@ -275,33 +97,54 @@ api::VulkanImage& vTensor::image(
 //
 
 api::VulkanImage allocate_image(
-    api::Context* const context_ptr, api::utils::uvec3& extents) {
+    api::Context* const context_ptr,
+    api::utils::uvec3& extents,
+    const caffe2::TypeMeta dtype) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   api::ImageSampler::Properties sampler_props{
-    VK_FILTER_NEAREST,
-    VK_SAMPLER_MIPMAP_MODE_NEAREST,
-    VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+      VK_FILTER_NEAREST,
+      VK_SAMPLER_MIPMAP_MODE_NEAREST,
+      VK_SAMPLER_ADDRESS_MODE_REPEAT,
+      VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
   };
 
   VkSampler sampler = adapter_ptr->sampler_cache().retrieve(sampler_props);
 
-  return adapter_ptr->vma().create_image3d_fp(
-      vk_extent(extents), sampler_props, sampler, true);
+  return adapter_ptr->vma().create_image3d(
+      api::create_extent3d(extents), sampler_props, sampler, dtype, true);
 }
 
 vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : context_(context),
-    extents_(image_extents(sizes)),
-    options_(options),
-    sizes_(sizes),
-    strides_(sizes.size()),
-    image_(allocate_image(context_, extents_)),
-    last_access_{} {
+    : context_(context),
+      extents_(image_extents(sizes)),
+      options_(options),
+      sizes_(sizes),
+      strides_(sizes.size()),
+      image_(allocate_image(context_, extents_, options_.dtype())),
+      last_access_{} {
+  ops::verify(options);
+}
+
+vTensorStorage::vTensorStorage(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options,
+    double q_scale_in,
+    int64_t q_zero_point_in)
+    : context_(context),
+      extents_(image_extents(sizes)),
+      options_(options),
+      sizes_(sizes),
+      strides_(sizes.size()),
+      is_quantized_{true},
+      q_scale{q_scale_in},
+      q_zero_point{q_zero_point_in},
+      image_(allocate_image(context_, extents_, options_.dtype())),
+      last_access_{} {
   ops::verify(options);
 }
 
@@ -318,17 +161,17 @@ void vTensorStorage::transition(
   api::MemoryAccessFlags prev_access = last_access_.access;
 
   const VkImageLayout cur_layout = image_.layout();
-  const VkImageLayout new_layout = vk_layout(cur_stage, cur_access);
+  const VkImageLayout new_layout = api::vk_layout(cur_stage, cur_access);
 
   const bool layout_changed = cur_layout != new_layout;
   const bool prev_written = (prev_access & api::MemoryAccessType::WRITE) != 0;
 
   if (prev_written || layout_changed) {
-    VkPipelineStageFlags src_stage = vk_stage(prev_stage);
+    VkPipelineStageFlags src_stage = api::vk_stage(prev_stage);
     if (0u == src_stage) {
       src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     }
-    VkPipelineStageFlags dst_stage = vk_stage(cur_stage);
+    VkPipelineStageFlags dst_stage = api::vk_stage(cur_stage);
     if (0u == dst_stage) {
       dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
@@ -337,8 +180,8 @@ void vTensorStorage::transition(
     pipeline_barrier.stage.dst |= dst_stage;
 
     pipeline_barrier.images.push_back(api::ImageMemoryBarrier(
-        vk_access(prev_stage, prev_access),
-        vk_access(cur_stage, cur_access),
+        api::vk_access(prev_stage, prev_access),
+        api::vk_access(cur_stage, cur_access),
         cur_layout,
         new_layout,
         image_));
@@ -364,11 +207,11 @@ void add_buffer_barrier(
   const bool is_RAW = read_requested && prev_written;
 
   if (is_RAW) {
-    VkPipelineStageFlags src_stage = vk_stage(prev_stage);
+    VkPipelineStageFlags src_stage = api::vk_stage(prev_stage);
     if (0u == src_stage) {
       src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     }
-    VkPipelineStageFlags dst_stage = vk_stage(cur_stage);
+    VkPipelineStageFlags dst_stage = api::vk_stage(cur_stage);
     if (0u == dst_stage) {
       dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
@@ -377,8 +220,8 @@ void add_buffer_barrier(
     pipeline_barrier.stage.dst |= dst_stage;
 
     pipeline_barrier.buffers.push_back(api::BufferMemoryBarrier(
-        vk_access(prev_stage, prev_access),
-        vk_access(cur_stage, cur_access),
+        api::vk_access(prev_stage, prev_access),
+        api::vk_access(cur_stage, cur_access),
         buffer));
   }
 }
