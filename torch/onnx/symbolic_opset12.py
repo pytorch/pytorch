@@ -47,7 +47,8 @@ def outer(g, input, other):
 
 def _dropout_shared(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
-    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    # In eval mode, dropout is non-op. That is, if the node's
+    # train param is set to False, dropout just returns its inputs.
     if not train:
         return input, None
     p = g.op("Constant", value_t=torch.tensor(p))
