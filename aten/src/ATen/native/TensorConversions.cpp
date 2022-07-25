@@ -7,6 +7,8 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <numeric>
+#include "ATen/core/ATen_fwd.h"
 
 namespace at {
 namespace native {
@@ -400,10 +402,10 @@ Tensor sparse_compressed_to_dense(
     if (self.dim() > 3) {
       // Flatten batch dims
       auto n_batch_dim = self.dim() - 2;
-      crow_indices = crow_indices.flatten(0, n_batch_dim);
-      col_indices = col_indices.flatten(0, n_batch_dim);
-      values = values.flatten(0, n_batch_dim);
-      dense = dense.flatten(0, n_batch_dim);
+      crow_indices = crow_indices.flatten(0, n_batch_dim - 1);
+      col_indices = col_indices.flatten(0, n_batch_dim - 1);
+      values = values.flatten(0, n_batch_dim - 1);
+      dense = dense.flatten(0, n_batch_dim - 1);
     }
 
     // At this point everything has 3d shape either the batch dim was inserted,
@@ -427,8 +429,8 @@ Tensor sparse_compressed_to_dense(
       dense[batch].index_add_(0, offsets, values[batch]);
     }
 
-    // untile the result, NOTE: The final reshape uses the original self.sizes()
-    // which will squeeze out the extra batch dim if we put one in
+    // un-tile the result, NOTE: The final reshape uses the original
+    // self.sizes() which will squeeze out the extra batch dim if we put one in
     return dense
         .unflatten(
             1, {self.size(-2) / blocksize[0], self.size(-1) / blocksize[1]})
@@ -798,35 +800,39 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
         not_zero_mask.sum({-2, -1}).equal(nse_per_batch),
         "Expect the same number of specified elements per batch.");
 
-    // Permute + flatten re-orders the mask so that the compressed axis has
-    // length (l * b) where l is the length of the compressed axis in the
-    // eventual output and b is the number of batches.
-    // This shape is required for our efficent re-batching of compressed indices
-    // algorithim.
+    // Permute + flatten re-orders the mask
+    // We have effectively joined the batches by extending the compressed
+    // dimension
 
     not_zero_mask = not_zero_mask.permute({1, 0, 2}).flatten(1, -1);
+    values = values.transpose(1, 0);
   }
 
   Tensor col_indices;
   Tensor row_indices;
   std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
-      not_zero_mask.permute({1, 0}), at::kLong, not_zero_mask.device());
+      not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
   Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
       col_indices, not_zero_mask.size(-1), false /*out_int32*/);
-
-  values = values.reshape({-1, values.size(-2), values.size(-1)})
-               .index_select(0, _mask_to_indices(not_zero_mask.flatten()));
+  values = values.flatten(0, -3).index_select(
+      0, _mask_to_indices(not_zero_mask.flatten()));
   if (n_batch_dim > 0) {
     ccol_indices = at::_compressed_to_batched_compressed_indices(
         ccol_indices,
         not_zero_mask.size(-1) / block_size_1,
         false /*out_int32*/);
+
     auto batch_shape = self.sizes().slice(0, n_batch_dim);
-    auto batch_sizes_nnz = DimVector(batch_shape);
-    row_indices = row_indices.unflatten(0, batch_shape);
-    ccol_indices = ccol_indices.unflatten(0, batch_shape);
-    batch_sizes_nnz.push_back(-1);
-    values = values.unflatten(0, batch_sizes_nnz);
+    auto batchsize_infer_last = DimVector(batch_shape);
+    // we can infer nnz/ncol+1
+    batchsize_infer_last.push_back(-1);
+    // -1 dim is nnz (per batch)
+    row_indices = row_indices.reshape(batchsize_infer_last);
+    // -1 dim is nnrows (per batch) + 1
+    ccol_indices = ccol_indices.reshape(batchsize_infer_last);
+    // -1 dim is nnz (per batch) blocksize dims already included (hence
+    // unflatten)
+    values = values.unflatten(0, batchsize_infer_last);
   }
 
   return at::native::_sparse_bsc_tensor_unsafe(
@@ -1011,28 +1017,26 @@ void compressed_to_batched_compressed_indices(
     const Tensor& batched,
     const Tensor& compressed,
     const int64_t n_batch) {
+  const output_t nnz = static_cast<output_t>(compressed[-1].item<input_t>());
   auto compressed_ = compressed.expect_contiguous();
   TORCH_INTERNAL_ASSERT(batched.is_contiguous());
   input_t* compressed_data_in = compressed_->data_ptr<input_t>();
   output_t* batched_data_out = batched.data_ptr<output_t>();
-  int64_t mat_dim_length = batched.size(-1) - 1;
-  at::parallel_for(
-      0, n_batch, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        for (const auto b : c10::irange(start, end)) {
-          input_t* comp_start = compressed_data_in + (b * mat_dim_length);
-          input_t* comp_end = comp_start + (mat_dim_length + 1);
-          output_t* batched_start =
-              batched_data_out + (b * (mat_dim_length + 1));
-          const auto idx_delta = static_cast<output_t>(b * mat_dim_length);
-          std::transform(
-              comp_start,
-              comp_end,
-              batched_start,
-              [&idx_delta](input_t compressed_idx) {
-                return static_cast<output_t>(compressed_idx) - idx_delta;
-              });
-        }
-      });
+  const auto ncomp_per_batch = (compressed.size(-1) - 1) / n_batch;
+  const auto nnz_per_batch = nnz / n_batch;
+  for (const auto b : c10::irange(n_batch)) {
+    input_t* comp_start = compressed_data_in + (b * ncomp_per_batch);
+    input_t* comp_end = comp_start + (ncomp_per_batch + 1);
+    output_t* batched_start = batched_data_out + (b * (ncomp_per_batch + 1));
+    const auto idx_delta = static_cast<output_t>(b * nnz_per_batch);
+    std::transform(
+        comp_start,
+        comp_end,
+        batched_start,
+        [&idx_delta](input_t compressed_idx) {
+          return static_cast<output_t>(compressed_idx) - idx_delta;
+        });
+  }
 }
 
 } // namespace
@@ -1320,6 +1324,163 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
   return self;
 }
 
+namespace {
+template <typename index_t, typename scalar_t>
+void _bsc_members_to_csc_cpu_kernel(
+    const int64_t n_brow,
+    const int64_t n_bcol,
+    const int64_t nr_p_b,
+    const int64_t nc_p_b,
+    const int64_t nnz,
+    const index_t* block_ccol_inds,
+    const index_t* block_row_inds,
+    const scalar_t* block_data,
+    index_t* ccol_inds,
+    index_t* row_inds,
+    scalar_t* data) {
+  // n ele per block
+  const auto nele_p_b = nr_p_b * nc_p_b;
+  // last element is nnz
+  ccol_inds[n_bcol * nc_p_b] = nnz;
+  // loop for block column
+  for (index_t b_col = 0; b_col < n_bcol; ++b_col) {
+    // num blocks in this column
+    const index_t bcol_size =
+        block_ccol_inds[b_col + 1] - block_ccol_inds[b_col];
+
+    // size of column in csc
+    const index_t col_size = nr_p_b * bcol_size;
+
+    // loop over cols inside the block
+    for (index_t c = 0; c < nc_p_b; ++c) {
+      // csc col number
+      const index_t col = nc_p_b * b_col + c;
+      // number of elements in the csc col
+      ccol_inds[col] = block_ccol_inds[b_col] * nele_p_b + c * col_size;
+      // loop block index inside col
+      for (index_t b_i = 0; b_i < bcol_size; ++b_i) {
+        const index_t block_index = block_ccol_inds[b_col] + b_i;
+        // block row number
+        const index_t brow = block_row_inds[block_index];
+        // loop over rows inside block
+        for (index_t r = 0; r < nr_p_b; ++r) {
+          // block data is row major contiguous
+          const index_t b_data_index = nele_p_b * block_index + nc_p_b * r + c;
+          // CSR row index
+          const index_t row = nr_p_b * brow + r;
+          // csr data index
+          const index_t data_ind = ccol_inds[col] + b_i * nr_p_b + r;
+          row_inds[data_ind] = row;
+          data[data_ind] = block_data[b_data_index];
+        }
+      }
+    }
+  }
+}
+
+Tensor _bsc_to_csc_cpu(const Tensor& self) {
+  const auto n_batch_dim = self.ccol_indices().dim() - 1;
+  const auto n_dense_dim = self.values().dim() - n_batch_dim - 3;
+  // Much of the shape computations rely on this, supporting dense dims for BSC
+  // will require rewriting.
+  TORCH_CHECK(
+      n_dense_dim <= 0,
+      "Conversion from ",
+      self.layout(),
+      " to SparseScs does not support dense dimensions");
+
+  // number of rows per block
+  const auto n_rpb = self.values().size(-2);
+  // number of cols per block
+  const auto n_cpb = self.values().size(-1);
+  // number of block rows
+  const auto n_br = self.size(-2) / n_rpb;
+  // number of cols per block
+  const auto n_bc = self.size(-1) / n_cpb;
+  // NNZ in self is the number of blocks, we assume for this conversion all
+  // values within a block will be specified in the un-blocked result
+  const auto nnz_per_batch = self._nnz() * n_rpb * n_cpb;
+
+  // extract bsr members
+  auto blocked_ccol_indices = self.ccol_indices();
+  auto blocked_row_indices = self.row_indices();
+  // Kernel relies on contiguous values, they may be have come from transpose of
+  // BSR
+  auto blocked_values = self.values().contiguous();
+
+  if (n_batch_dim == 0) {
+    blocked_ccol_indices.unsqueeze_(0);
+    blocked_row_indices.unsqueeze_(0);
+    blocked_values.unsqueeze_(0);
+  } else if (n_batch_dim > 0) {
+    blocked_ccol_indices = blocked_ccol_indices.flatten(0, n_batch_dim - 1);
+    blocked_row_indices = blocked_row_indices.flatten(0, n_batch_dim - 1);
+    blocked_values = blocked_values.flatten(0, n_batch_dim - 1);
+  }
+  // else one batch dim and already the correct shape
+
+  auto n_batch = blocked_ccol_indices.size(0);
+  // Allocate result arrays with flattened batch dims
+  auto result_ccol_indices =
+      at::empty({n_batch, self.size(-1) + 1}, self.ccol_indices().options());
+  auto result_row_indices =
+      at::empty({n_batch, nnz_per_batch}, self.row_indices().options());
+  auto result_values =
+      at::empty({n_batch, nnz_per_batch}, self.values().options());
+
+  if (nnz_per_batch == 0) {
+    result_ccol_indices.fill_(0);
+  } else {
+    AT_DISPATCH_INDEX_TYPES(
+        blocked_ccol_indices.scalar_type(), "_bsc_to_csc_cpu", [&] {
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+              kComplexHalf,
+              kHalf,
+              kBFloat16,
+              kBool,
+              blocked_values.scalar_type(),
+              "_bsc_to_csc_cpu",
+              [&] {
+                for (const auto batch : c10::irange(n_batch)) {
+                  _bsc_members_to_csc_cpu_kernel<index_t, scalar_t>(
+                      n_br,
+                      n_bc,
+                      n_rpb,
+                      n_cpb,
+                      nnz_per_batch,
+                      blocked_ccol_indices[batch].data_ptr<index_t>(),
+                      blocked_row_indices[batch].data_ptr<index_t>(),
+                      blocked_values[batch].data_ptr<scalar_t>(),
+                      result_ccol_indices[batch].data_ptr<index_t>(),
+                      result_row_indices[batch].data_ptr<index_t>(),
+                      result_values[batch].data_ptr<scalar_t>());
+                }
+              });
+        });
+  }
+  if (n_batch_dim == 0) {
+    result_ccol_indices.squeeze_(0);
+    result_row_indices.squeeze_(0);
+    result_values.squeeze_(0);
+  } else if (n_batch_dim > 0) {
+    auto batch_shape = self.sizes().slice(0, n_batch_dim);
+    result_ccol_indices = result_ccol_indices.unflatten(0, batch_shape);
+    result_row_indices = result_row_indices.unflatten(0, batch_shape);
+    result_values = result_values.unflatten(0, batch_shape);
+  }
+  // else one batch dim and already the correct shape
+
+  return _sparse_csc_tensor_unsafe(
+      result_ccol_indices,
+      result_row_indices,
+      result_values,
+      self.sizes(),
+      self.scalar_type(),
+      c10::kSparseCsc,
+      self.device());
+}
+} // namespace
+
 Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
   if (self.layout() == kSparseCsc) {
     // Based on to_sparse_csr just returning self doesn't work
@@ -1327,6 +1488,35 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
         self.ccol_indices(),
         self.row_indices(),
         self.values(),
+        self.sizes(),
+        self.scalar_type(),
+        c10::kSparseCsc,
+        self.device());
+  }
+  if (self.layout() == kSparseBsc) {
+    const auto self_ccol_indices = self.ccol_indices().cpu();
+    const auto self_row_indices = self.row_indices().cpu();
+    const auto self_values = self.values().cpu();
+    auto cpu_result = _bsc_to_csc_cpu(at::native::_sparse_bsc_tensor_unsafe(
+        self_ccol_indices,
+        self_row_indices,
+        self_values,
+        self.sizes(),
+        self_values.scalar_type(),
+        kSparseBsc,
+        self_values.device()));
+
+    auto result_ccol_indices = cpu_result.ccol_indices().to(
+        self_ccol_indices.options().device(self.device()));
+    auto result_row_indices = cpu_result.row_indices().to(
+        self_row_indices.options().device(self.device()));
+    auto result_values =
+        cpu_result.values().to(self_values.options().device(self.device()));
+
+    return at::native::_sparse_csc_tensor_unsafe(
+        result_ccol_indices.contiguous(),
+        result_row_indices.contiguous(),
+        result_values.contiguous(),
         self.sizes(),
         self.scalar_type(),
         c10::kSparseCsc,

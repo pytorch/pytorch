@@ -1,0 +1,19 @@
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - numpy
+  - pytest
+  - pytest-cov
+  - codecov
+  - pip
+  - pyyaml
+  - ca-certificates
+  - pip:
+      - unittest-xml-reporting
+      - pillow>=4.1.1
+      - scipy
+      - av
+      - networkx
+      - expecttest
+      - ninja
