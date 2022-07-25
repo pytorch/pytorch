@@ -75,6 +75,8 @@ from torch.onnx import (register_custom_op_symbolic,
                         unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
+PYTEST_FILES = ["test_ops", "test_ops_gradients", "test_ops_jit"]
+
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
@@ -90,9 +92,6 @@ MAX_NUM_RETRIES = 3
 
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
-
-slow_tests_dict: Optional[Dict[str, Any]] = None
-disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
@@ -336,6 +335,7 @@ class parametrize(_TestParametrizer):
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
+            values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
                 if isinstance(values, subtest):
@@ -370,6 +370,10 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
                 yield (gen_test, test_name, param_kwargs)
+
+            if values is check_exhausted_iterator:
+                raise ValueError('An empty arg_values was passed to @parametrize. '
+                                 'Note that this may result from reuse of a generator.')
 
 
 class ProfilingMode(Enum):
@@ -590,20 +594,33 @@ def lint_test_case_extension(suite):
                 succeed = False
     return succeed
 
+def sanitize_pytest_xml(xml_file: str):
+    # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
+    # consider somehow modifying the XML logger in conftest to do this instead
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(xml_file)
+    for testcase in tree.iter('testcase'):
+        full_classname = testcase.attrib['classname']
+        regex_result = re.search(r"^test\.(.*)\.([^\.]*)$", full_classname)
+        classname = regex_result.group(2)
+        file = regex_result.group(1).replace('.', "/")
+        testcase.set('classname', classname)
+        testcase.set('file', f"{file}.py")
+    tree.write(xml_file)
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
-            global slow_tests_dict
             with open(IMPORT_SLOW_TESTS, 'r') as fp:
-                slow_tests_dict = json.load(fp)
+                # use env vars so pytest-xdist subprocesses can still access them
+                os.environ['SLOW_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
         if os.path.exists(IMPORT_DISABLED_TESTS):
-            global disabled_tests_dict
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                disabled_tests_dict = json.load(fp)
+                os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
@@ -682,14 +699,36 @@ def run_tests(argv=UNITTEST_ARGS):
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
-        os.makedirs(test_report_path, exist_ok=True)
-        verbose = '--verbose' in argv or '-v' in argv
-        if verbose:
-            print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
-            verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
+            "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
+        ):
+            # exclude linux cuda tests because we run into memory issues when running in parallel
+            import pytest
+            os.environ["NO_COLOR"] = "1"
+            os.environ["USING_PYTEST"] = "1"
+            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+            os.makedirs(pytest_report_path, exist_ok=True)
+            # part of our xml parsing looks for grandparent folder names
+            pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
+            print(f'Test results will be stored in {pytest_report_path}')
+            # mac slower on 4 proc than 3
+            num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
+                                    '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
+            del os.environ["USING_PYTEST"]
+            sanitize_pytest_xml(f'{pytest_report_path}')
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            os.makedirs(test_report_path, exist_ok=True)
+            verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print(f'Test results will be stored in {test_report_path}')
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -1504,13 +1543,16 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
+    if "USING_PYTEST" in os.environ:
+        test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
+    if raw_test_name in json.loads(os.environ.get("SLOW_TESTS_DICT", "{}")):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
+        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1930,7 +1972,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+                stack.enter_context(CrossRefMode())
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
@@ -3075,6 +3117,14 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
+def is_slow_gradcheck_env() -> bool:
+    return os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1"
+
+skipIfSlowGradcheckEnv = unittest.skipIf(
+    is_slow_gradcheck_env(),
+    "Tests that don't use gradcheck don't need to run on slow_gradcheck CI"
+)
+
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
@@ -3087,7 +3137,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -3107,7 +3157,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():

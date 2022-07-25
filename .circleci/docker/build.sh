@@ -148,6 +148,16 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.7.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=5.0
@@ -234,14 +244,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-focal-rocm5.0-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=5.0
-    ;;
   pytorch-linux-focal-rocm5.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
@@ -249,6 +251,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=5.1.1
+    ;;
+  pytorch-linux-focal-rocm5.2-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.2
     ;;
   pytorch-linux-focal-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
@@ -262,6 +272,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.7
     CUDNN_VERSION=8
     CLANG_VERSION=12
     PROTOBUF=yes

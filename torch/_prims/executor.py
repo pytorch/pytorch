@@ -1,9 +1,10 @@
 from typing import Callable
 
+from torch._prims.context import TorchRefsMode
+from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
+
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.context import TorchRefsMode
-from torch._prims.nvfuser_executor import nvfuser_execute
 
 
 def execute(gm: GraphModule, *args, executor: str = "aten"):
@@ -16,6 +17,8 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     if executor == "aten":
         return gm.forward(*args)
     elif executor == "nvfuser":
+        return nvfuser_execute_partitioned(gm, *args)
+    elif executor == "strictly_nvfuser":
         return nvfuser_execute(gm, *args)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
@@ -63,7 +66,7 @@ def make_traced(fn: Callable):
             kwargs = dict(zip(kwargs_keys, args[nargs:]))
             return fn(*fn_args, **kwargs)
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
