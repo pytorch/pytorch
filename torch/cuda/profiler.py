@@ -1,7 +1,8 @@
 import tempfile
 import contextlib
-from . import cudart, check_error
-
+from . import cudart, check_error, init as cuda_init
+from .. import _C
+import subprocess
 
 DEFAULT_FLAGS = [
     "gpustarttimestamp",
@@ -46,3 +47,27 @@ def profile():
         yield
     finally:
         stop()
+
+
+def enable_memory_history():
+    cuda_init()
+    _C._cuda_enableMemoryHistory()
+
+def _frame_fmt(f):
+    c, i = f
+    fname = c.co_filename.split('/')[-1]
+    func = c.co_name
+    return f'{fname}:{i}:{func}'
+
+def save_memory_flamegraph(fname='memory.txt'):
+    ss = _C._cuda_memorySnapshot()
+    with open(fname, 'w') as f:
+        for x in ss:
+            for b in x['blocks']:
+                if 'history' not in b:
+                    continue
+                for h in b['history']:
+                    sz = h['real_size']
+                    frames = h['frames']
+                    stuff = ';'.join([ _frame_fmt(f) for f  in reversed(frames) ])
+                    f.write(f'{b["state"]};{stuff} {sz}\n')

@@ -519,11 +519,38 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
 }
 
+struct Frame {
+  PyCodeObject* code;
+  int lasti;
+};
+
+struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
+  std::vector<Frame> frames;
+  ~StackContext() {
+    for(auto& f : frames) {
+      Py_XDECREF((PyObject*)f.code);
+    }
+  }
+  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+    py::gil_scoped_acquire acquire;
+    auto r = std::make_unique<StackContext>();
+    PyThreadState *tstate = PyThreadState_GET();
+    PyFrameObject* f = tstate->frame;
+    while (f) {
+      Py_XINCREF((PyObject*)f->f_code);
+      r->frames.emplace_back(Frame {f->f_code, f->f_lasti});
+      f = f->f_back;
+    }
+    return r;
+  }
+};
+
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
+  using c10::cuda::CUDACachingAllocator::History;
 
   const auto segmentInfoToDict = [](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
@@ -542,6 +569,29 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           (blockInfo.allocated
                ? "active_allocated"
                : (blockInfo.active ? "active_pending_free" : "inactive"));
+      if (blockInfo.history) {
+        py::list history;
+        History * h = blockInfo.history;
+        while (h) {
+          py::dict history_entry;
+          history_entry["addr"] = (int64_t) h->addr;
+          history_entry["real_size"] = h->real_size;
+          if (h->context) {
+            py::list frames;
+            auto sc = (StackContext*) h->context.get();
+            for (auto& f : sc->frames) {
+              py::tuple frame(2);
+              frame[0] = py::reinterpret_borrow<py::object>((PyObject*)f.code);
+              frame[1] = PyCode_Addr2Line(f.code, f.lasti);
+              frames.append(std::move(frame));
+            }
+            history_entry["frames"] = std::move(frames);
+          }
+          h = h->next.get();
+          history.append(std::move(history_entry));
+        }
+        blockDict["history"] = std::move(history);
+      }
       blocks.append(blockDict);
     }
     segmentDict["blocks"] = blocks;
@@ -560,6 +610,14 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
 }
+
+PyObject* THCPModule_enableMemoryHistory(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::cuda::CUDACachingAllocator::setContextRecorder(StackContext::gather);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 
 PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -817,6 +875,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
+    {"_cuda_enableMemoryHistory", THCPModule_enableMemoryHistory, METH_NOARGS, nullptr},
+
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
