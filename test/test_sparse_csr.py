@@ -2456,15 +2456,21 @@ class TestSparseCSR(TestCase):
             self.assertEqual(to_dense(transpose), subject_dense)
 
         def check_dim_type_mismatch_throws(subject, name0, dim0, name1, dim1):
-            mismatch_name = f"{dim0}\({name0}\) and {dim1}\({name1}\)"
-            err = "transpose\(\): can only transpose dimensions of the same type \(Batch, Sparse, Dense\), got " + mismatch_name
+            mismatch_name = f"{dim0}\\({name0}\\) and {dim1}\\({name1}\\)"
+            err = r"transpose\(\): can only transpose dimensions of the same type \(Batch, Sparse, Dense\), got " + mismatch_name
 
             with self.assertRaisesRegex(RuntimeError, err):
                 subject.transpose(dim0, dim1)
 
         def run_test(shape, nnz, index_type, n_dense, blocksize=()):
-            subject = self.genSparseCompressedTensor(
-                shape, nnz, layout=layout, device=device, index_dtype=index_type, blocksize=blocksize, dense_dims=n_dense, dtype=dtype)
+            subject = self.genSparseCompressedTensor(shape,
+                                                     nnz,
+                                                     layout=layout,
+                                                     device=device,
+                                                     index_dtype=index_type,
+                                                     blocksize=blocksize,
+                                                     dense_dims=n_dense,
+                                                     dtype=dtype)
 
 
             sparse0 = len(shape) - n_dense - 1
@@ -2530,7 +2536,6 @@ class TestSparseCSR(TestCase):
                 run_test(shape, 0, index_dtype, n_dense)
                 run_test(shape, max(sparse_shape), index_dtype, n_dense)
                 run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense)
-
 
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
@@ -2687,7 +2692,8 @@ class TestSparseCSR(TestCase):
             # generate a dense tensor
             dense = make_tensor(shape, dtype=torch.float, device=device)
 
-            # introduce some sparsty, mask is sparse shape, element applies to entire dense sub-tensor (hybrid) and is applied to each batch
+            # introduce some sparsty, mask is sparse shape, element applies to entire dense sub-tensor (hybrid) and is
+            # applied to each batch
             mask = make_tensor(sparse_shape, dtype=torch.bool, device=device)
             # manually expand to match hybrid shape
             if hybrid:
@@ -2700,7 +2706,8 @@ class TestSparseCSR(TestCase):
 
         expect_to_layout_support = True
         expect_from_layout_support = True
-        # note: order is important here, the hybrid-ness decides the inner content check which is used to build the batched checker (if needed)
+        # note: order is important here, the hybrid-ness decides the inner content check which is used to build the
+        # batched checker (if needed)
         check_content = _check_against_scipy_matrix
         if hybrid:
             expect_to_layout_support = expect_to_layout_support and layout in supports_hybrid_to_sparse
@@ -2717,7 +2724,8 @@ class TestSparseCSR(TestCase):
         batch_sizes = [(3,), (1, 3), (2, 1, 3)] if batched else [()]
         hybrid_sizes = [(4, ), (2, 2)] if hybrid else [()]
         # general cases, always run
-        for sparse_shape, blocksize, batch_shape, hybrid_shape in itertools.product(sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
+        for sparse_shape, blocksize, batch_shape, hybrid_shape in itertools.product(
+                sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
             dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
             if expect_to_layout_support:
                 sparse = self._convert_to_layout(dense, layout, blocksize)
@@ -2734,7 +2742,8 @@ class TestSparseCSR(TestCase):
 
         # special cases for batched tensors
         if batched and expect_to_layout_support:
-            # batched sparse tensors need only have the same number of non-zeros in each batch not nessesarily the same sparsity pattern in each batch
+            # batched sparse tensors need only have the same number of non-zeros in each batch not nessesarily the
+            # same sparsity pattern in each batch
             sparse_shape = sparse_sizes[0]
             hybrid_shape = hybrid_shape[0]
             batch_shape = batch_shapes[0]
