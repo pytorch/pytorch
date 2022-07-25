@@ -556,7 +556,6 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
-        xfail('matrix_exp'),  # would benefit from narrow_scatter
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
@@ -635,7 +634,6 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('scatter'),
-        xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('view_as_complex'),
         xfail('prod'),
@@ -713,6 +711,7 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),
         xfail('complex'),
         xfail('linalg.pinv', 'hermitian'),
+        xfail('matrix_exp'),
         xfail('pinverse'),
         skip('_masked.mean'),  # ???
         xfail('linalg.cholesky_ex'),
@@ -1281,7 +1280,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
-        xfail('matrix_exp'),  # inplace
         xfail('take'),  # inplace
 
         xfail('linalg.eig'),  # all close?

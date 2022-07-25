@@ -595,21 +595,6 @@ Tensor sum_backward(
   return grad.expand(sizes);
 }
 
-Tensor sum_backward(
-    const Tensor& grad,
-    c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
-    bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
-    // we are only using `keepdim=true` path for SymInts for now
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Only the keepdim=true path is implemented to support symints in autograd");
-  } else {
-    return grad.expand_symint(sizes);
-  }
-}
-
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -3994,10 +3979,22 @@ Tensor differential_analytic_matrix_function(
   meta_grad_sizes[A.dim() - 1] *= 2;
 
   auto n = A.size(-1);
-  auto meta_grad = at::zeros(meta_grad_sizes, grad.options());
-  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  Tensor meta_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as both `A` and `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({A, grad})) {
+    meta_grad = at::cat(
+        {at::cat({A, grad}, -1), at::cat({at::zeros_like(A), A}, -1)}, -2);
+  } else {
+    meta_grad = at::zeros(meta_grad_sizes, grad.options());
+    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
+    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
+    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  }
 
   return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
 }

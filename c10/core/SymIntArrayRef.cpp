@@ -31,4 +31,8 @@ std::ostream& operator<<(std::ostream& os, SymInt s) {
   return os;
 }
 
+std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list) {
+  return out << list.wrapped_symint_array_ref;
+}
+
 } // namespace c10
