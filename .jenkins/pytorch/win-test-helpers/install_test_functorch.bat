@@ -15,6 +15,10 @@ python setup.py develop --no-deps
 popd
 if ERRORLEVEL 1 goto fail
 
+echo "Installing test dependencies"
+pip install networkx
+if errorlevel 1 exit /b
+
 echo "Test functorch"
 pushd test
 python run_test.py --functorch --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
