@@ -6,10 +6,12 @@ from typing import Tuple, Union
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_opset10 as opset10
-from torch.onnx import utils
+from torch.onnx import (
+    symbolic_helper,
+    symbolic_opset10 as opset10,
+    symbolic_opset9 as opset9,
+    utils,
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!

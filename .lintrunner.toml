@@ -671,14 +671,11 @@ init_command = [
 # that nothing breaks before removing the former
 [[linter]]
 code = 'UFMT'
-# This is a big bang change to reformat every python files in the repo,
-# so it's arguably safer to gradually reformat them in subsequent PR.
-# After that, we can use **/*.py to apply the formatter to all entries
-# currently enforced by BLACK linter
 include_patterns = [
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
+    'torch/onnx/**/*.py',
     'torch/package/**/*.py',
     'torch/_decomp/**/*.py',
     'torch/_lazy/**/*.py',
