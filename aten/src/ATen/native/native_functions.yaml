@@ -6471,6 +6471,8 @@
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: put
 
 - func: index_add.out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
