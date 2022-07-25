@@ -82,10 +82,13 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  auto has_half_dtype = v.scalar_type() == at::ScalarType::Half
-    || g.scalar_type() == at::ScalarType::Half;
+  // Disable changes from #73845 (disable custom CPU kernel) since it causes
+  // many issues, including #80599, #80569 and #81195
+  // auto has_half_dtype = v.scalar_type() == at::ScalarType::Half
+  //   || g.scalar_type() == at::ScalarType::Half;
 
-  bool can_use_fused = !has_half_dtype && ((dim == 0) || (dim == v.dim() - 1));
+  // bool can_use_fused = !has_half_dtype && ((dim == 0) || (dim == v.dim() - 1));
+  bool can_use_fused = v.is_cuda() && (dim == 0 || dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through
