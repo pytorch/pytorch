@@ -1,6 +1,9 @@
-
+import torch
 from dlrm_s_pytorch import DLRM_Net  # type: ignore[import]
 import numpy as np  # type: ignore[import]
+from dlrm_data_pytorch import CriteoDataset, collate_wrapper_criteo_offset  # type: ignore[import]
+import zipfile
+import os
 
 
 def get_valid_name(name):
@@ -41,3 +44,78 @@ def get_dlrm_model():
     }
     dlrm_model = DLRM_Net(**dlrm_model_config)
     return dlrm_model
+
+
+def dlrm_wrap(X, lS_o, lS_i, device, ndevices=1):
+    """Rewritten simpler version of ```dlrm_wrap()``` found in dlrm_s_pytorch.py.
+    This function simply moves the input tensors into the device and without the forward pass
+    """
+    if ndevices == 1:
+        lS_i = (
+            [S_i.to(device) for S_i in lS_i]
+            if isinstance(lS_i, list)
+            else lS_i.to(device)
+        )
+        lS_o = (
+            [S_o.to(device) for S_o in lS_o]
+            if isinstance(lS_o, list)
+            else lS_o.to(device)
+        )
+    return X.to(device), lS_o, lS_i
+
+
+def make_test_data_loader(raw_data_file_path, processed_data_file):
+    """Function to create dataset and dataloaders for the test dataset.
+    Rewritten simpler version of ```make_criteo_and_loaders()``` from the dlrm_data_pytorch.py
+    that makes the test dataset and dataloaders only for the ***kaggle criteo dataset***
+    """
+    test_data = CriteoDataset(
+        "kaggle",
+        -1,
+        0.0,
+        "total",
+        "test",
+        raw_data_file_path,
+        processed_data_file,
+        False,
+        False,
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_data,
+        batch_size=16384,
+        shuffle=False,
+        num_workers=7,
+        collate_fn=collate_wrapper_criteo_offset,
+        pin_memory=False,
+        drop_last=False,
+    )
+    return test_loader
+
+
+def fetch_model(model_path, device):
+    """This function unzips the zipped model checkpoint (if zipped) and returns a
+    model object
+
+    Args:
+        model_path (str)
+            path pointing to the zipped/raw model checkpoint file that was dumped in evaluate disk savings
+        device (torch.device)
+            device to which model needs to be loaded to
+    """
+    if zipfile.is_zipfile(model_path):
+        with zipfile.ZipFile(model_path, 'r', zipfile.ZIP_DEFLATED) as zip_ref:
+            zip_ref.extractall(os.path.dirname(model_path))
+            unzip_path = model_path.replace('.zip', '.ckpt')
+    else:
+        unzip_path = model_path
+
+    model = get_dlrm_model()
+    model.load_state_dict(torch.load(unzip_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+
+    # If there was a zip file, clean up the unzipped files
+    if zipfile.is_zipfile(model_path):
+        os.remove(unzip_path)
+
+    return model
