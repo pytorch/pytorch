@@ -27,11 +27,13 @@ std::string TidyClassNameFromTorchScript(
       out += atom;
     }
   }
-  std::cout << " out name: " << out << std::endl;
   return out;
 }
 
 std::string GetCallNodeVariableName(const Node* call_node) {
+  TORCH_INTERNAL_ASSERT(
+      call_node->kind() == prim::CallFunction ||
+      call_node->kind() == prim::CallMethod);
   auto module_node = call_node->input(0)->node();
 
   if (!module_node->hasAttribute(attr::name)) {
@@ -41,6 +43,8 @@ std::string GetCallNodeVariableName(const Node* call_node) {
   if (module_node->inputs().size() == 0) {
     return module_name;
   }
+  // If module is from container, attr::name in module node only carries
+  // index info. Need to check parent node (container) for variable name.
   auto parent_module_value = module_node->input(0);
   while (parent_module_value) {
     auto parent_module_type = parent_module_value->type()->cast<ClassType>();
@@ -149,17 +153,20 @@ void functionCallSubstitution(Block* block) {
   }
 }
 
-void ONNXGraphScopeSetup(Graph& graph) {
-  if (graph.inputs().size() > 0) {
-    if (auto top_module_type =
-            graph.inputs().at(0)->type()->cast<ClassType>()) {
-      auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
-          TidyClassNameFromTorchScript(top_module_type->name()),
-          top_module_variable_name);
-      auto scope = graph.current_scope()->push(Symbol::scope(scope_name));
-      graph.set_current_scope(scope);
-    }
+WithCurrentScope ONNXGraphTopLevelScopeGuard(Graph& graph) {
+  WithCurrentScope current_scope_guard(graph, graph.current_scope());
+  if (graph.inputs().size() == 0) {
+    return current_scope_guard;
   }
+  if (auto top_module_type =
+          graph.inputs().at(0)->type()->cast<ClassType>()) {
+    auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
+        TidyClassNameFromTorchScript(top_module_type->name()),
+        top_module_variable_name);
+    auto scope = graph.current_scope()->push(Symbol::scope(scope_name));
+    return WithCurrentScope(graph, scope);
+  }
+  return current_scope_guard;
 }
 
 } // namespace
@@ -170,8 +177,8 @@ void ONNXGraphScopeSetup(Graph& graph) {
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {
-  ONNXGraphScopeSetup(graph);
   GRAPH_DUMP("Before function call substitution calls: ", &graph);
+  auto top_level_scope_guard = ONNXGraphTopLevelScopeGuard(graph);
   functionCallSubstitution(graph.block());
   GRAPH_DUMP("After function call substitution calls: ", &graph);
 }
