@@ -164,14 +164,18 @@ class ModelReportVisualizer:
 
         return filtered_dict
 
-    def _generate_tensor_table(self, filtered_data: OrderedDict[str, Any], tensor_features: List[str]) -> Tuple[List, List]:
+    def _generate_tensor_table(
+        self,
+        filtered_data: OrderedDict[str, Dict[str, Any]],
+        tensor_features: List[str]
+    ) -> Tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
         Currently meant to generate the headers and table for both the tensor information.
 
         Args:
-            filtered_data (OrderedDict[str, Any]): An OrderedDict (sorted in order of model) mapping:
+            filtered_data (OrderedDict[str, Dict[str, Any]]): An OrderedDict (sorted in order of model) mapping:
                 module_fqns -> feature_names -> values
             tensor_features (List[str]): A list of the tensor level features
 
@@ -337,18 +341,11 @@ class ModelReportVisualizer:
                 # get the data for that specific feature
                 feature_data = filtered_data[module_fqn][feature_name]
 
-                # if it is only a single value, is tensor, otherwise per channel
-                if isinstance(feature_data, torch.Tensor):
-                    # see what the size of shape is
-                    if len(feature_data.shape) == 0:
-                        # single value
-                        # means is per-tensor
-                        tensor_features.add(feature_name)
-                    else:
-                        # works means per channel
-                        channel_features.add(feature_name)
-                        num_channels = len(feature_data)
-                elif isinstance(feature_data, list):
+                # check if not zero dim tensor
+                is_tensor: bool = isinstance(feature_data, torch.Tensor)
+                is_not_zero_dim: bool = is_tensor and len(feature_data.shape) != 0
+
+                if is_not_zero_dim or isinstance(feature_data, list):
                     # works means per channel
                     channel_features.add(feature_name)
                     num_channels = len(feature_data)
@@ -468,45 +465,50 @@ class ModelReportVisualizer:
         tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
         channel_info_features_count = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
 
+        # see if valid tensor or channel plot
+        is_valid_per_tensor_plot: bool = tensor_info_features_count == 1
+        is_valid_per_channel_plot: bool = channel_info_features_count == 1
+
+        # offset should either be one of tensor or channel table or neither
+        feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        if is_valid_per_channel_plot:
+            feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+
         # keep track of per_channel or not
         data_is_per_channel: bool = False
 
         x_data: List = []
         y_data: List[List] = []
         # the feature will either be a tensor feature or channel feature
-        if tensor_info_features_count == 1:
-            # it should only be single value data, so easy to plot
+        if is_valid_per_tensor_plot or is_valid_per_channel_plot:
+            # extra setup for y_data if per channel
+            if is_valid_per_channel_plot:
+                # gather the x_data and multiple y_data
+                # calculate the number of channels
+                num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in channel_table) + 1
+                for channel in range(num_channels):
+                    y_data.append([])  # seperate data list per channel
+
             for table_row_num, row in enumerate(tensor_table):
-                row_value = row[ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS]
-                if not type(row_value) == str:
-                    x_data.append(table_row_num)
-                    y_data.append(row[ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS])
-
-        elif channel_info_features_count == 1:
-            data_is_per_channel = True
-            # gather the x_data and multiple y_data
-            # calculate the number of channels
-            num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in channel_table) + 1
-            for channel in range(num_channels):
-                y_data.append([])  # seperate data list per channel
-
-            # get the data for each channel seperately
-            for table_row_num, row in enumerate(channel_table):
-                # we want append based on what channel it is
-                current_channel: int = row[self.CHANNEL_NUM_INDEX]
-
+                # get x_value to append
+                x_val_to_append = table_row_num
+                current_channel: int = -1  # intially chose current channel
                 # if new module we are looking at, add it's index to x_data
-                if current_channel == 0:
-                    # looking at new module (it's 0th channel)
+                if is_valid_per_channel_plot and row[self.CHANNEL_NUM_INDEX] == 0:
                     new_module_index: int = table_row_num // num_channels
-                    x_data.append(new_module_index)
+                    x_val_to_append = new_module_index
+                    current_channel = row[self.CHANNEL_NUM_INDEX]
 
-                # get the corresponding data value to add
-                data_value = row[ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS]
-                if not type(data_value) == str:
-                    # every num channels all belong to the same module
-                    # add it to the proper channel list
-                    y_data[current_channel].append(data_value)
+                # the index of the feature will the 0 + num non feature columns
+                tensor_feature_index = feature_column_offset
+                row_value = row[tensor_feature_index]
+                if not type(row_value) == str:
+                    x_data.append(x_val_to_append)
+                    # how we append y value depends on if per tensor or not
+                    if is_valid_per_channel_plot:
+                        y_data[current_channel].append(row_value)
+                    else:
+                        y_data.append(row_value)
         else:
             # more than one feature was chosen
             error_str = "Make sure to pick only a single feature with your filter to plot a graph."
