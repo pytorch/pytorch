@@ -668,7 +668,7 @@ class NativeFunction:
             from torchgen.api.types import NativeSignature
             implicit_composite = DispatchKey.CompositeImplicitAutograd
             name = str(func.name.name)
-            if name.endswith("_like") or name.startswith("new_"):
+            if name.endswith("_like"):
                 implicit_composite = DispatchKey.CompositeExplicitAutograd
             elif func.arguments.tensor_options is None:
                 pass
