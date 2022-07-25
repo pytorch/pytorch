@@ -41,6 +41,7 @@ CUDA_MAJOR, CUDA_MINOR = 0, 0
 if RUN_NVFUSER and torch.version.cuda is not None:
     CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.')[:2])
 
+os.environ['PYTORCH_NVFUSER_ENABLE'] = 'linear_decomposition,conv_decomposition'
 os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,unroll_with_rng'
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
 # TODO: enable complex when we fixes the extremal cases in OpInfo
@@ -4811,6 +4812,33 @@ class TestCudaFuser(JitTestCase):
                 t_cpu_jit(x)
 
             self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_expand(self):
+        device = "cuda"
+        x = torch.randn(3, 5, device=device)
+        y = torch.randn(4, 2, 3, 5, device=device)
+
+        def t(x, y):
+            with torch.jit.strict_fusion():
+                x = x.relu()
+                o0 = x.expand(2, 3, 5)
+                o1 = x.expand_as(y)
+            return o0, o1
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, check_stride=True)
+
+        def t2(x, y):
+            o0 = x.expand(2, 3, 5)
+            o1 = x.expand_as(y)
+            x.add_(1)
+            return o0, o1
+
+        t2_jit = torch.jit.script(t2)
+        self._run_helper(t2_jit, t2, x, y, check_stride=True, num_fusion=0)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

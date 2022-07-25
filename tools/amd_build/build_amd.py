@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 
-import os
 import argparse
+import os
 import sys
 
 sys.path.append(

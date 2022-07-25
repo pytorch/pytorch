@@ -535,7 +535,7 @@ Here are a few key attributes for quantized Tensor:
 
     * scale (float)
     * zero_point (int)
-  * torch.per_tensor_affine would have quantization parameters of
+  * torch.per_channel_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
     * per_channel_zero_points (list of int)
@@ -852,8 +852,8 @@ based on observed tensor data are provided, developers can provide their own
 quantization functions. Quantization can be applied selectively to different
 parts of the model or configured differently for different parts of the model.
 
-We also provide support for per channel quantization for **conv2d()**,
-**conv3d()** and **linear()**
+We also provide support for per channel quantization for **conv1d()**, **conv2d()**,
+**conv3d()** and **linear()**.
 
 Quantization workflows work by adding (e.g. adding observers as
 ``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to

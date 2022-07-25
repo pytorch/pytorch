@@ -19,6 +19,20 @@ namespace cuda {
 
 namespace {
 
+TensorView* maybe_broadcast_inner_to_rank(TensorView* t, size_t rank) {
+  size_t t_rank = TensorDomain::noReductions(t->getMaybeRFactorDomain()).size();
+
+  // broadcast inner on inp to match rank with other.
+  if (t_rank < rank) {
+    const int num_bcast = static_cast<int>(rank - t_rank);
+    std::vector<bool> inner_bcast_dims(rank, false);
+    std::fill(
+        inner_bcast_dims.begin(), inner_bcast_dims.begin() + num_bcast, true);
+    t = broadcast(t, inner_bcast_dims);
+  }
+  return t;
+}
+
 Val* simplifiedInt(Val* val) {
   TORCH_INTERNAL_ASSERT(
       val->isConstInt(), "Expecting Const Int's only in this routine.");
@@ -96,6 +110,49 @@ Val* newScalar(ValType vtype, DataType dtype) {
       " in newScalar.");
 }
 
+IterType promoteIterType(IterType type1, IterType type2) {
+  // Iteration: Default
+  // Reduction: Should not appear here
+  // Broadcast: Propagated only if type1 and type2 are Broadcast
+  // Gather: Converted to Iteration
+  // Stride: Shold not appear here
+  // VectorComponent: Converted to Iteration
+
+  TORCH_INTERNAL_ASSERT(
+      type1 != IterType::Reduction && type1 != IterType::Stride,
+      "Invalid IterType: ",
+      type1)
+  TORCH_INTERNAL_ASSERT(
+      type2 != IterType::Reduction && type2 != IterType::Stride,
+      "Invalid IterType: ",
+      type2);
+
+  // Do not propagate Gather and VectorComponent
+  if (type1 == IterType::Gather || type1 == IterType::VectorComponent) {
+    type1 = IterType::Iteration;
+  }
+  if (type2 == IterType::Gather || type2 == IterType::VectorComponent) {
+    type2 = IterType::Iteration;
+  }
+
+  // At this point, type1 and type2 must be either Iteration or
+  // Broadcast
+  TORCH_INTERNAL_ASSERT(
+      type1 == IterType::Iteration || type1 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type1);
+  TORCH_INTERNAL_ASSERT(
+      type2 == IterType::Iteration || type2 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type2);
+
+  if (type1 == IterType::Broadcast) {
+    return type2;
+  } else {
+    return type1;
+  }
+}
+
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<TensorView*> tvs;
   for (auto val : vals) {
@@ -141,12 +198,8 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
       }
       extent_vals[i] = promoteSize(extent_vals[i], dom[i]->extent());
       if (iter_types[i].has_value()) {
-        // TODO: Enable, see conv tests and gather promotion/gather broadcast
-        // behavior.
-        //
-        // TORCH_INTERNAL_ASSERT(
-        //     iter_types[i].value() == dom[i]->getIterType(),
-        //     "Invalid iter type promotion in newOutputTv for expression.");
+        iter_types[i] =
+            promoteIterType(iter_types[i].value(), dom[i]->getIterType());
       } else {
         iter_types[i] = dom[i]->getIterType();
       }
@@ -210,17 +263,7 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
   for (const auto i : c10::irange(vals.size())) {
     if (vals[i]->getValType().value() == ValType::TensorView) {
       auto tv = vals[i]->as<TensorView>();
-      size_t tv_dims =
-          TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size();
-      if (tv_dims < n_dims) {
-        std::vector<bool> bcast_flags(n_dims, false);
-        for (const auto j : c10::irange(n_dims - tv_dims)) {
-          bcast_flags[j] = true;
-        }
-        out_vals[i] = broadcast(tv, bcast_flags);
-      } else {
-        out_vals[i] = vals[i];
-      }
+      out_vals[i] = maybe_broadcast_inner_to_rank(tv, n_dims);
     } else {
       out_vals[i] = vals[i];
     }
@@ -558,8 +601,9 @@ namespace {
 // Helper function to reduce repetitive code
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
-  return func(v1->template as<Val>(), v2->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(v1->template as<Val>(), v2->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2>
@@ -568,9 +612,10 @@ TensorView* arithOpOverloads(
     T1* v1,
     T2* v2,
     DataType common_dtype) {
-  return binaryOp(
-             type, v1->template as<Val>(), v2->template as<Val>(), common_dtype)
-      ->template as<TensorView>();
+  Val* out = binaryOp(
+      type, v1->template as<Val>(), v2->template as<Val>(), common_dtype);
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3>
@@ -580,11 +625,12 @@ TensorView* arithOpOverloads(
     T2* v2,
     T3* v3) {
   auto vals = maybeBroadcast({v1, v2, v3});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3, typename T4>
@@ -595,12 +641,13 @@ TensorView* arithOpOverloads(
     T3* v3,
     T4* v4) {
   auto vals = maybeBroadcast({v1, v2, v3, v4});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>(),
-             vals[3]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>(),
+      vals[3]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 // Output type promotion logic for binary operators
@@ -946,6 +993,17 @@ static TensorView* newForReduction(
   return IrBuilder::create<TensorView>(td, data_type);
 }
 
+namespace {
+
+// PyTorch accepts reductions of zero-dimensional tensors, which are
+// just ignored.
+TensorView* reductionOpZeroDimTensor(TensorView* inp) {
+  TORCH_INTERNAL_ASSERT(inp->domain()->noReductions().size() == 0);
+  return set(inp);
+}
+
+} // namespace
+
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
@@ -961,9 +1019,12 @@ TensorView* reductionOp(
       TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
-  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
-
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // PyTorch allows reduction of 0-dim tensors
+  if (tv->domain()->noReductions().size() == 0) {
+    return reductionOpZeroDimTensor(tv);
+  }
 
   std::vector<unsigned int> uint_axes;
   const int ndims = tv->domain()->noReductions().size();
@@ -1003,7 +1064,6 @@ TensorView* reductionOp(
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
     }
-
     out = broadcast(out, is_broadcast);
   }
   return out;
@@ -1121,11 +1181,14 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
   auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   TORCH_CHECK(
-      expanded_sizes.size() == inp_domain.size(),
-      "Invalid expand, number of sizes provided is expected to be ",
+      expanded_sizes.size() >= inp_domain.size(),
+      "Invalid expand, number of sizes provided is expected to be at least ",
       inp_domain.size(),
       " but received ",
       expanded_sizes.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, expanded_sizes.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   std::vector<Val*> maybe_expanded_sizes;
   maybe_expanded_sizes.resize(inp_domain.size(), nullptr);
@@ -1194,11 +1257,14 @@ TensorView* expand_as(TensorView* inp, TensorView* other) {
       TensorDomain::noReductions(other->getMaybeRFactorDomain());
 
   TORCH_CHECK(
-      inp_domain.size() == other_domain.size(),
-      "Invalid expand_as, dimensions of inp don't match dimensions of other, expected other to be ",
+      inp_domain.size() <= other_domain.size(),
+      "Invalid expand_as, dimensions of inp is higher than dimensions of other, expected other to be at least ",
       inp_domain.size(),
       " but received ",
       other_domain.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, other_domain.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
 
   std::vector<IterDomain*> out_domain;
   std::vector<Val*> maybe_expanded_sizes;
@@ -1488,6 +1554,11 @@ Val* where(Val* c, Val* v1, Val* v2) {
   auto out_dtype = common_dtype;
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
+  // Even when v1 and v2 are scalar, the output is a tensor if the
+  // conditional input is a tensor.
+  if (c->getValType() == ValType::TensorView) {
+    out_vtype = ValType::TensorView;
+  }
   auto vals = maybeBroadcast({c, v1, v2});
   Val* out = nullptr;
   if (out_vtype == ValType::TensorView) {
