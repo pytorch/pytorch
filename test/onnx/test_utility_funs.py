@@ -1515,21 +1515,27 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return z
 
         module = MainModule()
-
+        ref_node_names = [
+            "/_module_1/Gemm",
+            "/_module_2/Gemm",
+            "/_module_3/Gemm",
+            "/_module_4/Gemm",
+            "/Mul",
+            "/Mul_1",
+        ]
         f = io.BytesIO()
+
         torch.onnx.export(module, torch.ones(1, 10), f, output_names=["y"])
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
 
-        [
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/storch.nn.modules.linear.Linear/Gemm",
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear1/Gemm",
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/Mul",
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear2/Gemm",
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/Mul1",
-            "test_utility_funs.TestUtilityFuns_opset9.test_onnx_node_naming.<locals>.MainModule/torch.nn.modules.linear.Linear3/Gemm",
-        ]
-
-        node_names = [n.name for n in onnx_model.graph.node]
+        torch.onnx.export(
+            torch.jit.script(module), torch.ones(1, 10), f, output_names=["y"]
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):

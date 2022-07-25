@@ -82,8 +82,6 @@ class NodeNameGenerator {
   NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(g){};
   virtual ~NodeNameGenerator() = 0;
   virtual void PopulateNodeNames() = 0;
-  // TODO: don't need GetName probably.
-  virtual c10::optional<std::string> GetName(const Node* n) const = 0;
 
  protected:
   virtual void PopulateNodeNames(Block*) = 0;
@@ -107,7 +105,6 @@ class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
   ScopedNodeNameGenerator(std::shared_ptr<Graph> g) : NodeNameGenerator(g){};
   void PopulateNodeNames() override;
-  c10::optional<std::string> GetName(const Node* n) const override;
 
  protected:
   void PopulateNodeNames(Block*) override;
@@ -144,7 +141,6 @@ bool NodeNameGenerator::IsGraphOutput(
 }
 
 void NodeNameGenerator::UpdateOutputsNames(Node* n) {
-  // auto node_name = this->GetName(n);
   if (node_names_.find(n) != node_names_.end()) {
     auto node_name = node_names_[n];
     for (auto i : c10::irange(n->outputs().size())) {
@@ -188,14 +184,6 @@ void ScopedNodeNameGenerator::CreateName(Node* n) {
     node_names_[n] = UpdateBaseName(base_node_name_counts_, name);
   }
   n->s_(Symbol::attr(::torch::onnx::OnnxNodeNameAttribute), node_names_[n]);
-}
-
-c10::optional<std::string> ScopedNodeNameGenerator::GetName(
-    const Node* n) const {
-  if (node_names_.find(n) == node_names_.end()) {
-    return c10::nullopt;
-  }
-  return node_names_.at(n);
 }
 
 std::string ScopedNodeNameGenerator::GetFullScopeName(ScopePtr scope) {
