@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 import operator
 import unittest
 from torch.fx import GraphModule, symbolic_trace

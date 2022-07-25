@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -64,6 +65,7 @@ dtype_abbrs = {
 }
 
 
+@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -820,6 +822,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
+@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
@@ -835,7 +838,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefFunctionMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
@@ -851,7 +854,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefDispatchMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
