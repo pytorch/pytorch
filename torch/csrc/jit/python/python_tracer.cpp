@@ -27,19 +27,23 @@ namespace tracer {
 std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
+  Py_INCREF(frame);
   std::vector<StackEntry> entries;
 
   while (nullptr != frame) {
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
     size_t line =
-        PyCode_Addr2Line(PyFrame_GetCode(frame), PyFrame_GetLasti(frame));
+        PyCode_Addr2Line(code.get(), PyFrame_GetLasti(frame));
     std::string filename =
-        THPUtils_unpackString(PyFrame_GetCode(frame)->co_filename);
+        THPUtils_unpackString(code->co_filename);
     std::string funcname =
-        THPUtils_unpackString(PyFrame_GetCode(frame)->co_name);
+        THPUtils_unpackString(code->co_name);
     auto source = std::make_shared<Source>(funcname, filename, line);
     entries.emplace_back(
         StackEntry{funcname, SourceRange(source, 0, funcname.size())});
-    frame = PyFrame_GetBack(frame);
+    auto new_frame = PyFrame_GetBack(frame);
+    Py_DECREF(frame);
+    frame = new_frame;
   }
   return entries;
 }
