@@ -2205,7 +2205,7 @@ def batch_norm(
         return res
 
 
-def _layer_norm_shared(
+def _layer_norm_returns_normalized_input_mean_rstd(
     g, input, normalized_shape, weight, bias, eps, cudnn_enable, return_mean_rstd
 ):
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -2237,6 +2237,7 @@ def _layer_norm_shared(
         normalized = add(g, normalized, bias)
 
     if return_mean_rstd:
+        # rdenominator = 1 / sqrt(variance + eps)
         rdenominator = reciprocal(g, denominator)
         return normalized, mean, rdenominator
     else:
@@ -2245,14 +2246,14 @@ def _layer_norm_shared(
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
 def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
-    return _layer_norm_shared(
+    return _layer_norm_returns_normalized_input_mean_rstd(
         g, input, normalized_shape, weight, bias, eps, False, True
     )
 
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    normalized, _, _ = _layer_norm_shared(
+    normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
         g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
     )
     return normalized
