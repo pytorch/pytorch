@@ -56,6 +56,39 @@ def all_prims():
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
 
 
+class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.ops.prims.* functions to
+    use nvFuser's prims in torch.ops.nvprims.*
+
+    >>> with NvfuserPrimMode():
+    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
+
+    By default, this context manager will fall back on the torch.ops.prims* if the
+    nvprim does not exist.
+    """
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
+            orig_func, torch._ops.OpOverloadPacket
+        ):
+            namespace = str(orig_func).split(".")[0]
+            name = str(orig_func).split(".")[1]
+            if namespace == "prims":
+                nvfunc = getattr(torch.ops.nvprims, name, None)
+                if nvfunc is not None:
+                    return nvfunc(*args, **kwargs)
+        return orig_func(*args, **kwargs)
+
+
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
     """
     Switches the interpretation of torch.* functions and Tensor methods to
