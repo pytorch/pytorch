@@ -664,7 +664,20 @@ class NativeFunction:
                 "name, then delete the dispatch table"
             )
         elif not structured and structured_delegate is None:
-            dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
+
+            from torchgen.api.types import NativeSignature
+            implicit_composite = DispatchKey.CompositeImplicitAutograd
+            name = str(func.name.name)
+            if name.endswith("_like") or name.startswith("new_"):
+                pass
+            elif func.arguments.tensor_options is None:
+                pass
+            elif any(isinstance(a.argument, Argument) and a.argument.type.is_tensor_like() for a in NativeSignature(func).arguments()):
+                pass
+            else:
+                implicit_composite = DispatchKey.CompositeExplicitAutograd
+
+            dispatch[implicit_composite] = BackendMetadata(
                 cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
 
