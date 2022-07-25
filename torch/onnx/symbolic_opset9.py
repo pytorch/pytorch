@@ -556,7 +556,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return v is not None and v != u
 
     if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
         dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
@@ -702,11 +702,13 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]  # type: ignore[assignment]
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype")
             return symbolic(g, self)
+
+        dim_desc = "is" if allow_multi_dim_support else "i"
 
         @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
@@ -2751,7 +2753,7 @@ def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return empty(g, sizes, dtype, layout, device, pin_memory)
@@ -2836,7 +2838,7 @@ def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return zeros(g, sizes, dtype, layout, device, pin_memory)
@@ -2878,7 +2880,7 @@ def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     return ones(g, sizes, dtype, layout, device, pin_memory)
@@ -3069,7 +3071,7 @@ def hardshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     lambd_op = g.op(
@@ -3098,7 +3100,7 @@ def softshrink(g, self, lambd):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
     lambd_op = g.op(
@@ -4184,11 +4186,11 @@ def scatter_add(g, self, dim, index, src):
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible"
         )
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
+    dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
         symbolic_helper.cast_pytorch_to_onnx[dtype]
     )
     # FIXME(justinchuby): Type mismatch reported by mypy
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]  # type: ignore
+    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]  # type: ignore[call-overload]
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
         assert dtype is not None
@@ -5382,7 +5384,7 @@ class Prim:
         dtype = symbolic_helper._try_get_scalar_type(self)
         if dtype is None:
             dtype = "Float"
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # typ
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
         return g.op("Constant", value_t=torch.tensor(dtype))
