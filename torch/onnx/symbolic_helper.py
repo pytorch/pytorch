@@ -1083,6 +1083,7 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     else:
         type = dtype
 
+    # TODO(justinchuby): Remove reference to scalar_type_to_onnx here
     start = g.op("Cast", start, to_i=scalar_type_to_onnx[type]) if start else None
     end = g.op("Cast", end, to_i=scalar_type_to_onnx[type]) if end else None
     step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
