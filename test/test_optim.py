@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, gradcheck
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2682,6 +2682,31 @@ class TestSWAUtils(TestCase):
         self.assertEqual(dnn.bn.momentum, 0.3)
 
 instantiate_parametrized_tests(TestLRScheduler)
+
+
+def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
+    # Ignored is the list of values in `opt_differentiable_state`, we do this
+    # for `gradcheck` to correctly track the state tensors as function inputs
+    # because otherwise it can't unpack the values in the `opt_differentiable_state`
+    # dict
+    p = p.clone()
+    p.grad = grad
+    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt = opt_class([p], **kwargs)
+    opt.state.update(opt_differentiable_state)
+    opt.step()
+    return (p,) + tuple(opt_differentiable_state.values())
+
+
+class TestDifferentiableOptimizer(TestCase):
+
+    def test_sgd(self):
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state = {'momentum_buffer': mbuff}
+        gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
 
 if __name__ == '__main__':
     run_tests()

@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required
+from .optimizer import Optimizer, required, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
@@ -90,7 +90,8 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None):
+                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None,
+                 differentiable=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -100,7 +101,8 @@ class SGD(Optimizer):
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        maximize=maximize, foreach=foreach)
+                        maximize=maximize, foreach=foreach,
+                        differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -112,7 +114,7 @@ class SGD(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
