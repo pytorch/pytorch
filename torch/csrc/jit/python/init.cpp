@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/schema_info.h>
 
 #include <ATen/core/operator_name.h>
+#include <c10/core/SymInt.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
@@ -276,6 +277,12 @@ void initJITBindings(PyObject* module) {
       JITException::setCaughtPythonClassName(className.value_or(""));
       exc(e.what());
     }
+  });
+
+  m.def("_set_skip_symint_overloads", [](bool val) -> bool {
+    bool old_val = c10::skipSymIntOverloads();
+    c10::skipSymIntOverloads() = val;
+    return old_val;
   });
 
   m.def(

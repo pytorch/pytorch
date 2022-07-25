@@ -1,8 +1,14 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymbolicIntNode.h>
+#include <atomic>
 
 namespace c10 {
+
+std::atomic<bool>& skipSymIntOverloads() {
+  static std::atomic<bool> skipSymIntOverloads_{true};
+  return skipSymIntOverloads_;
+}
 
 std::shared_ptr<SymbolicIntNode> SymInt::toSymbolicIntNode() const {
   auto& st = getSymIntTable();

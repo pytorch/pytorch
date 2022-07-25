@@ -132,6 +132,17 @@ CPP_SYMINT_CLASS = type(torch._C.SymbolicIntNode.new_symint(1))
 
 class TestPySymInt(TestCase):
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Setup the dynamic shape mode
+        cls.old_skip_python_overloads = torch._C._set_skip_symint_overloads(False)
+        return super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        torch._C._lazy._set_symbolic_shape_mode(cls.old_skip_python_overloads)
+        return super().tearDownClass()
+
     @skipIfNoSympy
     def test_roundtrip(self):
         shape_env = ShapeEnv()

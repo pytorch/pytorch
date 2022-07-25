@@ -91,5 +91,6 @@ class C10_API SymInt {
   int64_t data_;
 };
 
+C10_API std::atomic<bool>& skipSymIntOverloads();
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10

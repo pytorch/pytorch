@@ -674,10 +674,15 @@ static bool is_int_or_symint(PyObject* obj) {
   // which may have side effects if obj is a symint node
   // so we do `is_symint_node` check first
   // TODO: maybe we should be using checkLong here?
-  return torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj);
+  return !c10::skipSymIntOverloads() &&
+      (torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj));
 }
 
 static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
+  if (c10::skipSymIntOverloads()) {
+    return false;
+  }
+
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
@@ -1229,7 +1234,8 @@ bool FunctionSignature::parse(
   // expand((5,3))
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
-       params[0].type_ == ParameterType::SYM_INT_LIST)) {
+       ((params[0].type_ == ParameterType::SYM_INT_LIST) &&
+        !c10::skipSymIntOverloads()))) {
     allow_varargs_intlist = true;
   }
 
