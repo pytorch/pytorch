@@ -2472,8 +2472,7 @@ Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(
-      !(self.layout() == kSparseCsr || self.layout() == kSparseCsc ||
-        self.layout() == kSparseBsr || self.layout() == kSparseBsc),
+      !has_any_layout(self, kSparseCsr, kSparseCsc, kSparseBsr, kSparseBsc),
       "torch.transpose_: in-place transposition is not supported for ",
       self.layout(),
       " layout");

@@ -1162,8 +1162,9 @@ at::IntArrayRef strides_or_error(
         "'");
     if (input.is_mkldnn())
       return IntArrayRef({});
-    if (input.is_sparse_csr())
+    if (at::has_any_layout(input, c10::kSparseCsr)) {
       return IntArrayRef({});
+    }
     return input.strides();
   } else {
     return IntArrayRef({});

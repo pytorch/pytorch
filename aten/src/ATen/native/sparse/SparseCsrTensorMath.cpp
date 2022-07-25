@@ -566,8 +566,8 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
-  if ((mat1.layout() == kSparseCsc || mat1.layout() == kSparseCsr) &&
-      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseCsr)) {
+  if (has_any_layout(mat1, kSparseCsc, kSparseCsr) &&
+      has_any_layout(mat2, kSparseCsc, kSparseCsr)) {
     // TODO: Expensive conversion to CSR. Should add native support for CSC.
     // Covers CSC @ CSR
     // Covers CSR @ CSC
