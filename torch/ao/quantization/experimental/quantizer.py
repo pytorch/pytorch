@@ -57,7 +57,7 @@ class APoTQuantizer():
         result: fp representation of input Tensor
     """
     def dequantize(self, apot_tensor) -> Tensor:
-        apot_tensor_data = apot_tensor.data
+        apot_tensor_data = apot_tensor.data.flatten()
 
         # map apot_to_float over tensor2quantize elements
         result_temp = np.empty(apot_tensor_data.size())
