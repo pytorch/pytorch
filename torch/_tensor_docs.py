@@ -4274,10 +4274,7 @@ add_docstr_all('to_dense',
                r"""
 to_dense() -> Tensor
 
-Creates a strided copy of :attr:`self`.
-
-.. warning::
-  Throws an error if :attr:`self` is a strided tensor.
+Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
 
 Example::
 
@@ -4295,6 +4292,7 @@ Example::
 add_docstr_all('to_sparse',
                r"""
 to_sparse(sparseDims) -> Tensor
+
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
 :ref:`coordinate format <sparse-coo-docs>`.
 
@@ -4322,12 +4320,28 @@ Example::
 add_docstr_all('to_sparse_csr',
                r"""
 to_sparse_csr() -> Tensor
+
 Convert a tensor to compressed row storage format. Only works with 2D tensors.
 
 Example::
 
     >>> dense = torch.randn(5, 5)
     >>> sparse = dense.to_sparse_csr()
+    >>> sparse._nnz()
+    25
+
+""")
+
+add_docstr_all('to_sparse_csc',
+               r"""
+to_sparse_csc() -> Tensor
+
+Convert a tensor to compressed column storage format. Only works with 2D tensors.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csc()
     >>> sparse._nnz()
     25
 
@@ -4344,6 +4358,21 @@ Example::
     >>> sparse = dense.to_sparse_csr()
     >>> sparse_bsr = sparse.to_sparse_bsr((5, 5))
     >>> sparse_bsr.col_indices()
+    tensor([0, 1, 0, 1])
+
+""")
+
+add_docstr_all('to_sparse_bsc',
+               r"""
+to_sparse_bsc(blocksize) -> Tensor
+Convert a CSR tensor to a block sparse column (BSC) storage format of given blocksize.
+
+Example::
+
+    >>> dense = torch.randn(10, 10)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse_bsc = sparse.to_sparse_bsc((5, 5))
+    >>> sparse_bsc.row_indices()
     tensor([0, 1, 0, 1])
 
 """)
