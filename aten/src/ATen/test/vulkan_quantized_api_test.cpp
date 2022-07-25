@@ -1053,6 +1053,43 @@ TEST_F(VulkanAPITest, quantized_div) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, quantized_upsample_nearest2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu =
+      at::rand({2, 13, 12, 27}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6}, 1, 1);
+
+  const double scale = 0.1;
+  const int zero_point = 10;
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto upsample_vulkan =
+      at::native::vulkan::ops::quantized_upsample_nearest2d(
+          out_vulkan, {4, 6}, 1, 1);
+
+  const auto in_cpu2 =
+      at::rand({2, 13, 4, 6}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_vulkan_deq =
+      at::native::vulkan::ops::dequantize(upsample_vulkan);
+  auto output_for_dequantized_vulkan = vulkan_to_cpu(out_vulkan_deq, in_cpu2);
+
+  float rtol = 0;
+  float atol = 1;
+  const auto check =
+      at::allclose(out_cpu, output_for_dequantized_vulkan, rtol, atol);
+
+  if (!check) {
+    std::cout << "Max Diff allowed: " << rtol << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */
