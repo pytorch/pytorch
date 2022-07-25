@@ -38,7 +38,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             # Same shape
             shape = (5, 5)
@@ -104,7 +104,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             shape = (5, 5)
             a = make_arg(shape)
@@ -266,7 +266,7 @@ class TestPrims(TestCase):
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-        for executor in ('aten', 'nvfuser'):
+        for executor in ('aten', 'strictly_nvfuser'):
             fn = partial(traced, executor=executor)
             shape = (5, 5)
             a = make_arg(shape)
@@ -293,7 +293,7 @@ class TestPrims(TestCase):
         b_dict = {"b": b}
 
         result_aten = fn(a, b_dict, executor="aten")
-        result_nvfuser = fn(a, b_dict, executor="nvfuser")
+        result_nvfuser = fn(a, b_dict, executor="strictly_nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
 
     @dtypes(torch.float32)
