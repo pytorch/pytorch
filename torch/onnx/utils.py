@@ -25,6 +25,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
@@ -1228,7 +1229,7 @@ def unconvertible_ops(
 def _setup_trace_module_map(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]],
-):
+) -> Set[str]:
     def __register_attribute_hook():
         attr_name = "_onnx_attrs"
 
@@ -1258,13 +1259,8 @@ def _setup_trace_module_map(
     }
     torch.jit._trace._trace_module_map = trace_module_map
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
-        export_modules_as_functions = {
-            torch.typename(type(_m)) for _m, _ in trace_module_map.items()
-        }
-    elif (
-        isinstance(export_modules_as_functions, set)
-        and len(export_modules_as_functions) > 0
-    ):
+        module_typenames = {torch.typename(type(module)) for module in trace_module_map}
+    elif isinstance(export_modules_as_functions, set) and export_modules_as_functions:
 
         def _find_typename(v):
             if isinstance(v, type):
@@ -1277,14 +1273,13 @@ def _setup_trace_module_map(
                 )
 
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
-        export_modules_as_functions = module_typenames
     else:
-        export_modules_as_functions = False
+        module_typenames = set()
 
-    if export_modules_as_functions:
+    if module_typenames:
         __register_attribute_hook()
 
-    return export_modules_as_functions
+    return module_typenames
 
 
 def _reset_trace_module_map():
@@ -1346,8 +1341,10 @@ def _export(
                 "This is because `opset_version` < 15 implies IR version < 8, which means "
                 "no local function support. "
             )
+
+        module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
-            export_modules_as_functions = _setup_trace_module_map(
+            module_typenames_to_export_as_functions = _setup_trace_module_map(
                 model, export_modules_as_functions
             )
 
@@ -1408,10 +1405,12 @@ def _export(
 
             _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions:
+            if module_typenames_to_export_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = _C._jit_pass_onnx_function_extraction(
-                    graph, export_modules_as_functions, list(params_dict.keys())
+                    graph,
+                    module_typenames_to_export_as_functions,
+                    list(params_dict.keys()),
                 )
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
