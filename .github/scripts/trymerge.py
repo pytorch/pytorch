@@ -628,7 +628,7 @@ class GitHubPR:
         if self.labels is not None:
             return self.labels
         labels = [node['node']['name'] for node in self.info["labels"]["edges"]]
-        self.labels = labels
+        self.labels: List[str] = labels
         return self.labels
 
     def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
@@ -1120,7 +1120,7 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     if len(pending_checks) > 0:
         raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
 
-def has_ciflow_label(labels: List[str]):
+def has_ciflow_label(labels: List[str]) -> bool:
     return len(list(filter(CIFLOW_LABEL.match, labels))) > 0
 
 def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
