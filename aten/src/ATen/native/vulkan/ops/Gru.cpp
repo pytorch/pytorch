@@ -175,27 +175,29 @@ VulkanOpContext gru_context_create(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan gru expects 'dropout' to be 0.0.");
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(7);
-  packed_context.emplace_back(pack_linear_op_contexts(params_cpu, num_layers));
-  packed_context.emplace_back(has_biases);
-  packed_context.emplace_back(num_layers);
-  packed_context.emplace_back(dropout);
-  packed_context.emplace_back(train);
-  packed_context.emplace_back(bidirectional);
-  packed_context.emplace_back(batch_first);
+  c10::impl::GenericList source_args{c10::AnyType::get()};
+  source_args.reserve(7);
+  source_args.emplace_back(params_cpu);
+  source_args.emplace_back(has_biases);
+  source_args.emplace_back(num_layers);
+  source_args.emplace_back(dropout);
+  source_args.emplace_back(train);
+  source_args.emplace_back(bidirectional);
+  source_args.emplace_back(batch_first);
 
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(7);
-  unpacked_context.emplace_back(params_cpu);
-  unpacked_context.emplace_back(has_biases);
-  unpacked_context.emplace_back(num_layers);
-  unpacked_context.emplace_back(dropout);
-  unpacked_context.emplace_back(train);
-  unpacked_context.emplace_back(bidirectional);
-  unpacked_context.emplace_back(batch_first);
+  VulkanOpContext op_context(source_args);
 
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  op_context.get_packed_args().reserve(7);
+  op_context.get_packed_args().emplace_back(
+      pack_linear_op_contexts(params_cpu, num_layers));
+  op_context.get_packed_args().emplace_back(has_biases);
+  op_context.get_packed_args().emplace_back(num_layers);
+  op_context.get_packed_args().emplace_back(dropout);
+  op_context.get_packed_args().emplace_back(train);
+  op_context.get_packed_args().emplace_back(bidirectional);
+  op_context.get_packed_args().emplace_back(batch_first);
+
+  return op_context;
 }
 
 std::tuple<Tensor, Tensor> gru_context_run(
@@ -248,20 +250,44 @@ std::tuple<Tensor, Tensor> gru_context_run(
 
     const auto& r = at::sigmoid(
         linear_context_run(
-            x, cxt_ir->get_packed(), cxt_ir->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_ir->get_packed_args(),
+            cxt_ir->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_hr->get_packed(), cxt_hr->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_hr->get_packed_args(),
+            cxt_hr->get_source_args(),
+            1.0f,
+            1.0f));
     const auto& z = at::sigmoid(
         linear_context_run(
-            x, cxt_iz->get_packed(), cxt_iz->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_iz->get_packed_args(),
+            cxt_iz->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_hz->get_packed(), cxt_hz->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_hz->get_packed_args(),
+            cxt_hz->get_source_args(),
+            1.0f,
+            1.0f));
     const auto& n = at::tanh(
         linear_context_run(
-            x, cxt_in->get_packed(), cxt_in->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_in->get_packed_args(),
+            cxt_in->get_source_args(),
+            1.0f,
+            1.0f) +
         r *
             (linear_context_run(
-                h, cxt_hn->get_packed(), cxt_hn->get_unpacked(), 1.0f, 1.0f)));
+                h,
+                cxt_hn->get_packed_args(),
+                cxt_hn->get_source_args(),
+                1.0f,
+                1.0f)));
     h = (z * (-1) + 1) * n + z * h;
     x = h; // next input
     h_n_list.emplace_back(
@@ -298,8 +324,8 @@ std::tuple<Tensor, Tensor> run_gru_context(
   return gru_context_run(
       input_vk,
       hx_vk,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked());
+      vulkan_context->get_packed_args(),
+      vulkan_context->get_source_args());
 }
 
 /* Backwards compatibility */
@@ -330,13 +356,12 @@ std::tuple<Tensor, Tensor> GruOpContext::run(
   return gru_context_run(
       input_vk,
       hx_vk,
-      vulkan_context_.get_packed(),
-      vulkan_context_.get_unpacked());
+      vulkan_context_.get_packed_args(),
+      vulkan_context_.get_source_args());
 }
 
 GruOpContext::State GruOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ =
-      std::get<1>(vulkan_context_.get_state());
+  const c10::impl::GenericList unpacked_ = vulkan_context_.get_state();
   const std::vector<Tensor> unpacked_params_cpu =
       unpacked_.get(0).toTensorVector();
   const bool unpacked_has_biases = unpacked_.get(1).toBool();

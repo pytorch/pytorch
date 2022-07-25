@@ -11,20 +11,31 @@ namespace ops {
 
 class VulkanOpContext final : public torch::jit::CustomClassHolder {
  public:
-  static VulkanOpContext create(
-      c10::impl::GenericList packed_context,
-      c10::impl::GenericList unpacked_context);
-  using State = std::tuple<c10::impl::GenericList, c10::impl::GenericList>;
-  State get_state() const;
-  const c10::impl::GenericList& get_packed() const;
-  const c10::impl::GenericList& get_unpacked() const;
+  static VulkanOpContext create(c10::impl::GenericList source_args) {
+    return VulkanOpContext(source_args);
+  }
+
+  VulkanOpContext(c10::impl::GenericList source_args)
+      : source_args_{source_args}, packed_args_{c10::AnyType::get()} {}
 
  private:
-  VulkanOpContext(
-      c10::impl::GenericList packed_context,
-      c10::impl::GenericList unpacked_context);
-  c10::impl::GenericList packed_;
-  c10::impl::GenericList unpacked_;
+  c10::impl::GenericList source_args_;
+  c10::impl::GenericList packed_args_;
+
+ public:
+  using State = c10::impl::GenericList;
+
+  State get_state() const {
+    return source_args_;
+  }
+
+  const c10::impl::GenericList& get_source_args() const {
+    return source_args_;
+  }
+
+  const c10::impl::GenericList& get_packed_args() const {
+    return packed_args_;
+  }
 };
 
 } // namespace ops

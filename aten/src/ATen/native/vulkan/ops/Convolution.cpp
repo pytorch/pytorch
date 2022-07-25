@@ -375,39 +375,41 @@ VulkanOpContext conv2d_context_create(
   const auto method =
       determine_method(weight.sizes(), stride, padding, dilation, groups);
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(10);
-  packed_context.emplace_back(convert(pack_weights(weight, method)));
-  packed_context.emplace_back(convert(pack_biases(bias, weight)));
-  packed_context.emplace_back(pack_filter(weight, dilation));
-  packed_context.emplace_back(pack_params(stride));
-  packed_context.emplace_back(pack_params(padding));
-  packed_context.emplace_back(output_padding);
-  packed_context.emplace_back(pack_params(dilation));
-  packed_context.emplace_back(safe_downcast<int32_t>(groups));
-  packed_context.emplace_back(
+  c10::impl::GenericList source_args{c10::AnyType::get()};
+  source_args.reserve(10);
+  source_args.emplace_back(weight);
+  source_args.emplace_back(bias);
+  source_args.emplace_back(weight.sizes().vec());
+  source_args.emplace_back(stride_arg.vec());
+  source_args.emplace_back(padding_arg.vec());
+  source_args.emplace_back(output_padding_arg.vec());
+  source_args.emplace_back(dilation_arg.vec());
+  source_args.emplace_back(groups);
+  source_args.emplace_back(output_min);
+  source_args.emplace_back(output_max);
+  source_args.emplace_back(method);
+
+  VulkanOpContext op_context(source_args);
+
+  op_context.get_packed_args().reserve(10);
+  op_context.get_packed_args().emplace_back(
+      convert(pack_weights(weight, method)));
+  op_context.get_packed_args().emplace_back(convert(pack_biases(bias, weight)));
+  op_context.get_packed_args().emplace_back(pack_filter(weight, dilation));
+  op_context.get_packed_args().emplace_back(pack_params(stride));
+  op_context.get_packed_args().emplace_back(pack_params(padding));
+  op_context.get_packed_args().emplace_back(output_padding);
+  op_context.get_packed_args().emplace_back(pack_params(dilation));
+  op_context.get_packed_args().emplace_back(safe_downcast<int32_t>(groups));
+  op_context.get_packed_args().emplace_back(
       output_min ? output_min->template to<float>()
                  : -std::numeric_limits<float>::infinity());
-  packed_context.emplace_back(
+  op_context.get_packed_args().emplace_back(
       output_max ? output_max->template to<float>()
                  : +std::numeric_limits<float>::infinity());
-  packed_context.emplace_back(method);
+  op_context.get_packed_args().emplace_back(method);
 
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(10);
-  unpacked_context.emplace_back(weight);
-  unpacked_context.emplace_back(bias);
-  unpacked_context.emplace_back(weight.sizes().vec());
-  unpacked_context.emplace_back(stride_arg.vec());
-  unpacked_context.emplace_back(padding_arg.vec());
-  unpacked_context.emplace_back(output_padding_arg.vec());
-  unpacked_context.emplace_back(dilation_arg.vec());
-  unpacked_context.emplace_back(groups);
-  unpacked_context.emplace_back(output_min);
-  unpacked_context.emplace_back(output_max);
-  unpacked_context.emplace_back(method);
-
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  return op_context;
 }
 
 void conv2d_sliding_window(
@@ -620,7 +622,9 @@ Tensor run_conv2d_clamp_context(
     const Tensor& input,
     const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
   return conv2d_context_run(
-      input, vulkan_context->get_packed(), vulkan_context->get_unpacked());
+      input,
+      vulkan_context->get_packed_args(),
+      vulkan_context->get_source_args());
 }
 
 /* Backwards compatibility */
@@ -653,12 +657,13 @@ Conv2dOpContext Conv2dOpContext::create(
 
 Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   return conv2d_context_run(
-      input_arg, vulkan_context_.get_packed(), vulkan_context_.get_unpacked());
+      input_arg,
+      vulkan_context_.get_packed_args(),
+      vulkan_context_.get_source_args());
 }
 
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ =
-      std::get<1>(vulkan_context_.get_state());
+  const c10::impl::GenericList unpacked_ = vulkan_context_.get_state();
   const Tensor unpacked_weight = unpacked_.get(0).toTensor();
   const c10::optional<Tensor> unpacked_bias = unpacked_.get(1).isTensor()
       ? unpacked_.get(1).toTensor()

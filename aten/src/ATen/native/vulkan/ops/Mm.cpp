@@ -199,17 +199,18 @@ VulkanOpContext context_create(
       "Reason: The provided (weight, bias) parameters are either invalid "
       "individually or their combination is not supported by Vulkan Impl.");
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(2);
-  packed_context.emplace_back(convert(pack_weights(weight)));
-  packed_context.emplace_back(convert(pack_biases(weight, bias)));
+  c10::impl::GenericList source_args{c10::AnyType::get()};
+  source_args.reserve(2);
+  source_args.emplace_back(weight);
+  source_args.emplace_back(bias);
 
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(2);
-  unpacked_context.emplace_back(weight);
-  unpacked_context.emplace_back(bias);
+  VulkanOpContext op_context(source_args);
 
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  op_context.get_packed_args().reserve(2);
+  op_context.get_packed_args().emplace_back(convert(pack_weights(weight)));
+  op_context.get_packed_args().emplace_back(convert(pack_biases(weight, bias)));
+
+  return op_context;
 }
 
 static Tensor reshape_to_2d(const Tensor& input_arg) {
@@ -368,8 +369,8 @@ Tensor addmm(
 
   return context_run(
       input,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
+      vulkan_context.get_packed_args(),
+      vulkan_context.get_source_args(),
       alpha.to<float>(),
       beta.to<float>());
 }
@@ -380,8 +381,8 @@ Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
 
   return context_run(
       mat1_arg,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
+      vulkan_context.get_packed_args(),
+      vulkan_context.get_source_args(),
       1.0f,
       1.0f);
 }
@@ -424,8 +425,8 @@ Tensor run_linear_context(
     const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
   return linear_context_run(
       input,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked(),
+      vulkan_context->get_packed_args(),
+      vulkan_context->get_source_args(),
       1.0f,
       1.0f);
 }
@@ -446,15 +447,14 @@ Tensor LinearOpContext::run(
     const float beta) const {
   return linear_context_run(
       input_arg,
-      vulkan_context_.get_packed(),
-      vulkan_context_.get_unpacked(),
+      vulkan_context_.get_packed_args(),
+      vulkan_context_.get_source_args(),
       alpha,
       beta);
 }
 
 LinearOpContext::State LinearOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ =
-      std::get<1>(vulkan_context_.get_state());
+  const c10::impl::GenericList unpacked_ = vulkan_context_.get_state();
   const Tensor unpacked_weight = unpacked_.get(0).toTensor();
   const c10::optional<Tensor> unpacked_bias = unpacked_.get(1).isTensor()
       ? unpacked_.get(1).toTensor()

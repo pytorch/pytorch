@@ -27,8 +27,8 @@ TORCH_LIBRARY(vulkan, m) {
           },
           // __setstate__
           [](VulkanOpContext::State state) {
-            return c10::make_intrusive<VulkanOpContext>(VulkanOpContext::create(
-                std::get<0>(state), std::get<1>(state)));
+            return c10::make_intrusive<VulkanOpContext>(
+                VulkanOpContext::create(state));
           });
   // To maintain backwards compatibility.
   m.class_<Conv2dOpContext>("Conv2dOpContext")
@@ -264,7 +264,9 @@ Tensor convolution(
     VulkanOpContext vulkan_context = conv2d_transpose_context_create(
         weight, bias, stride, padding, output_padding, dilation, groups);
     return conv2d_transpose_context_run(
-        input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
+        input,
+        vulkan_context.get_packed_args(),
+        vulkan_context.get_source_args());
   }
   VulkanOpContext vulkan_context = conv2d_context_create(
       weight,
@@ -276,7 +278,9 @@ Tensor convolution(
       output_padding,
       groups);
   return conv2d_context_run(
-      input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
+      input,
+      vulkan_context.get_packed_args(),
+      vulkan_context.get_source_args());
 }
 
 Tensor quantized_convolution(
@@ -295,7 +299,9 @@ Tensor quantized_convolution(
     VulkanOpContext vulkan_context = conv2d_transpose_context_create(
         weight, bias, stride, padding, output_padding, dilation, groups);
     return conv2d_transpose_context_run(
-        input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
+        input,
+        vulkan_context.get_packed_args(),
+        vulkan_context.get_source_args());
   }
   VulkanOpContext vulkan_context = conv2d_context_create_q(
       weight,
@@ -310,8 +316,8 @@ Tensor quantized_convolution(
       c10::nullopt);
   return conv2d_context_run_q(
       input,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
+      vulkan_context.get_packed_args(),
+      vulkan_context.get_source_args(),
       out_scale,
       out_zero_point);
 }

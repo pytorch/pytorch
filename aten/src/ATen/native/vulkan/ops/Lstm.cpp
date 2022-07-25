@@ -219,28 +219,29 @@ VulkanOpContext lstm_context_create(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(7);
-  packed_context.emplace_back(
+  c10::impl::GenericList source_args{c10::AnyType::get()};
+  source_args.reserve(7);
+  source_args.emplace_back(params_cpu);
+  source_args.emplace_back(has_biases);
+  source_args.emplace_back(num_layers);
+  source_args.emplace_back(dropout);
+  source_args.emplace_back(train);
+  source_args.emplace_back(bidirectional);
+  source_args.emplace_back(batch_first);
+
+  VulkanOpContext op_context(source_args);
+
+  op_context.get_packed_args().reserve(7);
+  op_context.get_packed_args().emplace_back(
       pack_lstm_linear_op_contexts(params_cpu, num_layers));
-  packed_context.emplace_back(has_biases);
-  packed_context.emplace_back(num_layers);
-  packed_context.emplace_back(dropout);
-  packed_context.emplace_back(train);
-  packed_context.emplace_back(bidirectional);
-  packed_context.emplace_back(batch_first);
+  op_context.get_packed_args().emplace_back(has_biases);
+  op_context.get_packed_args().emplace_back(num_layers);
+  op_context.get_packed_args().emplace_back(dropout);
+  op_context.get_packed_args().emplace_back(train);
+  op_context.get_packed_args().emplace_back(bidirectional);
+  op_context.get_packed_args().emplace_back(batch_first);
 
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(7);
-  unpacked_context.emplace_back(params_cpu);
-  unpacked_context.emplace_back(has_biases);
-  unpacked_context.emplace_back(num_layers);
-  unpacked_context.emplace_back(dropout);
-  unpacked_context.emplace_back(train);
-  unpacked_context.emplace_back(bidirectional);
-  unpacked_context.emplace_back(batch_first);
-
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  return op_context;
 }
 
 std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
@@ -310,24 +311,56 @@ std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
 
     const auto& i = at::sigmoid(
         linear_context_run(
-            x, cxt_ii->get_packed(), cxt_ii->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_ii->get_packed_args(),
+            cxt_ii->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_hi->get_packed(), cxt_hi->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_hi->get_packed_args(),
+            cxt_hi->get_source_args(),
+            1.0f,
+            1.0f));
     const auto& f = at::sigmoid(
         linear_context_run(
-            x, cxt_if->get_packed(), cxt_if->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_if->get_packed_args(),
+            cxt_if->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_hf->get_packed(), cxt_hf->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_hf->get_packed_args(),
+            cxt_hf->get_source_args(),
+            1.0f,
+            1.0f));
     const auto& g = at::tanh(
         linear_context_run(
-            x, cxt_ig->get_packed(), cxt_ig->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_ig->get_packed_args(),
+            cxt_ig->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_hg->get_packed(), cxt_hg->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_hg->get_packed_args(),
+            cxt_hg->get_source_args(),
+            1.0f,
+            1.0f));
     const auto& o = at::sigmoid(
         linear_context_run(
-            x, cxt_io->get_packed(), cxt_io->get_unpacked(), 1.0f, 1.0f) +
+            x,
+            cxt_io->get_packed_args(),
+            cxt_io->get_source_args(),
+            1.0f,
+            1.0f) +
         linear_context_run(
-            h, cxt_ho->get_packed(), cxt_ho->get_unpacked(), 1.0f, 1.0f));
+            h,
+            cxt_ho->get_packed_args(),
+            cxt_ho->get_source_args(),
+            1.0f,
+            1.0f));
     c = f * c + i * g;
     h = o * at::tanh(c);
     x = h; // next input
@@ -371,8 +404,8 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
       input_vk,
       hx_vk,
       cx_vk,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked());
+      vulkan_context->get_packed_args(),
+      vulkan_context->get_source_args());
 }
 
 } // namespace ops
