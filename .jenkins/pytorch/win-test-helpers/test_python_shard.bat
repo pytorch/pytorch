@@ -21,9 +21,6 @@ if "%SHARD_NUMBER%" == "1" (
   )
 )
 
-echo "Print torch version"
-python -c "import torch; print(torch.__version__)"
-
 echo Run nn tests
 python run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
 if ERRORLEVEL 1 goto fail
