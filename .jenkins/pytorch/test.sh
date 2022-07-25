@@ -331,10 +331,12 @@ test_libtorch() {
 }
 
 test_aot_compilation() {
-  echo "Testing Ahead of Time compilation"
-  if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then LD_LIBRARY_PATH="$LD_LIBRARY_PATH":/opt/conda/lib/python3.7/site-packages/torch/lib/ "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
-  # shellcheck source=test/mobile/nnc/test_aot_compile.sh
-  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing Ahead of Time compilation"
+    if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then LD_LIBRARY_PATH="$LD_LIBRARY_PATH":/opt/conda/lib/python3.7/site-packages/torch/lib/ "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
+    # shellcheck source=test/mobile/nnc/test_aot_compile.sh
+    if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+  fi
 }
 
 test_vulkan() {
