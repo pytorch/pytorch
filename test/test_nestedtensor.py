@@ -839,42 +839,42 @@ class TestNestedTensorDeviceType(TestCase):
         nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt0, nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt0, nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt0, nt2)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt1, nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt1, nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch1 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 1st input has rank: [0-9]+",
             lambda: torch.matmul(nt1, nt2)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch2 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 2nd input has rank: [0-9]+",
             lambda: torch.matmul(nt2, nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"batch2 must be a 3\+D tensor",
+            r"matmul: For nested tensors, only inputs with >= 3 dims are currently supported. 2nd input has rank: [0-9]+",
             lambda: torch.matmul(nt2, nt1)
         )
         # error case: incompatible batch size
@@ -885,12 +885,12 @@ class TestNestedTensorDeviceType(TestCase):
                                   device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            "Expected size for the 1st dimension of batch2 tensor to be: 2 but got: 3.",
+            r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
             lambda: torch.matmul(nt0, nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "Expected size for the 1st dimension of batch2 tensor to be: 3 but got: 2.",
+            r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
             lambda: torch.matmul(nt1, nt0)
         )
         # error case: incompatible generalized batch size
@@ -902,14 +902,14 @@ class TestNestedTensorDeviceType(TestCase):
                                   device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"nested tensor generalized bmm does not broadcast: "
+            r"matmul: For nested tensors, no broadcasting is currently performed: "
             r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
             r"have mismatching sizes [0-9]+ and [0-9]+",
             lambda: torch.matmul(nt0, nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            r"nested tensor generalized bmm does not broadcast: "
+            r"matmul: For nested tensors, no broadcasting is currently performed: "
             r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
             r"have mismatching sizes [0-9]+ and [0-9]+",
             lambda: torch.matmul(nt1, nt0)
