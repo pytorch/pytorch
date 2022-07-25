@@ -99,6 +99,7 @@ __all__ = [
     "clone",
     "constant_pad_nd",
     "contiguous",
+    "convolution",
     "conv_tbc",
     "conv_transpose1d",
     "conv_transpose2d",
@@ -354,17 +355,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("add", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("sub", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
@@ -373,7 +371,11 @@ def rsub(g, self, other, alpha=None):
 
 
 def mul(g, self, other):
-    return g.op("Mul", self, other)
+    if symbolic_helper._is_bool(self) and symbolic_helper._is_bool(other):
+        # ONNX Mul doesn't support Boolean, so use And as an equivalent operator.
+        return g.op("And", self, other)
+    else:
+        return g.op("Mul", self, other)
 
 
 def div(g, self, other, *args):
@@ -1919,6 +1921,13 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    return log_softmax(g, input, dim)
+
+
 @symbolic_helper.parse_args(
     "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
 )
@@ -1984,6 +1993,37 @@ def _convolution(
         return g.op("Add", n, bias)
     else:
         return n
+
+
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
+def convolution(
+    g,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+):
+    return _convolution(
+        g,
+        input,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")

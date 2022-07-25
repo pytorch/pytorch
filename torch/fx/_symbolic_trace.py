@@ -23,7 +23,7 @@ import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
-from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
+from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph, _ParamDescr
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, TracerBase
@@ -540,8 +540,11 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
+
+            # TODO: this seems sketchy. We're not carrying forward type annotations
+            # or default values
             self.graph._codegen = _PyTreeCodeGen(
-                _PyTreeInfo(orig_args[:total_args], in_spec, None)
+                _PyTreeInfo([_ParamDescr(arg, '', '') for arg in orig_args[:total_args]], in_spec, None)
             )
 
             def flatten_fn(*args):
