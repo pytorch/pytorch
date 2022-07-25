@@ -1,5 +1,4 @@
 import torch
-import itertools
 import numpy as np
 import math
 
@@ -107,7 +106,7 @@ class LinearAPoT(WeightedQuantizedModule):
                         # curr_result = x * r
                         # print("curr result", curr_result)
                         if x == 0:
-                            curr_result = 0
+                            curr_result = 0.0
                         else:
                             x = int(math.log2(x))
 
@@ -134,18 +133,18 @@ class LinearAPoT(WeightedQuantizedModule):
                                 dec_portion = 0.0
                                 for exp in range(len(dec)):
                                     if int(dec[exp]):
-                                        dec_portion = dec_portion + (2**-(exp+1))
+                                        dec_portion = dec_portion + (2 ** - (exp + 1))
 
                                 # convert whole portion from binary -> decimal
                                 r_bin = r_bin[::-1]
                                 whole_portion = 0.0
                                 for exp in range(len(r_bin)):
                                     if int(r_bin[exp]):
-                                        whole_portion = whole_portion + (2**exp)
+                                        whole_portion = whole_portion + (2 ** exp)
 
-                                curr_result = whole_portion + dec_portion
+                                curr_result = float(whole_portion + dec_portion)
 
-                        result[i][j] += float(curr_result)
+                        result[i][j] += curr_result
 
         result = result * self.gamma
 
@@ -160,7 +159,7 @@ class LinearAPoT(WeightedQuantizedModule):
         return self.linear_APoT_fn(activation)
 
 
-    def from_reference(cls,
+    def from_reference(self,  # type: ignore[override]
                        ref_qlinear,
                        alpha: torch.Tensor,
                        gamma: torch.Tensor,

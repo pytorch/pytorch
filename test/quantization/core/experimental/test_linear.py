@@ -3,8 +3,6 @@
 import torch
 from torch.ao.quantization.experimental.linear import LinearAPoT
 import unittest
-import math
-import numpy as np
 
 class TestNonUniformObserver(unittest.TestCase):
     """
