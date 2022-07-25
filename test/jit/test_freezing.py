@@ -2191,85 +2191,87 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
-        conv_bias = [True, False]
-        conv_ops = [nn.Conv2d, nn.Conv3d]
-        add_z = [True, False]
-        use_tracing = [True, False]
-        for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+        with set_default_dtype(torch.float):
+            conv_bias = [True, False]
+            conv_ops = [nn.Conv2d, nn.Conv3d]
+            add_z = [True, False]
+            use_tracing = [True, False]
+            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+                class Net(nn.Module):
+                    def __init__(self, in_channels, out_channels, **kwargs):
+                        super(Net, self).__init__()
+                        self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                        self.relu = nn.ReLU(inplace=True)
+                        self.add_z = add_z
+
+                    def forward(self, x):
+                        z = self.conv(x)
+                        out = self.conv(x)
+                        if self.add_z:
+                            out += z
+                        out = self.relu(out)
+                        return out
+
+                mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
+
+                inps = [5, 3, 4, 4]
+                if conv == nn.Conv3d:
+                    inps.append(inps[-1])
+                inp = torch.rand(inps).cuda()
+
+                if tracing:
+                    scripted_mod = torch.jit.trace(mod_eager, (inp))
+                else:
+                    scripted_mod = torch.jit.script(mod_eager)
+
+                frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
+                if TEST_WITH_ROCM:
+                    if add_z:
+                        FileCheck().check("aten::miopen_convolution_add_relu").run(frozen_mod.graph)
+                    else:
+                        FileCheck().check("aten::miopen_convolution_relu").run(frozen_mod.graph)
+                else:
+                    if add_z:
+                        FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+                    else:
+                        FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+
+                self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
+    @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
+    def test_freeze_conv_relu_fusion_not_forward(self):
+        with set_default_dtype(torch.float):
             class Net(nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
                     super(Net, self).__init__()
-                    self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.conv = nn.Conv2d(in_channels, out_channels, bias=None, **kwargs)
                     self.relu = nn.ReLU(inplace=True)
-                    self.add_z = add_z
 
                 def forward(self, x):
                     z = self.conv(x)
                     out = self.conv(x)
-                    if self.add_z:
-                        out += z
                     out = self.relu(out)
                     return out
+
+                @torch.jit.export
+                def make_prediction(self, x):
+                    return self.forward(x)
 
             mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
             inps = [5, 3, 4, 4]
-            if conv == nn.Conv3d:
-                inps.append(inps[-1])
             inp = torch.rand(inps).cuda()
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (inp))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
+            frozen_mod = torch.jit.freeze(scripted_mod, preserved_attrs=['make_prediction'])
+            optimized_mod = torch.jit.optimize_for_inference(frozen_mod, other_methods=['make_prediction'])
             if TEST_WITH_ROCM:
-                if add_z:
-                    FileCheck().check("aten::miopen_convolution_add_relu").run(frozen_mod.graph)
-                else:
-                    FileCheck().check("aten::miopen_convolution_relu").run(frozen_mod.graph)
+                FileCheck().check("aten::miopen_convolution_relu").run(optimized_mod.make_prediction.graph)
             else:
-                if add_z:
-                    FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
-                else:
-                    FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+                FileCheck().check("aten::cudnn_convolution_relu").run(optimized_mod.make_prediction.graph)
 
-            self.assertEqual(mod_eager(inp), frozen_mod(inp))
-
-    @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
-    def test_freeze_conv_relu_fusion_not_forward(self):
-        class Net(nn.Module):
-            def __init__(self, in_channels, out_channels, **kwargs):
-                super(Net, self).__init__()
-                self.conv = nn.Conv2d(in_channels, out_channels, bias=None, **kwargs)
-                self.relu = nn.ReLU(inplace=True)
-
-            def forward(self, x):
-                z = self.conv(x)
-                out = self.conv(x)
-                out = self.relu(out)
-                return out
-
-            @torch.jit.export
-            def make_prediction(self, x):
-                return self.forward(x)
-
-        mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
-
-        inps = [5, 3, 4, 4]
-        inp = torch.rand(inps).cuda()
-
-        scripted_mod = torch.jit.script(mod_eager)
-
-        frozen_mod = torch.jit.freeze(scripted_mod, preserved_attrs=['make_prediction'])
-        optimized_mod = torch.jit.optimize_for_inference(frozen_mod, other_methods=['make_prediction'])
-        if TEST_WITH_ROCM:
-            FileCheck().check("aten::miopen_convolution_relu").run(optimized_mod.make_prediction.graph)
-        else:
-            FileCheck().check("aten::cudnn_convolution_relu").run(optimized_mod.make_prediction.graph)
-
-        self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
+            self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_incompatible_perf_formats(self):
