@@ -31,7 +31,6 @@ def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
 
 
 # Tensor properties access
-_register_default_op(torch.Tensor.requires_grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.shape.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.dtype.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.layout.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
@@ -43,6 +42,27 @@ _register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
 _register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
+
+# autograd related properties
+_register_default_op(torch.Tensor.requires_grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+# TODO: set grad with a ShardedTensor that consists of all local grads
+_register_default_op(torch.Tensor.grad.__get__, _sharded_op_impl)  # type: ignore[union-attr]
+_register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+
+# device property is ambiguous as from a global prospective,
+# ShardedTensor.device consists of multiple devices (might even across hosts)
+# We choose to return the current device of the local tensor to represent
+# the device property on each rank
+@_sharded_op_impl(torch.Tensor.device.__get__)
+def tensor_device(types, args=(), kwargs=None, pg=None):
+    self_st = args[0]
+    # Validate types
+    if not isinstance(self_st, ShardedTensor):
+        raise TypeError("input needs to be a ShardedTensor")
+
+    return self_st.local_shards()[0].tensor.device
+
 
 def sharded_type_as_check(*args, **kwargs):
     """
@@ -156,17 +176,23 @@ _register_sharded_op_on_local_shards(
 @_sharded_op_impl(torch.Tensor.requires_grad_)
 def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
     self_st = args[0]
-    requires_grad = args[1]
     # Validate types
     if not isinstance(self_st, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
 
+    if kwargs is None:
+        kwargs = {}
+
+    requires_grad = args[1] if len(args) > 1 else kwargs.get("requires_grad", True)
     if requires_grad == self_st.requires_grad:
         return self_st
 
     for local_shard in self_st.local_shards():
         local_shard.tensor.requires_grad_(requires_grad)
 
+        # update the wrapper class property
+    with torch._C.DisableTorchFunction():
+        self_st.requires_grad_(requires_grad)
     # update the metadata in the meanwhile
     self_st._metadata.tensor_properties.requires_grad = requires_grad
     return self_st
