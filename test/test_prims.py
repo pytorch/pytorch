@@ -150,7 +150,7 @@ class TestPrims(TestCase):
         ops_without_nvfuser_impl = {
             name
             for name in prim_nvfuser_ops
-            if getattr(torch.ops.prims, name).default.impl_nvfuser is None
+            if getattr(torch.ops.nvprims, name, None) is None
         }
         assert (
             len(ops_without_nvfuser_impl) == 0
@@ -187,7 +187,7 @@ class TestPrims(TestCase):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
         # If it's ever supported, this test will need to be updated
-        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
@@ -216,7 +216,7 @@ class TestPrims(TestCase):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
         # If it's ever supported, this test will need to be updated
-        self.assertTrue(torch.ops.prims.digamma.default.impl_nvfuser is None)
+        self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
