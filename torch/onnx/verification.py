@@ -416,7 +416,7 @@ def _onnx_graph_from_model(
     if opset_version is None:
         opset_version = _constants.onnx_default_opset
 
-    export_modules_as_functions = utils._setup_trace_module_map(
+    utils._setup_trace_module_map(
         model, export_modules_as_functions
     )
 
