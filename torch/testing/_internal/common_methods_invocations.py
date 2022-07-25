@@ -6623,13 +6623,16 @@ def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_s
 def get_foreach_method_names(name):
     # get torch inplace reference function
     op_name = "_foreach_" + name
-    inplace_op_name = "_foreach_" + name + "_"
 
     op = getattr(torch, op_name, None)
-    inplace_op = getattr(torch, inplace_op_name, None)
+    inplace_op = getattr(torch, op_name + "_", None)
 
     ref = getattr(torch, name, None)
-    ref_inplace = getattr(torch.Tensor, name + "_", None)
+    if name in ("maximum", "minimum"):
+        ref_inplace = ref
+    else:
+        ref_inplace = getattr(torch.Tensor, name + "_", None)
+
     return op, inplace_op, ref, ref_inplace
 
 class ForeachFuncInfo(OpInfo):

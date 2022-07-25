@@ -1,5 +1,6 @@
 # Owner(s): ["module: mta"]
 
+import copy
 import itertools
 from numbers import Number
 import random
@@ -43,21 +44,41 @@ def getScalarLists(N):
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
+# TODO(crcrpar): [refactoring] for inplace case, call a native function with `out` specified.
 class RegularFuncWrapper:
 
-    def __init__(self, func):
+    def __init__(self, func, arg_out_not_inplace: bool = False):
         self.func = func
+        self.arg_out_not_inplace = arg_out_not_inplace
 
     def __call__(self, inputs, values=None, **kwargs):
         if values is not None:
             assert len(inputs) == 3
             if isinstance(values, Number):
                 values = [values for _ in range(len(inputs[0]))]
-            return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
+            if self.arg_out_not_inplace:
+                result = []
+                for idx, i in enumerate(zip(*inputs)):
+                    cur_kwargs = copy.deepcopy(kwargs)
+                    cur_kwargs.update({"out": i[0]})
+                    self.func(*i, value=values[idx], **cur_kwargs)
+                    result.append(i[0])
+                return result
+            else:
+                return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
         if len(inputs) == 2 and isinstance(inputs[1], Number):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
-        return [self.func(*i, **kwargs) for i in zip(*inputs)]
+        if self.arg_out_not_inplace:
+            result = []
+            for i in zip(*inputs):
+                cur_kwargs = copy.deepcopy(kwargs)
+                cur_kwargs.update({"out": i[0]})
+                self.func(*i, **kwargs)
+                result.append(i[0])
+            return result
+        else:
+            return [self.func(*i, **kwargs) for i in zip(*inputs)]
 
 
 class ForeachFuncWrapper:
@@ -97,12 +118,12 @@ class TestForeach(TestCase):
     # note(mkozuki): It might be the case that the expected number of `cudaLaunchKernel`s
     # is greater than 1 once foreach functions internally separate their input `TensorList`s by
     # devices & dtypes into vectors of tensors.
-    def _get_funcs(self, op, n_expected_cudaLaunchKernels):
+    def _get_funcs(self, op, n_expected_cudaLaunchKernels: int, arg_out_not_inplace: bool = False):
         return (
             ForeachFuncWrapper(op.method_variant, n_expected_cudaLaunchKernels),
-            RegularFuncWrapper(op.ref),
+            RegularFuncWrapper(op.ref, arg_out_not_inplace=False),
             ForeachFuncWrapper(op.inplace_variant, n_expected_cudaLaunchKernels),
-            RegularFuncWrapper(op.ref_inplace),
+            RegularFuncWrapper(op.ref_inplace, arg_out_not_inplace=arg_out_not_inplace),
         )
 
     def _binary_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, alpha=None):
@@ -371,10 +392,15 @@ class TestForeach(TestCase):
             self._test_unary(device, dtype, op, N, is_fastpath=False)
 
     def _minmax_test(self, opinfo, inputs, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels, True)
         self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
 
-    # note(mkozuki): in-place of foreach_minimum and foreach_maximum aren't implemented.
+        inplace_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
+        inplace_ref_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
+        inplace_ref(inplace_ref_inputs)
+        inplace_op(inplace_inputs, self.is_cuda, is_fastpath)
+        self.assertEqual(inplace_ref_inputs[0], inplace_inputs[0])
+
     @ops(foreach_minmax_op_db)
     def test_minmax_fastpath(self, device, dtype, op):
         for N in N_values:
