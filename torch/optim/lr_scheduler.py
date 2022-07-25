@@ -167,6 +167,10 @@ class _LRScheduler(object):
                 else:
                     values = self.get_lr()
 
+        # Compitiable with customized reseting
+        if hasattr(self.optimizer, 'reset_lr'):
+            self.optimizer.reset_lr(lr)
+
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             param_group['lr'] = lr

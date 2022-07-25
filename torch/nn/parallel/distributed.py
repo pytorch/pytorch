@@ -1461,6 +1461,18 @@ class DistributedDataParallel(Module, Joinable):
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
+    # TODO: type hint
+    def _register_overlapped_optim(self, optim: object):
+        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
+        from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+            _OptimizerHookState,
+            _hook_then_optimizer
+        )
+        opt_hook_state = _OptimizerHookState(optim, optim.params)
+        opt_hook = _hook_then_optimizer(allreduce_hook, opt_hook_state)
+        self.register_comm_hook(opt_hook)
+    
+
     def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
         r"""
         Registers an optimizer with DDP such that the optimization for a
