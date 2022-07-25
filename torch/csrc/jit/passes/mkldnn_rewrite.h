@@ -18,14 +18,10 @@ namespace jit {
 
 namespace mkldnn {
 
-struct PostOp {
-  ideep::attr_t op_attr;
-  std::vector<torch::jit::MatchFilter> filters = {};
-};
-
-const static std::map<std::string, PostOp> fusion_attr_map = {
-    {"none", {ideep::attr_t()}},
-    {"relu", {ideep::attr_t::fuse_relu()}},
+const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
+    fusion_rewrite_map = {
+        {"none", {}},
+        {"relu", {}},
 };
 
 } // namespace mkldnn

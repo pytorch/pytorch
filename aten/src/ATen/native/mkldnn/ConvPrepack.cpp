@@ -4,10 +4,10 @@
 #include <ATen/native/mkldnn/Common.h>
 #include <ATen/native/mkldnn/ConvPrepack.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/OpContext.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -16,8 +16,6 @@ namespace native {
 namespace mkldnn {
 namespace internal {
 namespace convolution {
-
-using torch::jit::mkldnn::fusion_attr_map;
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
@@ -30,7 +28,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::string attr) {
   auto it = fusion_attr_map.find(attr);
   TORCH_CHECK(it != fusion_attr_map.end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = it->second.op_attr;
+  ideep::attr_t op_attr = it->second;
 
   return mkldnn::MkldnnConvOpContext::create_context(
       std::move(weight),

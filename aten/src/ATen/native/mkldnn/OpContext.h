@@ -10,6 +10,11 @@ namespace at {
 namespace native {
 namespace mkldnn {
 
+const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
+    {"none", ideep::attr_t()},
+    {"relu", ideep::attr_t::fuse_relu()},
+};
+
 using SerializationTypeConvPrePack = std::tuple<
     Tensor,
     c10::optional<Tensor>,

@@ -146,7 +146,7 @@ void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
         return (%res))");
 
-  for (auto const& it : mkldnn::fusion_attr_map) {
+  for (auto const& it : mkldnn::fusion_rewrite_map) {
     std::string op = it.first;
     if (op == std::string("none")) {
       continue;
@@ -162,7 +162,7 @@ void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
     rewriter.RegisterRewritePattern(
         conv_op_rstring.format(env), conv_op_fused_rstring.format(env_fused));
 
-    auto filters = it.second.filters;
+    auto filters = it.second;
     rewriter.runOnGraph(graph, filters);
   }
 }
