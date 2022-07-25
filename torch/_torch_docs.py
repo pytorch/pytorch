@@ -11414,8 +11414,9 @@ Example::
     ),
 )
 
-add_docstr(torch.split,
-           r"""
+add_docstr(
+    torch.split,
+    r"""
 split(input, split_size, dim=0) -> List[Tensor]
 
 Splits the tensor into chunks. Each chunk is a view of the original tensor.
@@ -11456,7 +11457,8 @@ Example::
              [4, 5],
              [6, 7],
              [8, 9]]))
-""")
+""",
+)
 
 add_docstr(
     torch.take,
