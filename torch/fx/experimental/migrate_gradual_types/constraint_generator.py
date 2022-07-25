@@ -5,7 +5,7 @@ from typing import Callable, Dict, Iterable
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem, T, F, \
-    TVar, DVar, GetItemTensor, IndexSelect, Transpose
+    TVar, DVar, GetItemTensor, IndexSelect, Transpose, DGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.operation import \
     op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt, op_add, op_mul
 from torch.fx.node import Target, Node
@@ -56,6 +56,48 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
         return [BinConstraintT(input, output, op_eq)], counter
     else:
         raise NotImplementedError('Not yet implemented')
+
+@register_inference_rule(torch.bmm)
+def bmm_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    Constraints that match the input to a size 3 tensor
+    and switch the dimensions according to the rules
+    of batch multiplication
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
+
+    bmm_output, counter = gen_tvar(counter)
+    symbols[n] = bmm_output
+
+    bmm_input1 = symbols[n.args[0]]
+    bmm_input2 = symbols[n.args[1]]
+
+    dims_input1, counter = gen_tensor_dims(3, counter)
+    dims_input2, counter = gen_tensor_dims(3, counter)
+
+    inputs_dyn = Conj([BinConstraintT(bmm_input1, Dyn, op_eq),
+                       BinConstraintT(bmm_input2, Dyn, op_eq),
+                       BinConstraintT(bmm_output, Dyn, op_eq)])
+
+    input1_dyn = Conj([BinConstraintT(bmm_input1, Dyn, op_eq),
+                       BinConstraintT(bmm_input2, TensorType(dims_input2), op_eq),
+                       BinConstraintT(bmm_output, TensorType([dims_input2[0], Dyn, dims_input2[2]]), op_eq)])
+
+    input2_dyn = Conj([BinConstraintT(bmm_input2, Dyn, op_eq),
+                       BinConstraintT(bmm_input1, TensorType(dims_input1), op_eq),
+                       BinConstraintT(bmm_output, TensorType([dims_input1[0], dims_input1[1], Dyn]), op_eq)])
+
+    consistency_constraints = [BinConstraintD(dims_input1[0], dims_input2[0], op_consistency)]
+
+    batch_size, counter = gen_dvar(counter)
+
+    inputs_are_tensors = Conj([BinConstraintT(bmm_input1, TensorType(dims_input1), op_eq),
+                               BinConstraintT(bmm_input2, TensorType(dims_input2), op_eq),
+                               BinConstraintT(bmm_output, TensorType([batch_size, dims_input1[1], dims_input2[2]]), op_eq),
+                               *consistency_constraints, DGreatestUpperBound(batch_size, dims_input1[0], dims_input2[0])])
+
+    return [Disj([inputs_dyn, input1_dyn, input2_dyn, inputs_are_tensors])], counter
 
 
 @register_inference_rule("index_select")
@@ -115,7 +157,6 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     e2_constraint = BinConstraintT(e2, TensorType([arg if isinstance(arg, int) else symbols[arg] for arg in n.args[1:]]), op_eq)
 
-
     constraints, counter = gen_broadcasting_constraints(e1, e2, symbols, counter, expand)
 
     # constraint the output size
@@ -126,11 +167,14 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     return constraints, counter
 
+@register_inference_rule(torch.nn.functional.gelu)
 @register_inference_rule(torch.nn.functional.dropout)
+@register_inference_rule(torch.nn.functional.softmax)
 @register_inference_rule("detach")
 @register_inference_rule("to")
 @register_inference_rule("int")
 @register_inference_rule("long")
+@register_inference_rule("contiguous")
 def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
@@ -244,7 +288,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
     return [Disj([c1, Disj(c2)])], counter
 
 
-
+@register_inference_rule("reshape")
 @register_inference_rule("view")
 def view_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -256,16 +300,31 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
     my_view, counter = gen_tvar(counter)
     symbols[n] = my_view
 
+
     src_var = symbols[n.args[0]]
     t2 = [symbols[elem] if isinstance(elem, Node) else elem for elem in n.args[1:]]  # target shape
-    t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
+    t2_type = []
+    num_constraints = []
+
+    for t in t2:
+        if t == -1:
+            var, counter = gen_dvar(counter)
+            t2_type.append(var)
+            num_constraints.append(BinConstraintD(var, Dyn, op_neq))
+
+        else:
+            num_constraints.append(BinConstraintD(t, Dyn, op_neq))
+            t2_type.append(t)
+
+    t2_type = TensorType(t2_type)  # type: ignore[assignment]
+
     c1 = BinConstraintT(my_view, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)
 
     # TODO: add the extra check mentioned here:
     # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html#torch.Tensor.view
 
-    return [c1, c2], counter
+    return [c1, c2] + num_constraints, counter  # type: ignore[operator]
 
 
 @register_inference_rule("size")
@@ -458,6 +517,104 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
     else:
         raise NotImplementedError('Method not yet implemented')
 
+
+
+@register_inference_rule(operator.ne)
+def neq_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    Translates to inconsistent in gradual types.
+    To prove inequality, we should prove that
+    tensors are either different sizes or
+    disagree on at least one dimension
+
+    This is a WIP (works when the condition
+    is false. We are working on making this operation work
+    when the condition is true as well)
+    """
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], tuple)
+
+    # implementing for size 3 and 4
+    if len(n.args[1]) == 3:
+
+        assert isinstance(n.args[1][0], Node) or isinstance(n.args[1][0], int)
+        assert isinstance(n.args[1][1], Node) or isinstance(n.args[1][1], int)
+        assert isinstance(n.args[1][2], Node) or isinstance(n.args[1][2], int)
+
+        lhs = symbols[n.args[0]]
+
+        b, counter = gen_tensor_dims(4, counter)
+        input_is_size3 = BinConstraintT(lhs, TensorType([b[0], b[1], b[2]]), op_eq)
+
+        d1 = n.args[1][0] if isinstance(n.args[1][0], int) else symbols[n.args[1][0]]
+        d2 = n.args[1][1] if isinstance(n.args[1][1], int) else symbols[n.args[1][1]]
+        d3 = n.args[1][2] if isinstance(n.args[1][2], int) else symbols[n.args[1][2]]
+
+        # dimensions not equal
+        my_ne, counter = gen_bvar(counter)
+        neq_1 = BinConstraintD(d1, b[0], op_neq)
+        neq_2 = BinConstraintD(d2, b[1], op_neq)
+        neq_3 = BinConstraintD(d3, b[2], op_neq)
+
+        # dimensions inconsistent
+        dims_inconsistent1 = Conj([BinConstraintD(d1, Dyn, op_neq), BinConstraintD(b[0], Dyn, op_neq), neq_1])
+        dims_inconsistent2 = Conj([BinConstraintD(d2, Dyn, op_neq), BinConstraintD(b[1], Dyn, op_neq), neq_2])
+        dims_inconsistent3 = Conj([BinConstraintD(d3, Dyn, op_neq), BinConstraintD(b[2], Dyn, op_neq), neq_3])
+
+        dims_inconsistent = Disj([dims_inconsistent1, dims_inconsistent2, dims_inconsistent3])
+
+        # we are covering size 3 and 4 only for now
+        ne_constraint = Conj([input_is_size3, dims_inconsistent])
+
+        my_ne, counter = gen_bvar(counter)
+        equality_constraint = BinConstraintD(my_ne, ne_constraint, op_eq)
+
+    elif len(n.args[1]) == 4:
+
+        assert isinstance(n.args[1][0], Node) or isinstance(n.args[1][0], int)
+        assert isinstance(n.args[1][1], Node) or isinstance(n.args[1][1], int)
+        assert isinstance(n.args[1][2], Node) or isinstance(n.args[1][2], int)
+        assert isinstance(n.args[1][3], Node) or isinstance(n.args[1][3], int)
+
+        lhs = symbols[n.args[0]]
+
+        b1, counter = gen_dvar(counter)
+        b2, counter = gen_dvar(counter)
+        b3, counter = gen_dvar(counter)
+        b4, counter = gen_dvar(counter)
+
+        input_is_size4 = BinConstraintT(lhs, TensorType([b1, b2, b3, b4]), op_eq)
+
+        d1 = n.args[1][0] if isinstance(n.args[1][0], int) else symbols[n.args[1][0]]
+        d2 = n.args[1][1] if isinstance(n.args[1][1], int) else symbols[n.args[1][1]]
+        d3 = n.args[1][2] if isinstance(n.args[1][2], int) else symbols[n.args[1][2]]
+        d4 = n.args[1][3] if isinstance(n.args[1][3], int) else symbols[n.args[1][3]]
+
+        # dimensions not equal
+        my_ne, counter = gen_bvar(counter)
+        neq_1 = BinConstraintD(d1, b1, op_neq)
+        neq_2 = BinConstraintD(d2, b2, op_neq)
+        neq_3 = BinConstraintD(d3, b3, op_neq)
+        neq_4 = BinConstraintD(d4, b4, op_neq)
+
+        # dimensions to inconsistent
+        dims_inconsistent1 = Conj([BinConstraintD(d1, Dyn, op_neq), BinConstraintD(b1, Dyn, op_neq), neq_1])
+        dims_inconsistent2 = Conj([BinConstraintD(d2, Dyn, op_neq), BinConstraintD(b2, Dyn, op_neq), neq_2])
+        dims_inconsistent3 = Conj([BinConstraintD(d3, Dyn, op_neq), BinConstraintD(b3, Dyn, op_neq), neq_3])
+        dims_inconsistent4 = Conj([BinConstraintD(d4, Dyn, op_neq), BinConstraintD(b3, Dyn, op_neq), neq_4])
+
+        dims_inconsistent = Disj([dims_inconsistent1, dims_inconsistent2, dims_inconsistent3, dims_inconsistent4])
+
+        ne_constraint = Conj([input_is_size4, dims_inconsistent])
+
+        my_ne, counter = gen_bvar(counter)
+
+        equality_constraint = BinConstraintD(my_ne, ne_constraint, op_eq)
+
+    else:
+        raise NotImplementedError('Method not yet implemented')
+
+    return [equality_constraint], counter
 
 
 @register_inference_rule(operator.lt)
@@ -769,7 +926,7 @@ def add_linear_constraints(dims1, dims2, module_instance):
 
     return constraints
 
-# module_instance.out_features
+
 @register_inference_rule(torch.reshape)
 def reshape_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
