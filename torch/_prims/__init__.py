@@ -11,6 +11,7 @@ import torch
 import torch._prims_common as utils
 import torch.library
 from torch import _TypedStorage, Tensor
+from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
     check,
     DimsSequenceType,
@@ -463,6 +464,10 @@ def _make_prim(
         p.__doc__ = doc
         p.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
         p.return_type = return_type  # type: ignore[attr-defined]
+
+        p.schema = schema
+        p.prim_impl = _prim_impl
+        p.prim_meta_impl = _wrap_tensor_meta(meta)
 
     return _prim
 
@@ -2876,3 +2881,5 @@ fft_c2r = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
 )
+
+register_nvprims()

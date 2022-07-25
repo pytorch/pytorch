@@ -237,6 +237,24 @@ class TestPrims(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("is not supported by nvFuser" in str(w[-1].message))
 
+    def test_nvprims(self, device):
+        # This test is to ensure that nvfuser specific prims are exposed
+        # and can be traced with make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(a):
+            return torch.ops.nvprims.add(a, a)
+
+        a = torch.randn(3, 4, device=device)
+        gm = make_fx(func)(a)
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(node.name == "add_default")
+                self.assertTrue(node.target == torch.ops.nvprims.add.default)
+                self.assertFalse(node.target == torch.ops.prims.add.default)
+                self.assertFalse(node.target == torch.ops.aten.add.default)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
