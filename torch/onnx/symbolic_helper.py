@@ -4,6 +4,7 @@ import enum
 import functools
 import inspect
 import sys
+import typing
 import warnings
 from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import Literal
@@ -14,6 +15,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
+from torch.onnx import _type_utils, errors
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -124,37 +126,42 @@ def _parse_arg(
         elif desc == "fs":
             return [float(v) for v in node_val]
         else:
-            raise RuntimeError(
+            raise errors.SymbolicValueError(
                 f"ONNX symbolic does not understand the Constant node '{node}' "
-                f"specified with descriptor '{value}'."
+                f"specified with descriptor '{desc}'.",
+                value,
             )
     elif node.kind() == "prim::ListConstruct":
         if desc == "is":
             for v in node.inputs():
                 element_node = v.node()
-                if element_node.kind() != "onnx::Constant":
-                    raise RuntimeError(
+                if element_node.kind() == "onnx::Constant":
+                    raise errors.SymbolicValueError(
                         f"Failed to export an ONNX attribute '{element_node.kind()}' "
                         f"(node '{element_node}' in list node {node}) "
                         f"because it is not constant. "
-                        f"Please try to make things (e.g. kernel sizes) static if possible."
+                        f"Please try to make things (e.g. kernel sizes) static if possible.",
+                        value,
                     )
             return [int(v.node()["value"]) for v in node.inputs()]
         else:
-            raise RuntimeError(
+            raise errors.SymbolicValueError(
                 f"ONNX symbolic does not know to unpack the ListConstruct node that "
-                f"is not a list of integers: '{node}'"
+                f"is not a list of integers: '{node}'",
+                value,
             )
 
     if arg_name is None or node_name is None:
-        raise RuntimeError(
-            f"Expected node type 'onnx::Constant', got '{node.kind()}' (node '{node}')."
+        raise errors.SymbolicValueError(
+            f"Expected node type 'onnx::Constant', got '{node.kind()}'.",
+            value,
         )
 
-    raise RuntimeError(
+    raise errors.SymbolicValueError(
         "Expected node type 'onnx::Constant' "
         f"for argument '{arg_name}' of node '{node_name}', "
-        f"got '{node.kind()}' (node '{node}')."
+        f"got '{node.kind()}'.",
+        value,
     )
 
 
@@ -179,9 +186,10 @@ def _maybe_get_scalar(value):
 
 def _get_const(value, desc, arg_name):
     if not _is_constant(value):
-        raise ValueError(
+        raise errors.SymbolicValueError(
             f"ONNX symbolic expected a constant value of the '{arg_name}' argument, "
-            f"got '{value}'"
+            f"got '{value}'",
+            value,
         )
     return _parse_arg(value, desc)
 
@@ -189,10 +197,10 @@ def _get_const(value, desc, arg_name):
 def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     list_node = list_value.node()
     if list_node.kind() != "prim::ListConstruct":
-        # TODO(justinchuby): Create a node type error that appends value and node information automatically
-        raise ValueError(
+        raise errors.SymbolicValueError(
             f"ONNX symbolic expected node type prim::ListConstruct, "
-            f"got '{list_node}'."
+            f"got '{list_node}'.",
+            list_value,
         )
     return list(list_node.inputs())
 
@@ -200,9 +208,10 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
 def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value]:
     tuple_node = tuple_value.node()
     if tuple_node.kind() != "prim::TupleConstruct":
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             f"ONNX symbolic expected node type 'prim::TupleConstruct', "
-            f"got '{tuple_node}'."
+            f"got '{tuple_node.kind()}'.",
+            tuple_value,
         )
     return tuple(tuple_node.inputs())
 
@@ -427,7 +436,11 @@ def _is_list(x: _C.Value) -> bool:
 
 
 def _is_tensor_list(x: _C.Value) -> bool:
-    return _is_list(x) and isinstance(x.type().getElementType(), _C.TensorType)
+    if not _is_list(x):
+        return False
+    x_type = x.type()
+    typing.cast(_C.ListType, x_type)
+    return isinstance(x_type.getElementType(), _C.TensorType)
 
 
 def _is_scalar_list(x: _C.Value) -> bool:
@@ -436,11 +449,14 @@ def _is_scalar_list(x: _C.Value) -> bool:
     Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
+    if not _is_list(x):
+        return False
+    x_type = x.type()
+    typing.cast(_C.ListType, x_type)
     element_type = str(x.type().getElementType())
     return (
-        _is_list(x)
-        and element_type in scalar_name_to_pytorch.keys()
-        and (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
+        _type_utils.valid_torch_name(element_type)
+        and _type_utils.ScalarType.from_name(element_type).onnx_compatible()
     )
 
 
@@ -451,31 +467,31 @@ def is_caffe2_aten_fallback() -> bool:
     )
 
 
-def _get_tensor_rank(x: _C.Value) -> int:
+def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
-    return x.type().dim()
+    x_type = x.type()
+    typing.cast(_C.TensorType, x_type)
+    return x_type.dim()
 
 
 def _get_tensor_sizes(x: _C.Value, allow_nonstatic=True):
     if not _is_tensor(x) or x.type() is None:
         return None
+    x_type = x.type()
+    x_type = typing.cast(_C.TensorType, x_type)
     if allow_nonstatic:
         # Each individual symbol is returned as None.
         # e.g. [1, "a", "b"] -> [1, None, None]
-        return x.type().varyingSizes()
+        return x_type.varyingSizes()
     # returns None, if exists any symbol in sizes.
     # e.g. [1, "a", "b"] -> None
-    return x.type().sizes()
+    return x_type.sizes()
 
 
 def _get_tensor_dim_size(x: _C.Value, dim: int):
-    try:
-        sizes = _get_tensor_sizes(x)
-        return sizes[dim]
-    except Exception:
-        # FIXME(justinchuby): Exception too broad
-        return None
+    sizes = _get_tensor_sizes(x)
+    return sizes[dim] if sizes else None
 
 
 def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
@@ -484,6 +500,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     # If dim is not given, it defaults to the first dimension found with the size 3
     if dim is None:
         sizes = _get_tensor_sizes(x)
+        assert sizes is not None
         for index, size in enumerate(sizes):
             if size is not None and size == 3:
                 return index
@@ -534,7 +551,7 @@ def _block_list_in_opset(name: str):
     return symbolic_fn
 
 
-def _try_get_scalar_type(*args):
+def _try_get_scalar_type(*args) -> Optional[str]:
     for arg in args:
         try:
             return arg.type().scalarType()
@@ -684,8 +701,8 @@ def _unsqueeze_helper(g, input, axes_i):
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
-        raise ValueError(
-            f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}"
+        raise errors.SymbolicValueError(
+            f"Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
         )
     return g.op("Unsqueeze", input, axes_i[0])
 
@@ -698,14 +715,14 @@ def _squeeze_helper(g, input, axes_i):
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
-        raise ValueError(
-            f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}"
+        raise errors.SymbolicValueError(
+            f"Opset version must be >= 13 for Squeeze with dynamic axes.", input
         )
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
     if axes_rank > 1:
-        raise ValueError(
-            "For Squeeze axses as input, the axes rank must be one in ONNX spec."
+        raise errors.SymbolicValueError(
+            "For Squeeze axses as input, the axes rank must be one in ONNX spec.", input
         )
     elif axes_rank == 0:
         # The axes is a scalar. Unsqueeze it to a rank 1 tensor.
@@ -1126,8 +1143,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
 
     if weight is None or _is_none(weight):
         if channel_size is None:
-            raise RuntimeError(
-                "Unsupported: ONNX export of batch_norm for unknown " "channel size."
+            raise errors.SymbolicValueError(
+                "Unsupported: ONNX export of batch_norm for unknown channel size.",
+                input,
             )
         weight_value = torch.tensor([1.0] * channel_size).type(
             "torch." + input.type().scalarType() + "Tensor"
@@ -1135,8 +1153,9 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
         if channel_size is None:
-            raise RuntimeError(
-                "Unsupported: ONNX export of batch_norm for unknown " "channel size."
+            raise errors.SymbolicValueError(
+                "Unsupported: ONNX export of batch_norm for unknown channel size.",
+                input,
             )
         bias_value = torch.tensor([0.0] * channel_size).type(
             "torch." + input.type().scalarType() + "Tensor"
