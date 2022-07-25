@@ -52,6 +52,11 @@ def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name
         )
 
 
+# Utilities should come BEFORE this import
+from torch._decomp import register_decomposition
+
+
+@register_decomposition(torch.ops.aten.linalg_vector_norm)
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
@@ -123,6 +128,7 @@ def inverse_permutation(perm):
     return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
 
 
+# CompositeImplicitAutograd
 @out_wrapper(exact_dtype=True)
 def matrix_norm(
     A: TensorLikeType,
@@ -202,6 +208,7 @@ def matrix_norm(
             )
 
 
+# CompositeImplicitAutograd
 @out_wrapper(exact_dtype=True)
 def norm(
     A: TensorLikeType,
@@ -236,11 +243,13 @@ def norm(
         return vector_norm(A, ord, dim, keepdim, dtype=dtype)
 
 
+# CompositeImplicitAutograd
 @out_wrapper("U", "S", "Vh", exact_dtype=True)
 def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
     return prims.svd(A, full_matrices=full_matrices)
 
 
+# CompositeImplicitAutograd
 @out_wrapper(exact_dtype=True)
 def svdvals(A: TensorLikeType) -> Tensor:
     return svd(A, full_matrices=False)[1]
