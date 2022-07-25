@@ -322,7 +322,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('diag_embed'),
         xfail('linalg.householder_product'),
         xfail('logit'),
-        xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
         xfail('corrcoef'),
