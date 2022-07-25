@@ -1123,6 +1123,7 @@ Tensor zeros_like(
     } else {
       res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
     }
+    res._coalesced_(true);
 
     return res;
   }
