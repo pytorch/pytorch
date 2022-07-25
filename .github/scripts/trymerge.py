@@ -503,6 +503,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.labels: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
@@ -627,8 +628,8 @@ class GitHubPR:
     def get_labels(self) -> List[str]:
         if self.labels is not None:
             return self.labels
-        labels = [node['node']['name'] for node in self.info["labels"]["edges"]]
-        self.labels: List[str] = labels
+        labels = [node['node']['name'] for node in self.info["labels"]["edges"]] if "labels" in self.info else []
+        self.labels = labels
         return self.labels
 
     def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
@@ -1240,7 +1241,7 @@ def main() -> None:
         return
 
     try:
-        on_green = args.on_green or has_ciflow_label(pr.labels)
+        on_green = args.on_green or has_ciflow_label(pr.get_labels())
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               force=args.force,
