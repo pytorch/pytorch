@@ -175,7 +175,10 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.softmax.int": None,
             "torch.ops.aten.log_softmax.int": None,
             # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.amax
-            # "torch.ops.aten._softmax": None,
+            "torch.ops.aten._softmax": None,
+            "torch.ops.aten._log_softmax": None,
+            "torch.ops.aten.relu_": None,
+            "torch.ops.aten.to": None,
             "torch.ops.aten._log_softmax_backward_data": None,
             # "torch.ops.aten._softmax_backward_data": None,  # Node _softmax_backward_data_default does not support nvfuser
             # "torch.ops.aten.var.dim": None,       # missing refs
