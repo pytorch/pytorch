@@ -840,8 +840,9 @@ class FullyShardedDataParallel(nn.Module):
         # shard any leftover parameters.
         params = [
             p for p in module.parameters()
-            if p not in ignored_params and not isinstance(p, FlatParameter)
+            if p not in ignored_params and (not isinstance(p, FlatParameter) or isinstance(p, ShardedTensor))
         ]
+        params = [p if not isinstance(p, ShardedTensor) else p.local_tensor() for p in params]
 
         if sync_module_states:
             if params != [] and params[0].device == torch.device("cpu"):
@@ -4346,6 +4347,8 @@ def _get_param_to_unflat_param_names(
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
+                if (isinstance(param, ShardedTensor)):
+                    param = param.local_tensor()
                 module_prefixed_param_names = (
                     param._param_names if isinstance(param, FlatParameter)
                     else [param_name]

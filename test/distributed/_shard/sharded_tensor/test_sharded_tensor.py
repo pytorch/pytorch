@@ -1763,6 +1763,31 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_cpu = st.to(device=cpu_device)
         self.assertEqual(st_cpu.device, cpu_device)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_meta(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st = sharded_tensor.zeros(spec, h, w)
+        current_device = torch.device(torch.cuda.current_device())
+        self.assertEqual(current_device, st.device)
+
+        # test after to cpu, device get changed
+        cpu_device = torch.device("cpu")
+        st_cpu = st.to(device=cpu_device)
+        self.assertEqual(st_cpu.device, cpu_device)
+
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_uneven_shards(self):
