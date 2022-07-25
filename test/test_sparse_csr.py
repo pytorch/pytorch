@@ -2518,8 +2518,11 @@ class TestSparseCSR(TestCase):
                 if layout_a is torch.sparse_bsc:
                     # workaround no dense<->bsc
                     b_bsr = self._convert_to_layout(a.transpose(0, 1).contiguous(), torch.sparse_bsr)
-                    # bsr of the tranpose is bsc of this
-                    b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(), b_bsr.col_indices(), b_bsr.values().transpose(-2, -1).contiguous(), size=(b_bsr.shape[-1], b_bsr.shape[-2]))
+                    # bsr of the transpose is bsc of this
+                    b = torch._sparse_bsc_tensor_unsafe(b_bsr.crow_indices(),
+                                                        b_bsr.col_indices(),
+                                                        b_bsr.values().transpose(-2, -1).contiguous(),
+                                                        size=(b_bsr.shape[-1], b_bsr.shape[-2]))
                     torch._validate_sparse_compressed_tensor_args(b.ccol_indices(), b.row_indices(), b.values(), b.shape, b.layout)
                 else:
                     b = self._convert_to_layout(a, layout_a)
@@ -2589,17 +2592,7 @@ class TestSparseCSR(TestCase):
             for i in range(batch_len):
                 batch_idx = tuple(np.unravel_index(i, batch_shape))
                 _test_matrix(pt_tensor[batch_idx], dense[batch_idx], layout, blocksize)
-            # todo: check whole conversion once to_dense impl for n-d batched-bsr
-            # take 3d slices of dense/sparse to convert/compare for now
-            if dense.dim() > 3:
-                part_dim = dense.dim() - 3
-                part_shape = batch_shape[:part_dim]
-                len_partition = functools.reduce(lambda x, y: x * y, part_shape, 1)
-                for i in range(len_partition):
-                    part_idx = tuple(np.unravel_index(i, part_shape))
-                    self.assertEqual(dense[part_idx], pt_tensor[part_idx].to_dense())
-            else:
-                self.assertEqual(dense, pt_tensor.to_dense())
+            self.assertEqual(dense, pt_tensor.to_dense())
 
         # Verify exception when given 0 sized batch
         for shape, blocksize in itertools.product(shapes, blocksizes):
