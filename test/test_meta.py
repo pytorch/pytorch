@@ -402,20 +402,9 @@ meta disagrees with real impl:
 
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
-
-"""
-# This is some sample code for how we could dump these dicts into YAML
-# file for easier reading/writing
-import yaml
-print(yaml.dump(
-  {resolve_name(k): [dtype_abbrs[d] for d in v]
-   for k, v in meta_function_expected_failures.items()}, default_flow_style=None))
-import sys
-sys.exit()
-"""
-
 meta_function_expected_failures = {
     torch.Tensor.to_sparse : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
+    torch.arange: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.allclose : {f64, f16, c128, c64, bf16, f32},
     torch.angle : {f64, i32, i64, u8, i16, b8, i8, f32},
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
@@ -474,6 +463,17 @@ meta_function_expected_failures = {
     torch.linalg.eigvals : {f64, f32},
     torch.linalg.lstsq : {f64, f32},
 }
+
+"""
+# This is some sample code for how we could dump these dicts into YAML
+# file for easier reading/writing
+import yaml
+print(yaml.dump(
+  {resolve_name(k): [dtype_abbrs[d] for d in v]
+   for k, v in meta_function_expected_failures.items()}, default_flow_style=None))
+import sys
+sys.exit()
+"""
 
 meta_function_skips = {
         torch.Tensor.__rmatmul__ : {bf16, c128, f64, f32, f16, c64},
