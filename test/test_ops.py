@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     first_sample,
     parametrize,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -66,7 +67,7 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
-from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -96,6 +97,7 @@ _ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -491,7 +493,7 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        self._ref_test_helper(lambda: TorchRefsMode.push(strict=True), device, dtype, op)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -1260,6 +1262,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
+@skipIfSlowGradcheckEnv
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1469,6 +1472,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
+@skipIfSlowGradcheckEnv
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1481,6 +1485,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@skipIfSlowGradcheckEnv
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1492,7 +1497,7 @@ class TestTags(TestCase):
             if isinstance(input, torch.Tensor):
                 old_size = input.size()
                 old_stride = input.stride()
-                with push_torch_dispatch_mode(TestTagsMode):
+                with TestTagsMode():
                     rs = op(input, *sample.args, **sample.kwargs)
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
@@ -1500,6 +1505,7 @@ class TestTags(TestCase):
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
+@skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
@@ -1662,6 +1668,8 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+
+@skipIfSlowGradcheckEnv
 class TestFakeTensorNonErroring(TestCase):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.any_one)
