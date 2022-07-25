@@ -15,7 +15,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import _type_utils, errors
+from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
 
 # Note [Edit Symbolic Files]
@@ -455,8 +455,8 @@ def _is_scalar_list(x: _C.Value) -> bool:
     typing.cast(_C.ListType, x_type)
     element_type = str(x.type().getElementType())
     return (
-        _type_utils.valid_torch_name(element_type)
-        and _type_utils.ScalarType.from_name(element_type).onnx_compatible()
+        element_type in scalar_name_to_pytorch.keys()
+        and (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
     )
 
 
