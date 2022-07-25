@@ -2252,7 +2252,7 @@ def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    normalized, mean, rstd = _layer_norm_shared(
+    normalized, _, _ = _layer_norm_shared(
         g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
     )
     return normalized
