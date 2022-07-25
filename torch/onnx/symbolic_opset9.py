@@ -17,8 +17,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import _patch_torch, symbolic_helper  # noqa: F401
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
@@ -355,17 +354,14 @@ def add(g, self, other, alpha=None):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported"
         )
-
-    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("add", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
-    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
-        return symbolic_helper._unimplemented("sub", "alpha != 1")
+        other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
 
@@ -1920,6 +1916,13 @@ def log_softmax(g, input, dim, dtype=None):
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
+
+
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    return log_softmax(g, input, dim)
 
 
 @symbolic_helper.parse_args(
