@@ -122,6 +122,19 @@ class Sequential(Module):
     def __len__(self) -> int:
         return len(self._modules)
 
+    def __add__(self, other) -> 'Sequential':
+        if isinstance(other, Sequential):
+            ret = Sequential()
+            for layer in self:
+                ret.append(layer)
+            for layer in other:
+                ret.append(layer)
+            return ret
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
+
     @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
@@ -148,6 +161,26 @@ class Sequential(Module):
             module (nn.Module): module to append
         """
         self.add_module(str(len(self)), module)
+        return self
+
+    def insert(self, index: int, module: Module) -> 'Sequential':
+        if not isinstance(module, Module):
+            raise AssertionError(
+                'module should be of type: {}'.format(Module))
+        n = len(self._modules)
+        if not (-n <= index <= n):
+            raise IndexError(
+                'Index out of range: {}'.format(index))
+        if index < 0:
+            index += n
+        for i in range(n, index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+        return self
+
+    def extend(self, sequential) -> 'Sequential':
+        for layer in sequential:
+            self.append(layer)
         return self
 
 

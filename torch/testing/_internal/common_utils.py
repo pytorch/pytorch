@@ -75,6 +75,8 @@ from torch.onnx import (register_custom_op_symbolic,
                         unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
+PYTEST_FILES = ["test_ops", "test_ops_gradients", "test_ops_jit"]
+
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
@@ -91,10 +93,8 @@ MAX_NUM_RETRIES = 3
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
-slow_tests_dict: Optional[Dict[str, Any]] = None
-disabled_tests_dict: Optional[Dict[str, Any]] = None
-
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
 
 class _TestParametrizer(object):
     """
@@ -335,6 +335,7 @@ class parametrize(_TestParametrizer):
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
+            values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
                 if isinstance(values, subtest):
@@ -369,6 +370,10 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
                 yield (gen_test, test_name, param_kwargs)
+
+            if values is check_exhausted_iterator:
+                raise ValueError('An empty arg_values was passed to @parametrize. '
+                                 'Note that this may result from reuse of a generator.')
 
 
 class ProfilingMode(Enum):
@@ -589,20 +594,33 @@ def lint_test_case_extension(suite):
                 succeed = False
     return succeed
 
+def sanitize_pytest_xml(xml_file: str):
+    # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
+    # consider somehow modifying the XML logger in conftest to do this instead
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(xml_file)
+    for testcase in tree.iter('testcase'):
+        full_classname = testcase.attrib['classname']
+        regex_result = re.search(r"^test\.(.*)\.([^\.]*)$", full_classname)
+        classname = regex_result.group(2)
+        file = regex_result.group(1).replace('.', "/")
+        testcase.set('classname', classname)
+        testcase.set('file', f"{file}.py")
+    tree.write(xml_file)
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
-            global slow_tests_dict
             with open(IMPORT_SLOW_TESTS, 'r') as fp:
-                slow_tests_dict = json.load(fp)
+                # use env vars so pytest-xdist subprocesses can still access them
+                os.environ['SLOW_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
         if os.path.exists(IMPORT_DISABLED_TESTS):
-            global disabled_tests_dict
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                disabled_tests_dict = json.load(fp)
+                os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
@@ -681,14 +699,36 @@ def run_tests(argv=UNITTEST_ARGS):
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
-        os.makedirs(test_report_path, exist_ok=True)
-        verbose = '--verbose' in argv or '-v' in argv
-        if verbose:
-            print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
-            verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+        if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
+            "cuda" in os.environ["BUILD_ENVIRONMENT"] and "linux" in os.environ["BUILD_ENVIRONMENT"]
+        ):
+            # exclude linux cuda tests because we run into memory issues when running in parallel
+            import pytest
+            os.environ["NO_COLOR"] = "1"
+            os.environ["USING_PYTEST"] = "1"
+            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+            os.makedirs(pytest_report_path, exist_ok=True)
+            # part of our xml parsing looks for grandparent folder names
+            pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
+            print(f'Test results will be stored in {pytest_report_path}')
+            # mac slower on 4 proc than 3
+            num_procs = 3 if "macos" in os.environ["BUILD_ENVIRONMENT"] else 4
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
+                                    '--reruns=2', '-rfEsX', f'--junit-xml-reruns={pytest_report_path}'])
+            del os.environ["USING_PYTEST"]
+            sanitize_pytest_xml(f'{pytest_report_path}')
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            os.makedirs(test_report_path, exist_ok=True)
+            verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print(f'Test results will be stored in {test_report_path}')
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -822,6 +862,30 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         kwargs = kwargs or {}
         r = func(*args, **kwargs)
         return r
+
+# Run PyTorch tests with TorchDynamo
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+if TEST_WITH_TORCHDYNAMO:
+    import torchdynamo
+    # torchdynamo.config.trace = True
+    # torchdynamo.config.debug = True
+    torchdynamo.config.print_internal_exceptions = False
+    # TODO - Collect errors with fake tensors
+    torchdynamo.config.fake_tensor_propagation = False
+    # Do not spend time on helper functions that are called with different inputs
+    torchdynamo.config.cache_size_limit = 8
+
+
+def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_TORCHDYNAMO:
+                raise unittest.SkipTest(msg)
+            else:
+                fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1188,20 +1252,35 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
+@contextmanager
+def disable_functorch():
+    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        del guard
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch():
+    with no_dispatch(), disable_functorch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
     try:
         yield
     finally:
-        with no_dispatch():
+        # Modes are not happy with torch.cuda.set_rng_state
+        # because it clones the state (which could produce a Tensor Subclass)
+        # and then grabs the new tensor's data pointer in generator.set_state.
+        #
+        # In the long run torch.cuda.set_rng_state should probably be
+        # an operator.
+        with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.set_rng_state(rng_state)
@@ -1464,13 +1543,16 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
+    if "USING_PYTEST" in os.environ:
+        test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
+    if raw_test_name in json.loads(os.environ.get("SLOW_TESTS_DICT", "{}")):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
+        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1826,7 +1908,16 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        super().run(result=result)
+
+        if TEST_WITH_TORCHDYNAMO:
+            with torchdynamo.optimize("eager"):
+                super().run(result=result)
+
+            # TODO - Reset for each test slows down testing significantly.
+            # torchdynamo.reset()
+        else:
+            super().run(result=result)
+
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():
@@ -1881,7 +1972,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+                stack.enter_context(CrossRefMode())
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
@@ -2044,7 +2135,7 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=()):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=(), dense_dims=0):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
@@ -2052,11 +2143,13 @@ class TestCase(expecttest.TestCase):
         assert len(size) >= sparse_dim
         if blocksize:
             assert len(blocksize) == 2, (size, blocksize)
-            assert size[-2] % blocksize[0] == 0, (size, blocksize)
-            assert size[-1] % blocksize[1] == 0, (size, blocksize)
+            assert size[-2 - dense_dims] % blocksize[0] == 0, (size, blocksize)
+            assert size[-1 - dense_dims] % blocksize[1] == 0, (size, blocksize)
             blocksize0, blocksize1 = blocksize
         else:
             blocksize0 = blocksize1 = 1
+
+        dense_size = size[(len(size) - dense_dims):]
 
         def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
             compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
@@ -2067,44 +2160,43 @@ class TestCase(expecttest.TestCase):
                     torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor((nnz,) + blocksize, device=device, dtype=dtype, low=low, high=high)
+            values = make_tensor((nnz,) + blocksize + dense_size, device=device, dtype=dtype, low=low, high=high)
             return values, compressed_indices, plain_indices
 
-        batch_shape = size[:-2]
+        batch_shape = size[:-2 - dense_dims]
         n_batch = reduce(mul, batch_shape, 1)
 
         if layout in {torch.sparse_csr, torch.sparse_bsr}:
-            n_compressed_dims, n_plain_dims = size[-2] // blocksize0, size[-1] // blocksize1
+            n_compressed_dims, n_plain_dims = size[-2 - dense_dims] // blocksize0, size[-1 - dense_dims] // blocksize1
         else:
-            n_compressed_dims, n_plain_dims = size[-1] // blocksize1, size[-2] // blocksize0
+            n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
         sparse_tensors_it = map(list, zip(*sparse_tensors))
 
-        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize)
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
-
         return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
                                               values, size=size, dtype=dtype, layout=layout, device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=dense_dims)
 
-    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype, dense_dims=0):
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=0)
 
-    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
-    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
         assert len(blocksize) == 2
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
-                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
@@ -3026,6 +3118,14 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
+def is_slow_gradcheck_env() -> bool:
+    return os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1"
+
+skipIfSlowGradcheckEnv = unittest.skipIf(
+    is_slow_gradcheck_env(),
+    "Tests that don't use gradcheck don't need to run on slow_gradcheck CI"
+)
+
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
@@ -3038,7 +3138,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -3058,7 +3158,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
