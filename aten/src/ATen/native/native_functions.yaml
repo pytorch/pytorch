@@ -5439,7 +5439,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
-    SparseCPU, SparseCUDA: zero_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
   autogen: zero, zero.out
@@ -10890,6 +10890,7 @@
   dispatch:
     CompositeExplicitAutograd: isinf
     SparseCPU, SparseCUDA: isinf_sparse
+    SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()

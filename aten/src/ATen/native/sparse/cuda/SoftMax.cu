@@ -408,6 +408,7 @@ void cuda_sparse_coo_softmax(
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
+  TORCH_INTERNAL_ASSERT(nnz, "nnz is zero, would div by zero");
   auto nvalues = values.numel() / nnz;
 
   /* Prepare accessors */

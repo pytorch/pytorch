@@ -715,6 +715,16 @@ Tensor empty_like_sparse_csr(
         self.layout(),
         options.device());
     return result;
+  } else if (options.layout() == kSparseCsc) {
+    auto result = at::native::_sparse_csc_tensor_unsafe(
+        self.ccol_indices().clone(),
+        self.row_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
   } else if (options.layout() == kStrided) {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   } else {
