@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -2206,8 +2206,15 @@ def batch_norm(
 
 
 def _layer_norm_returns_normalized_input_mean_rstd(
-    g, input, normalized_shape, weight, bias, eps, cudnn_enable, return_mean_rstd
-):
+    g,
+    input: torch._C.Value,
+    normalized_shape: Sequence[int],
+    weight: torch._C.Value,
+    bias: torch._C.Value,
+    eps: float,
+    cudnn_enable: bool,
+    return_mean_rstd: bool,
+) -> Tuple[torch._C.Value, Optional[torch._C.Value], Optional[torch._C.Value]]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
