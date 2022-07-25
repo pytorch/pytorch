@@ -533,7 +533,7 @@ def load_deprecated_signatures(
         # if the types and alias annotation match.
         def is_schema_compatible(
             aten_schema: FunctionSchema,
-        ) -> Optional[Dict[str, str]]:
+        ) -> bool:
             arguments: Iterable[Argument]
             if is_out:
                 arguments = itertools.chain(
@@ -554,10 +554,10 @@ def load_deprecated_signatures(
                         schema_annotation = schema_arg.annotation
 
                     if schema_type != arg.type or schema_annotation != arg.annotation:
-                        return None
+                        return False
                 else:
                     if arg.default is None:
-                        return None
+                        return False
 
             return len(schema.returns) == len(aten_schema.returns) and all(
                 a.type == b.type for a, b in zip(schema.returns, aten_schema.returns)
