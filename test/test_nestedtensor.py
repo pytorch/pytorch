@@ -1236,15 +1236,11 @@ class TestNestedTensorAutograd(TestCase):
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
     def test_nested_tensor_matmul_backward(self):
-        nt0 = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))])
-        nt1 = torch.nested_tensor([torch.randn((6, 4)), torch.randn((6, 5))])
-        pt0 = nt0.to_padded_tensor(0.0)
-        pt1 = nt1.to_padded_tensor(0.0)
-
-        nt0.requires_grad_(True)
-        nt1.requires_grad_(True)
-        pt0.requires_grad_(True)
-        pt1.requires_grad_(True)
+        nt0 = torch.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))]).requires_grad_(True)
+        nt1 = torch.nested_tensor([torch.randn((6, 4)), torch.randn((6, 5))]).requires_grad_(True)
+        with torch.no_grad():
+            pt0 = nt0.to_padded_tensor(0.0).requires_grad_(True)
+            pt1 = nt1.to_padded_tensor(0.0).requires_grad_(True)
 
         ynt = torch.matmul(nt0, nt1)
         ypt = torch.matmul(pt0, pt1)
