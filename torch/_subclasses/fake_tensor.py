@@ -623,13 +623,10 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
                 return out
             return e
 
-        try:
-            args = tree_map(to_real_tensor, args)
-            kwargs = tree_map(to_real_tensor, kwargs)
+        args = tree_map(to_real_tensor, args)
+        kwargs = tree_map(to_real_tensor, kwargs)
 
-            r = func(*args, **kwargs)
-        except Exception as new_exception:
-            raise orig_not_implemented_exception from new_exception
+        r = func(*args, **kwargs)
 
         tensor_impls = set()
         storages = set()
