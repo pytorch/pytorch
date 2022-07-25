@@ -288,6 +288,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad2d",
     "replication_pad3d",
     "take",
+    "put",
     "put_",
     "_to_copy",
     "replication_pad1d_backward",
@@ -517,6 +518,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    "lift_fresh",
+    "lift_fresh_copy",
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
