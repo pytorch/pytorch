@@ -99,6 +99,7 @@ __all__ = [
     "clone",
     "constant_pad_nd",
     "contiguous",
+    "convolution",
     "conv_tbc",
     "conv_transpose1d",
     "conv_transpose2d",
@@ -1986,6 +1987,37 @@ def _convolution(
         return g.op("Add", n, bias)
     else:
         return n
+
+
+@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
+def convolution(
+    g,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+):
+    return _convolution(
+        g,
+        input,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")

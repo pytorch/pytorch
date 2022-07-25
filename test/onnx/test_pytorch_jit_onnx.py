@@ -78,6 +78,22 @@ class _TestJITIRToONNX:
         b = torch.randn(2, 3)
         self.run_test(graph_ir, (a, b))
 
+    def test_convolution(self):
+        graph_ir = """
+        graph(%1 : Tensor,
+              %2 : Tensor):
+          %3 : NoneType = prim::Constant()
+          %4 : int[] = prim::Constant[value=[1, 1]]()
+          %5 : int[] = prim::Constant[value=[0, 0]]()
+          %6 : bool = prim::Constant[value=0]()
+          %7 : int = prim::Constant[value=1]()
+          %8 : Tensor = aten::convolution(%1, %2, %3, %4, %5, %4, %6, %5, %7)
+          return (%8)
+        """
+        x = torch.randn(8, 1, 5, 5)
+        w = torch.randn(4, 1, 3, 3)
+        self.run_test(graph_ir, (x, w))
+
 
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
