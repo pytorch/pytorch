@@ -649,13 +649,23 @@ bool is_float_or_complex_list(PyObject* obj) {
 
 static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+    auto len = PySequence_Size(obj);
+    if (len == 0) {
       return true;
     }
 
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
     if (THPUtils_checkIndex(item.ptr())) {
       return true;
+    }
+
+    // Make sure none of the later arguments are SymInt
+    // NB: do NOT check that the later arguments are ints, as this is
+    // BC-breaking for FX
+    for (int i = 1; i < len; i++) {
+      if (torch::is_symint_node(py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+        return false;
+      }
     }
 
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
