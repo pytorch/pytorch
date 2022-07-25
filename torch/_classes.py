@@ -1,22 +1,25 @@
 import types
+
 import torch._C
+
 
 class _ClassNamespace(types.ModuleType):
     def __init__(self, name):
-        super(_ClassNamespace, self).__init__('torch.classes' + name)
+        super(_ClassNamespace, self).__init__("torch.classes" + name)
         self.name = name
 
     def __getattr__(self, attr):
         proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
         if proxy is None:
-            raise RuntimeError(f'Class {self.name}.{attr} not registered!')
+            raise RuntimeError(f"Class {self.name}.{attr} not registered!")
         return proxy
 
+
 class _Classes(types.ModuleType):
-    __file__ = '_classes.py'
+    __file__ = "_classes.py"
 
     def __init__(self):
-        super(_Classes, self).__init__('torch.classes')
+        super(_Classes, self).__init__("torch.classes")
 
     def __getattr__(self, name):
         namespace = _ClassNamespace(name)
@@ -46,6 +49,7 @@ class _Classes(types.ModuleType):
             path (str): A path to a shared library to load.
         """
         torch.ops.load_library(path)
+
 
 # The classes "namespace"
 classes = _Classes()
