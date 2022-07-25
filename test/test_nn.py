@@ -1628,8 +1628,9 @@ class TestNN(NNTestCase):
         n *= 2
         self.assertEqual(n, nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4))
         n *= 2
-        self.assertEqual(n, nn.Sequential
-        (l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4)
+        self.assertEqual(
+            n,
+            nn.Sequential(l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4, l1, l2, l3, l4)
         )
 
     def test_Sequential_append(self):
