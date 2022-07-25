@@ -17,7 +17,7 @@ namespace utils {
 
 class TORCH_API AliasMap {
  public:
- AliasMap() = default;
+  AliasMap() = default;
   explicit AliasMap(const c10::FunctionSchema& schema);
   const std::vector<std::unordered_set<size_t>>& alias_map() const {
     return alias_map_;
