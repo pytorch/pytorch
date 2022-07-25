@@ -1,32 +1,32 @@
+import contextlib
+import math
+import operator
+import weakref
+from enum import Enum
+from functools import partial, reduce
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
+
 import torch
-from torch import Tensor, _TypedStorage
 
 import torch._prims_common as utils
+import torch.library
+from torch import _TypedStorage, Tensor
 from torch._prims_common import (
     check,
-    TensorLike,
-    TensorLikeType,
-    ShapeType,
-    getnvFuserDtype,
-    DimsType,
     DimsSequenceType,
-    StrideType,
+    DimsType,
+    getnvFuserDtype,
     Number,
     NumberType,
+    ShapeType,
+    StrideType,
+    TensorLike,
+    TensorLikeType,
     type_to_dtype,
 )
-from torch.overrides import has_torch_function, handle_torch_function
-import torch.library
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
-import contextlib
-from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
-from functools import reduce, partial
-from enum import Enum
-import operator
-import math
-import weakref
+from torch.overrides import handle_torch_function, has_torch_function
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -1403,7 +1403,7 @@ _broadcast_in_dim_doc = """
   """
 
 broadcast_in_dim = _make_prim(
-    schema="broadcast_in_dim(Tensor(a) a, int[] shape, int[] broadcast_dimensions) -> Tensor(a)",
+    schema="broadcast_in_dim(Tensor(a) a, SymInt[] shape, int[] broadcast_dimensions) -> Tensor(a)",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
     impl_nvfuser=_broadcast_in_dim_nvfuser,
@@ -1559,6 +1559,7 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
         idx for idx in range(len(new_shape)) if idx not in dimensions
     ]
     return broadcast_in_dim(a, new_shape, broadcast_dimensions)
+
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
 pyslice: Type[slice] = slice  # type: ignore[has-type]

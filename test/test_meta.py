@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -64,6 +65,7 @@ dtype_abbrs = {
 }
 
 
+@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -555,11 +557,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nn.functional.conv1d: {f16, c32, bf16, c128, c32, c64, f16, f32, f64},
-    torch.nn.functional.conv2d: {f16, c32, bf16, c128, c32, c64, f16, f32, f64},
-    torch.nn.functional.conv_transpose1d: {bf16, f16},
-    torch.nn.functional.conv_transpose2d: {bf16, f16},
-    torch.nn.functional.conv_transpose3d: {bf16, f16},
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -626,7 +623,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
-        
+
         return run_meta_crossref(
             self.test_case, test_expect, func, args,
             kwargs, dtype=self.dtype, device_type=self.device_type
@@ -742,7 +739,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._convolution.default: {f16, c32},
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
-    aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
@@ -783,7 +779,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cuda'] = {
-    aten._conj.default: {c32, f16}, # file issue 
+    aten._conj.default: {c32, f16}, # file issue
     aten._linalg_svd.default: {c64, c128},  # aten::linalg_eigvalsh.out
     aten.cudnn_batch_norm.default: {f32, f64},
     aten.log_softmax.int : {c32, c64},
@@ -850,9 +846,10 @@ op_skips = {
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
+@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    # @onlyCUDA
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -865,13 +862,13 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefFunctionMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    # @onlyCUDA
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
