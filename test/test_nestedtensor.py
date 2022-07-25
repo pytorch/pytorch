@@ -1220,7 +1220,7 @@ class TestNestedTensorAutograd(TestCase):
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
 
-    def test_nested_tensor_matmul(self):
+    def test_nested_tensor_matmul_gradcheck(self):
         a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
         b = torch.randn(3, 6, requires_grad=True, dtype=torch.float64)
         c = torch.randn(6, 4, requires_grad=True, dtype=torch.float64)
