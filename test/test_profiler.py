@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 import torch.optim
-from torch.profiler.profiler import tensorboard_trace_handler
 import torch.utils.data
 import torch.utils.data.datapipes as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
