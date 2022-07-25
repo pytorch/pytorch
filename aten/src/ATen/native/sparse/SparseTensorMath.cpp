@@ -782,7 +782,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
     get_sparse_impl(res)->raw_resize_(sparse_dim, /*dense_dim=*/0, /*shape=*/res_shape);
     get_sparse_impl(res)->set_indices_and_values_unsafe(indices, values);
     get_sparse_impl(res)->set_nnz_and_narrow(0);
-    return res;
+    return res._coalesced_(true);
   }
 
   const auto d_dim = d.dim();
