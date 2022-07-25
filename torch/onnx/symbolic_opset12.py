@@ -58,7 +58,7 @@ def _dropout_shared(g, input, p, train):
 
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
-    masked, mask = _dropout_shared(g, input, p, train)
+    masked, _ = _dropout_shared(g, input, p, train)
     return masked
 
 
