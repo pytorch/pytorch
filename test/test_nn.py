@@ -1610,10 +1610,8 @@ class TestNN(NNTestCase):
         n2 = nn.Sequential(l1, l2, l3)
         self.assertEqual(n1, n2)
         # check order of the index
-        k = 0
-        for key in range(len(n1)):
-            self.assertEqual(key, k)
-            k = k + 1
+        for k, mod in zip(range(len(n1)), n1):
+            self.assertIs(n1[k], mod)
 
     def test_Sequential_insert(self):
         l1 = nn.Linear(1, 2)
@@ -1739,10 +1737,8 @@ class TestNN(NNTestCase):
         self.assertEqual(modules.pop(1), module_list.pop(1))
         self.assertEqual(modules, module_list)
         # check order of the index
-        k = 0
-        for key in range(len(module_list)):
-            self.assertEqual(key, k)
-            k = k + 1
+        for k, mod in zip(range(len(module_list)), module_list):
+            self.assertIs(module_list[k], mod)
 
         # verify the right exception is thrown when trying to "forward" through a ModuleList
         self.assertRaises(NotImplementedError, module_list)
