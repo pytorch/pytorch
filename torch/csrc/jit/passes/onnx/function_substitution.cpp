@@ -158,8 +158,7 @@ WithCurrentScope ONNXGraphTopLevelScopeGuard(Graph& graph) {
   if (graph.inputs().size() == 0) {
     return current_scope_guard;
   }
-  if (auto top_module_type =
-          graph.inputs().at(0)->type()->cast<ClassType>()) {
+  if (auto top_module_type = graph.inputs().at(0)->type()->cast<ClassType>()) {
     auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
         TidyClassNameFromTorchScript(top_module_type->name()),
         top_module_variable_name);
