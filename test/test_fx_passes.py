@@ -3,12 +3,15 @@
 import operator
 import logging
 
+from torch import sigmoid
+
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
 
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -163,6 +166,8 @@ class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
         return node.op == "call_function" and node.target in {operator.add}
 
+
+@instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
 
     @parametrize("fn, expected_partition", [
@@ -270,7 +275,362 @@ class TestFXGraphPasses(JitTestCase):
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
 
-instantiate_parametrized_tests(TestFXGraphPasses)
+
+class TestCase:
+    def forward(x):
+        val = torch.neg(x)
+        return torch.add(val, val)
+
+    def pattern(a):
+        return torch.neg(a)
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 0),
+        (False, True, 1),
+        (True, True, 0)
+    ]
+
+class TestCase1:
+    def forward(x):
+        val = torch.neg(x) + torch.relu(x)
+        return torch.add(val, val)
+
+    def pattern(a):
+        return torch.neg(a) + torch.relu(a)
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 0),
+        (False, True, 1),
+        (True, True, 0)
+    ]
+
+class TestCase2:
+    def forward(x, w1, w2):
+        m1 = torch.cat([w1, w2]).sum()
+        m2 = torch.cat([w2, w1]).sum()
+        m3 = torch.cat([m1, m2]).sum()
+        return x + torch.max(m1) + torch.max(m2) + m3
+
+    def pattern(a, b):
+        return torch.cat([a, b]).sum()
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 3),
+        (True, False, 0),
+        (False, True, 2),
+        (True, True, 0)
+    ]
+
+class TestCase3:
+    def forward(x, y):
+        return torch.mm(x, y)
+
+    def pattern(x, y):
+        return torch.mm(x, y)
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 1),
+        (False, True, 1),
+        (True, True, 1)
+    ]
+
+class TestCase4:
+    def forward(x, y):
+            val = torch.neg(y) + torch.relu(x)
+            return torch.add(val, val)
+
+    def pattern(x):
+        return torch.relu(x)
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 0),
+        (False, True, 1),
+        (True, True, 0)
+    ]
+
+class TestCase5:
+    def forward(x):
+        a = torch.neg(x)
+        return torch.add(a, a)
+
+    def pattern(x):
+        a = torch.neg(x)
+        return torch.add(a, a)
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 1),
+        (False, True, 1),
+        (True, True, 1)
+    ]
+
+class DiamondShapePatternTestCast:
+    def forward(x):
+        a = torch.neg(x)
+
+        a = a.relu()
+        left = a.sigmoid()
+        right = a.relu()
+        out = left + right
+
+        return out
+
+    def pattern(a):
+        a = a.relu()
+        left = a.sigmoid()
+        right = a.relu()
+        out = left + right
+        return out
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 1),
+        (False, True, 0),
+        (True, True, 0)
+    ]
+
+class TestCase7:
+    def forward(x, w1, w2, b1, b2):
+        m0 = torch.cat([w1, w2])
+        m1 = torch.cat([w1, w2])
+        m2 = torch.cat([x, b2])
+        t0 = torch.addmm(b1, m1, m2.t())
+        t1 = torch.sum(w1, 1)
+        t2 = torch.addmm(b1, m1, m2.t())
+        return torch.sum(t1), torch.sum(t2)
+
+    def pattern(x, w1, w2, b1, b2):
+        m1 = torch.cat([w1, w2])
+        m2 = torch.cat([x, b2])
+        return torch.addmm(b1, m1, m2.t())
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 2),
+        (True, False, 0),
+        (False, True, 2),
+        (True, True, 0)
+    ]
+
+class TestCase8:
+    def forward(x):
+        x = torch.sigmoid(x)
+        x = torch.sigmoid(x)
+        return torch.sigmoid(x)
+
+    def pattern(x):
+        return torch.sigmoid(torch.sigmoid(x))
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 2),
+        (True, False, 1),
+        (False, True, 1),
+        (True, True, 0)
+    ]
+
+class JerryZhangTestCase:
+    def forward(x):
+        x += 3
+        x = x.dequantize()
+        x = torch.sigmoid(x)
+        x = x.to(torch.float16)
+        return x
+
+    def pattern(x):
+        x = x.dequantize()
+        x = torch.sigmoid(x)
+        x = x.to(torch.float16)
+        return x
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 1),
+        (False, True, 0),
+        (True, True, 0)
+    ]
+
+class MultipleOutputsWithDependency:
+    def forward(x):
+        y = x.relu()
+        z = y.sigmoid()
+        return z, y
+
+    def pattern(a):
+        b = a.relu()
+        c = b.sigmoid()
+        return b, c     # outputs have data dependency
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 0),
+        (False, True, 1),
+        (True, True, 0)
+    ]
+
+class MultipleOutputsWithoutDependency:
+
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        y = x.sigmoid()
+
+        out = y.sigmoid() + z.sum()
+        return out
+
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return b, c
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 1),
+        (True, False, 0),
+        (False, True, 0),
+        (True, True, 0)
+    ]
+
+class MultipleOutputsMultipleOverlappingMatches:
+
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        z1 = x.sum()
+        y = x.sigmoid()
+        y1 = x.sigmoid()
+
+        return z + z1 + y + y1
+
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return b, c
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 4),
+    ]
+
+class MultipleOutputsMultipleNonOverlappingMatches:
+
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        y = x.sigmoid()
+
+        x = x.relu()
+        z1 = x.sum()
+        y1 = x.sigmoid()
+
+        x = x.relu()
+        z2 = x.sum()
+        y2 = x.sigmoid()
+
+        return z + z1 + y + y1 + z2 + y2
+
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return b, c
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        (False, False, 3),
+    ]
+
+class MultipleOutputsIdenticalAnchor:
+
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        y = x.sigmoid()
+        y1 = x.sigmoid()
+
+        return  y, y1
+
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        b1 = a.sigmoid()
+        return b, b1
+
+    expects = [
+        # match_output, match_placeholder, num_matches
+        # (False, False, 2),  # FIXME: currently still matches to 2, should fix to 1
+        (True, False, 1),
+        (False, True, 0),
+    ]
+
+@instantiate_parametrized_tests
+class TestFXMatcherUtils(JitTestCase):
+
+    @parametrize("test_case", [
+        TestCase,
+        TestCase1,
+        TestCase2,
+        TestCase3,
+        TestCase4,
+        TestCase5,
+        DiamondShapePatternTestCast,
+        TestCase7,
+        TestCase8,
+        JerryZhangTestCase,
+        MultipleOutputsWithDependency,
+        MultipleOutputsWithoutDependency,
+        MultipleOutputsMultipleOverlappingMatches,
+        MultipleOutputsMultipleNonOverlappingMatches,
+        MultipleOutputsIdenticalAnchor,
+    ])
+    def test_pattern_matcher(self, test_case):
+
+        traced = symbolic_trace(test_case.forward)
+        pattern_traced = symbolic_trace(test_case.pattern)
+
+        for match_output, match_placeholder, num_matches in test_case.expects:
+
+            matcher = SubgraphMatcher(pattern_traced.graph,
+                                    match_output=match_output,
+                                    match_placeholder=match_placeholder)
+            matches = matcher.match(traced.graph)
+
+            assert len(matches) == num_matches
+
+            for match in matches:
+                for node in pattern_traced.graph.nodes:
+                    if not match_placeholder and node.op == "placeholder":
+                        continue
+                    if not match_output and node.op == "output":
+                        continue
+                    assert node in match.nodes_map
+
 
 if __name__ == "__main__":
     run_tests()

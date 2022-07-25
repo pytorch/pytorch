@@ -17,6 +17,9 @@ class Match(NamedTuple):
     # Maps nodes in the pattern subgraph to nodes in the larger graph
     nodes_map: Dict[Node, Node]
 
+    def __copy__(self):
+        return Match(anchor=self.anchor, nodes_map=self.nodes_map.copy())
+
 class _SubgraphMatcher:
     def __init__(self, pattern: Graph) -> None:
         self.pattern = pattern
