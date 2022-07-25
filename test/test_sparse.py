@@ -3387,7 +3387,8 @@ class TestSparse(TestCase):
     @dtypes(torch.double)
     def test_softmax_zero_nnz(self, device, dtype):
         t = torch.sparse_coo_tensor([[]], [], (3,), device=device, dtype=dtype)
-        torch.sparse.softmax(t, 0)
+        out = torch.sparse.softmax(t, 0)
+        self.assertEqual(out.to_dense(), torch.zeros_like(t))
 
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
