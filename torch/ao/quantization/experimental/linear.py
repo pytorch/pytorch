@@ -24,9 +24,6 @@ class LinearAPoT(WeightedQuantizedModule):
     """
 
     def __init__(self, weight2quantize: torch.Tensor, signed=False):
-        # self.in_features = in_features
-        # self.out_features = out_features
-
         super().__init__()
 
         # hard code to APoT paper example inputs: b=4, k=2
@@ -44,6 +41,8 @@ class LinearAPoT(WeightedQuantizedModule):
         r"""
         Helper function to decompose sums of PoT from APoT quantization
         into corresponding tuples of PoT terms.
+        For weight[i][j] = gamma * W = gamma * (W1 + W2),
+        levels_decomposed[i][j] = (W1, W2)
         """
         size = int(math.sqrt(torch.numel(self.weight)))
 
@@ -75,7 +74,7 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return np_levels_decomposed
 
-    def linear_APoT_fn(self, activation: torch.Tensor) -> torch.Tensor:
+    def linear_APoT_fn(self, activation: torch.Tensor) -> torch.FloatTensor:
         r"""
         Multiply APoT quantized weight and uniformly quantized activation
         with bitshifting instead of matrix multiplication.
@@ -148,9 +147,10 @@ class LinearAPoT(WeightedQuantizedModule):
 
         result = result * self.gamma
 
+        print("result dtype", result.dtype)
         return result
 
-    def forward(self, activation: torch.Tensor) -> torch.Tensor:
+    def forward(self, activation: torch.Tensor) -> torch.FloatTensor:
         r"""
         Call linear_APoT_fn to multiply activation with an APoT quantized weight.
         Args:
@@ -158,8 +158,8 @@ class LinearAPoT(WeightedQuantizedModule):
         """
         return self.linear_APoT_fn(activation)
 
-
-    def from_reference(self,  # type: ignore[override]
+    @classmethod
+    def from_reference(cls,  # type: ignore[override]
                        ref_qlinear,
                        alpha: torch.Tensor,
                        gamma: torch.Tensor,

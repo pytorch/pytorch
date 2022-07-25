@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+from torch import quantize_per_tensor
+from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.experimental.linear import LinearAPoT
 import unittest
 
@@ -10,8 +12,17 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_linear_APoT_fn(self):
         weight = 1000 * torch.rand(4, 4)
-        activation = 16 * torch.rand(4, 4)
-        activation = activation.int()
+        activation2quantize = 1000 * torch.rand(4, 4)
+
+        uniform_observer = MinMaxObserver()
+        uniform_observer(activation2quantize)
+        scale, zero_point = uniform_observer.calculate_qparams()
+
+        activation = quantize_per_tensor(input=activation2quantize,
+                                         scale=scale,
+                                         zero_point=zero_point,
+                                         dtype=torch.quint8).int_repr()
+        # activation = activation.int()
 
         # calculate result from calling linear forward method
         linear = LinearAPoT(weight)
