@@ -17,8 +17,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
+from torch.onnx import _patch_torch, symbolic_helper  # noqa: F401
 from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
