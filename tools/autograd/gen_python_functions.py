@@ -529,8 +529,9 @@ def load_deprecated_signatures(
                 name in schema_args_by_name or name in known_constants
             ), f"deprecation definiton: Unrecognized value {name}"
 
-        # Map deprecated signature arguments to their aten signature name
-        def map_schema_arguments(
+        # Map deprecated signature arguments to their aten signature and test
+        # if the types and alias annotation match.
+        def is_schema_compatible(
             aten_schema: FunctionSchema,
         ) -> Optional[Dict[str, str]]:
             arguments: Iterable[Argument]
@@ -541,7 +542,6 @@ def load_deprecated_signatures(
             else:
                 arguments = aten_schema.arguments.flat_all
 
-            arg_mapping: Dict[str, str] = {}
             for i, arg in enumerate(arguments):
                 if i < len(call_args):
                     arg_name = call_args[i]
@@ -549,7 +549,6 @@ def load_deprecated_signatures(
                         schema_type = known_constants[arg_name]
                         schema_annotation = None
                     else:
-                        arg_mapping[arg_name] = arg.name
                         schema_arg = schema_args_by_name[arg_name]
                         schema_type = schema_arg.type
                         schema_annotation = schema_arg.annotation
@@ -560,15 +559,13 @@ def load_deprecated_signatures(
                     if arg.default is None:
                         return None
 
-            returns_match = len(schema.returns) == len(aten_schema.returns) and all(
+            return len(schema.returns) == len(aten_schema.returns) and all(
                 a.type == b.type for a, b in zip(schema.returns, aten_schema.returns)
             )
-            return arg_mapping if returns_match else None
 
         any_schema_found = False
         for pair in grouped[aten_name]:
-            to_aten_name = map_schema_arguments(pair.function.func)
-            if to_aten_name is None:
+            if not is_schema_compatible(pair.function.func):
                 continue
             any_schema_found = True
 
