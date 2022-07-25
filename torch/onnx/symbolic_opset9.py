@@ -559,7 +559,8 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
-        dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]  # type: ignore[call-overload]
+        assert isinstance(dtype, torch.dtype)
 
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
@@ -4193,11 +4194,11 @@ def scatter_add(g, self, dim, index, src):
     dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]  # type: ignore[call-overload]
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
-        assert dtype is not None
+        assert isinstance(dtype, torch.dtype)
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
     else:
-        dtype = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)
-        to_add = zeros_like(g, self, dtype)
+        dtype_ = symbolic_helper.scalar_type_to_pytorch_type.index(dtype)  # type: ignore[arg-type]
+        to_add = zeros_like(g, self, dtype_)
     to_add = symbolic_helper._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -5140,7 +5141,7 @@ def fill(g, self, value):
     if dtype is None:
         dtype = symbolic_helper.ScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore
+        dtype = symbolic_helper.scalar_type_to_onnx.index(  # type: ignore[assignment]
             symbolic_helper.cast_pytorch_to_onnx[dtype]
         )
 
