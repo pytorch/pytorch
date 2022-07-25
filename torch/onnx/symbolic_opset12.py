@@ -45,7 +45,7 @@ def outer(g, input, other):
     return einsum_helper(g, "i,j->ij", [input, other])
 
 
-def _dropout_shared(g, input, p, train):
+def _dropout_returns_masked_input_and_mask(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
     # In eval mode, dropout is non-op. That is, if the node's
     # train param is set to False, dropout just returns its inputs.
@@ -59,13 +59,13 @@ def _dropout_shared(g, input, p, train):
 
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
-    masked, _ = _dropout_shared(g, input, p, train)
+    masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
     return masked
 
 
 @symbolic_helper.parse_args("v", "f", "i")
 def native_dropout(g, input, p, train):
-    return _dropout_shared(g, input, p, train)
+    return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 
 def nll_loss(g, self, target, weight, reduction, ignore_index):
