@@ -33,7 +33,7 @@ double convert_ord_to_double(const Scalar& ord) {
   } else if (ord.isFloatingPoint()) {
     p = ord.to<double>();
   } else {
-    AT_ERROR("foreach_tensor_norm_cuda expects ord to be integer or float");
+    TORCH_CHECK(false, "foreach_tensor_norm_cuda expects ord to be integer or float");
   }
   return p;
 }

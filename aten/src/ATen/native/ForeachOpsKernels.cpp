@@ -238,7 +238,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& o
 Tensor foreach_tensor_global_norm_slow(TensorList tensors, const Scalar& ord) {
   TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
   double p;
-  if (ord.isIntegral(false)) {
+  if (ord.isIntegral(/* includeBool */false)) {
     p = static_cast<int64_t>(ord.to<int64_t>());
   }
   if (ord.isFloatingPoint()) {
@@ -254,7 +254,7 @@ Tensor foreach_tensor_global_norm_slow(TensorList tensors, const Scalar& ord) {
       return cumulative_sum + (p == 0.0 || p == 1.0 ? norm : at::pow(norm, ord));
     }
   );
-  return (p == 0.0 ? result : at::pow(result, 1 / p)).to(result_scalar_type);
+  return (p == 0.0 || p == 1.0 ? result : at::pow(result, 1 / p)).to(result_scalar_type);
 }
 
 }} // namespace at::native
