@@ -121,7 +121,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                   approved_by=["pytorch/metamates"],
                   mandatory_checks_name=["Lint",
                                          "Facebook CLA Check",
-                                         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                                         "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
                                          ],
                   ),
     ]
@@ -257,7 +257,7 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
-        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_many_land_checks(self, mocked_gql: Any) -> None:
@@ -265,7 +265,7 @@ class TestGitHubPR(TestCase):
         """
         conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
         self.assertGreater(len(conclusions), 100)
-        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_failed_land_checks(self, mocked_gql: Any) -> None:
