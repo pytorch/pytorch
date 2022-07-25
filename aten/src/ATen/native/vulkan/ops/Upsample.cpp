@@ -7,7 +7,6 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
-namespace {}
 using namespace api::utils;
 
 Tensor upsample_nearest2d(
