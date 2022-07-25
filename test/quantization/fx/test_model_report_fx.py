@@ -1142,16 +1142,13 @@ class TestFxModelReportClass(QuantizationTestCase):
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
-    class LinearConv(torch.nn.Module):
-        def __init__(self):
+    class SimpleConv(torch.nn.Module):
+        def __init__(self, con_dims):
             super().__init__()
-            self.linear = torch.nn.Linear(3, 3)
             self.relu = torch.nn.ReLU()
-            self.conv = torch.nn.Conv2d(3, 3, 1)
+            self.conv = torch.nn.Conv2d(con_dims[0], con_dims[1], kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
 
         def forward(self, x):
-            x = self.linear(x)
-            x = self.relu(x)
             x = self.conv(x)
             x = self.relu(x)
             return x
@@ -1159,16 +1156,20 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
     class TwoBlockComplexNet(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.block1 = TestFxDetectInputWeightEqualization.LinearConv()
-            self.block2 = TestFxDetectInputWeightEqualization.LinearConv()
-            self.conv = torch.nn.Conv2d(3, 3, 1)
+            self.block1 = TestFxDetectInputWeightEqualization.SimpleConv((3, 32))
+            self.block2 = TestFxDetectInputWeightEqualization.SimpleConv((3, 3))
+            self.conv = torch.nn.Conv2d(32, 3, kernel_size=(1, 1), stride=(1, 1), padding=(1, 1), bias=False)
+            self.linear = torch.nn.Linear(768, 10)
             self.relu = torch.nn.ReLU()
 
         def forward(self, x):
             x = self.block1(x)
+            x = self.conv(x)
             y = self.block2(x)
+            y = y.repeat(1, 1, 2, 2)
             z = x + y
-            z = self.conv(z)
+            z = z.flatten(start_dim=1)
+            z = self.linear(z)
             z = self.relu(z)
             return z
 
@@ -1176,7 +1177,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return [['conv', 'relu']]
 
         def get_example_inputs(self):
-            return (torch.randn((1, 3, 3, 3)),)
+            return (torch.randn((1, 3, 28, 28)),)
 
     class ReluOnly(torch.nn.Module):
         def __init__(self):
@@ -1218,8 +1219,8 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # get the set of all nodes in the graph their fqns
                 node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
 
-                # there should be 5 node fqns that have the observer inserted
-                correct_number_of_obs_inserted = 5
+                # there should be 4 node fqns that have the observer inserted
+                correct_number_of_obs_inserted = 4
                 number_of_obs_found = 0
                 obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
 
@@ -1271,13 +1272,13 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             # get the specific report for input weight equalization
             input_weight_str, input_weight_dict = generated_report[test_input_weight_detector.get_detector_name()]
 
-            # we should have 5 layers looked at since 5 conv / linear layers
-            self.assertEqual(len(input_weight_dict), 5)
+            # we should have 5 layers looked at since 4 conv / linear layers
+            self.assertEqual(len(input_weight_dict), 4)
 
             # we can validate that the max and min values of the detector were recorded properly for the first one
             # this is because no data has been processed yet, so it should be values from original input
 
-            example_input = example_input.reshape((3, 3, 3))  # reshape input
+            example_input = example_input.reshape((3, 28, 28))  # reshape input
             for module_fqn in input_weight_dict:
                 # look for the first linear
                 if "block1.linear" in module_fqn:
