@@ -9,7 +9,7 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
@@ -40,6 +40,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
+
 aten = torch.ops.aten
 
 
@@ -333,6 +334,7 @@ aliasing_ops_list_return = {
 }
 
 
+@unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
