@@ -6561,6 +6561,21 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   return std::make_tuple(grad_self, grad_src);
 }
 
+Tensor take_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& indices) {
+  Tensor grad_self = at::zeros_like(self);
+  // For Composite Compliance,
+  // if `grad` and `indices` are CCT but `self` is not
+  // then we use the out-of-place variant of `put`.
+  if (!isTensorSubclassLike(self) &&
+      areAnyTensorSubclassLike({grad, indices})) {
+    return grad_self.put(indices, grad, true);
+  }
+  return grad_self.put_(indices, grad, true);
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
