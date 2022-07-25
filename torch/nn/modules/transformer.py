@@ -411,9 +411,8 @@ class TransformerEncoderLayer(Module):
             self.self_attn.batch_first and
             self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
             self.norm1.eps == self.norm2.eps and
-            ((src_mask is None and src_key_padding_mask is None)
-             if src.is_nested
-             else (src_mask is None or src_key_padding_mask is None))):
+            src_mask is None and
+                not (src.is_nested and src_key_padding_mask is not None)):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
@@ -453,7 +452,7 @@ class TransformerEncoderLayer(Module):
                     self.linear1.bias,
                     self.linear2.weight,
                     self.linear2.bias,
-                    src_mask if src_mask is not None else src_key_padding_mask,
+                    src_mask if src_mask is not None else src_key_padding_mask,  # TODO: split into two args
                 )
         x = src
         if self.norm_first:
