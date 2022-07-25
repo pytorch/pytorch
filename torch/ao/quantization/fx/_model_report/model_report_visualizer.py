@@ -72,8 +72,11 @@ class ModelReportVisualizer:
     TABLE_CHANNEL_KEY = "channel_level_info"
 
     # Constants for header vals
-    DEFAULT_NON_FEATURE_TENSOR_HEADERS = 2
-    DEFAULT_NON_FEATURE_CHANNEL_HEADERS = 3
+    NUM_NON_FEATURE_TENSOR_HEADERS = 2
+    NUM_NON_FEATURE_CHANNEL_HEADERS = 3
+
+    # Constants for row index in header
+    CHANNEL_NUM_INDEX = 2
 
     def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
@@ -187,7 +190,7 @@ class ModelReportVisualizer:
             # now we add all the data
             for index, module_fqn in enumerate(filtered_data):
                 # we make a new row for the tensor table
-                tensor_table_row = [index + 1, module_fqn]
+                tensor_table_row = [index, module_fqn]
                 for feature in tensor_features:
                     # we iterate in same order of added features
 
@@ -241,7 +244,7 @@ class ModelReportVisualizer:
         channel_headers: List[str] = []
 
         # counter to keep track of number of entries in
-        channel_table_entry_counter: int = 1
+        channel_table_entry_counter: int = 0
 
         if len(channel_features) > 0:
             # now we add all channel data
@@ -305,13 +308,19 @@ class ModelReportVisualizer:
                 Default = "", results in all the modules in the reports to be visible in the table
 
         Returns a dictionary with two keys:
-            (Dict[strList[List[Any]]]) A dict containing two keys:
+            (Dict[str, Tuple[List, List]]) A dict containing two keys:
             "tensor_level_info", "channel_level_info"
                 Each key maps to a tuple with:
                     A list of the headers of each table
                     A list of lists containing the table information row by row
                     The 0th index row will contain the headers of the columns
                     The rest of the rows will contain data
+
+        Example Use:
+            >>> mod_report_visualizer.generate_filtered_tables(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                ) # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
@@ -329,15 +338,23 @@ class ModelReportVisualizer:
                 feature_data = filtered_data[module_fqn][feature_name]
 
                 # if it is only a single value, is tensor, otherwise per channel
-                try:
-                    iterator = iter(feature_data)
-                except TypeError:
-                    # means is per-tensor
-                    tensor_features.add(feature_name)
-                else:
+                if isinstance(feature_data, torch.Tensor):
+                    # see what the size of shape is
+                    if len(feature_data.shape) == 0:
+                        # single value
+                        # means is per-tensor
+                        tensor_features.add(feature_name)
+                    else:
+                        # works means per channel
+                        channel_features.add(feature_name)
+                        num_channels = len(feature_data)
+                elif isinstance(feature_data, list):
                     # works means per channel
                     channel_features.add(feature_name)
                     num_channels = len(feature_data)
+                else:
+                    # means is per-tensor
+                    tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
         tensor_features_list: List[str] = sorted(list(tensor_features))
@@ -388,8 +405,13 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Expected Use:
-            >>> model_report_visualizer.generate_table_visualization(*filters)  # outputs neatly formatted table
+        Example Use:
+            >>> mod_report_visualizer.generate_table_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # prints out neatly formatted table with per_channel_min info for
+                all modules in block 1 of the model
         """
         # see if we got tabulate
         if not got_tabulate:
@@ -405,11 +427,14 @@ class ModelReportVisualizer:
         # now we have populated the tables for each one
         # let's create the strings to be returned
         table_str = ""
-        if len(tensor_headers) > self.DEFAULT_NON_FEATURE_TENSOR_HEADERS:
+        # the tables will have some headers columns that are non-feature
+        # ex. table index, module name, channel index, etc.
+        # we want to look at header columns for features, that come after those headers
+        if len(tensor_headers) > self.NUM_NON_FEATURE_TENSOR_HEADERS:
             # if we have at least one tensor level feature to be addded we add tensor table
             table_str += "Tensor Level Information \n"
             table_str += tabulate(tensor_table, headers=tensor_headers)
-        if len(channel_headers) > self.DEFAULT_NON_FEATURE_CHANNEL_HEADERS:
+        if len(channel_headers) > self.NUM_NON_FEATURE_CHANNEL_HEADERS:
             # if we have at least one channel level feature to be addded we add tensor table
             table_str += "\n\n Channel Level Information \n"
             table_str += tabulate(channel_table, headers=channel_headers)
@@ -420,42 +445,28 @@ class ModelReportVisualizer:
 
         print(table_str)
 
-    def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
+    def _get_plotting_data(self, table_dict: Dict[str, Tuple[List, List]]) -> Tuple[bool, List, List]:
         r"""
-        Takes in a feature and optional module_filter and plots of the desired data.
+        Takes in the table information as a dictionary and outputs both the x and y data
+        required to do the plotting.
 
-        Note:
-            Only features in the report that have tensor value data are plottable by this class
-            When the tensor information is plotted, it will plot:
-                idx as the x val, feature value as the y_val
-            When the channel information is plotted, it will plot:
-                idx // 3 as the x val, feature value as the y_val [for each channel]
-                The reason for this is that we want to be able to compare values across the
-                channels for same layer, and it will be hard if values are staggered by idx
         Args:
-            feature_filter (str): Filters the features presented to only those that
-                contain this filter substring
-            module_fqn_filter (str, optional): Only includes modules that contains this string
-                Default = "", results in all the modules in the reports to be visible in the table
+            table_dict ( Dict[str, Tuple[List, List]]): maps each of the:
+                TENSOR_LEVEL_INFO -> tensor_headers, tensor_table
+                CHANNEL_LEVEL_INFO -> channel_headers, channel_table
 
-        Expected Use:
-            >>> # the code below both returns the info and diplays the plot
-            >>> model_report_visualizer.generate_plot_visualization(*filters) # plots the data
+        Returns a tuple of three elements:
+            If the data is per_channel or not
+            A list of the x values to plot
+            A list of the y values to plot
         """
-        # checks if we have matplotlib and let's user know to install it if don't
-        if not got_matplotlib:
-            print("make sure to install matplotlib and try again.")
-            return None
-
-        # get the table dict and the specific tables of interest
-        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
         tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
         channel_headers, channel_table = table_dict[self.TABLE_CHANNEL_KEY]
 
         # make sure it is only 1 feature that is being plotted
         # get the number of features in each of these
-        tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS
-        channel_info_features_count = len(channel_headers) - ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS
+        tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        channel_info_features_count = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
 
         # keep track of per_channel or not
         data_is_per_channel: bool = False
@@ -465,36 +476,35 @@ class ModelReportVisualizer:
         # the feature will either be a tensor feature or channel feature
         if tensor_info_features_count == 1:
             # it should only be single value data, so easy to plot
-            for row in tensor_table:
-                row_value = row[ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS]
+            for table_row_num, row in enumerate(tensor_table):
+                row_value = row[ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS]
                 if not type(row_value) == str:
-                    x_data.append(row[0])
-                    y_data.append(row[ModelReportVisualizer.DEFAULT_NON_FEATURE_TENSOR_HEADERS])
+                    x_data.append(table_row_num)
+                    y_data.append(row[ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS])
 
         elif channel_info_features_count == 1:
             data_is_per_channel = True
             # gather the x_data and multiple y_data
             # calculate the number of channels
-            num_channels: int = max(row[2] for row in channel_table) + 1
+            num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in channel_table) + 1
             for channel in range(num_channels):
                 y_data.append([])  # seperate data list per channel
 
-            # keep track of last added x_value
-            last_added = None
-
             # get the data for each channel seperately
-            for row in channel_table:
+            for table_row_num, row in enumerate(channel_table):
                 # we want append based on what channel it is
-                current_channel = row[2]
-                data_value = row[ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS]
+                current_channel: int = row[self.CHANNEL_NUM_INDEX]
+
+                # if new module we are looking at, add it's index to x_data
+                if current_channel == 0:
+                    # looking at new module (it's 0th channel)
+                    new_module_index: int = table_row_num // num_channels
+                    x_data.append(new_module_index)
+
+                # get the corresponding data value to add
+                data_value = row[ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS]
                 if not type(data_value) == str:
                     # every num channels all belong to the same module
-                    # if we haven't already added it
-                    new_x_val = (row[0] - 1) // num_channels
-                    if new_x_val != last_added:
-                        x_data.append((row[0] - 1) // num_channels)
-                        last_added = new_x_val
-
                     # add it to the proper channel list
                     y_data[current_channel].append(data_value)
         else:
@@ -503,6 +513,47 @@ class ModelReportVisualizer:
             error_str += " We recommend calling get_all_unique_feature_names() to find unique feature names."
             error_str += " Pick one of those features to plot."
             raise ValueError(error_str)
+
+        # return whether per channel, x, and y values
+        return (data_is_per_channel, x_data, y_data)
+
+    def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
+        r"""
+        Takes in a feature and optional module_filter and plots of the desired data.
+
+        Note:
+            Only features in the report that have tensor value data are plottable by this class
+            When the tensor information is plotted, it will plot:
+                idx as the x val, feature value as the y_val
+            When the channel information is plotted, it will plot:
+                the first idx of each module as the x val, feature value as the y_val [for each channel]
+                The reason for this is that we want to be able to compare values across the
+                channels for same layer, and it will be hard if values are staggered by idx
+                This means each module is represented by only 1 x value
+        Args:
+            feature_filter (str): Filters the features presented to only those that
+                contain this filter substring
+            module_fqn_filter (str, optional): Only includes modules that contains this string
+                Default = "", results in all the modules in the reports to be visible in the table
+
+        Example Use:
+            >>> mod_report_visualizer.generate_plot_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # outputs line plot of per_channel_min information for all modules in block1 of model
+                each channel gets it's own line, and it's plotted across the in-order modules
+                on the x-axis
+        """
+        # checks if we have matplotlib and let's user know to install it if don't
+        if not got_matplotlib:
+            print("make sure to install matplotlib and try again.")
+            return None
+
+        # get the table dict and the specific tables of interest
+        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
+
+        data_is_per_channel, x_data, y_data = self._get_plotting_data(table_dict)
 
         # plot based on whether data is per channel or not
         fig = plt.figure()
@@ -540,8 +591,13 @@ class ModelReportVisualizer:
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
-        Expected Use:
-            >>> # displays the histogram
-            >>> model_report_visualizer.generate_histogram_visualization(*filters) # displays the histogram
+        Example Use:
+            >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
+                    feature_filter = "per_channel_min",
+                    module_fqn_filter = "block1"
+                )
+            # outputs histogram of per_channel_min information for all modules in block1 of model
+                information is gathered across all channels for all modules in block 1 for the
+                per_channel_min and is displayed in a histogram of equally sized bins
         """
         pass
