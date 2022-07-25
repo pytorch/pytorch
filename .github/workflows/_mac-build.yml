@@ -83,6 +83,7 @@ jobs:
           sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+          echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
 
       - name: Get workflow job id
         id: get-job-id
