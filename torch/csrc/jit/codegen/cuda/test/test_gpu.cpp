@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -56,58 +57,6 @@ using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
-
-// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder()
-      .ndims(ndims)
-      .dtype(dtype)
-      .contiguity(std::vector<bool>(ndims, true))
-      .build();
-}
-
-// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
-}
-
-// Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder().shape(shape).dtype(dtype).build();
-}
-
-TensorView* makeContigConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder()
-      .shape(shape)
-      .dtype(dtype)
-      .contiguity(std::vector<bool>(shape.size(), true))
-      .build();
-}
-
-void checkIntValue(
-    ExpressionEvaluator& evaluator,
-    Val* val,
-    Int::ScalarType expected_value) {
-  TORCH_CHECK(val->isAnInt());
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
-
-void checkIntValue(
-    kir::ExpressionEvaluator& evaluator,
-    const Val* val,
-    Int::ScalarType expected_value) {
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
 
 TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
   auto used_tvs = ir_utils::allTvs(gpulw.kernel()->as<Fusion>());
@@ -5765,12 +5714,11 @@ TEST_F(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
   std::vector<int64_t> reduction_axes{0, 1};
   auto reduction_params = getReductionHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {input0, input1}, reduction_params.value().lparams);
-  auto cg_outputs =
-      fe.runFusion({input0, input1}, reduction_params.value().lparams);
+  fe.compileFusion(&fusion, {input0, input1}, reduction_params->lparams);
+  auto cg_outputs = fe.runFusion({input0, input1}, reduction_params->lparams);
 
   auto aten_output = input0.add(input1).to(at::kDouble).sum(reduction_axes);
 
@@ -5782,7 +5730,7 @@ TEST_F(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
       __LINE__,
       __FILE__,
       "",
-      reduction_params.value().lparams);
+      reduction_params->lparams);
 }
 
 TEST_F(NVFuserTest, FusionAdvancedIndexing7_CUDA) {
@@ -7712,9 +7660,9 @@ TEST_F(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
   // Apply reduction heuristic
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -7841,9 +7789,9 @@ TEST_F(NVFuserTest, FusionReductionScheduler_CUDA) {
   // Apply reduction heuristic
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -7948,8 +7896,8 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
   // Apply reduction heuristic
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
+  scheduleReduction(&fusion, *reduction_params);
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -7991,8 +7939,8 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
+  scheduleReduction(&fusion, *reduction_params);
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -8066,9 +8014,9 @@ TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
       auto aten_output = aten_input.to(at::kDouble).sum({0});
 
       auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
-      TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-      scheduleReduction(&fusion, reduction_params.value());
-      auto lparams = reduction_params.value().lparams;
+      TORCH_CHECK(reduction_params != nullptr, "Reduction is not found!");
+      scheduleReduction(&fusion, *reduction_params);
+      auto lparams = reduction_params->lparams;
 
       FusionExecutor fe;
       fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -8148,9 +8096,9 @@ TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
                     : at::randn({rdim, odim}, options));
 
           auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
-          TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-          scheduleReduction(&fusion, reduction_params.value());
-          auto lparams = reduction_params.value().lparams;
+          TORCH_CHECK(reduction_params != nullptr, "Reduction is not found!");
+          scheduleReduction(&fusion, *reduction_params);
+          auto lparams = reduction_params->lparams;
 
           FusionExecutor fe;
           fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -8808,9 +8756,9 @@ TEST_F(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
   auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  schedulePersistentKernel(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -8863,9 +8811,9 @@ TEST_F(NVFuserTest, FusionTestMaskSoftmax_CUDA) {
       getPersistentHeuristics(&fusion, {aten_input, aten_mask});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  schedulePersistentKernel(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input, aten_mask}, lparams);
@@ -10921,11 +10869,11 @@ TEST_F(NVFuserTest, FusionReductionHalf_CUDA) {
 
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -10993,8 +10941,8 @@ TEST_F(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
   // Apply reduction heuristic
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
+  scheduleReduction(&fusion, *reduction_params);
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -11040,8 +10988,8 @@ TEST_F(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  scheduleReduction(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
+  scheduleReduction(&fusion, *reduction_params);
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -11086,8 +11034,8 @@ TEST_F(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   // Apply reduction heuristic
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
+  scheduleReduction(&fusion, *reduction_params);
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -13000,9 +12948,9 @@ TEST_F(NVFuserTest, FusionWelfordSchedule_CUDA) {
   at::Tensor t0 = at::randn({M, N}, options);
   // TODO: Why do we use launch params from here, but not scheduling???
   auto reduction_params = getReductionHeuristics(&fusion, {t0});
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
   FusionExecutor fe;
   fe.compileFusion(&fusion, {t0}, lparams);
   auto outputs = fe.runFusion({t0}, lparams);
@@ -13022,7 +12970,7 @@ TEST_F(NVFuserTest, FusionWelfordSchedule_CUDA) {
       __LINE__,
       __FILE__,
       "validate welford",
-      reduction_params.value().lparams);
+      reduction_params->lparams);
 }
 
 namespace {
@@ -13076,9 +13024,9 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   }
 
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
@@ -13104,7 +13052,7 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
       __LINE__,
       __FILE__,
       "validate welford",
-      reduction_params.value().lparams);
+      reduction_params->lparams);
 }
 } // namespace
 
@@ -13815,8 +13763,9 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime1 = executor_cache.getMostRecentKernelRuntime();
-  auto log1 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
-  TORCH_CHECK(log1.has_value());
+  auto log1 = std::dynamic_pointer_cast<PointwiseParams>(
+      executor_cache.getMostRecentExecutorInfo().params);
+  TORCH_CHECK(log1 != nullptr);
   TORCH_CHECK(log1->vectorize);
 
   testValidate(
@@ -13828,8 +13777,9 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime2 = executor_cache.getMostRecentKernelRuntime();
-  auto log2 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
-  TORCH_CHECK(log2.has_value());
+  auto log2 = std::dynamic_pointer_cast<PointwiseParams>(
+      executor_cache.getMostRecentExecutorInfo().params);
+  TORCH_CHECK(log2 != nullptr);
   TORCH_CHECK(log2->vectorize);
 
   testValidate(
@@ -13841,8 +13791,9 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime3 = executor_cache.getMostRecentKernelRuntime();
-  auto log3 = executor_cache.getMostRecentExecutorInfo().pointwise_params;
-  TORCH_CHECK(log3.has_value());
+  auto log3 = std::dynamic_pointer_cast<PointwiseParams>(
+      executor_cache.getMostRecentExecutorInfo().params);
+  TORCH_CHECK(log3 != nullptr);
   TORCH_CHECK(log3->vectorize);
 
   testValidate(
@@ -16237,10 +16188,10 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
 
   auto reduction_params = getReductionHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  scheduleReduction(&fusion, reduction_params.value());
+  scheduleReduction(&fusion, *reduction_params);
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
   FusionExecutor fe;
   fe.compileFusion(&fusion, {input0, input1}, lparams);
   auto cg_outputs = fe.runFusion({input0, input1}, lparams);
@@ -16285,9 +16236,9 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
 
   auto reduction_params = getPersistentHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-  schedulePersistentKernel(&fusion, reduction_params.value());
+  schedulePersistentKernel(&fusion, *reduction_params);
 
-  auto lparams = reduction_params.value().lparams;
+  auto lparams = reduction_params->lparams;
   FusionExecutor fe;
   fe.compileFusion(&fusion, {input0, input1}, lparams);
   auto cg_outputs = fe.runFusion({input0, input1}, lparams);

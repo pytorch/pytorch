@@ -721,18 +721,7 @@ bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
   if (index_mode_ != other->index_mode_) {
     return false;
   }
-  // Heuristic equal should imply has_reduction_param_ equal,
-  //  need to double check if it is the case before removing
-  //  the below one.
-  if (has_reduction_param_ != other->has_reduction_param_) {
-    return false;
-  }
-  if (has_reduction_param_) {
-    return rparams_ == other->rparams_;
-  } else {
-    return pparams_ == other->pparams_;
-  }
-  return true;
+  return params_->sameAs(other->params_);
 }
 
 namespace {
@@ -834,7 +823,7 @@ class ReductionScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::Reduction, true) {
+      : SchedulerEntry(ScheduleHeuristic::Reduction) {
     computeHeuristics(fusion, runtime_info, data_cache);
   }
 
@@ -964,7 +953,7 @@ class ReductionScheduler : public SchedulerEntry {
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule Single Reduction");
-    scheduleReduction(fusion, rparams());
+    scheduleReduction(fusion, reductionParams());
   }
 
  private:
@@ -972,9 +961,8 @@ class ReductionScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
-    auto param = getReductionHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(param.has_value());
-    rparams() = param.value();
+    params_ = getReductionHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params_ != nullptr);
   }
 };
 
@@ -984,7 +972,7 @@ class PointWiseScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::PointWise, false) {
+      : SchedulerEntry(ScheduleHeuristic::PointWise) {
     computeHeuristics(fusion, runtime_info, data_cache);
   }
 
@@ -1027,16 +1015,15 @@ class PointWiseScheduler : public SchedulerEntry {
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule PointWise Fusion");
-    schedulePointwise(fusion, pparams());
+    schedulePointwise(fusion, pointwiseParams());
   }
 
   void computeHeuristics(
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
-    auto pparam = getPointwiseHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(pparam.has_value());
-    pparams() = pparam.value();
+    params_ = getPointwiseHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params_ != nullptr);
   }
 };
 
@@ -1046,13 +1033,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::Persistent, true) {
+      : SchedulerEntry(ScheduleHeuristic::Persistent) {
     computeHeuristics(fusion, runtime_info, data_cache);
   }
 
   void schedule(Fusion* fusion) override {
     FUSER_PERF_SCOPE("Schedule Persistent Fusion");
-    schedulePersistentKernel(fusion, rparams());
+    schedulePersistentKernel(fusion, reductionParams());
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
@@ -1263,9 +1250,8 @@ class PersistentKernelScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
-    auto param = getPersistentHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(param.has_value());
-    rparams() = param.value();
+    params_ = getPersistentHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params_ != nullptr);
   }
 };
 
@@ -1367,11 +1353,7 @@ c10::optional<ScheduleHeuristic> SchedulerEntry::proposeHeuristics(
 }
 
 size_t SchedulerEntryHash::operator()(const SchedulerEntry& se) const {
-  if (se.hasReductionParam()) {
-    return ReductionParamsHash()(se.reductionParams());
-  } else {
-    return PointwiseParamsHash()(se.pointwiseParams());
-  }
+  return se.params()->hash();
 }
 
 std::string toString(ScheduleHeuristic sh) {

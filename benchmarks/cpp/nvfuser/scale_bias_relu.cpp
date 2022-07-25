@@ -135,8 +135,7 @@ static void NvFuserScheduler_SBR(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
-  auto params = toString(compile_log.pointwise_params.value());
+  auto params = toString(compile_log.params);
   auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(params + lparams);
@@ -238,8 +237,7 @@ static void NvFuserScheduler_SBR_Norm(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
-  auto params = toString(compile_log.pointwise_params.value());
+  auto params = toString(compile_log.params);
   auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(params + lparams);

@@ -65,8 +65,7 @@ static void NvFuserScheduler_Reduction(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
-  auto rparams = toString(compile_log.reduction_params.value());
+  auto rparams = toString(compile_log.params);
   auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(rparams + lparams);

@@ -186,7 +186,7 @@ class DomainMap {
 
 } // namespace
 
-c10::optional<PointwiseParams> getPointwiseHeuristics(
+std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs,
     HeuristicSummary* data_cache) {
@@ -194,7 +194,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   return getPointwiseHeuristics(fusion, runtime_info, data_cache);
 }
 
-c10::optional<PointwiseParams> getPointwiseHeuristics(
+std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     HeuristicSummary* data_cache) {
@@ -257,10 +257,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
                   std::vector<scheduler_utils::BroadcastMultiple>>();
             });
     broadcast_byte_multiples_entry.get();
-
-    PointwiseParams params;
-    params.tag = "Pointwise heuristics";
-    return params;
+    return std::make_shared<PointwiseParams>("Pointwise heuristics");
   }
 
   // Find all vectorizable inputs/outputs
@@ -298,8 +295,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
     max_unroll_factor = 1;
   }
 
-  PointwiseParams params;
-  params.tag = "Pointwise heuristics";
+  auto params = std::make_shared<PointwiseParams>("Pointwise heuristics");
 
   /*
    * 2D pointwise scheduling logic. What is expected is there's some
@@ -467,7 +463,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // Vectorizing innermost domains
 
   // Don't try to vectorize if it's not recommended
-  params.unroll_factor = 1;
+  params->unroll_factor = 1;
 
   // Compute maximum vectorize factor that can be used
   size_t vectorize_factor = max_unroll_factor;
@@ -497,27 +493,27 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   }
 
   if (vectorize_factor == 1) {
-    params.vectorize = false;
-    params.unroll_factor = max_unroll_factor;
+    params->vectorize = false;
+    params->unroll_factor = max_unroll_factor;
   } else {
-    params.vectorize = true;
-    params.unroll_factor = vectorize_factor;
+    params->vectorize = true;
+    params->unroll_factor = vectorize_factor;
   }
 
   TORCH_INTERNAL_ASSERT(right_elem_count > 0 || break_point == 0);
   TORCH_INTERNAL_ASSERT(!(bdimy > 1 && gdim_right > 1));
 
-  params.break_point = break_point;
-  params.flip_grid_binding = flip_grid_binding;
-  params.split_block = bdimy > 1;
+  params->break_point = break_point;
+  params->flip_grid_binding = flip_grid_binding;
+  params->split_block = bdimy > 1;
 
-  params.lparams.bind(bdimx, ParallelType::TIDx);
-  if (params.split_block) {
-    params.lparams.bind(bdimy, ParallelType::TIDy);
+  params->lparams.bind(bdimx, ParallelType::TIDx);
+  if (params->split_block) {
+    params->lparams.bind(bdimy, ParallelType::TIDy);
   }
   if ((flip_grid_binding && gdim_right > 65535) ||
       (!flip_grid_binding && gdim_left > 65535)) {
-    params.split_grid_y_dim = true;
+    params->split_grid_y_dim = true;
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
@@ -535,7 +531,7 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
               << (right_elem_count > 0 ? n_elems / right_elem_count : 0)
               << " RHS elems: " << right_elem_count << std::endl;
     std::cerr << std::endl;
-    std::cerr << params.toString() << std::endl;
+    std::cerr << params->toString() << std::endl;
   }
 
   return params;
@@ -548,9 +544,9 @@ LaunchParams schedulePointwise(
   FUSER_PERF_SCOPE("scheduleFusion");
   auto params = getPointwiseHeuristics(fusion, runtime_inputs);
   TORCH_INTERNAL_ASSERT(
-      params.has_value(), "Could not schedule pointwise operation.");
-  schedulePointwise(fusion, params.value());
-  return params.value().lparams;
+      params != nullptr, "Could not schedule pointwise operation.");
+  schedulePointwise(fusion, *params);
+  return params->lparams;
 }
 
 bool hasReferenceTensorView(Fusion* fusion) {
