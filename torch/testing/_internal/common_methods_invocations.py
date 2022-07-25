@@ -17508,7 +17508,14 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_gradgrad=True,
            supports_out=False,
-           ),
+           skips=(
+               # FakeTensor used in refs does not support tracking storage_offset and this leads
+               # to bellow failing. For complex those tests are disabled so we need to exclude them
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta",
+                            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16)),
+               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta",
+                            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16)),
+           )),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),

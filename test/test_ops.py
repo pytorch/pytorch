@@ -1565,7 +1565,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.trunc_divide',
         '_refs.vsplit',
         '_refs.vstack',
-        '_refs.unbind',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"

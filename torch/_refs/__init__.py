@@ -2676,6 +2676,7 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 0)
 
 
+@register_decomposition(torch.ops.aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
