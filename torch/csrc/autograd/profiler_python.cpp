@@ -40,15 +40,15 @@ struct CodeLocation {
   CodeLocation() = default;
   explicit CodeLocation(PyFrameObject* frame)
       : line_number_{PyFrame_GetLineNumber(frame)} {
-        auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-        filename_ = THPUtils_unpackStringView(code->co_filename).data();
-        name_ = THPUtils_unpackStringView(code->co_name).data();
-      }
-
-  bool operator==(const CodeLocation& other) const {
-    return filename_ == other.filename_ && name_ == other.name_ && line_number_ == other.line_number_;
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+    filename_ = THPUtils_unpackStringView(code->co_filename).data();
+    name_ = THPUtils_unpackStringView(code->co_name).data();
   }
 
+  bool operator==(const CodeLocation& other) const {
+    return filename_ == other.filename_ && name_ == other.name_ &&
+        line_number_ == other.line_number_;
+  }
 
   const char* filename_{nullptr};
   const char* name_{nullptr};
@@ -59,10 +59,10 @@ PyCodeObject* nnModuleCode() {
   static auto module_call_code = []() {
     pybind11::gil_scoped_acquire gil;
     auto res = py::module::import("torch.nn")
-        .attr("Module")
-        .attr("__call__")
-        .attr("__code__")
-        .ptr();
+                   .attr("Module")
+                   .attr("__call__")
+                   .attr("__code__")
+                   .ptr();
     TORCH_INTERNAL_ASSERT(PyCode_Check(res));
     return (PyCodeObject*)res;
   }();
@@ -601,8 +601,7 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
-      return tls.intern<CallType::PyModuleCall, E>(
-          self.get(), back.get());
+      return tls.intern<CallType::PyModuleCall, E>(self.get(), back.get());
     } else {
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       auto f_back = (back.get() != nullptr) ? back.get() : frame;
