@@ -654,6 +654,7 @@
   structured: True
   dispatch:
     CPU, CUDA: argmin_out
+    MPS: argmin_out_mps
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
@@ -1034,6 +1035,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_not_out
+    MPS: logical_not_out_mps
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1051,6 +1053,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_xor_out
+    MPS: logical_xor_out_mps
 
 - func: logical_and(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1068,6 +1071,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_and_out
+    MPS: logical_and_out_mps
 
 - func: logical_or(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1085,6 +1089,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_or_out
+    MPS: logical_or_out_mps
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -3118,6 +3123,7 @@
   structured: True
   dispatch:
     CPU, CUDA: amax_out
+    MPS: amax_out_mps
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -3274,6 +3280,7 @@
   structured: True
   dispatch:
     CPU, CUDA: amin_out
+    MPS: amin_out_mps
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
@@ -4841,6 +4848,7 @@
   variants: function, method
   dispatch:
     CPU, QuantizedCPU, CUDA, QuantizedCUDA: flip
+    MPS: flip_mps
 
 - func: fliplr(Tensor self) -> Tensor
   variants: function, method
@@ -6956,6 +6964,7 @@
   variants: method
   dispatch:
     CPU, CUDA: exponential_
+    MPS: exponential_mps_
   autogen: exponential.functional, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -8289,6 +8298,7 @@
   dispatch:
     CPU: cpu_equal
     CUDA: cuda_equal
+    MPS: mps_equal
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
@@ -8379,7 +8389,7 @@
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU, CUDA: normal
-    #MPS: normal_mps
+    MPS: normal_mps
     Meta: normal_meta
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
@@ -8391,8 +8401,8 @@
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU, CUDA: normal
+    MPS: normal_mps
     Meta: normal_meta
-    #MPS: normal_mps
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8403,8 +8413,8 @@
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU, CUDA: normal
+    MPS: normal_mps
     Meta: normal_meta
-    #MPS: normal_mps
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -9386,16 +9396,19 @@
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_out
+    MPS: huber_loss_out_mps
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss
+    MPS: huber_loss_mps
 
 - func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_backward_out
+    MPS: huber_loss_backward_out_mps
 
 - func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   python_module: nn
@@ -9461,6 +9474,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9472,12 +9486,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
@@ -9677,6 +9693,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_out
+    MPS: softplus_out_mps
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out
@@ -9689,6 +9706,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
+    MPS: softplus_backward_out_mps
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
