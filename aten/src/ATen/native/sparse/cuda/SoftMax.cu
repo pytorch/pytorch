@@ -91,7 +91,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     PackedTensorAccessor<scalar_t, 2> input_values_acc,
     PackedTensorAccessor<scalar_t, 2> output_values_acc) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -153,7 +153,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     PackedTensorAccessor<scalar_t, 2> out_values_accessor,
     PackedTensorAccessor<scalar_t, 2> grad_values_accessor) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
@@ -226,7 +226,7 @@ Tensor get_offsets(
     const IntArrayRef& sizes,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/Softmax.cpp:get_offsets for the CPU
+    See ATen/native/sparse/SoftMax.cpp:get_offsets for the CPU
     implementation of get_offsets function that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -284,8 +284,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     Return pools of indices that align with the given dimension and the
     corresponding max values for each pool.
 
-    See ATen/native/sparse/Softmax.cpp:get_offsets and
-    ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:get_offsets and
+    ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -379,7 +379,7 @@ void cuda_sparse_coo_softmax(
     const Tensor& input,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -450,7 +450,7 @@ void cuda_sparse_coo_softmax_backward(
     const int64_t dim,
     ScalarType input_dtype) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
