@@ -35,29 +35,29 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorMatrixOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_contiguous(self):
         specs = _chunk_sharding_specs_list_for_test([0], seed=7)
         for spec in specs:
-            st = sharded_tensor.rand(spec, 10, 22, 5, init_rrefs=True)
+            st = sharded_tensor.rand(spec, 10, 22, 5, init_rrefs=False)
             st = st.transpose(1, 0)
             st = st.contiguous()
             self.assertTrue(st.is_contiguous())
             self.assertTrue(st.local_tensor().is_contiguous())
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_type_as(self):
         specs = _chunk_sharding_specs_list_for_test([0], seed=7)
         for spec in specs:
             st = sharded_tensor.rand(
-                spec, 16, 30, 5, init_rrefs=True, dtype=torch.double
+                spec, 16, 30, 5, init_rrefs=False, dtype=torch.double
             )
             st_2 = sharded_tensor.rand(
-                spec, 16, 30, 5, init_rrefs=True, dtype=torch.float
+                spec, 16, 30, 5, init_rrefs=False, dtype=torch.float
             )
             st_3 = st.type_as(st_2)
             self.assertEqual(torch.float, st_3.dtype)
@@ -66,7 +66,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             self.assertEqual(torch.bool, st_3.dtype)
             self.assertEqual(torch.bool, st_3.local_tensor().dtype)
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_transpose(self):
@@ -92,21 +92,21 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 torch.allclose(_shard_tensor(tensor, spec).transpose(1, 2), st_expected)
             )
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_transpose_error(self):
         enumerable_spec = generate_enumerable_sharding_specs_for_test()[0]
         st = sharded_tensor.rand(
-            enumerable_spec, 10, 10, init_rrefs=True, dtype=torch.double
+            enumerable_spec, 10, 10, init_rrefs=False, dtype=torch.double
         )
         with self.assertRaisesRegex(
-            NotImplementedError,
-            "Only ChunkShardingSpec supported for 'transpose'",
+            RuntimeError,
+            "not supported",
         ):
             st.transpose(1, 0)
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_softmax(self):
@@ -140,7 +140,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_masked_fill(self):
@@ -149,14 +149,14 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
         self._test_masked_fill_with_sizes((35, 26), broadcast_style=True)
         self._test_masked_fill_with_sizes((26,))
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_masked_fill_error(self):
         specs = _chunk_sharding_specs_list_for_test([1, 2], seed=7)
         for spec in specs:
             st = sharded_tensor.rand(
-                spec, 35, 17, 26, init_rrefs=True, dtype=torch.double
+                spec, 35, 17, 26, init_rrefs=False, dtype=torch.double
             )
             mask = (
                 torch.randint(0, 2, (2, 35, 17, 26))
@@ -176,15 +176,18 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 st.masked_fill(mask, 25.0)
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_view(self):
-        specs = _chunk_sharding_specs_list_for_test([0, 0], seed=10)
+        specs = _chunk_sharding_specs_list_for_test([0, 0, -3], seed=10)
         for spec in specs:
             tensor = torch.rand(16, 35, 26).cuda(self.rank)
             tensor_v = tensor.view(16, 35, 26).view(4, 4, 35, 26)
-            st_expected = _shard_tensor(tensor_v, spec)
+            new_spec = copy.deepcopy(spec)
+            if new_spec.dim < 0:
+                new_spec.dim -= 1
+            st_expected = _shard_tensor(tensor_v, new_spec)
             self.assertTrue(
                 torch.allclose(
                     _shard_tensor(tensor, spec).view(4, 4, 35, 26),
@@ -194,18 +197,18 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             st_expected = _shard_tensor(tensor, spec)
             self.assertTrue(
                 torch.allclose(
-                    _shard_tensor(tensor_v, spec).view(16, 35, 26),
+                    _shard_tensor(tensor_v, new_spec).view(16, 35, 26),
                     st_expected,
                 )
             )
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_view_error(self):
         for spec in _chunk_sharding_specs_list_for_test([2], seed=7):
             st = sharded_tensor.rand(
-                spec, 35, 17, 26, init_rrefs=True, dtype=torch.double
+                spec, 35, 17, 26, init_rrefs=False, dtype=torch.double
             )
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -224,7 +227,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             ):
                 st.view(5, 7, -1, -1)
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_layer_norm(self):
@@ -264,7 +267,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 )
             )
 
-    @with_comms(init_rpc=True)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_tensor_layer_norm_error(self):

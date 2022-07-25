@@ -27,7 +27,6 @@ class SchedulerRuntimeInfo;
 struct ExecutorLog {
   c10::optional<ReductionParams> reduction_params = c10::nullopt;
   c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
-  c10::optional<LaunchParams> launch_constraints = c10::nullopt;
   FusionExecutor* fusion_executor = nullptr;
 };
 
@@ -89,14 +88,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
   //! Returns the fusion segments if applicable
   SegmentedFusion* fusionSegments() {
-    TORCH_INTERNAL_ASSERT(is_segmented_);
     return segmented_fusion_.get();
-  }
-
-  //! Returns the single kernel fusion if applicable
-  Fusion* singleKernelFusion() {
-    TORCH_INTERNAL_ASSERT(!is_segmented_);
-    return single_kernel_fusion_.get();
   }
 
   //! Returns the list of heuristics in this runtime
@@ -127,13 +119,12 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
  private:
   //! Interface to run a single kernel, either one kernel for single-kernel
-  //! fusions,
-  //!  or a kernel for a segmentedGrouup in a segmented fusion. Returns the
-  //!  kernel outputs.
+  //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns
+  //! the kernel outputs.
   std::vector<at::Tensor> runKernelWithInput(
       const at::ArrayRef<IValue>& inputs,
       size_t input_id,
-      SegmentedGroup* sg = nullptr);
+      SegmentedGroup* sg);
 
   //! Interface to run a the whole graph in a segmented fusion and return the
   //! complete
@@ -161,14 +152,6 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
   //! Multi-Kernel fusion segment when applies
   std::unique_ptr<SegmentedFusion> segmented_fusion_ = nullptr;
-
-  //! Single-Kernel fusion when applies
-  //!  TODO: unify the segmented and un-segmented code-path
-  std::unique_ptr<Fusion> single_kernel_fusion_ = nullptr;
-
-  //! Graph traversal datacache for the single kernel fusion
-  //!  TODO: unify the segmented and un-segmented code-path
-  std::unique_ptr<HeuristicSummary> single_kernel_fusion_data_cache_ = nullptr;
 
   //! Pre-allocated runtime workspace to speed up kernel launch preparation.
   struct RuntimeWorkSpace {

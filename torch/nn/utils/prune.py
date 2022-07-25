@@ -1315,7 +1315,7 @@ def _compute_nparams_toprune(amount, tensor_size):
     if isinstance(amount, numbers.Integral):
         return amount
     else:
-        return int(round(amount * tensor_size))  # int needed for Python 2
+        return round(amount * tensor_size)
 
 
 def _validate_pruning_dim(t, dim):
