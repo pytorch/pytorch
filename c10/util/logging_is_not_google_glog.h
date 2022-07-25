@@ -136,46 +136,46 @@ static_assert(
           ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #endif // NDEBUG
 
-#define CHECK_OP(val1, val2, op)                                              \
+#define TORCH_CHECK_OP(val1, val2, op)                                              \
   FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
                              << (val1) << " vs. " << (val2) << ") "
 
-// Check_op macro definitions
-#define TORCH_CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
-#define TORCH_CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
-#define TORCH_CHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
-#define TORCH_CHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
-#define TORCH_CHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
-#define TORCH_CHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
+// TORCH_CHECK_OP macro definitions
+#define TORCH_CHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
+#define TORCH_CHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
+#define TORCH_CHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
+#define TORCH_CHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
+#define TORCH_CHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
+#define TORCH_CHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
 
 #ifndef NDEBUG
-// Debug only versions of CHECK_OP macros.
-#define TORCH_DCHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
-#define TORCH_DCHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
-#define TORCH_DCHECK_LE(val1, val2) CHECK_OP(val1, val2, <=)
-#define TORCH_DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
-#define TORCH_DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
-#define TORCH_DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
+// Debug only versions of TORCH_CHECK_OP macros.
+#define TORCH_DCHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
+#define TORCH_DCHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
+#define TORCH_DCHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
+#define TORCH_DCHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
+#define TORCH_DCHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
 #else // !NDEBUG
 // These versions generate no code in optimized mode.
 #define TORCH_DCHECK_EQ(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, ==)
+  TORCH_CHECK_OP(val1, val2, ==)
 #define TORCH_DCHECK_NE(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, !=)
+  TORCH_CHECK_OP(val1, val2, !=)
 #define TORCH_DCHECK_LE(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, <=)
+  TORCH_CHECK_OP(val1, val2, <=)
 #define TORCH_DCHECK_LT(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, <)
+  TORCH_CHECK_OP(val1, val2, <)
 #define TORCH_DCHECK_GE(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, >=)
+  TORCH_CHECK_OP(val1, val2, >=)
 #define TORCH_DCHECK_GT(val1, val2) \
   while (false)                     \
-  CHECK_OP(val1, val2, >)
+  TORCH_CHECK_OP(val1, val2, >)
 #endif // NDEBUG
 
 // Check that a pointer is not null.
