@@ -146,14 +146,18 @@ class ModelReportVisualizer:
 
         return filtered_dict
 
-    def _generate_tensor_table(self, filtered_data: OrderedDict[str, Any], tensor_features: List[str]) -> Tuple[List, List]:
+    def _generate_tensor_table(
+        self,
+        filtered_data: OrderedDict[str, Dict[str, Any]],
+        tensor_features: List[str]
+    ) -> Tuple[List, List]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
         Currently meant to generate the headers and table for both the tensor information.
 
         Args:
-            filtered_data (OrderedDict[str, Any]): An OrderedDict (sorted in order of model) mapping:
+            filtered_data (OrderedDict[str, Dict[str, Any]]): An OrderedDict (sorted in order of model) mapping:
                 module_fqns -> feature_names -> values
             tensor_features (List[str]): A list of the tensor level features
 
@@ -319,18 +323,11 @@ class ModelReportVisualizer:
                 # get the data for that specific feature
                 feature_data = filtered_data[module_fqn][feature_name]
 
-                # if it is only a single value, is tensor, otherwise per channel
-                if isinstance(feature_data, torch.Tensor):
-                    # see what the size of shape is
-                    if len(feature_data.shape) == 0:
-                        # single value
-                        # means is per-tensor
-                        tensor_features.add(feature_name)
-                    else:
-                        # works means per channel
-                        channel_features.add(feature_name)
-                        num_channels = len(feature_data)
-                elif isinstance(feature_data, list):
+                # check if not zero dim tensor
+                is_tensor: bool = isinstance(feature_data, torch.Tensor)
+                is_not_zero_dim: bool = is_tensor and len(feature_data.shape) != 0
+
+                if is_not_zero_dim or isinstance(feature_data, list):
                     # works means per channel
                     channel_features.add(feature_name)
                     num_channels = len(feature_data)
