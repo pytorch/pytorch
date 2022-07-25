@@ -537,36 +537,34 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
-_ScalarAndTensorElementTypeGroup = collections.namedtuple(
-    "_ScalarAndTensorElementTypeGroup", ("tensor_element_types", "scalar_types")
-)
-_FPTypeGroup = _ScalarAndTensorElementTypeGroup(
-    (torch.float16, torch.float32, torch.float64, torch.bfloat16),
-    ("Float", "Double", "Half", "BFloat16"),
-)
-_BoolTypeGroup = _ScalarAndTensorElementTypeGroup((torch.bool,), ("Bool",))
-
-
-def _is_in_type_group(value, type_set):
-    if not value:
+def _is_in_type_group(value, scalar_types: Set[_type_utils.ScalarType]) -> bool:
+    """Helper function for determining if a value is in a scalar type group."""
+    if value is None:
         return False
     if isinstance(value, torch.Tensor):
-        return value.dtype in type_set.tensor_element_types
+        return _type_utils.ScalarType.from_dtype(value.dtype) in scalar_types
     scalar_type = value.type().scalarType()
     if scalar_type is None:
         warnings.warn(
             "Type cannot be inferred, which might cause exported graph to produce incorrect results."
         )
-    return scalar_type in type_set.scalar_types
+    return _type_utils.ScalarType.from_name(scalar_type) in scalar_types
 
 
-def _is_fp(value):
-    # TODO(justinchuby): Refactor this
-    return _is_in_type_group(value, _FPTypeGroup)
+def _is_fp(value) -> bool:
+    return _is_in_type_group(
+        value,
+        {
+            _type_utils.ScalarType.FLOAT,
+            _type_utils.ScalarType.DOUBLE,
+            _type_utils.ScalarType.HALF,
+            _type_utils.ScalarType.BFLOAT16,
+        },
+    )
 
 
-def _is_bool(value):
-    return _is_in_type_group(value, _BoolTypeGroup)
+def _is_bool(value) -> bool:
+    return _is_in_type_group(value, {_type_utils.ScalarType.BOOL})
 
 
 def _generate_wrapped_number(g, scalar):
