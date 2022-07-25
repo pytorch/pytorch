@@ -136,7 +136,7 @@ static_assert(
           ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #endif // NDEBUG
 
-#define TORCH_CHECK_OP(val1, val2, op)                                              \
+#define TORCH_CHECK_OP(val1, val2, op)                                        \
   FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
                              << (val1) << " vs. " << (val2) << ") "
 
