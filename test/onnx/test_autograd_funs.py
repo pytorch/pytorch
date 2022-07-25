@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from test_pytorch_onnx_onnxruntime import run_model_test
+from onnx_test_common import run_model_test
 from torch.onnx import OperatorExportTypes
 from torch.onnx._globals import GLOBALS
 from torch.onnx.utils import _model_to_graph
