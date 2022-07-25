@@ -454,9 +454,8 @@ def _is_scalar_list(x: _C.Value) -> bool:
     x_type = x.type()
     typing.cast(_C.ListType, x_type)
     element_type = str(x.type().getElementType())
-    return (
-        element_type in scalar_name_to_pytorch.keys()
-        and (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
+    return element_type in scalar_name_to_pytorch.keys() and (
+        scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys()
     )
 
 
@@ -702,7 +701,7 @@ def _unsqueeze_helper(g, input, axes_i):
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
         raise errors.SymbolicValueError(
-            f"Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
+            "Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
         )
     return g.op("Unsqueeze", input, axes_i[0])
 
@@ -716,7 +715,7 @@ def _squeeze_helper(g, input, axes_i):
     # Tensor type
     if GLOBALS.export_onnx_opset_version < 13:
         raise errors.SymbolicValueError(
-            f"Opset version must be >= 13 for Squeeze with dynamic axes.", input
+            "Opset version must be >= 13 for Squeeze with dynamic axes.", input
         )
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
