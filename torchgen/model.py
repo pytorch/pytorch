@@ -669,7 +669,7 @@ class NativeFunction:
             implicit_composite = DispatchKey.CompositeImplicitAutograd
             name = str(func.name.name)
             if name.endswith("_like") or name.startswith("new_"):
-                pass
+                implicit_composite = DispatchKey.CompositeExplicitAutograd
             elif func.arguments.tensor_options is None:
                 pass
             elif any(isinstance(a.argument, Argument) and a.argument.type.is_tensor_like() for a in NativeSignature(func).arguments()):
