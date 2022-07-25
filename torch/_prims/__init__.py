@@ -1928,11 +1928,6 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
         return copy_to(result, a)
 
 
-# def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
-#     nvfuser_dtype = getnvFuserDtype(dtype)
-#     return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
-
-
 _convert_element_type_doc = """
   Creates a copy of a tensor with the given dtype.
   """
