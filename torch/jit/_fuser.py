@@ -48,8 +48,13 @@ def fuser(name):
         torch._C._jit_override_can_fuse_on_gpu(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
+    elif name == 'none':  # Turn Pytorch fuser off
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(False)
     else:
-        raise Exception("unrecognized fuser option")
+        raise Exception(f"unrecognized fuser option (name: {name})")
     try:
         yield
     finally:

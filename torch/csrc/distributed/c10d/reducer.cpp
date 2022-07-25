@@ -846,7 +846,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
+    _AllReduceBySumCommHook allreduce_hook(process_group_);
     return allreduce_hook.runHook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
@@ -1729,13 +1729,11 @@ void Reducer::register_builtin_comm_hook(
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
-      comm_hook_ =
-          std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::AllReduceCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
       break;
     case c10d::BuiltinCommHookType::FP16_COMPRESS:
-      comm_hook_ =
-          std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::FP16CompressCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
       break;
     default:

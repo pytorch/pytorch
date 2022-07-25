@@ -545,6 +545,15 @@ bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
            AttributeKind::t); // Check other types?
 }
 
+bool hasParamInput(Node* n, const ValueToParamPairMap& valsToParamsMap) {
+  for (auto input : n->inputs()) {
+    if (valsToParamsMap.find(input) != valsToParamsMap.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::vector<at::Tensor> getValues(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
@@ -638,14 +647,26 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
       // Constant folding is not supported for this op. Skip it.
       continue;
     }
-    // Create a new input to the block (prim::Param node output). Add a
-    // corresponding entry in valToParamMap. Replace the downstream inputs
-    // with this value, and disconnect all the input values of the folded node.
+
     at::Tensor updatedVal = *updatedValWrapped;
-    auto newSourceNodeOutput = b->addInput();
-    valsToParamsMap.insert(
-        {newSourceNodeOutput,
-         std::make_pair(newSourceNodeOutput->debugName(), updatedVal)});
+    auto newSourceNodeOutput = [&]() -> Value* {
+      if (onnx_constant_fold::hasParamInput(node, valsToParamsMap)) {
+        // Create a new input to the block (prim::Param node output). Add a
+        // corresponding entry in valToParamMap. Replace the downstream inputs
+        // with this value, and disconnect all the input values of the folded
+        // node.
+        auto newSourceNodeOutput = b->addInput();
+        valsToParamsMap.insert(
+            {newSourceNodeOutput,
+             std::make_pair(newSourceNodeOutput->debugName(), updatedVal)});
+        return newSourceNodeOutput;
+      } else {
+        auto newSourceNode =
+            createONNXConstant(node->owningGraph(), node, updatedVal);
+        newSourceNode->copyMetadata(node);
+        return newSourceNode->output();
+      }
+    }();
     newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
     // Next we remove the current node that has been replaced by
