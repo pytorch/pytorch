@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, dtypesIfCUDA
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_FAIRSEQ, run_tests, parametrize, instantiate_parametrized_tests, freeze_rng_state)
@@ -653,9 +652,9 @@ class TestTransformers(NNTestCase):
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
     @parametrize("attn_mask_dim,is_causal",
-                      [(None, False), (2, False), (2, True), (3, False), (3, True)],
-                      name_fn=lambda dim, is_causal: (f"{dim}D_{'causal_' if is_causal else ''}attn_mask"
-                                                      if dim is not None else "no_attn_mask"))
+                 [(None, False), (2, False), (2, True), (3, False), (3, True)],
+                 name_fn=lambda dim, is_causal: (f"{dim}D_{'causal_' if is_causal else ''}attn_mask"
+                                                 if dim is not None else "no_attn_mask"))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @parametrize("device", device_list)
     def test_scaled_dot_product_attention(self, device, attn_mask_dim, is_causal, dropout_p):
