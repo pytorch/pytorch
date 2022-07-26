@@ -46,7 +46,7 @@ class Int8GivenTensorFillOp final : public Operator<CPUContext> {
   }
 
   bool Fill(Int8TensorCPU* output) {
-    DCHECK_EQ(output->t.numel(), values_.numel())
+    TORCH_DCHECK_EQ(output->t.numel(), values_.numel())
         << "output size: " << output->t.numel()
         << " given size: " << values_.numel();
     auto* data = output->t.template mutable_data<uint8_t>();
@@ -98,7 +98,7 @@ class Int8GivenIntTensorFillOp final : public Operator<CPUContext> {
   }
 
   bool Fill(Int8TensorCPU* output) {
-    DCHECK_EQ(output->t.numel(), values_.numel())
+    TORCH_DCHECK_EQ(output->t.numel(), values_.numel())
         << "output size: " << output->t.numel()
         << " given size: " << values_.numel();
     auto* data = output->t.template mutable_data<int32_t>();

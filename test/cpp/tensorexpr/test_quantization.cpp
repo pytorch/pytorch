@@ -57,7 +57,7 @@ TEST_F(Quantization, QuantDequantInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, QuantDequantUInt8) {
@@ -87,7 +87,7 @@ TEST_F(Quantization, QuantDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, QuantDequantUInt8_NLC) {
@@ -119,7 +119,7 @@ TEST_F(Quantization, QuantDequantUInt8_NLC) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 at::Tensor quantized_add(
@@ -174,7 +174,7 @@ TEST_F(Quantization, QuantAddDequantInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, QuantAddDequantUInt8) {
@@ -218,7 +218,7 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, QuantSigmoidDequantUInt8) {
@@ -254,7 +254,7 @@ TEST_F(Quantization, QuantSigmoidDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 at::Tensor quantized_mul(
@@ -310,7 +310,7 @@ TEST_F(Quantization, QuantMulDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
@@ -348,7 +348,7 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 TEST_F(Quantization, UpsampleNearst2d) {
@@ -377,7 +377,7 @@ TEST_F(Quantization, UpsampleNearst2d) {
     std::cout << "y_expected:\n" << y_expected << std::endl;
     std::cout << "y:\n" << y << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 at::Tensor quantized_cat(
@@ -445,7 +445,7 @@ TEST_F(Quantization, QuantCatDequantUInt8) {
     std::cout << "expected:\n" << expected << std::endl;
     std::cout << "result:\n" << result << std::endl;
   }
-  CHECK_EQ(check, 1);
+  TORCH_CHECK_EQ(check, 1);
 }
 
 } // namespace jit

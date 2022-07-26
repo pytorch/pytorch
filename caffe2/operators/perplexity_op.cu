@@ -21,7 +21,7 @@ template <>
 bool PerplexityOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
 
-  DCHECK_EQ(X.dim(), 1);
+  TORCH_DCHECK_EQ(X.dim(), 1);
   int N = X.dim32(0);
 
   auto* Y = Output(0, vector<int64_t>(), at::dtype<float>());

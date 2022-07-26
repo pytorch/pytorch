@@ -18,7 +18,7 @@ TSOpVector SizeNode::Lower(
   arguments.emplace_back(index);
   torch::lazy::TSOpVector size_out =
       torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-  CHECK_EQ(size_out.size(), 1);
+  TORCH_CHECK_EQ(size_out.size(), 1);
   return size_out;
 }
 
