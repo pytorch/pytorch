@@ -367,16 +367,16 @@ extern SYCL_EXTERNAL void __assert_fail(
 __host__ __device__
 #endif
 
-// This forward declaration matching the declaration of __assert_fail
+    // This forward declaration matching the declaration of __assert_fail
     // exactly how it is in glibc in case parts of the program are compiled with
     // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
     // error. Note: On ROCm - this declaration serves for host side compilation.
-void
+    void
     __assert_fail(
-    const char* assertion,
-    const char* file,
-    unsigned int line,
-    const char* function) throw()  __attribute__((__noreturn__));
+        const char* assertion,
+        const char* file,
+        unsigned int line,
+        const char* function) throw() __attribute__((__noreturn__));
 
 #if defined(__HIP_ARCH__) || defined(__HIP__)
 // ROCm supports __assert_fail only as a device side function.
