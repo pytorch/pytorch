@@ -3123,7 +3123,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
-        xfail('matrix_exp'),
         xfail('histogramdd'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.embedding_bag'),
