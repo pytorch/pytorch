@@ -110,7 +110,7 @@ class Pattern:
                     return f"{time_ns:.2f} {unit}"
                 time_ns //= 1000
 
-        assert hasattr(self, 'benchmark', 'Please implement benchmark()')
+        assert hasattr(self, 'benchmark'), 'Please implement benchmark()'
         shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
         original_time = sum(event.duration_time_ns for event in events)
         new_time = sum(shapes_factor_map[input_shapes(event)] *
