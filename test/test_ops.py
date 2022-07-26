@@ -1541,6 +1541,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.masked_fill',
         '_refs.transpose',
         '_refs.var',
+        '_refs.rsub',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',

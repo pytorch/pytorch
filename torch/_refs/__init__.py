@@ -140,7 +140,7 @@ __all__ = [
     # 'polar',  # abs, cos, sin
     "pow",
     "remainder",
-    # 'rsub', # unblocked
+    "rsub",
     # # special.xlog1py
     # # special.zeta
     "sub",
@@ -1362,6 +1362,19 @@ remainder = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
+
+# reverse sub
+def rsub(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    *,
+    alpha: Optional[NumberType] = None,
+):
+    if isinstance(a, Number):
+        msg = "Received a Number for the first argument, but expected a Tensor"
+        raise ValueError(msg)
+    return sub(b, a, alpha=alpha)
+
 
 # TODO: add docstring
 # TODO: consider refactoring this with add impl
