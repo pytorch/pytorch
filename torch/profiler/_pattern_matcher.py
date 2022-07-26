@@ -376,31 +376,22 @@ class SynchronizedDataLoaderPattern(Pattern):
             "Detected DataLoader running with synchronized implementation. "
             "Please enable asynchronous dataloading by setting num_workers > 0 when initializing DataLoader."
         )
-        # We precompile the regex to avoid recompiling it every time we match
-        # The four back slashes are to escape windows path separator
-        seperator = "\\\\" if os.sep == "\\" else os.sep
-        self.iter_regex = re.compile(
-            r"torch/utils/data/dataloader.py\([0-9]+\): __iter__$".replace(
-                "/", seperator))
-        self.get_iterator_regex = re.compile(
-            r"torch/utils/data/dataloader.py\([0-9]+\): _get_iterator$".
-            replace("/", seperator))
-        self.check_worker_regex = re.compile(
-            r"torch/utils/data/dataloader.py\([0-9]+\): check_worker_number_rationality$"
-            .replace("/", seperator))
 
     def match(self, event: _ProfilerEvent):
-        if not re.search(self.iter_regex, event.name()):
+        def is_dataloader_function(name: str, function_name: str):
+            return name.startswith(os.path.join("torch", "utils", "data", "dataloader.py")) and name.endswith(function_name)
+        if not is_dataloader_function(event.name(), "__iter__"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        if not re.search(self.get_iterator_regex, event.name()):
+        if not is_dataloader_function(event.name(), "_get_iterator"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        return not bool(re.search(self.check_worker_regex, event.name()))
+        return not is_dataloader_function(event.name(), "check_worker_number_rationality")
+        # TODO: We should also check if the loader is bottleneck.
 
 
 class GradNotSetToNonePattern(Pattern):
@@ -487,7 +478,7 @@ def source_code_location(event: _ProfilerEvent):
             assert isinstance(event.extra_fields,
                               _ExtraFields_PyCall) or isinstance(
                                   event.extra_fields, _ExtraFields_PyCCall)
-            if not event.extra_fields.caller.file_name.startswith("torch/"):
+            if not event.extra_fields.caller.file_name.startswith("torch" + os.sep):
                 return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
         event = event.parent
     return "No source code location found"
