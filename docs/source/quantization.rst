@@ -1135,7 +1135,10 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.nn
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
+.. py:module:: torch.ao.nn.sparse.qat
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
+.. py:module:: torch.ao.nn.sparse.intrinsic.quantized
+.. py:module:: torch.ao.nn.sparse.intrinsic.qat
 .. py:module:: torch.ao.ns
 .. py:module:: torch.ao.ns.fx
 .. py:module:: torch.ao.quantization
