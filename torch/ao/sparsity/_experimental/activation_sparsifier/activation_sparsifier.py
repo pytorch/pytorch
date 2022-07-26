@@ -242,21 +242,65 @@ class ActivationSparsifier:
         self.data_groups.pop(name)
 
     def step(self):
+        """Internally calls the update_mask() function for each layer
         """
-        step() does the following for each registered layer -
+        with torch.no_grad():
+            for name, configs in self.data_groups.items():
+                data = configs['data']
+                self.update_mask(name, data, configs)
+
+                self.data_groups[name].pop('data')  # reset the accumulated data
+
+    def update_mask(self, name, data, configs):
+        """
+        Called for each registered layer and does the following-
             1. apply reduce_fn on the aggregated activations
             2. use mask_fn to compute the sparsification mask
-        """
-        pass
 
-    def update_mask(self, name, data, **config):
-        """Computes and updates mask based on config, feature and dim and data
+        Note:
+            the reduce_fn and mask_fn is called for each feature, dim over the data
         """
-        pass
+        mask = self.get_mask(name)
+        sparse_config = configs['sparse_config']
+        features = configs['features']
+        reduce_fn = configs['reduce_fn']
+        mask_fn = configs['mask_fn']
+        if features is None:
+            data = reduce_fn(data)
+            mask.data = mask_fn(data, **sparse_config)
+        else:
+            for feature_idx in range(len(features)):
+                data_feature = reduce_fn(data[feature_idx])
+                mask[feature_idx].data = mask_fn(data_feature, **sparse_config)
+
+    def _sparsify_hook(self, name):
+        """Returns hook that applies sparsification mask to input entering the attached layer
+        """
+        mask = self.get_mask(name)
+        features = self.data_groups[name]['features']
+        feature_dim = self.data_groups[name]['feature_dim']
+
+        def hook(module, input):
+            input_data = input[0]
+            if features is None:
+                # apply to all the features
+                return input_data * mask
+            else:
+                # apply per feature, feature_dim
+                for feature_idx in range(0, len(features)):
+                    feature = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
+                    sparsified = torch.index_select(input_data, feature_dim, feature) * mask[feature_idx]
+                    input_data.index_copy_(feature_dim, feature, sparsified)
+                return input_data
+        return hook
 
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
         Unregisters aggreagate hook that was applied earlier and registers sparsification hooks if
         attach_sparsify_hook = True.
         """
-        pass
+        for name, configs in self.data_groups.items():
+            # unhook agg hook
+            configs['hook'].remove()
+            if attach_sparsify_hook:
+                configs['hook'] = configs['layer'].register_forward_pre_hook(self._sparsify_hook(name))
