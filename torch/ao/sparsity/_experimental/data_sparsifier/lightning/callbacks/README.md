@@ -12,10 +12,10 @@ There are 2 types of data sparsity callbacks
 2. **Training Aware data sparsifier callback**: Sparsification of the model parameters *during* training.
 
 ## API Design
-1. ```PostTrainingDataSparsity```: callback class that sparsifies the model parameters post training. Accepts
-    1.  ```data_sparsifier_class```: class/type of data sparsifier that needs to be used. Only the class should be passed, the data sparsifier object
+1. `PostTrainingDataSparsity`: callback class that sparsifies the model parameters post training. Accepts
+    1.  `data_sparsifier_class`: class/type of data sparsifier that needs to be used. Only the class should be passed, the data sparsifier object
     will be created internally and will be attached to the model by the callback whenever necessary.
-    2. ```data_sparsifier_args```: the arguments/config for the data sparsifier constructor that will be used while creating the object.
+    2. `data_sparsifier_args`: the arguments/config for the data sparsifier constructor that will be used while creating the object.
 
     Example:
     ```
@@ -28,11 +28,11 @@ There are 2 types of data sparsity callbacks
     pt_callback = PostTrainingDataSparsity(data_sparsifier_class=DataNormSparsifier, data_sparsifier_args=sparsifier_args)
     ```
 
-2. ```TrainingAwareDataSparsity```: callback class to sparsify model during training. In addition to ```data_sparsifier_class``` and ```data_sparsifier_args```,
+2. `TrainingAwareDataSparsity`: callback class to sparsify model during training. In addition to `data_sparsifier_class` and `data_sparsifier_args`,
     also accepts
-    1. ```data_scheduler_class```: class/type of data scheduler to schedule the sparsity levels during training. Only the class should be passed, the object
+    1. `data_scheduler_class`: class/type of data scheduler to schedule the sparsity levels during training. Only the class should be passed, the object
     will be created internally whenever necessary.
-    2. ```data_scheduler_args```: the arguments/config for the data scheduler constructor that will be used while creating the object.
+    2. `data_scheduler_args`: the arguments/config for the data scheduler constructor that will be used while creating the object.
 
     Example:
 
@@ -58,7 +58,7 @@ There are 2 types of data sparsity callbacks
 
 **Note:**
 1. The model is copied and then sparsified, so the existing model is not modified.
-2. The sparsified model can be accessed using ```sparsified``` attribute and can be used for comparison with the original version.
+2. The sparsified model can be accessed using `sparsified` attribute and can be used for comparison with the original version.
 3. The data sparsifier/scheduler object will be created internally and will be attached to the model by the callback whenever necessary.
 
 ## Usage
