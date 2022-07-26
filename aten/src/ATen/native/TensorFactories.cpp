@@ -1162,7 +1162,7 @@ Tensor bartlett_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  ScalarType dtype = c10::value_or_else(dtype_opt, [] { return c10::get_default_dtype_as_scalartype(); });
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("bartlett_window", options, window_length);
@@ -1201,7 +1201,7 @@ Tensor blackman_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  ScalarType dtype = c10::value_or_else(dtype_opt, [] { return c10::get_default_dtype_as_scalartype(); });
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("blackman_window", options, window_length);
@@ -1272,7 +1272,7 @@ Tensor hamming_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  ScalarType dtype = c10::value_or_else(dtype_opt, [] { return c10::get_default_dtype_as_scalartype(); });
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("hamming_window", options, window_length);
@@ -1349,7 +1349,7 @@ Tensor kaiser_window(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  ScalarType dtype = c10::value_or_else(dtype_opt, [] { return c10::get_default_dtype_as_scalartype(); });
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);
