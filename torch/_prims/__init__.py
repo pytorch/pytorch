@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import math
 import operator
 import weakref
@@ -263,7 +264,10 @@ def TensorMeta(
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
     else:
         # SymInt doesnt support empty_strided yet
-        if any(isinstance(inp, torch.SymbolicIntNode) for inp in shape):
+        if any(
+            isinstance(inp, torch.SymbolicIntNode)
+            for inp in itertools.chain(shape, strides)
+        ):
             meta_t = torch.empty(shape, dtype=dtype, device="meta")
         else:
             meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
