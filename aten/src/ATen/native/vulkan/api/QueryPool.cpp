@@ -176,18 +176,15 @@ void QueryPool::print_results() {
   std::cout << generate_string_report() << std::endl;
 }
 
-double QueryPool::get_total_op_time(std::string op_name) {
+uint64_t QueryPool::get_total_op_ns(std::string op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
-  long sum = 0;
+  uint64_t sum = 0;
   for (ShaderDuration& entry : shader_log_) {
-    std::chrono::duration<size_t, std::nano> exec_duration_ns(
-        entry.execution_duration_ns);
-
     if (entry.kernel_name == op_name) {
-      sum += exec_duration_ns.count();
+      sum += entry.execution_duration_ns;
     }
   }
-  return sum / 1000000.0;
+  return sum;
 }
 
 } // namespace api
