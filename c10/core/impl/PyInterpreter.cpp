@@ -101,5 +101,11 @@ void PyInterpreter::disarm() noexcept {
   trace_cuda_event_creation_fn_ = &noop_trace_cuda_event_creation_fn;
 }
 
+// Defined out-of-line because it needs access to the definition of TensorImpl.
+__ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> PyInterpreter::detach(
+    const TensorImpl* self) const {
+  return (*detach_fn_)(this, self);
+}
+
 } // namespace impl
 } // namespace c10

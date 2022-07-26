@@ -1,5 +1,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/PythonFallbackKernel.h>
+#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
@@ -286,7 +287,7 @@ class PyInterpreterHolder {
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
             &concrete_sym_numel_fn,
-            &trace_cuda_event_creation_fn)) {}
+            &concrete_trace_cuda_event_creation_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -368,6 +369,10 @@ void registerPythonTensorClass(
 
 static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
+}
+
+void activateCUDATrace() {
+  c10::impl::CUDATraceTLS::set_trace(self_interpreter.get());
 }
 
 // TODO: Make this take Variable by const reference
@@ -2496,7 +2501,12 @@ c10::SymInt concrete_sym_numel_fn(
 }
 
 void concrete_trace_cuda_event_creation_fn(const c10::impl::PyInterpreter*, uintptr_t event) {
-  // call into Python here
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::module mod = py::module::import("torch.utils._cuda_trace");
+  py::object hook = mod.attr("_fire_callbacks_for_cuda_event_creation");
+  hook(event);
 }
 
 } // anonymous namespace

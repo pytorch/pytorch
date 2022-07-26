@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/impl/PyInterpreter.h>
 
 namespace c10 {

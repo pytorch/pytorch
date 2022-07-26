@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/impl/CUDATraceTLS.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
@@ -164,6 +165,10 @@ private:
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+    const auto* interp = c10::impl::CUDATraceTLS::get_trace();
+    if (interp) {
+      interp->trace_cuda_event_creation(reinterpret_cast<uintptr_t>(event_));
+    }
     is_created_ = true;
   }
 

@@ -3,7 +3,7 @@
 namespace c10 {
 namespace impl {
 
-thread_local const PyInterpreter* cudaTraceState;
+static const PyInterpreter* cudaTraceState;
 
 void CUDATraceTLS::set_trace(const PyInterpreter* trace) {
   cudaTraceState = trace;

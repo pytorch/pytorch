@@ -202,9 +202,7 @@ struct C10_API PyInterpreter {
   // detach, which will also arrange for the PyObject to get copied in this
   // situation
   __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
-  }
+      const TensorImpl* self) const;
 
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
