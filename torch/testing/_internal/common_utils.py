@@ -512,6 +512,8 @@ torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
 CI_TEST_PREFIX = str(Path(os.getcwd()))
+CI_PT_ROOT = str(Path(os.getcwd()).parent)
+CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p):
     try:
@@ -575,6 +577,15 @@ def sanitize_test_filename(filename):
         filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
+
+# hack until https://github.com/pytorch/pytorch/issues/82109 is resolved
+def sanitize_if_functorch_test_filename(filename):
+    # absolute filenames must be converted to relative paths, otherwise,
+    # we cannot prepend test-reports/ to it
+    # (e.g. test-reports\\C:\\... on windows is nonsense)
+    if filename.startswith(CI_FUNCTORCH_ROOT):
+        filename = filename[len(CI_PT_ROOT) + 1:]
+    return filename
 
 def lint_test_case_extension(suite):
     succeed = True
@@ -696,7 +707,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
-        test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
+        test_filename = inspect.getfile(sys._getframe(1))
+        test_filename = sanitize_if_functorch_test_filename(test_filename)
+        test_filename = sanitize_test_filename(test_filename)
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
