@@ -131,6 +131,17 @@ class _TestJITIRToONNX:
         x = torch.randn(5, 2).half().to("cuda")
         self.run_test(graph_ir, (x,))
 
+    def test_native_dropout(self):
+        graph_ir = """
+        graph(%1 : Float(2, 3)):
+          %2 : float = prim::Constant[value=0.0]()
+          %training : bool = prim::Constant[value=1]()
+          %3 : Tensor, %4 : Tensor = aten::native_dropout(%1, %2, %training)
+          return (%3, %4)
+        """
+        a = torch.randn(2, 3)
+        self.run_test(graph_ir, (a,))
+
 
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
