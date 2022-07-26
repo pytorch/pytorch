@@ -1,6 +1,7 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymbolicIntNode.h>
+#include <array>
 
 namespace c10 {
 
