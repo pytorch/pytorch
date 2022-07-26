@@ -1817,7 +1817,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
             # get the number of features in each of these
             tensor_info_features = len(tensor_headers)
-            channel_info_features = len(channel_headers) - ModelReportVisualizer.DEFAULT_NON_FEATURE_CHANNEL_HEADERS
+            channel_info_features = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
 
             # make sure that there are no tensor features, and that there is one channel level feature
             self.assertEqual(tensor_info_features, 0)
