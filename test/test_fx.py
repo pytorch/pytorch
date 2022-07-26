@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1659,6 +1660,18 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
+
+    def test_pytree_unpack_annotations(self):
+        def foo(x : torch.Tensor, y : torch.Tensor, l : List[torch.Tensor]):
+            return torch.cat([x, y] + l)
+
+        concrete_args = {'l': [torch.fx._symbolic_trace.PH] * 10}
+        traced = torch.fx.symbolic_trace(foo, concrete_args=concrete_args)
+        x = torch.randn(5, 3)
+        y = torch.randn(5, 3)
+        l = [torch.randn(5, 3)] * 10
+
+        torch.testing.assert_close(traced(x, y, l), foo(x, y, l))
 
     def test_interpreter_run_node_override(self):
         class MyModule(torch.nn.Module):
@@ -3401,7 +3414,7 @@ class TestFX(JitTestCase):
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3436,7 +3449,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -3465,7 +3478,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {', '.join(var.name for var in free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4060,6 +4073,7 @@ TestFunctionalTracing.generate_tests()
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
+@skipIfSlowGradcheckEnv
 class TestVisionTracing(JitTestCase):
     def setUp(self):
         # Checking for mutable operations while tracing is feature flagged
