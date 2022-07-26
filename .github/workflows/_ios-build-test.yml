@@ -48,7 +48,7 @@ jobs:
     # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
     #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
     if: github.repository_owner == 'pytorch'
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
     env:
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
@@ -158,6 +158,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
+          # use the pytorch nightly build to generate models
           pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
