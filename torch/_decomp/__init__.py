@@ -1,12 +1,13 @@
+import inspect
+from collections import defaultdict
+from functools import wraps
+from itertools import chain
+from typing import Callable, Dict, NamedTuple, Sequence, Tuple, Union
+
 import torch
 import torch._ops
 import torch.library
-from functools import wraps
-from itertools import chain
-from typing import Callable, Union, Dict, Sequence, Tuple, NamedTuple
 from torch.utils._pytree import tree_map
-from collections import defaultdict
-import inspect
 
 __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
 

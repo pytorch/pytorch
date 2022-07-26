@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
+    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -64,6 +65,7 @@ dtype_abbrs = {
 }
 
 
+@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -430,11 +432,6 @@ meta_function_expected_failures = {
     torch.mode: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::mode
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nn.functional.conv1d: {bf16, f32, f64, i64},
-    torch.nn.functional.conv2d: {bf16, f32, f64, i64},
-    torch.nn.functional.conv_transpose1d: {f32, f64, i64},
-    torch.nn.functional.conv_transpose2d: {f32, f64, i64},
-    torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
@@ -447,7 +444,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multilabel_margin_loss: {f32, f64},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
-    torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
@@ -540,11 +536,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nn.functional.conv1d: {f16, c32},
-    torch.nn.functional.conv2d: {f16, c32},
-    torch.nn.functional.conv_transpose1d: {bf16, f16},
-    torch.nn.functional.conv_transpose2d: {bf16, f16},
-    torch.nn.functional.conv_transpose3d: {bf16, f16},
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -554,7 +545,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
-    torch.nn.functional.prelu: {f16},  # aten::prelu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
     torch.vdot: {f16},  # aten::vdot
@@ -637,7 +627,6 @@ meta_dispatch_expected_failures = {
     aten.col2im.default: {c64, f32, f64, c128},
     aten.complex.default: {c64, f64, c128, f16, f32},
     aten.complex.out: {f16},
-    aten.convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten.count_nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.equal.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
@@ -672,7 +661,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
-    aten.prelu.default: {bf16, f64, f32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
@@ -726,7 +714,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._convolution.default: {f16, c32},
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
-    aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
@@ -759,7 +746,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
-    aten.prelu.default: {f16},  # aten::prelu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
@@ -824,6 +810,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
+@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
@@ -839,7 +826,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefFunctionMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
@@ -855,7 +842,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefDispatchMode(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
