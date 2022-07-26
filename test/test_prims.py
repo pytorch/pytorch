@@ -146,7 +146,7 @@ class TestPrims(TestCase):
         # This test is not intended to test the correctness of the nvfuser implementation
         from torch._C._nvfuser import FusionDefinition as fd
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {
             name
             for name in prim_nvfuser_ops
