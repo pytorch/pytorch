@@ -81,11 +81,11 @@ class NodeNameGenerator {
  public:
   NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(g){};
   virtual ~NodeNameGenerator() = 0;
-  virtual void PopulateNodeNames() = 0;
+  void PopulateNodeNames();
 
  protected:
-  virtual void PopulateNodeNames(Block*) = 0;
   virtual void CreateNodeName(Node* n) = 0;
+  void PopulateNodeNames(Block*);
   void UpdateOutputsNames(Node* n);
 
  protected:
@@ -103,10 +103,8 @@ NodeNameGenerator::~NodeNameGenerator(){};
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
   ScopedNodeNameGenerator(std::shared_ptr<Graph> g) : NodeNameGenerator(g){};
-  void PopulateNodeNames() override;
 
  protected:
-  void PopulateNodeNames(Block*) override;
   void CreateNodeName(Node* n) override;
 
  private:
@@ -140,11 +138,11 @@ void NodeNameGenerator::UpdateOutputsNames(Node* n) {
   }
 }
 
-void ScopedNodeNameGenerator::PopulateNodeNames() {
+void NodeNameGenerator::PopulateNodeNames() {
   PopulateNodeNames(graph_->block());
 }
 
-void ScopedNodeNameGenerator::PopulateNodeNames(Block* b) {
+void NodeNameGenerator::PopulateNodeNames(Block* b) {
   for (auto* n : b->nodes()) {
     for (auto* sub_block : n->blocks()) {
       PopulateNodeNames(sub_block);
