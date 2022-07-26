@@ -741,6 +741,7 @@ symbolic_tensor_failures = {
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('tile', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('topk', ''),  # aten.topk.default - couldn't find symbolic meta function/decomposition
+    xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
