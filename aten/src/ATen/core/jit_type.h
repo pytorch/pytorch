@@ -1895,7 +1895,8 @@ struct getTypePtr_<c10::List<T>> final {
 template <class T>
 struct getTypePtr_<c10::IListRef<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    static auto type = ListType::get("List", inner_type);
     return type;
   }
 };
