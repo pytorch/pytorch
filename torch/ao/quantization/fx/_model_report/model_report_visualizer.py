@@ -2,6 +2,14 @@ import torch
 from typing import Any, Set, Dict, List, Tuple, OrderedDict
 from collections import OrderedDict as OrdDict
 
+# try to import tablate
+got_tabulate = True
+try:
+    from tabulate import tabulate
+except ImportError:
+    got_tabulate = False
+
+
 class ModelReportVisualizer:
     r"""
     The ModelReportVisualizer class aims to provide users a way to visualize some of the statistics
@@ -57,8 +65,8 @@ class ModelReportVisualizer:
     TABLE_CHANNEL_KEY = "channel_level_info"
 
     # Constants for header vals
-    DEFAULT_NON_FEATURE_TENSOR_HEADERS = 2
-    DEFAULT_NON_FEATURE_CHANNEL_HEADERS = 3
+    NUM_NON_FEATURE_TENSOR_HEADERS = 2
+    NUM_NON_FEATURE_CHANNEL_HEADERS = 3
 
     def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
@@ -392,7 +400,37 @@ class ModelReportVisualizer:
             # prints out neatly formatted table with per_channel_min info for
                 all modules in block 1 of the model
         """
-        pass
+        # see if we got tabulate
+        if not got_tabulate:
+            print("Make sure to install tabulate and try again.")
+            return None
+
+        # get the table dict and the specific tables of interest
+        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
+        tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
+        channel_headers, channel_table = table_dict[self.TABLE_CHANNEL_KEY]
+
+        # get the table string and print it out
+        # now we have populated the tables for each one
+        # let's create the strings to be returned
+        table_str = ""
+        # the tables will have some headers columns that are non-feature
+        # ex. table index, module name, channel index, etc.
+        # we want to look at header columns for features, that come after those headers
+        if len(tensor_headers) > self.NUM_NON_FEATURE_TENSOR_HEADERS:
+            # if we have at least one tensor level feature to be addded we add tensor table
+            table_str += "Tensor Level Information \n"
+            table_str += tabulate(tensor_table, headers=tensor_headers)
+        if len(channel_headers) > self.NUM_NON_FEATURE_CHANNEL_HEADERS:
+            # if we have at least one channel level feature to be addded we add tensor table
+            table_str += "\n\n Channel Level Information \n"
+            table_str += tabulate(channel_table, headers=channel_headers)
+
+        # if no features at all, let user know
+        if table_str == "":
+            table_str = "No data points to generate table with."
+
+        print(table_str)
 
     def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
