@@ -10,7 +10,7 @@ void check_out_type_matches(
     c10::optional<at::ScalarType> scalarType,
     bool scalarType_is_none,
     c10::optional<at::Layout> layout,
-    const at::Device& device,
+    c10::optional<at::Device> device,
     bool device_is_none) {
   if (scalarType_is_none && !layout && device_is_none) { // common case
     return;
@@ -23,8 +23,6 @@ void check_out_type_matches(
         result.scalar_type(),
         ")");
   }
-  auto device_type_arg =
-      device_is_none ? result.device().type() : device.type();
   if (layout && result.layout() != *layout) {
     AT_ERROR(
         "layout ",
@@ -33,10 +31,10 @@ void check_out_type_matches(
         result.layout(),
         ")");
   }
-  if (result.device().type() != device_type_arg) {
+  if (!device_is_none && result.device().type() != device.value().type()) {
     AT_ERROR(
         "device type ",
-        device_type_arg,
+        device->type(),
         " does not match device type of out parameter (",
         result.device().type(),
         ")");
