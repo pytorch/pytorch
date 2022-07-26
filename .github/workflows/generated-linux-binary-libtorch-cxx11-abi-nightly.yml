@@ -1284,7 +1284,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  libtorch-rocm5_0-shared-with-deps-cxx11-abi-build:
+  libtorch-rocm5_2-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1293,20 +1293,20 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  libtorch-rocm5_0-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_2-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-build
+    needs: libtorch-rocm5_2-shared-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1315,11 +1315,11 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1363,7 +1363,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+          name: libtorch-rocm5_2-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1394,7 +1394,7 @@ jobs:
       - name: Pull Docker image
         uses: ./pytorch/.github/actions/pull-docker-image
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1405,29 +1405,29 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-rocm5_2-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-test
+    needs: libtorch-rocm5_2-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  libtorch-rocm5_0-static-with-deps-cxx11-abi-build:
+  libtorch-rocm5_2-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1436,20 +1436,20 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2-static-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  libtorch-rocm5_0-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_2-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-build
+    needs: libtorch-rocm5_2-static-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1458,11 +1458,11 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1506,7 +1506,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+          name: libtorch-rocm5_2-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1537,7 +1537,7 @@ jobs:
       - name: Pull Docker image
         uses: ./pytorch/.github/actions/pull-docker-image
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.0
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1548,29 +1548,29 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-rocm5_2-static-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-test
+    needs: libtorch-rocm5_2-static-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_0-static-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2-static-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build:
+  libtorch-rocm5_2_1-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1579,20 +1579,20 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2_1-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_2_1-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build
+    needs: libtorch-rocm5_2_1-shared-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1601,11 +1601,11 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1649,7 +1649,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+          name: libtorch-rocm5_2_1-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1680,7 +1680,7 @@ jobs:
       - name: Pull Docker image
         uses: ./pytorch/.github/actions/pull-docker-image
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1691,29 +1691,29 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-rocm5_2_1-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-test
+    needs: libtorch-rocm5_2_1-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2_1-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build:
+  libtorch-rocm5_2_1-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1722,20 +1722,20 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2_1-static-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_2_1-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build
+    needs: libtorch-rocm5_2_1-static-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1744,11 +1744,11 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1792,7 +1792,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
+          name: libtorch-rocm5_2_1-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1823,7 +1823,7 @@ jobs:
       - name: Pull Docker image
         uses: ./pytorch/.github/actions/pull-docker-image
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.1.1
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1834,22 +1834,22 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_1_1-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-rocm5_2_1-static-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-rocm5_1_1-static-with-deps-cxx11-abi-test
+    needs: libtorch-rocm5_2_1-static-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.2.1
+      GPU_ARCH_VERSION: 5.2.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm5_1_1-static-with-deps-cxx11-abi
+      build_name: libtorch-rocm5_2_1-static-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
