@@ -66,6 +66,33 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
   return strides;
 }
 
+// assume contiguous, we can construct offsets from size
+inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
+  // empty `sizes` means empty nested tensor, so return empty strides
+  if (sizes.dim() == 0) {
+    return std::vector<int64_t>();
+  }
+  int64_t ntensors = sizes.size(0),
+      orig_dim = sizes.size(1);
+  std::vector<int64_t> offsets(ntensors);
+  // nesting scalars has easy offsets
+  if (orig_dim == 0) {
+    std::iota(offsets.begin(), offsets.end(), 0);
+    return offsets;
+  }
+  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  offsets[0] = 0;
+  for (int64_t i = 0; i < ntensors - 1; i++) {
+    int64_t row_product = sizes_ptr[0];
+    for (int64_t j = 1; j < orig_dim; j++) {
+      row_product *= sizes_ptr[j];
+    }
+    offsets[i + 1] = offsets[i] + row_product;
+    sizes_ptr += orig_dim;
+  }
+  return offsets;
+}
+
 // [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality
 // key and therefore getAutogradRelatedKeySetFromBackend will return the
 // wrong autograd key. For this specific impl we make sure to register the
@@ -84,14 +111,17 @@ c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
 
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor)
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    const std::vector<int64_t>& offsets)
     : TensorImpl(
           generate_nested_key_set(buffer),
           buffer.dtype(),
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
+      nested_stride_tensor_(std::move(nested_stride_tensor)),
+      offsets_(offsets),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
   TORCH_WARN_ONCE(
@@ -101,9 +131,26 @@ NestedTensorImpl::NestedTensorImpl(
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.is_contiguous());
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.dim() == size_dim);
+  TORCH_INTERNAL_ASSERT(nested_stride_tensor_.sizes() == nested_size_tensor_.sizes());
+  TORCH_INTERNAL_ASSERT((size_dim == 0 && (int64_t)offsets_.empty())
+      || (size_dim == 2 && nested_size_tensor_.size(0) == (int64_t)offsets_.size()));
   refresh_dim();
   set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
+
+// assume contiguous, `nested_stride_tensor` and `offsets`
+// can be infered from `nested_size_tensor`
+NestedTensorImpl::NestedTensorImpl(
+    at::Tensor buffer,
+    at::Tensor nested_size_tensor)
+    : NestedTensorImpl(
+          buffer,
+          nested_size_tensor,
+          construct_nested_stride_tensor(nested_size_tensor),
+          construct_offsets(nested_size_tensor))
+{}
 
 void NestedTensorImpl::refresh_dim() {
   const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
@@ -160,6 +207,45 @@ IntArrayRef NestedTensorImpl::strides_custom() const {
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
+}
+
+
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  if (key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    if (r) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+    // otherwise just copy the TensorImpl and not the PyObject.  Since
+    // the interpreter is dead no one can call us out on it
+  }
+  auto impl = c10::make_intrusive<NestedTensorImpl>(this -> buffer_, this -> nested_size_tensor_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  return impl;
+}
+
+c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
 }
 
 } // namespace native
