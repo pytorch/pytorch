@@ -10,6 +10,13 @@ except ImportError:
     got_tabulate = False
 
 
+# var to see if we could import matplotlib
+got_matplotlib = True
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    got_matplotlib = False
+
 class ModelReportVisualizer:
     r"""
     The ModelReportVisualizer class aims to provide users a way to visualize some of the statistics
@@ -67,6 +74,9 @@ class ModelReportVisualizer:
     # Constants for header vals
     NUM_NON_FEATURE_TENSOR_HEADERS = 2
     NUM_NON_FEATURE_CHANNEL_HEADERS = 3
+
+    # Constants for row index in header
+    CHANNEL_NUM_INDEX = 2
 
     def __init__(self, generated_reports: OrderedDict[str, Any]):
         r"""
@@ -184,7 +194,7 @@ class ModelReportVisualizer:
             # now we add all the data
             for index, module_fqn in enumerate(filtered_data):
                 # we make a new row for the tensor table
-                tensor_table_row = [index + 1, module_fqn]
+                tensor_table_row = [index, module_fqn]
                 for feature in tensor_features:
                     # we iterate in same order of added features
 
@@ -238,7 +248,7 @@ class ModelReportVisualizer:
         channel_headers: List[str] = []
 
         # counter to keep track of number of entries in
-        channel_table_entry_counter: int = 1
+        channel_table_entry_counter: int = 0
 
         if len(channel_features) > 0:
             # now we add all channel data
@@ -432,17 +442,99 @@ class ModelReportVisualizer:
 
         print(table_str)
 
+    def _get_plotting_data(self, table_dict: Dict[str, Tuple[List, List]]) -> Tuple[bool, List, List]:
+        r"""
+        Takes in the table information as a dictionary and outputs both the x and y data
+        required to do the plotting.
+
+        Args:
+            table_dict ( Dict[str, Tuple[List, List]]): maps each of the:
+                TENSOR_LEVEL_INFO -> tensor_headers, tensor_table
+                CHANNEL_LEVEL_INFO -> channel_headers, channel_table
+
+        Returns a tuple of three elements:
+            If the data is per_channel or not
+            A list of the x values to plot
+            A list of the y values to plot
+        """
+        tensor_headers, tensor_table = table_dict[self.TABLE_TENSOR_KEY]
+        channel_headers, channel_table = table_dict[self.TABLE_CHANNEL_KEY]
+
+        # make sure it is only 1 feature that is being plotted
+        # get the number of features in each of these
+        tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        channel_info_features_count = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+
+        # see if valid tensor or channel plot
+        is_valid_per_tensor_plot: bool = tensor_info_features_count == 1
+        is_valid_per_channel_plot: bool = channel_info_features_count == 1
+
+        # offset should either be one of tensor or channel table or neither
+        feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        if is_valid_per_channel_plot:
+            feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+
+        # keep track of per_channel or not
+        data_is_per_channel: bool = False
+
+        x_data: List = []
+        y_data: List[List] = []
+        # the feature will either be a tensor feature or channel feature
+        if is_valid_per_tensor_plot or is_valid_per_channel_plot:
+            # extra setup for y_data if per channel
+            if is_valid_per_channel_plot:
+                # gather the x_data and multiple y_data
+                # calculate the number of channels
+                num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in channel_table) + 1
+                for channel in range(num_channels):
+                    y_data.append([])  # seperate data list per channel
+
+            for table_row_num, row in enumerate(tensor_table):
+                # get x_value to append
+                x_val_to_append = table_row_num
+                current_channel: int = -1  # intially chose current channel
+                # if new module we are looking at, add it's index to x_data
+                if is_valid_per_channel_plot and row[self.CHANNEL_NUM_INDEX] == 0:
+                    new_module_index: int = table_row_num // num_channels
+                    x_val_to_append = new_module_index
+                    current_channel = row[self.CHANNEL_NUM_INDEX]
+
+                # the index of the feature will the 0 + num non feature columns
+                tensor_feature_index = feature_column_offset
+                row_value = row[tensor_feature_index]
+                if not type(row_value) == str:
+                    x_data.append(x_val_to_append)
+                    # how we append y value depends on if per tensor or not
+                    if is_valid_per_channel_plot:
+                        y_data[current_channel].append(row_value)
+                    else:
+                        y_data.append(row_value)
+        else:
+            # more than one feature was chosen
+            error_str = "Make sure to pick only a single feature with your filter to plot a graph."
+            error_str += " We recommend calling get_all_unique_feature_names() to find unique feature names."
+            error_str += " Pick one of those features to plot."
+            raise ValueError(error_str)
+
+        # return whether per channel, x, and y values
+        return (data_is_per_channel, x_data, y_data)
+
     def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
         Takes in a feature and optional module_filter and plots of the desired data.
 
         Note:
             Only features in the report that have tensor value data are plottable by this class
-
+            When the tensor information is plotted, it will plot:
+                idx as the x val, feature value as the y_val
+            When the channel information is plotted, it will plot:
+                the first idx of each module as the x val, feature value as the y_val [for each channel]
+                The reason for this is that we want to be able to compare values across the
+                channels for same layer, and it will be hard if values are staggered by idx
+                This means each module is represented by only 1 x value
         Args:
-            feature_filter (str, optional): Filters the features presented to only those that
+            feature_filter (str): Filters the features presented to only those that
                 contain this filter substring
-                Default = "", results in all the features being printed
             module_fqn_filter (str, optional): Only includes modules that contains this string
                 Default = "", results in all the modules in the reports to be visible in the table
 
@@ -455,7 +547,37 @@ class ModelReportVisualizer:
                 each channel gets it's own line, and it's plotted across the in-order modules
                 on the x-axis
         """
-        pass
+        # checks if we have matplotlib and let's user know to install it if don't
+        if not got_matplotlib:
+            print("make sure to install matplotlib and try again.")
+            return None
+
+        # get the table dict and the specific tables of interest
+        table_dict = self.generate_filtered_tables(feature_filter, module_fqn_filter)
+
+        data_is_per_channel, x_data, y_data = self._get_plotting_data(table_dict)
+
+        # plot based on whether data is per channel or not
+        fig = plt.figure()
+        ax = plt.subplot()
+        ax.set_ylabel(feature_filter)
+        ax.set_title(feature_filter + " Plot")
+        plt.xticks(x_data)  # only show ticks for actual points
+
+        if data_is_per_channel:
+            ax.set_xlabel("First idx of module")
+            # set the legend as well
+            # plot a seperate line for each channel
+            for index, channel_info in enumerate(y_data):
+                ax.plot(x_data, channel_info, label="Channel {}".format(index))
+
+            ax.legend(loc='upper right')
+        else:
+            ax.set_xlabel("idx")
+            ax.plot(x_data, y_data)
+
+        # actually show the plot
+        plt.show()
 
     def generate_histogram_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
         r"""
