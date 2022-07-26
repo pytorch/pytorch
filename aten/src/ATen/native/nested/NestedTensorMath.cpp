@@ -558,6 +558,11 @@ Tensor NestedTensor_mul_Tensor(const Tensor& self, const Tensor& other) {
       });
 }
 
+// Only usable on the C++ side; scalars are converted to tensors coming from Python.
+Tensor NestedTensor_mul_Scalar(const Tensor& self, const Scalar& other) {
+  return NestedTensor_mul_Tensor(self, wrapped_scalar_tensor(other));
+}
+
 template <typename Func>
 Tensor& NestedTensor_elementwise__Tensor(
     Tensor& self,
@@ -603,6 +608,11 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
       self, other, "mul_", [](const Tensor& b1, const Tensor& b2) {
         return b1.mul_(b2);
       });
+}
+
+// Only usable on the C++ side; scalars are converted to tensors coming from Python.
+Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
+  return NestedTensor_mul__Tensor(self, wrapped_scalar_tensor(other));
 }
 
 Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {

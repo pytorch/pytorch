@@ -3440,6 +3440,7 @@
   dispatch:
     CompositeExplicitAutograd: mul
     SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Scalar
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3447,6 +3448,7 @@
   dispatch:
     CompositeExplicitAutograd: mul_
     SparseCsrCPU, SparseCsrCUDA: mul__scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Scalar
   autogen: mul.Scalar_out
 
 # multiply, alias for mul
