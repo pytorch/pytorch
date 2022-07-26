@@ -135,9 +135,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
        t.dtype() == at::kHalf)) {
     auto* nt_input = get_nested_tensor_impl(t);
-    TORCH_CHECK(
-        nested_tensor_impl_is_contiguous(nt_input),
-        "for now to_padded_tensor only supports contiguous nested tensor");
+    TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
 
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
