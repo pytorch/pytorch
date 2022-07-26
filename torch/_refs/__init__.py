@@ -2677,7 +2677,6 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-@out_wrapper()
 def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     if not sizes:
