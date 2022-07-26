@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Set, Any
+from typing import List, Tuple, Dict, Set, Any
 import torch
 import torch.fx as fx
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -16,12 +16,16 @@ memory_reduced = 0
 num_node_pairs = 0
 
 
-def is_fused_node(node):
+def is_fused_node(node) -> bool:
     return node.op == "call_module" and "fused_" in node.target
 
 
-def has_remat_node(node, fused_graph):
-    module = getattr(fused_graph, node.name)
+def has_remat_node(module_node: fx.Node, fused_graph: fx.GraphModule) -> bool:
+    """
+    Return True if the submodule of ``fused_graph`` corresponding to ``module_node``
+    has at least one node that can be rematerialized.
+    """
+    module = getattr(fused_graph, module_node.name)
     try_remat = False
     for node in module.graph.nodes:
         if node.target != operator.getitem and node.op == "call_function" and not ban_recomputation(node):
@@ -30,13 +34,20 @@ def has_remat_node(node, fused_graph):
     return try_remat
 
 
-def try_remat(node, fused_graph):
+def try_remat(node: fx.Node, fused_graph: fx.GraphModule) -> bool:
+    """
+    Return True if there might be rematerialization opportunities in the submodule of ``fused_graph``
+    corresponding to ``node``.
+    """
     return is_fused_node(node) and has_remat_node(node, fused_graph)
 
 
-def get_users(node):
-    # get the users of a node in fused graph
-    # the user might use the output of node through getitem
+def get_users(node: fx.Node) -> Set[fx.Node]:
+    """
+    Return the users of a node
+    A user might directly take in the node as an arg or
+    use the output of node through getitem
+    """
     users = set()
     for user_node in node.users:
         if user_node.target == operator.getitem:
@@ -46,9 +57,11 @@ def get_users(node):
     return users
 
 
-def get_fused_node_pairs(fused_graph):
-    # get pairs of fused node that are (parent, children) relationship in graph
-    # the two (parent, children) nodes might have an getitem node between them
+def get_fused_node_pairs(fused_graph: fx.GraphModule) -> List[Tuple[fx.Node, fx.Node]]:
+    """
+    Return a list of pairs of fused nodes that are (parent, child) relationship in fused_graph.
+    the two (parent, child) nodes might have an getitem node between them
+    """
     fused_node_pairs = []
     for node in fused_graph.graph.nodes:
         if(try_remat(node, fused_graph)):
@@ -58,16 +71,18 @@ def get_fused_node_pairs(fused_graph):
     return fused_node_pairs
 
 
-def get_weight(node):
+def get_weight(node: fx.Node) -> int:
     weight = 0
     if 'tensor_meta' in node.meta:
         weight = _size_of(node.meta['tensor_meta'])
     return weight
 
 
-def get_name_to_args_map(node_orig, gm):
+def get_name_to_args_map(node_orig: fx.Node, gm: fx.GraphModule) -> Dict[str, fx.Node]:
     """
-    map from placeholder name in gm to node_orig.args
+    Return a map from placeholder name in gm to node_orig.args
+
+    ``node_orig`` is the node corresponding to submodule ``gm`` in some fused_graph.
     """
     placeholder_map = {}
     loc = 0
@@ -78,7 +93,7 @@ def get_name_to_args_map(node_orig, gm):
     return placeholder_map
 
 
-def get_nx_node_name(node_name):
+def get_nx_node_name(node_name: str) -> str:
     if node_name.endswith("_in"):
         return node_name[:-3]
     elif node_name.endswith("_out"):
@@ -87,6 +102,14 @@ def get_nx_node_name(node_name):
 
 
 def get_cut_nodes_from_partition(partition, nx_graph):
+    """
+    Return the cut nodes from the partition. Cut nodes are the nodes reachable from the root node
+    and have outgoing edges to nodes in the non-reachable partition. 
+
+    Args:
+    ``partition`` is a tuple of set of nodes in nx_graph.
+    ``nx_graph`` is a networkx graph.
+    """
     reachable, non_reachable = partition
     cutset = set()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
@@ -98,7 +121,7 @@ def get_cut_nodes_from_partition(partition, nx_graph):
     return cut_nodes
 
 
-def order_topologically(nodes, gm):
+def order_topologically(nodes: List[fx.Node], gm: fx.GraphModule) -> List[fx.Node]:
     node_order_dict = {}
     rank = 0
     for n in gm.graph.nodes:
@@ -366,9 +389,9 @@ def find_min_cut(node_pair: Tuple[fx.Node, fx.Node], node_users_map: Dict[str, S
             nx_graph.add_edge("source", node.name + "_out", capacity=math.inf)
 
         # some ops like cuda_batch_norm return tuples, and they cannot be returned as output
-        # because torch.jit.script does not accept
-        # need to return getitem, these getitems might already in the graph
-        # neeed to change the capacity between _in and _out of these ndoes to inf
+        # because torch.jit.script does not accept tuples.
+        # so we need to change the capacity between _in and _out of these tuple nodes to inf
+        # Instead, we need to return getitem nodes, and these getitems might already be in the graph,
         for user in node.users:
             if user.target == operator.getitem:
                 weight = math.inf
@@ -412,6 +435,16 @@ def get_fused_graph(traced_graph):
 def rematerialize_fused_graph(fused_graph: fx.GraphModule, node_users_map: Dict[str, Set[fx.Node]]):
     """
     Modify the fused graph to rematerialize the nodes.
+    We find all pairs of fusion groups (A, B) that are “touching”, meaning fusion group A's output
+    is directly used by fusion group B. 
+
+    The for each pair of nodes, we use a min-cut algorithm to determine whether rematerialization
+    is needed and which nodes should be rematerialized. This algorithm minimizes the memory reading/writing 
+    cost of computing the outputs of these two fusion groups. Then we modify the fusion groups to 
+    rematerialize the nodes based on the min-cut partition given.
+
+    This is a heuristic algorithm because even though the rematerialization decision between each pair of 
+    touching fusion groups is optimal, the decision might not be the optimal for the whole graph.
 
     Args:
         fused_graph: the fused graph (of some FX graph G) where each fusion group is a submodule
