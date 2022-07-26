@@ -2149,6 +2149,7 @@ class TestCase(expecttest.TestCase):
         else:
             blocksize0 = blocksize1 = 1
 
+        size = tuple(size)
         dense_size = size[(len(size) - dense_dims):]
 
         def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
