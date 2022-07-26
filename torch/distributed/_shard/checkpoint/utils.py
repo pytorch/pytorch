@@ -60,7 +60,6 @@ class _DistWrapper:
                 dst=self.coordinator_rank,
                 group=self.group
             )
-            # technically the type is shou
             result = gather_objs
         else:
             result = [object]
