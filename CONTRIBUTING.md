@@ -443,7 +443,7 @@ These are the docs that you see over at [our docs website](https://pytorch.org/d
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
 the [PyTorch Developer Wiki](https://pytorch.org/wiki).
-If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
 
