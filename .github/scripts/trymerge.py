@@ -101,7 +101,7 @@ fragment PullRequestFragment on PullRequest {
       hasPreviousPage
     }
   }
-  labels(first: 100) @include(if: $with_labels) {
+  labels(first: 100) {
     edges {
       node {
         name
@@ -186,7 +186,7 @@ GH_GET_PR_INFO_QUERY = (GH_PULL_REQUEST_FRAGMENT
                         + GH_PR_REVIEWS_FRAGMENT
                         + GH_CHECKSUITES_FRAGMENT
                         + GH_COMMIT_AUTHORS_FRAGMENT) + """
-query ($owner: String!, $name: String!, $number: Int!, $with_labels: Boolean = false) {
+query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       ...PullRequestFragment
@@ -470,8 +470,8 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     return cast(Dict[str, Any], rc)
 
 
-def gh_get_pr_info(org: str, proj: str, pr_no: int, with_labels: bool = False) -> Any:
-    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no, with_labels=with_labels)
+def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
+    rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
 
 
@@ -758,12 +758,11 @@ class GitHubPR:
         return mc["oid"] if mc is not None else None
 
     def get_labels(self) -> List[str]:
-        if self.info["labels"] is None:
-            self.info = gh_get_pr_info(self.org, self.project, self.pr_num, True)
-        labels = []
-        for node in self.info["labels"]["edges"]:
-            labels.append(node['node']['name'])
-        return labels
+        if self.labels is not None:
+            return self.labels
+        labels = [node['node']['name'] for node in self.info["labels"]["edges"]] if "labels" in self.info else []
+        self.labels = labels
+        return self.labels
 
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
@@ -1268,6 +1267,7 @@ def handle_exception(e: Exception, org: str, project: str, pr_num: int, dry_run:
     run_url = os.getenv("GH_RUN_URL")
     if run_url is not None:
         msg += f"\nRaised by {run_url}"
+    print(msg)
     gh_post_pr_comment(org, project, pr_num, msg, dry_run=dry_run)
     import traceback
     traceback.print_exc()
