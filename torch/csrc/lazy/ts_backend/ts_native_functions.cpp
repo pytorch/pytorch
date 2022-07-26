@@ -269,6 +269,23 @@ at::Tensor LazyNativeFunctions::_to_copy(
   }
 };
 
+at::Tensor LazyNativeFunctions::empty_symint(
+    c10::SymIntArrayRef size,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<at::MemoryFormat> memory_format) {
+  // TODO: support SymIntNodes as well
+  return empty(
+      c10::asIntArrayRefSlow(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      memory_format);
+}
+
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size,
     c10::optional<at::ScalarType> dtype,
@@ -409,6 +426,11 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
 // "lifting" a tensor for functionalization means wrapping it in a
 // FunctionalTensorWrapper object.
 at::Tensor LazyNativeFunctions::lift(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      !at::functionalization::impl::isFunctionalTensor(tensor));
+  return at::functionalization::impl::to_functional_tensor(tensor);
+}
+at::Tensor LazyNativeFunctions::lift_fresh(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       !at::functionalization::impl::isFunctionalTensor(tensor));
   return at::functionalization::impl::to_functional_tensor(tensor);
