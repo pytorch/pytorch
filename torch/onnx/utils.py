@@ -1253,8 +1253,19 @@ def _setup_trace_module_map(
             m.register_forward_hook(_track_module_attributes_forward_hook)
             m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
+    def __unqualified_variable_name(qualified_name: str):
+        name_atoms = qualified_name.split(".")
+        idx = next(
+            i
+            for i, atom in reversed(list(enumerate(name_atoms)))
+            if not atom.isnumeric()
+        )
+        return ".".join(name_atoms[idx:])
+
     trace_module_map = {
-        _m: torch._C._jit_onnx_create_full_scope_name(torch.typename(type(_m)), _n)
+        _m: torch._C._jit_onnx_create_full_scope_name(
+            torch.typename(type(_m)), __unqualified_variable_name(_n)
+        )
         for _n, _m in model.named_modules()
     }
     torch.jit._trace._trace_module_map = trace_module_map
@@ -1416,6 +1427,8 @@ def _export(
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
             _C._jit_pass_onnx_assign_node_and_value_names(graph)
+            # Override generated graph output names with user-provided names
+            _set_input_and_output_names(graph, input_names, output_names)
             if export_params:
                 (
                     proto,

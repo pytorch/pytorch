@@ -85,9 +85,8 @@ class NodeNameGenerator {
 
  protected:
   virtual void PopulateNodeNames(Block*) = 0;
-  virtual void CreateName(Node* n) = 0;
+  virtual void CreateNodeName(Node* n) = 0;
   void UpdateOutputsNames(Node* n);
-  bool IsGraphOutput(const Value* v, const std::shared_ptr<Graph> graph) const;
 
  protected:
   std::string UpdateBaseName(
@@ -108,7 +107,7 @@ class ScopedNodeNameGenerator : public NodeNameGenerator {
 
  protected:
   void PopulateNodeNames(Block*) override;
-  void CreateName(Node* n) override;
+  void CreateNodeName(Node* n) override;
 
  private:
   std::string GetFullScopeName(ScopePtr scope);
@@ -129,27 +128,14 @@ std::string NodeNameGenerator::UpdateBaseName(
   return base_name;
 }
 
-bool NodeNameGenerator::IsGraphOutput(
-    const Value* v,
-    const std::shared_ptr<Graph> graph) const {
-  for (const auto* graph_output : graph->outputs()) {
-    if (v == graph_output) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void NodeNameGenerator::UpdateOutputsNames(Node* n) {
   if (node_names_.find(n) != node_names_.end()) {
     auto node_name = node_names_[n];
     for (auto i : c10::irange(n->outputs().size())) {
       auto output = n->output(i);
-      if (!IsGraphOutput(output, graph_)) {
-        auto output_name = node_name;
-        output_name.append("_output_").append(std::to_string(i));
-        output->setDebugName(output_name);
-      }
+      auto output_name = node_name;
+      output_name.append("_output_").append(std::to_string(i));
+      output->setDebugName(output_name);
     }
   }
 }
@@ -163,13 +149,12 @@ void ScopedNodeNameGenerator::PopulateNodeNames(Block* b) {
     for (auto* sub_block : n->blocks()) {
       PopulateNodeNames(sub_block);
     }
-    // TODO: better naming
-    CreateName(n);
+    CreateNodeName(n);
     UpdateOutputsNames(n);
   }
 }
 
-void ScopedNodeNameGenerator::CreateName(Node* n) {
+void ScopedNodeNameGenerator::CreateNodeName(Node* n) {
   if (node_names_.find(n) == node_names_.end()) {
     if (!ONNXScopeName::isCompatibleScope(n->scope())) {
       return;

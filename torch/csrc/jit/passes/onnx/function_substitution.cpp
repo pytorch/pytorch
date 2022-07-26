@@ -64,17 +64,19 @@ std::string GetCallNodeVariableName(const Node* call_node) {
   return module_name;
 }
 
-WithCurrentScope SetScopeGuardForCall(Graph& graph, Node* call_node) {
-  TORCH_INTERNAL_ASSERT(
-      call_node->kind() == prim::CallFunction ||
-      call_node->kind() == prim::CallMethod);
-  const auto type = call_node->input(0)->type()->expect<c10::NamedType>();
-  const auto class_name = TidyClassNameFromTorchScript(type->name());
-  const auto variable_name = GetCallNodeVariableName(call_node);
-  const auto scope_name =
-      onnx::ONNXScopeName::createFullScopeName(class_name, variable_name);
-  auto call_scope = graph.current_scope()->push(Symbol::scope(scope_name));
-  return WithCurrentScope(graph, call_scope);
+WithCurrentScope SetScopeGuardForForwardCall(Graph& graph, Node* call_node) {
+  TORCH_INTERNAL_ASSERT(call_node->kind() == prim::CallMethod);
+  const std::string& method_name = call_node->s(attr::name);
+  if (method_name == "forward") {
+    const auto type = call_node->input(0)->type()->expect<c10::NamedType>();
+    const auto class_name = TidyClassNameFromTorchScript(type->name());
+    const auto variable_name = GetCallNodeVariableName(call_node);
+    const auto scope_name =
+        onnx::ONNXScopeName::createFullScopeName(class_name, variable_name);
+    auto call_scope = graph.current_scope()->push(Symbol::scope(scope_name));
+    return WithCurrentScope(graph, call_scope);
+  }
+  return WithCurrentScope(graph, graph.current_scope());
 }
 
 void functionCallSubstitution(Block* block) {
@@ -132,8 +134,17 @@ void functionCallSubstitution(Block* block) {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           Function& function = class_type->getMethod(name);
-          WithCurrentScope scope_guard = SetScopeGuardForCall(*graph, cur);
+          WithCurrentScope scope_guard =
+              SetScopeGuardForForwardCall(*graph, cur);
+          GRAPH_DEBUG(
+              "Setting scope guard for forward call: ",
+              graph->current_scope()->namesFromRoot());
           if (auto graphFunction = tryToGraphFunction(function)) {
+            GRAPH_DEBUG(
+                "Inner graph for method call ",
+                name,
+                ": ",
+                *graphFunction->graph());
             WithCurrentScope inner_graph_scope_guard = WithCurrentScope(
                 *graphFunction->graph(), graph->current_scope());
             functionCallSubstitution(graphFunction->graph()->block());
@@ -150,6 +161,9 @@ void functionCallSubstitution(Block* block) {
         }
       } break;
     }
+    GRAPH_DEBUG(
+        "Graph current scope after node process: ",
+        graph->current_scope()->namesFromRoot());
   }
 }
 
