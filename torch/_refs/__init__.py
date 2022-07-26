@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, wraps
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 
@@ -140,7 +140,7 @@ __all__ = [
     # 'polar',  # abs, cos, sin
     "pow",
     "remainder",
-    # 'rsub', # unblocked
+    "rsub",
     # # special.xlog1py
     # # special.zeta
     "sub",
@@ -235,6 +235,7 @@ __all__ = [
     "scalar_tensor",
     "zeros",
     "zeros_like",
+    "arange",
     #
     # Randomness References
     #
@@ -1361,6 +1362,19 @@ remainder = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
+
+# reverse sub
+def rsub(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    *,
+    alpha: Optional[NumberType] = None,
+):
+    if isinstance(a, Number):
+        msg = "Received a Number for the first argument, but expected a Tensor"
+        raise ValueError(msg)
+    return sub(b, a, alpha=alpha)
+
 
 # TODO: add docstring
 # TODO: consider refactoring this with add impl
@@ -2986,6 +3000,74 @@ def empty_like(
     )
 
 
+@overload
+def arange(
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    pass
+
+
+@overload
+def arange(
+    start: NumberType,
+    end: NumberType,
+    step: NumberType = 1,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    pass
+
+
+@register_decomposition(torch.ops.aten.arange)
+@out_wrapper()
+def arange(
+    a: Optional[NumberType] = None,
+    b: Optional[NumberType] = None,
+    step: NumberType = 1,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    assert (a is not None and b is not None) or (a is not None and b is None)
+    if a is not None and b is not None:
+        return prims.arange(
+            a,
+            b,
+            step,
+            dtype=dtype,
+            device=device,
+            # layout=layout,
+            # pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+    elif a is not None and b is None:
+        return prims.arange(
+            0,
+            a,
+            step,
+            dtype=dtype,
+            device=device,
+            # layout=layout,
+            # pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+    else:
+        raise AssertionError()
+
+
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 @register_decomposition(torch.ops.aten.empty_strided)
 def empty_strided(
@@ -3147,6 +3229,32 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@out_wrapper(exact_dtype=True)
+def norm(
+    input: TensorLikeType,
+    p: Optional[Union[float, str]] = "fro",
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # In these cases we compute the "Frobenius norm"
+    if (
+        p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2)
+    ) or p is None:
+        p = 2
+    if isinstance(dim, int):
+        dim = [dim]
+    if isinstance(p, str):
+        # Here we either call the nuclear norm, or we call matrix_norm with some arguments
+        # that will throw an error
+        if dim is None:
+            dim = tuple(range(input.ndim))
+        return torch.linalg.matrix_norm(input, p, dim, keepdim, dtype=dtype)
+    else:
+        return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype)
+
+
 @register_decomposition(torch.ops.aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
     utils.check(
@@ -3156,5 +3264,6 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 
 
 import torch._refs.fft
+import torch._refs.linalg
 import torch._refs.nn.functional
 import torch._refs.special
