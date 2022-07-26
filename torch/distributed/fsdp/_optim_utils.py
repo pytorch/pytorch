@@ -3,6 +3,7 @@ import copy
 import functools
 from typing import (
     Any,
+    cast,
     Dict,
     Iterable,
     Iterator,
@@ -1071,9 +1072,11 @@ def _optim_state_dict(
         if rank == 0:
             r0_flat_param_id_to_optim_state_key[flat_param_id] = optim_state_key
         optim_state_key_to_flat_param_id[optim_state_key] = flat_param_id
-    obj_list = [r0_flat_param_id_to_optim_state_key] if rank == 0 else [None]
-    dist.broadcast_object_list(obj_list, src=0, group=group)
-    r0_flat_param_id_to_optim_state_key = obj_list[0]
+    key_obj_list: List[Optional[Dict[int, _OptimStateKey]]] = (
+        [r0_flat_param_id_to_optim_state_key] if rank == 0 else [None]
+    )
+    dist.broadcast_object_list(key_obj_list, src=0, group=group)
+    r0_flat_param_id_to_optim_state_key = key_obj_list[0]
 
     # Ensure that all ranks have at least the optimizer states needed by
     # rank 0's optimizer
@@ -1115,7 +1118,11 @@ def _optim_state_dict(
         if r0_optim_state_key.is_flat_param:
             fsdp_module = flat_param_to_fsdp_module[param]
             unflat_state = _unflatten_optim_state(
-                param, osd_state[flat_param_id], fsdp_module, to_save, shard_state
+                cast(FlatParameter, param),
+                osd_state[flat_param_id],
+                fsdp_module,
+                to_save,
+                shard_state
             )
             if to_save:
                 assert len(unflat_state) == len(r0_optim_state_key.unflat_param_names)

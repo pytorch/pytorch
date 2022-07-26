@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import copy
 import functools
@@ -59,11 +58,9 @@ from ._optim_utils import (
     _flatten_optim_state_dict,
     _get_param_id_to_param,
     _get_param_to_param_id,
-    _OptimStateKey,
     _optim_state_dict,
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
-    _unflatten_optim_state,
 )
 from ._utils import (
     _apply_to_modules,
