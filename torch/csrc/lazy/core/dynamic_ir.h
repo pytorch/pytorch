@@ -46,10 +46,10 @@ class TORCH_API DimensionNode {
   virtual bool isDynamic() const {
     return false;
   };
-  virtual int64_t getStaticValue() const {
+  virtual int64_t getDynamicValue() const {
     TORCH_CHECK(false, "NYI");
   };
-  virtual int64_t getDynamicValue() const {
+  virtual int64_t getStaticValue() const {
     TORCH_CHECK(false, "NYI");
   };
   virtual ~DimensionNode() = default;
