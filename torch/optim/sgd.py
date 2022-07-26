@@ -240,7 +240,7 @@ def _single_tensor_sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        param.add_(d_p, alpha=lr)
+        param.add_(d_p, alpha=-lr)
 
 
 def _multi_tensor_sgd(params: List[Tensor],
@@ -298,8 +298,8 @@ def _multi_tensor_sgd(params: List[Tensor],
             grads = bufs
 
     if not has_sparse_grad:
-        torch._foreach_add_(params, grads, alpha=lr)
+        torch._foreach_add_(params, grads, alpha=-lr)
     else:
         # foreach APIs dont support sparse
         for i in range(len(params)):
-            params[i].add_(grads[i], alpha=lr)
+            params[i].add_(grads[i], alpha=-lr)
