@@ -125,6 +125,10 @@ RUN rm install_openssl.sh
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
+# See https://github.com/pytorch/pytorch/issues/82174
+# TODO(sdym@fb.com):
+# check if this is needed after full off Xenial migration
+ENV CARGO_NET_GIT_FETCH_WITH_CLI true
 RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Add jni.h for java host build
