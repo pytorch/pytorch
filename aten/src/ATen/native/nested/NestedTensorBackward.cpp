@@ -107,5 +107,10 @@ Tensor _reshape_nested_backward(const Tensor& self, const Tensor& grad) {
   return grad.reshape(sizes);
 }
 
+Tensor native_dropout_backward_nested(const Tensor& grad, const Tensor& mask, double scale) {
+  Tensor result = grad * mask * scale;
+  return result;
+}
+
 } // namespace native
 } // namespace at

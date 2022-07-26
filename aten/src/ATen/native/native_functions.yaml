@@ -222,12 +222,14 @@
   dispatch:
     CPU: native_dropout_cpu
     CUDA: native_dropout_cuda
+    NestedTensorCPU, NestedTensorCUDA: native_dropout_nested
   tags: nondeterministic_seeded
 
 - func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   dispatch:
     CPU: native_dropout_backward_cpu
     CUDA: native_dropout_backward_cuda
+    NestedTensorCPU, NestedTensorCUDA: native_dropout_backward_nested
 
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 
@@ -242,9 +244,6 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  dispatch:
-    CompositeImplicitAutograd: dropout
-    NestedTensorCPU, NestedTensorCUDA: dropout_nested
   tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
@@ -3441,6 +3440,7 @@
   dispatch:
     CompositeExplicitAutograd: mul
     SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: mul_scalar_nested
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
