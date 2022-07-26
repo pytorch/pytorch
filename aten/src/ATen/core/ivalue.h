@@ -681,7 +681,7 @@ public:
 
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible<IValue, T>::value ||
+      std::is_constructible<IValue, T>::value &&
           std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
       std::nullptr_t>;
 

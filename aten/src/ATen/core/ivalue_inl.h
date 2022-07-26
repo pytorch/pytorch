@@ -2017,11 +2017,11 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   }
 }
 
-inline IValue::IValue(at::OptionalTensorRef v) : IValue() {
-  if (v.has_value()) {
-    *this = IValue(*v);
-  }
+inline c10::optional<at::Tensor> to_c10_optional(at::OptionalTensorRef ref) {
+  return ref.has_value() ? c10::optional<at::Tensor>(*ref) : c10::nullopt;
 }
+
+inline IValue::IValue(at::OptionalTensorRef v) : IValue(to_c10_optional(v)) {}
 
 template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::IListRef<T> v) : IValue() {

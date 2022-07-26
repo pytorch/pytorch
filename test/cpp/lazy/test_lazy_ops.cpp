@@ -5021,7 +5021,6 @@ TEST_F(LazyOpsTest, TestMultiIndexHeadNull) {
               100,
               {4, 3, 5, 6, 7},
               torch::TensorOptions(scalar_type).device(DefaultDevice()));
-    torch::Tensor indices_null;
     torch::Tensor indices_0 = torch::randint(
         -3,
         3,
@@ -5032,14 +5031,13 @@ TEST_F(LazyOpsTest, TestMultiIndexHeadNull) {
         3,
         {2, 4, 3},
         torch::TensorOptions(torch::kLong).device(DefaultDevice()));
-    torch::Tensor result =
-        torch::index(params, {indices_null, indices_0, indices_1});
+    torch::Tensor result = torch::index(params, {{}, indices_0, indices_1});
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor lazy_params = CopyToDevice(params, device);
       torch::Tensor lazy_indices_0 = CopyToDevice(indices_0, device);
       torch::Tensor lazy_indices_1 = CopyToDevice(indices_1, device);
-      torch::Tensor lazy_result = torch::index(
-          lazy_params, {indices_null, lazy_indices_0, lazy_indices_1});
+      torch::Tensor lazy_result =
+          torch::index(lazy_params, {{}, lazy_indices_0, lazy_indices_1});
       AllEqual(result, lazy_result);
     });
   }
@@ -5066,20 +5064,18 @@ TEST_F(LazyOpsTest, TestMultiIndexMiddleNull) {
         3,
         {2, 4, 3},
         torch::TensorOptions(torch::kLong).device(DefaultDevice()));
-    torch::Tensor indices_null;
     torch::Tensor indices_1 = torch::randint(
         -3,
         3,
         {2, 4, 3},
         torch::TensorOptions(torch::kLong).device(DefaultDevice()));
-    torch::Tensor result =
-        torch::index(params, {indices_0, indices_null, indices_1});
+    torch::Tensor result = torch::index(params, {indices_0, {}, indices_1});
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor lazy_params = CopyToDevice(params, device);
       torch::Tensor lazy_indices_0 = CopyToDevice(indices_0, device);
       torch::Tensor lazy_indices_1 = CopyToDevice(indices_1, device);
-      torch::Tensor lazy_result = torch::index(
-          lazy_params, {lazy_indices_0, indices_null, lazy_indices_1});
+      torch::Tensor lazy_result =
+          torch::index(lazy_params, {lazy_indices_0, {}, lazy_indices_1});
       AllEqual(result, lazy_result);
     });
   }
@@ -5106,20 +5102,18 @@ TEST_F(LazyOpsTest, TestMultiIndexTailNull) {
         3,
         {2, 4, 3},
         torch::TensorOptions(torch::kLong).device(DefaultDevice()));
-    torch::Tensor indices_null;
     torch::Tensor indices_1 = torch::randint(
         -3,
         3,
         {2, 4, 3},
         torch::TensorOptions(torch::kLong).device(DefaultDevice()));
-    torch::Tensor result =
-        torch::index(params, {indices_0, indices_1, indices_null});
+    torch::Tensor result = torch::index(params, {indices_0, indices_1, {}});
     ForEachDevice([&](const torch::Device& device) {
       torch::Tensor lazy_params = CopyToDevice(params, device);
       torch::Tensor lazy_indices_0 = CopyToDevice(indices_0, device);
       torch::Tensor lazy_indices_1 = CopyToDevice(indices_1, device);
-      torch::Tensor lazy_result = torch::index(
-          lazy_params, {lazy_indices_0, lazy_indices_1, indices_null});
+      torch::Tensor lazy_result =
+          torch::index(lazy_params, {lazy_indices_0, lazy_indices_1, {}});
       AllEqual(result, lazy_result);
     });
   }

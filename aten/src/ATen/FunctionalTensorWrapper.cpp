@@ -331,10 +331,6 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 namespace functionalization {
 namespace impl {
 
-c10::optional<Tensor> to_optional_tensor(OptionalTensorRef ref) {
-  return ref.has_value() ? c10::optional<Tensor>(*ref) : c10::nullopt;
-}
-
 Tensor to_functional_tensor(const Tensor& tensor) {
   // Note [Wrapped Numbers <> Functionalization]
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
@@ -353,7 +349,7 @@ c10::List<c10::optional<Tensor>> to_functional_tensor(IOptTensorListRef t_list) 
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto& tensor : t_list) {
-    outputs.push_back(to_functional_tensor(to_optional_tensor(tensor)));
+    outputs.push_back(to_functional_tensor(to_c10_optional(tensor)));
   }
   return outputs;
 }
@@ -487,7 +483,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 }
 
 bool isFunctionalTensor(OptionalTensorRef t) {
-  return isFunctionalTensor(to_optional_tensor(t));
+  return isFunctionalTensor(to_c10_optional(t));
 }
 
 template <typename T, typename F>
