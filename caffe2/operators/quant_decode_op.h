@@ -37,7 +37,7 @@ void Decode(
 
     int sz = output->numel();
     for (C10_UNUSED const auto i : c10::irange(sz)) {
-      DCHECK_LE(*code_ptr, cb_size);
+      TORCH_DCHECK_LE(*code_ptr, cb_size);
       *out_ptr++ = cb_ptr[*code_ptr++];
     }
   } else {
@@ -49,7 +49,7 @@ void Decode(
     CAFFE_ENFORCE_EQ(cb_size, output->numel());
     auto* out_ptr = output->template mutable_data<CodebookT>();
     while (gradient_ptr < gradient_end) {
-      DCHECK_LE(*code_ptr, cb_size);
+      TORCH_DCHECK_LE(*code_ptr, cb_size);
       out_ptr[*code_ptr++] += *gradient_ptr++;
     }
   }
