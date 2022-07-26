@@ -5,7 +5,6 @@ import torch
 torch.set_default_dtype(torch.double)
 
 import os
-import unittest
 
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn

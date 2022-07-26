@@ -6,7 +6,7 @@ import sys
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_ARM64, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_ARM64
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME

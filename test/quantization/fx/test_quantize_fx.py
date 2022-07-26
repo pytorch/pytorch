@@ -2,7 +2,6 @@
 
 from collections import OrderedDict
 import os
-import unittest
 import torch
 import torch.nn.functional as F
 import torch.nn as nn

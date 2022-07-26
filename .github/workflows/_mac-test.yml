@@ -92,7 +92,7 @@ jobs:
         if: inputs.build-environment == 'macos-12-py3-arm64'
         run: |
           # As wheels are cross-compiled they are reported as x86_64 ones
-          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
+          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
 
       - name: Test
         id: test
