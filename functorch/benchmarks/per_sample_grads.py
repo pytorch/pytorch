@@ -2,11 +2,8 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from opacus.utils.module_modification import convert_batchnorm_modules
-from torchvision.datasets import CIFAR10
 import time
 
-from functools import partial
-import functorch
 from functorch import vmap, grad
 from functorch import make_functional
 from opacus import PrivacyEngine
