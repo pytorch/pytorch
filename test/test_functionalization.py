@@ -128,6 +128,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
     """)
