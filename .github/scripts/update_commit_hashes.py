@@ -68,8 +68,8 @@ def approve_pr(pr_number: str) -> None:
     )
 
 
-def make_comment(pr_number: str) -> None:
-    params = {"body": "@pytorchbot merge -g"}
+def make_comment(pr_number: str, msg: str) -> None:
+    params = {"body": msg}
     # comment with pytorchbot because pytorchmergebot gets ignored
     git_api(
         f"/repos/{OWNER}/{REPO}/issues/{pr_number}/comments",
@@ -89,26 +89,19 @@ def close_pr(pr_number: str) -> None:
 
 
 def is_newer_hash(new_hash: str, old_hash: str, repo_name: str) -> bool:
-    # this git command prints the unix timestamp of the hash
-    new_date = (
-        subprocess.run(
-            f"git show --no-patch --no-notes --pretty=%ct {new_hash}".split(),
-            capture_output=True,
-            cwd=f"{repo_name}",
+    def _get_date(hash: str) -> int:
+        # this git command prints the unix timestamp of the hash
+        return int(
+            subprocess.run(
+                f"git show --no-patch --no-notes --pretty=%ct {hash}".split(),
+                capture_output=True,
+                cwd=f"{repo_name}",
+            )
+            .stdout.decode("utf-8")
+            .strip()
         )
-        .stdout.decode("utf-8")
-        .strip()
-    )
-    old_date = (
-        subprocess.run(
-            f"git show --no-patch --no-notes --pretty=%ct {old_hash}".split(),
-            capture_output=True,
-            cwd=f"{repo_name}",
-        )
-        .stdout.decode("utf-8")
-        .strip()
-    )
-    return int(new_date) > int(old_date)
+
+    return _get_date(new_hash) > _get_date(old_hash)
 
 
 def main() -> None:
@@ -146,7 +139,7 @@ def main() -> None:
         f.seek(0)
         f.truncate()
         f.write(f"{hash}\n")
-    if is_newer_hash(hash.strip(), old_hash, args.repo_name):
+    if is_newer_hash(hash, old_hash, args.repo_name):
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
         subprocess.run(f"git add .github/ci_commit_pins/{args.repo_name}.txt".split())
@@ -160,12 +153,13 @@ def main() -> None:
             pr_num = make_pr(args.repo_name, branch_name)
             approve_pr(pr_num)
         # comment to merge if all checks are green
-        make_comment(pr_num)
+        make_comment(pr_num, "@pytorchbot merge -g")
     else:
         print(
             f"tried to update from old hash: {old_hash} to new hash: {hash} but the old hash seems to be newer, not creating pr"
         )
         if pr_num is not None:
+            make_comment(pr_num, "closing pr as the current hash seems up to date")
             close_pr(pr_num)
             print(f"closing PR {pr_num}")
 
