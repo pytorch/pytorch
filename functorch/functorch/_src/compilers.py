@@ -447,11 +447,11 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
                                  decompositions=default_decompositions)
 
 
-def get_save_fx_default_func(current_name, folder_name, dump_example_input=False):
+def graph_dumper_aot(current_name, folder_name, dump_example_input=False):
     """
     Dump the forward, backward, and joint computation graph.
     Example Usage:
-    save_fx_func = get_save_fx_default_func(current_name, folder_name, dump_example_input = False)
+    save_fx_func = graph_dumper_aot(current_name, folder_name, dump_example_input = False)
     optimize_ctx = torchdynamo.optimize(
         save_fx_func
     )
