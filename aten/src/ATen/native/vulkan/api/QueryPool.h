@@ -79,6 +79,7 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
+  double get_time(std::string op_name);
 };
 
 } // namespace api
