@@ -113,7 +113,7 @@ class FileSystemReader(StorageReader):
             # During load time, we will load the Tensor (with it orignal view)
             # narrow it along all dimemsions, and copy_ it to the
             # target tensor, which will be the same size.
-            view_to_copy = tensor_narrow_n(view_to_copy, req.offsets, req.lengths)
+            view_to_copy = narrow_tensor_by_index(view_to_copy, req.offsets, req.lengths)
 
             assert (
                 view_to_copy.size() == req.tensor.size()

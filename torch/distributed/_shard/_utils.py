@@ -1,8 +1,8 @@
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
-from typing import Tuple
+from typing import Sequence
 
-def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Tuple[int, ...], sizes: Tuple[int, ...]) -> torch.Tensor:
+def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Sequence[int], sizes: Sequence[int]) -> torch.Tensor:
     """
     Narrow the tensor according to ``offsets`` and ``sizes``.
     """

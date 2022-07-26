@@ -1,8 +1,6 @@
-from typing import List, Callable, Tuple, Optional, Union, TypeVar, cast
+from typing import List, Callable, Optional, Union, TypeVar, cast
 import torch.distributed as dist
 from .api import CheckpointException
-import torch
-
 
 T = TypeVar('T')
 R = TypeVar('R')
