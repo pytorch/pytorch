@@ -362,28 +362,31 @@ extern SYCL_EXTERNAL void __assert_fail(
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+// CUDA supports __assert_fail function which are common for both device
+// and host side code.
 __host__ __device__
-#elif defined(__HIP_ARCH__) || defined(__HIP__)
+#endif
+
+// This forward declaration matching the declaration of __assert_fail
+    // exactly how it is in glibc in case parts of the program are compiled with
+    // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
+    // error. Note: On ROCm - this declaration serves for host side compilation.
+void
+    __assert_fail(
+    const char* assertion,
+    const char* file,
+    unsigned int line,
+    const char* function) throw()  __attribute__((__noreturn__));
+
+#if defined(__HIP_ARCH__) || defined(__HIP__)
+// ROCm supports __assert_fail only as a device side function.
 __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion,
     const char* file,
     unsigned int line,
     const char* function);
-#endif
-    void
-    __assert_fail(
-        const char* assertion,
-        const char* file,
-        unsigned int line,
-        const char* function) throw()
-// We match the declaration of __assert_fail exactly how it is in glibc in case
-// parts of the program are compiled with different NDEBUG settings. Otherwise
-// we might get 'ambiguous declaration' error.
-#ifdef __GNUC__
-        __attribute__((__noreturn__))
-#endif
-        ;
-#endif
+#endif // defined(__HIP_ARCH__) || defined(__HIP__)
+#endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
