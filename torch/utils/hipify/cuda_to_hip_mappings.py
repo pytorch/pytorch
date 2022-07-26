@@ -29,7 +29,7 @@ supported in ROCm/HIP yet.
 
 # We need to know the ROCm version so we can conditionalize some of the mappings later.
 # As of ROCm 5.0, the version is found in rocm_version.h header file under /opt/rocm/include.
-rocm_path = "/opt/rocm"
+rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/rocm"
 try:
     rocm_path = check_output(["hipconfig", "--rocmpath"]).decode("utf-8")
 except:
@@ -54,7 +54,6 @@ if os.path.isfile(rocm_version_h):
 else:
     print("Warning: failed to open {rocm_version_h}, assuming ROCm version < 5.0")
     rocm_version = (0,0,0)
-print(rocm_version)
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict(
