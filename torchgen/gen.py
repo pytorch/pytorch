@@ -38,6 +38,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_view_inverse_declaration,
     gen_symint_view_copy_kernel,
 )
+from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
 from torchgen.model import (
     Argument,
@@ -1840,6 +1841,10 @@ def gen_headers(
             ],
         },
     )
+
+    cpu_fm.write(
+        'VmapGeneratedPlumbing.h',
+        lambda: gen_all_vmap_plumbing(native_functions))
 
     def gen_aten_interned_strings() -> Dict[str, str]:
         attrs = set()  # All function argument names
