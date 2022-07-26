@@ -16653,6 +16653,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16675,6 +16676,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
            aten_name='linalg_svdvals',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
@@ -21645,6 +21647,16 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.norm",
+        torch_opinfo_name="norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
     ),
     #
     # torch.linalg
