@@ -499,6 +499,10 @@ std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_isnan(const at::Tensor& self) {
+  return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   // TODO(whc) support cat in codegen and move this to compute_*_cat functions
   std::vector<int64_t> out_shape(
