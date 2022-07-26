@@ -561,7 +561,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
-        xfail('put'),
         xfail('quantile'),  # checks q via a .item() call
         xfail('stft'),
         xfail('view_as_complex'),
@@ -651,7 +650,6 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
 
-        xfail('put'),  # calls put_ during vmap with only vmaps over other, not self
         xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
         # erroring because running_mean and running_var aren't differentiable
@@ -719,6 +717,7 @@ class TestOperators(TestCase):
         xfail('linalg.cholesky_ex'),
         xfail('masked_scatter'),
         xfail('index_fill'),
+        xfail('put'),
         xfail('take'),
         xfail('linalg.eigvals'),
         xfail('linalg.qr'),
@@ -1283,7 +1282,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # call inplace functions
         xfail('linalg.householder_product'),  # inplace
-        xfail('take'),  # inplace
 
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
