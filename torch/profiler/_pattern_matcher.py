@@ -1,4 +1,5 @@
 from collections import deque
+import json
 import math
 import os
 import re
@@ -577,7 +578,11 @@ def eventTreeBFS(event_tree: List[_ProfilerEvent]):
             stack.append(child_event)
 
 
-def report_all_anti_patterns(prof, should_benchmark: bool = False, json_report_dir: str = None):
+def report_all_anti_patterns(prof,
+                             should_benchmark: bool = False,
+                             print_enable: bool = True,
+                             json_report_dir: str = None):
+    report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
         ForLoopIndexingPattern(prof, should_benchmark),
@@ -603,11 +608,27 @@ def report_all_anti_patterns(prof, should_benchmark: bool = False, json_report_d
             if report_msg not in reported:
                 message_list.append(report_msg)
                 reported.add(report_msg)
+                src_location, line_no = source_code_location(event).split(":")
+                report_dict.setdefault(src_location, []).append({
+                    "line_number": int(line_no),
+                    "message": anti_pattern.description
+                })
+
+    if json_report_dir is not None:
+        json_report_path = os.path.join(json_report_dir, "torchtidy_report.json")
+        if os.path.exists(json_report_path):
+            with open(json_report_path, "r") as f:
+                exisiting_report = json.load(f)
+                exisiting_report.update(report_dict)
+                report_dict = exisiting_report
+        with open(json_report_path, "w") as f:
+            json.dump(report_dict, f, indent=4)
 
     message_list.append("Summary:")
     message_list += summaries
     message_list.append(f"{'-'*40}TorchTidy Report{'-'*40}")
-    print("\n".join(message_list))
+    if print_enable:
+        print("\n".join(message_list))
 
 
 def event_type(event: _ProfilerEvent):
