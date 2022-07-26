@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <ATen/WrapDimUtils.h>
 
 namespace at { namespace functorch {
 
@@ -188,7 +187,7 @@ struct LinalgCheckMatrixUnaryRuleHelper;
 template <char const *op_name, typename F, F Func, typename A, typename... T>
 struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
   static inline Tensor check_and_reshape_input(const Tensor& tensor, optional<int64_t> batch_dim) {
-    TORCH_CHECK(tensor.dim() > 2, op_name, ": The input tensor A must have at least 2 dimensions.");
+    TORCH_CHECK(rankWithoutBatchDim(tensor, batch_dim) >= 2, op_name, ": The input tensor A must have at least 2 dimensions.");
     return moveBatchDimToFront(tensor, batch_dim);
   }
 
@@ -237,11 +236,11 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& first, optional<int64_t> first_bdim,
       const Tensor& second, optional<int64_t> second_bdim,
       T... extra_args) {
-    TORCH_CHECK(!first_bdim.has_value() || first.dim() > 2,
+    TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
               op_name, ": The input tensor A must have at least 2 dimensions.");
-    TORCH_CHECK(!second_bdim.has_value() || second.dim() > 2,
-              op_name, ": The input tensor A must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim);
+    TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
+              op_name, ": The input tensor B must have at least 2 dimensions.");
+    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
@@ -253,12 +252,12 @@ oneOutput cholesky_solve_batch_rule(
     const Tensor& self, c10::optional<int64_t> self_bdim,
     const Tensor& A, c10::optional<int64_t> A_bdim,
     bool upper) {
-  TORCH_CHECK(!self_bdim.has_value() || self.dim() > 2,
+  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2,
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  TORCH_CHECK(!A_bdim.has_value() || A.dim() > 2,
+  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, false);
   const auto tensor_ = std::get<0>(tensor_other);
   const auto other_ = std::get<1>(tensor_other);
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
@@ -266,10 +265,16 @@ oneOutput cholesky_solve_batch_rule(
 
 threeOutputs linalg_lu_factor_ex_batch_rule(
     const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
-  TORCH_CHECK(A.dim() > 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
+  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
   const auto A_ = moveBatchDimToFront(A, A_bdim);
   const auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+}
+
+oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
+  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.matrix_exp: The input tensor A must have at least 2 dimensions.");
+  const auto self_ = moveBatchDimToFront(self, self_bdim).contiguous();  // seems to be a bug
+  return std::make_tuple(at::matrix_exp(self_), 0);
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -294,6 +299,8 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
     c10::guts::function_traits<decltype(ATEN_FN(fn))>::parameter_types>::apply_##num_out)
 
 
+// Define string constants with the function names. These will be used as template parameters
+// C++ doesn't let us use string literals as template parameters, so we have to declare them as consts first
 #define LINALG_STRING_CONST(fn, op_name) \
   const char func_string_##fn[] = #op_name;\
 
@@ -336,14 +343,13 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, two));\
   }
 
-// These need to be outside string constant must be declared outside of a macro to be used as template param
+// These need to be outside. String constant must be declared outside of a macro to be used as template param
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_matrix_exp, linalg.matrix_exp);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_pinv, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(linalg_pinv, atol_rtol_float, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
@@ -370,6 +376,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
+  VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
