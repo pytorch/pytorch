@@ -1,13 +1,15 @@
 # Owner(s): ["module: onnx"]
 
+import io
+
 import numpy as np
+import onnx
 
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
 from torch.testing._internal import common_utils
-import io
-import onnx
+
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -299,11 +301,11 @@ class TestONNXShapeInference(common_utils.TestCase):
                 embedding_output = CustomLayerNorm.apply(embeddings)
                 query = embedding_output.transpose(0, 1)
                 tgt_len, bsz, embed_dim = query.size()
-                query = (query.reshape(tgt_len, bsz, embed_dim))
+                query = query.reshape(tgt_len, bsz, embed_dim)
                 return query
 
         embeddings = torch.randn(batch_size, max_position_embeddings, hidden_size)
-        
+
         f = io.BytesIO()
         torch.onnx.export(
             EmbeddingModule().eval(),

@@ -1649,6 +1649,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         )
         unregister_custom_op_symbolic("::cat", _onnx_opset_version)
 
+
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
     opset_version = 10
 
