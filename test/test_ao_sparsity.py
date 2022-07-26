@@ -23,6 +23,7 @@ from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
 
 # Composability
 from ao.sparsity.test_composability import TestComposability  # noqa: F401
+from ao.sparsity.test_composability import TestFxComposability  # noqa: F401
 
 # Utilities
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
