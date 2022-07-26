@@ -391,7 +391,8 @@ class TestDecomp(TestCase):
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
-                    torch.ops.aten.new_empty.default
+                    torch.ops.aten.new_empty.default,
+                    torch.ops.aten.new_empty.SymInt
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
