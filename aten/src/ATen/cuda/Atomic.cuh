@@ -310,13 +310,7 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
   gpuAtomicAdd(address, val);
 }
 
-/* Note [explicitly non-returning atomics]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * AMD's MI100 (gfx908) provides an optimized fp32 atomicAdd, exposed via atomicAddNoRet().
- * Due to compiler limitations, callers must opt-in to guarantee the optimized instruction.
- * This non-returning atomicAddNoRet cannot be used to implement the returning atomicAdd,
- * therefore we need a new API 'gpuAtomicAddNoReturn'.
- */
+// This used to be a separate intrinsic provided by the ROCm backend, but has been recently marked deprecated.
 template<typename T>
 static inline __device__ void gpuAtomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
@@ -328,13 +322,7 @@ static inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gp
 static inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
 static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
-
-/* Special case fp32 atomic. */
-#if defined(USE_ROCM)
-static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
-#else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
-#endif
 
 // Atomic multiplication implementation.
 
