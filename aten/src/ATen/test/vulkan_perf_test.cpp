@@ -79,7 +79,7 @@ static void add_op_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("add"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("add") / 1000000.0);
 #endif
 }
 
@@ -132,7 +132,7 @@ static void add_op_q_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("quantized_add"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_add") / 1000000.0);
 #endif
 }
 
@@ -217,7 +217,7 @@ static void conv2d_op_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("conv2d"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d") / 1000000.0);
 #endif
 }
 
@@ -325,7 +325,7 @@ static void conv2d_op_q_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("quantized_conv2d"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_conv2d") / 1000000.0);
 #endif
 }
 
@@ -409,7 +409,7 @@ static void conv2dpw_op_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("conv2d_pw_2x2"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d_pw_2x2") / 1000000.0);
 #endif
 }
 
@@ -516,7 +516,7 @@ static void conv2dpw_op_q_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("quantized_conv2d_pw_2x2"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_conv2d_pw_2x2") / 1000000.0);
 #endif
 }
 
