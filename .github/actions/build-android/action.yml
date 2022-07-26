@@ -37,12 +37,10 @@ runs:
       shell: bash
       env:
         BRANCH: ${{ inputs.branch }}
-        JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
         BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-${{ inputs.arch-for-build-env }}-build"
         AWS_DEFAULT_REGION: us-east-1
         PR_NUMBER: ${{ github.event.pull_request.number }}
         SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-        CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
         DOCKER_IMAGE: ${{ inputs.docker-image  }}
         MATRIX_ARCH: ${{ inputs.arch }}
@@ -52,16 +50,12 @@ runs:
         export container_name
         container_name=$(docker run \
           -e BUILD_ENVIRONMENT \
-          -e JOB_BASE_NAME \
           -e MAX_JOBS="$(nproc --ignore=2)" \
           -e AWS_DEFAULT_REGION \
-          -e IS_GHA \
           -e PR_NUMBER \
           -e SHA1 \
           -e BRANCH \
-          -e GITHUB_RUN_ID \
           -e SCCACHE_BUCKET \
-          -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
           -e SKIP_SCCACHE_INITIALIZATION=1 \
           --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
           --security-opt seccomp=unconfined \

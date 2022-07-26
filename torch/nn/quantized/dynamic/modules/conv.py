@@ -13,6 +13,7 @@ from torch.nn.quantized.modules.conv import _reverse_repeat_padding
 import torch.nn.quantized.modules as nnq
 import warnings
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']
 
 class Conv1d(nnq.Conv1d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.

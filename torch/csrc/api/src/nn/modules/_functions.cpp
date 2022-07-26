@@ -8,9 +8,9 @@ namespace nn {
 namespace functions {
 
 Variable CrossMapLRN2d::forward(
-    AutogradContext *ctx,
+    AutogradContext* ctx,
     const Variable& input,
-    const CrossMapLRN2dOptions& options){
+    const CrossMapLRN2dOptions& options) {
   ctx->saved_data["size"] = options.size();
   ctx->saved_data["alpha"] = options.alpha();
   ctx->saved_data["beta"] = options.beta();
@@ -19,7 +19,9 @@ Variable CrossMapLRN2d::forward(
 
   TORCH_CHECK(input.dim() == 4);
 
-  ctx->saved_data["scale"] = ctx->saved_data["scale"].toTensor().defined() ? ctx->saved_data["scale"] : torch::empty({0}, input.options());
+  ctx->saved_data["scale"] = ctx->saved_data["scale"].toTensor().defined()
+      ? ctx->saved_data["scale"]
+      : torch::empty({0}, input.options());
 
   torch::Tensor output = torch::empty({0}, input.options());
 
@@ -32,7 +34,8 @@ Variable CrossMapLRN2d::forward(
   auto input_square = output;
   torch::pow_out(input_square, input, 2);
 
-  int64_t pre_pad = static_cast<int64_t>((ctx->saved_data["size"].toInt() - 1) / 2 + 1);
+  int64_t pre_pad =
+      static_cast<int64_t>((ctx->saved_data["size"].toInt() - 1) / 2 + 1);
   int64_t pre_pad_crop = pre_pad > channels ? channels : pre_pad;
 
   auto scale_first = ctx->saved_data["scale"].toTensor().select(1, 0);
@@ -63,18 +66,25 @@ Variable CrossMapLRN2d::forward(
     }
   }
 
-  ctx->saved_data["scale"].toTensor()
-      .mul_(ctx->saved_data["alpha"].toDouble() / ctx->saved_data["size"].toInt())
+  ctx->saved_data["scale"]
+      .toTensor()
+      .mul_(
+          ctx->saved_data["alpha"].toDouble() / ctx->saved_data["size"].toInt())
       .add_(ctx->saved_data["k"].toInt());
 
-  torch::pow_out(output, ctx->saved_data["scale"].toTensor(), -ctx->saved_data["beta"].toDouble());
+  torch::pow_out(
+      output,
+      ctx->saved_data["scale"].toTensor(),
+      -ctx->saved_data["beta"].toDouble());
   output.mul_(input);
 
   ctx->save_for_backward({input, output});
   return output;
 }
 
-variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_outputs) {
+variable_list CrossMapLRN2d::backward(
+    AutogradContext* ctx,
+    variable_list grad_outputs) {
   auto grad_output = grad_outputs[0];
   auto input = ctx->get_saved_variables()[0];
   auto output = ctx->get_saved_variables()[1];
@@ -85,15 +95,24 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
 
-  auto padded_ratio = torch::empty({channels + ctx->saved_data["size"].toInt() - 1, input_height, input_width},
-                                    input.options());
-  auto accum_ratio = torch::empty({input_height, input_width},
-                                    input.options());
-  double cache_ratio_value = 2 * ctx->saved_data["alpha"].toDouble() * ctx->saved_data["beta"].toDouble() / ctx->saved_data["size"].toInt();
-  int64_t inversePrePad = static_cast<int64_t>(ctx->saved_data["size"].toInt() - (ctx->saved_data["size"].toInt() - 1) / 2);
+  auto padded_ratio = torch::empty(
+      {channels + ctx->saved_data["size"].toInt() - 1,
+       input_height,
+       input_width},
+      input.options());
+  auto accum_ratio = torch::empty({input_height, input_width}, input.options());
+  double cache_ratio_value = 2 * ctx->saved_data["alpha"].toDouble() *
+      ctx->saved_data["beta"].toDouble() / ctx->saved_data["size"].toInt();
+  int64_t inversePrePad = static_cast<int64_t>(
+      ctx->saved_data["size"].toInt() -
+      (ctx->saved_data["size"].toInt() - 1) / 2);
 
   grad_input.resize_as_(input);
-  torch::pow_out(grad_input, ctx->saved_data["scale"].toTensor(), -ctx->saved_data["beta"].toDouble()).mul_(grad_output);
+  torch::pow_out(
+      grad_input,
+      ctx->saved_data["scale"].toTensor(),
+      -ctx->saved_data["beta"].toDouble())
+      .mul_(grad_output);
 
   padded_ratio.zero_();
   auto padded_ratio_center = padded_ratio.narrow(0, inversePrePad, channels);
@@ -104,7 +123,8 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
     torch::sum_out(
         accum_ratio,
         padded_ratio.narrow(0, 0, ctx->saved_data["size"].toInt() - 1),
-        0, /*keepdim=*/false);
+        0,
+        /*keepdim=*/false);
     for (const auto c : c10::irange(channels)) {
       accum_ratio.add_(padded_ratio[c + ctx->saved_data["size"].toInt() - 1]);
       grad_input[n][c].addcmul_(input[n][c], accum_ratio, -cache_ratio_value);
@@ -112,9 +132,10 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
     }
   }
 
-  return variable_list{grad_input, Variable(), Variable(), Variable(), Variable()};
+  return variable_list{
+      grad_input, Variable(), Variable(), Variable(), Variable()};
 }
 
-}
+} // namespace functions
 } // namespace nn
 } // namespace torch

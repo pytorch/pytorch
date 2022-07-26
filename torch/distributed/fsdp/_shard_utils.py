@@ -180,12 +180,8 @@ def _all_gather_sharded_tensor(
         device=cuda_device,
     )
     dist._all_gather_base(tensor, local_tensor, group=pg)
-    all_move_to_cpu = torch.empty(world_size, device=cuda_device)
-    dist._all_gather_base(all_move_to_cpu, move_to_cpu, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
-    if all_move_to_cpu.sum().is_nonzero():
-        tensor = tensor.cpu()
     return tensor
 
 
@@ -194,15 +190,16 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, this API gathers all the ShardedTensor in the state_dict
-    to the output_rank, and creates a new state_dict which the values are either
-    the gathered tensors (rank == output_rank) or None (rank != output_rank).
+    Given a state_dict, this API gathers all the ShardedTensors in the state_dict.
     """
     new_state_dict = {}
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             output_tensor = _all_gather_sharded_tensor(tensor, pg)
-            tensor = output_tensor
+            if tensor.local_shards() and tensor.local_shards()[0].tensor.is_cuda:
+                tensor = output_tensor
+            else:
+                tensor = output_tensor.cpu()
         new_state_dict[key] = tensor
     return new_state_dict
 

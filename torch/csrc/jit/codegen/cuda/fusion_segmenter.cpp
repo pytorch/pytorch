@@ -251,6 +251,32 @@ std::string toString(const SegmentedEdge* edge) {
   return ss.str();
 }
 
+std::unique_ptr<SegmentedFusion> SegmentedFusion::fromCompleteFusion(
+    std::unique_ptr<Fusion> fusion_ptr,
+    ScheduleHeuristic heuristic) {
+  auto fusion = fusion_ptr.get();
+
+  auto segmented_fusion_ptr =
+      std::make_unique<SegmentedFusion>(std::move(fusion_ptr));
+
+  // Make a group for the single fusion
+  auto single_group = segmented_fusion_ptr->newGroup();
+
+  // Add input and output vals
+  single_group->input_vals = fusion->inputs();
+  single_group->output_vals = fusion->outputs();
+
+  // Get ordered expression list
+  single_group->resetExprList();
+
+  // Assign heuristics and id for the complete fusion
+  //  to share the runtime path of segmented fusion.
+  single_group->setHeuristic(heuristic);
+  single_group->setID(0);
+
+  return segmented_fusion_ptr;
+}
+
 SegmentedFusion::SegmentedFusion(std::unique_ptr<Fusion> fusion)
     : impl_(this), complete_fusion_(std::move(fusion)) {
   segmented_fusion_name_ = segmentedFusionName();

@@ -122,7 +122,11 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->stop());
     os_ << " : ";
   }
-  print_inline(id->extent());
+  if (id->isBroadcast() && id->hasExpandedExtent()) {
+    print_inline(id->expandedExtent());
+  } else {
+    print_inline(id->extent());
+  }
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
@@ -430,6 +434,11 @@ void IrPrinter::handle(const WelfordOp* wop) {
   os_ << " )\n";
 }
 
+void IrPrinter::handle(const LoadStoreOp* ldst) {
+  indent() << ldst->out() << " = " << ldst->opType() << "( " << ldst->in()
+           << " )\n";
+}
+
 void IrPrinter::handle(const BroadcastOp* bop) {
   indent() << bop->out() << "\n";
   indent() << "   = broadcast( " << bop->in() << " )\n";
@@ -465,6 +474,18 @@ void IrPrinter::handle(const Merge* m) {
 
 void IrPrinter::handle(const TransposeOp* top) {
   indent() << top->out() << " = transpose( " << top->in() << " )\n";
+}
+
+void IrPrinter::handle(const ExpandOp* eop) {
+  indent() << eop->out() << " = expand( " << eop->in() << ", {";
+  std::stringstream ss;
+  for (auto expanded_extent : eop->expanded_extents()) {
+    if (ss.tellp()) {
+      ss << ", ";
+    }
+    ss << expanded_extent;
+  }
+  os_ << ss.str() << "} )\n";
 }
 
 void IrPrinter::handle(const ShiftOp* sop) {
@@ -563,6 +584,10 @@ void IrPrinter::handle(const kir::Allocate* node) {
 void IrPrinter::handle(const kir::BlockSync* node) {
   indent() << "BLOCKSYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
            << ")\n";
+}
+
+void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT()\n";
 }
 
 void IrPrinter::handle(const kir::GridSync* node) {
@@ -767,11 +792,7 @@ void IrTransformPrinter::handle(Fusion* f) {
 }
 
 void IrTransformPrinter::printTransforms(TensorView* tv) {
-  auto root_domain = tv->getMaybeRFactorDomain();
-  auto all_exp = DependencyCheck::getAllExprsBetween(
-      {root_domain.begin(), root_domain.end()},
-      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-
+  auto root_domain = tv->domain()->getRootDomain();
   os() << " root domain : (";
   for (const auto root_idx : c10::irange(root_domain.size())) {
     IrPrinter::handle(root_domain[root_idx]);
@@ -780,6 +801,33 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
     }
   }
   os() << ")\n";
+
+  if (tv->hasRFactor()) {
+    auto rfactor_domain = tv->domain()->getRFactorDomain();
+
+    auto all_exp = DependencyCheck::getAllExprsBetween(
+        {root_domain.begin(), root_domain.end()},
+        {rfactor_domain.begin(), rfactor_domain.end()});
+
+    for (auto exp : all_exp) {
+      os() << "  ";
+      IrPrinter::handle(exp);
+    }
+
+    os() << " rfactor domain : (";
+    for (const auto root_idx : c10::irange(rfactor_domain.size())) {
+      IrPrinter::handle(rfactor_domain[root_idx]);
+      if (root_idx + 1 < rfactor_domain.size()) {
+        os() << ",";
+      }
+    }
+    os() << ")\n";
+  }
+
+  auto from = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   for (auto exp : all_exp) {
     os() << "  ";

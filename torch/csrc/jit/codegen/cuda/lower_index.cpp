@@ -335,7 +335,8 @@ void IndexLowering::handleGridReduction(
       "Found a reduction stage that has both a non-parallelized ",
       "reduction and a grid reduction. This is not supported, ",
       "please use rfactor to do the serialized reduction first, ",
-      "then the grid reduction.");
+      "then the grid reduction. ",
+      rop->toString());
 
   // When using the fused reduction in a loop, the global work buffer
   // is double buffered to save global synchronizations.
@@ -502,6 +503,8 @@ void IndexLowering::handleGridReduction(
       out_domain->domain().end(),
       [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
+  const bool privatize_buffer = !grouped_rop->isAllreduce();
+
   std::vector<kir::Allocate*> reduce_buffers;
   std::transform(
       outputs.begin(),
@@ -511,14 +514,25 @@ void IndexLowering::handleGridReduction(
         return ir_utils::allocGlobalBufferForGridComm(
             getGridCommWorkBufferSize(
                 out_domain,
-                for_loops_,
+                privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>(),
                 (grouped_rop->isAllreduce() && is_within_a_loop ? 2 : 1)),
             output->dtype(),
             false);
       });
 
   const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
-      getGridSyncBufferSize(out_domain, for_loops_), DataType::Int, true);
+      getGridSyncBufferSize(
+          out_domain,
+          privatize_buffer ? for_loops_ : std::vector<kir::ForLoop*>()),
+      DataType::Int,
+      true);
+
+  const auto entrance_ind = privatize_buffer
+      ? getEntranceLinIndGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->zeroVal();
+  const auto n_entrances = privatize_buffer
+      ? getEntranceCountGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->oneVal();
 
   // The thread predicate for GridReduction needs to be set
   // separately from the main predicate. Do not combine them like
@@ -533,6 +547,8 @@ void IndexLowering::handleGridReduction(
       inputs,
       reduce_buffers,
       sync_buffer,
+      entrance_ind,
+      n_entrances,
       grouped_rop->isAllreduce());
 
   grid_reduction->setThreadPredicate(thread_pred);
@@ -729,6 +745,13 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   }
 }
 
+void IndexLowering::handle(const LoadStoreOp* ldst) {
+  const auto in = lowerSrcIndex(ldst->in(), ldst->out());
+  const auto out = lowerDstIndex(ldst->out());
+  pushBack(IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in));
+  GpuLower::current()->propagateExprInfo(ldst, back());
+}
+
 void IndexLowering::handle(const MmaOp* mma) {
   const auto a = lowerSrcIndex(mma->inA(), mma->out());
   const auto b = lowerSrcIndex(mma->inB(), mma->out());
@@ -801,6 +824,11 @@ void IndexLowering::handle(const kir::BlockSync* sync) {
 void IndexLowering::handle(const kir::GridSync* sync) {
   // TODO(kir): remove the need for const_cast
   pushBack(const_cast<kir::GridSync*>(sync)); // NOLINT
+}
+
+void IndexLowering::handle(const kir::CpAsyncWait* wait) {
+  // TODO(kir): remove the need for const_cast
+  pushBack(const_cast<kir::CpAsyncWait*>(wait)); // NOLINT
 }
 
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {

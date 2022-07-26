@@ -65,7 +65,7 @@ REGISTER_NNC_KERNEL(
     "_add_kernel_nnc_fake_model:v1:forward:VERTOKEN",
     add_kernel)
 
-TEST(NNCBackendTest, AOTCompileThenExecute) {
+TEST(DISABLED_NNCBackendTest, AOTCompileThenExecute) {
   torch::jit::Module m("m");
   auto param = torch::ones({1});
   m.register_parameter("param", param, false);

@@ -1,15 +1,17 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <c10/util/CallOnce.h>
+
 #include <ATen/mps/MPSDevice.h>
 
 namespace at {
 namespace mps {
 
 static std::unique_ptr<MPSDevice> mps_device;
-static std::once_flag mpsdev_init;
+static c10::once_flag mpsdev_init;
 
 MPSDevice* MPSDevice::getInstance() {
-  std::call_once(mpsdev_init, [] {
+  c10::call_once(mpsdev_init, [] {
       mps_device = std::unique_ptr<MPSDevice>(new MPSDevice());
   });
   return mps_device.get();
@@ -21,6 +23,20 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice(): _mtl_device(nil) {
+  // Check that MacOS 12.3+ version of MPS framework is available
+  // Create the MPSGraph and check method introduced in 12.3+
+  // which is used by MPS backend.
+  id mpsCD = NSClassFromString(@"MPSGraph");
+  if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
+                                                       recurrentWeight:
+                                                           inputWeight:
+                                                                  bias:
+                                                             initState:
+                                                              initCell:
+                                                            descriptor:
+                                                                  name:)] == NO) {
+    return;
+  }
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
@@ -33,8 +49,9 @@ MPSDevice::MPSDevice(): _mtl_device(nil) {
 }
 
 at::Allocator* getMPSSharedAllocator();
+at::Allocator* getMPSStaticAllocator();
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return useSharedAllocator ? getMPSSharedAllocator() : GetAllocator(DeviceType::MPS);
+  return useSharedAllocator ? getMPSSharedAllocator() : getMPSStaticAllocator();
 }
 
 bool is_available() {
