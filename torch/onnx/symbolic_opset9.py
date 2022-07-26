@@ -2207,14 +2207,14 @@ def batch_norm(
 
 def _layer_norm_returns_normalized_input_mean_rstd(
     g,
-    input: torch._C.Value,
+    input: _C.Value,
     normalized_shape: Sequence[int],
-    weight: torch._C.Value,
-    bias: torch._C.Value,
+    weight: _C.Value,
+    bias: _C.Value,
     eps: float,
     cudnn_enable: bool,
     return_mean_rstd: bool,
-) -> Tuple[torch._C.Value, Optional[torch._C.Value], Optional[torch._C.Value]]:
+) -> Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
