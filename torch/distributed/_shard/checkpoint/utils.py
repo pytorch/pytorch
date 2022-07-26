@@ -3,10 +3,6 @@ import torch.distributed as dist
 from .api import CheckpointException
 import torch
 
-def tensor_narrow_n(tensor: torch.Tensor, offsets: Tuple[int, ...], lengths: Tuple[int, ...]) -> torch.Tensor:
-    for dim, (start, length) in enumerate(zip(offsets, lengths)):
-        tensor = torch.narrow(tensor, dim, start, length)
-    return tensor
 
 T = TypeVar('T')
 R = TypeVar('R')
@@ -115,9 +111,9 @@ class _DistWrapper:
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
 
         This method operates in the following way:
-            Run ``map_cp`` on all ranks
+            Run ``map_fun`` on all ranks
             Gather results on rank 0
-            Call ``reduce_cb`` on all those values
+            Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
         local_data: Union[BaseException, T]
@@ -150,21 +146,21 @@ class _DistWrapper:
     def all_reduce(
         self,
         step: str,
-        map_cb: Callable[[], T],
-        reduce_cb: Callable[[List[T]], R]
+        map_fun: Callable[[], T],
+        reduce_fun: Callable[[List[T]], R]
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
 
         This method operates in the following way:
-            Run ``map_cp`` on all ranks
+            Run ``map_fun`` on all ranks
             Gather results on rank 0
-            Call ``reduce_cb`` on all those values
-            Broadcast the reduced value to all ranks
+            Call ``reduce_fun`` on all those values
+            Broadcast the reduced value to all ranks.
         """
         local_data: Union[T, BaseException]
         try:
-            local_data = map_cb()
+            local_data = map_fun()
         except BaseException as e:
             local_data = e
 
@@ -175,7 +171,7 @@ class _DistWrapper:
             node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
             if len(node_failures) == 0:
                 try:
-                    result = reduce_cb(cast(List[T], all_data))
+                    result = reduce_fun(cast(List[T], all_data))
                 except BaseException as e:
                     node_failures[self.rank] = e
 
@@ -215,7 +211,7 @@ class _DistWrapper:
     def broadcast(
         self,
         step: str,
-        map_cb: Callable[[], T],
+        map_fun: Callable[[], T],
     ) -> T:
         """
         Compute a value on rank 0 and broadcast it.
@@ -227,7 +223,7 @@ class _DistWrapper:
         result: Optional[Union[T, CheckpointException]] = None
         if self.is_coordinator:
             try:
-                result = map_cb()
+                result = map_fun()
             except BaseException as e:
                 result = CheckpointException(step, {self.rank: e})
         final_result = self.broadcast_object(result)

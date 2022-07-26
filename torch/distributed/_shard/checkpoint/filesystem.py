@@ -16,7 +16,7 @@ from .metadata import (
     TensorWriteRequest,
 )
 from .storage import StorageReader, StorageWriter
-from .utils import tensor_narrow_n
+from torch.distributed._shard._utils import narrow_tensor_by_index
 
 
 class FileSystemWriter(StorageWriter):
