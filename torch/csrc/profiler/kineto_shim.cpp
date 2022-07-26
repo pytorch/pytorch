@@ -36,7 +36,7 @@ const std::set<libkineto::ActivityType> cudaTypes = {
 
 const std::set<libkineto::ActivityType> hpuTypes = {
     libkineto::ActivityType::HPU_OP,
-  };
+};
 } // namespace
 #endif // USE_KINETO
 
@@ -307,7 +307,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PYTHON_FUNCTION:
       return c10::DeviceType::CPU;
     case libkineto::ActivityType::HPU_OP:
-        return c10::DeviceType::HPU;
+      return c10::DeviceType::HPU;
     default: {
       TORCH_WARN(
           "Unknown activity type (",
