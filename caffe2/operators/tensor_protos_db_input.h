@@ -80,7 +80,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         Tensor src = deserializer.Deserialize(protos.protos(i));
         Tensor* dst = BlobGetMutableTensor(
             &prefetched_blobs_[i], dims, at::dtype(src.dtype()).device(CPU));
-        DCHECK_EQ(src.numel() * batch_size_, dst->numel());
+        TORCH_DCHECK_EQ(src.numel() * batch_size_, dst->numel());
         this->context_.CopyItemsSameDevice(
             src.dtype(),
             src.numel(),
