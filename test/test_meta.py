@@ -842,7 +842,7 @@ op_skips = {
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    # @onlyCUDA
+    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -860,29 +860,29 @@ class TestMeta(TestCase):
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
 
-    # @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    # @onlyCUDA
-    # @skipIfCrossRef
-    # @suppress_warnings
-    # @ops(op_db)
-    # def test_dispatch_meta(self, device, dtype, op):
-    #     func = op.get_op()
-    #     samples = op.sample_inputs(device, dtype, requires_grad=False)
-    #     for sample_input in samples:
-    #         args = [sample_input.input] + list(sample_input.args)
-    #         kwargs = sample_input.kwargs
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyCUDA
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(op_db)
+    def test_dispatch_meta(self, device, dtype, op):
+        func = op.get_op()
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
 
-    #         name = op.name
-    #         if op.variant_test_name:
-    #             name += "_" + op.variant_test_name
+            name = op.name
+            if op.variant_test_name:
+                name += "_" + op.variant_test_name
 
-    #         if dtype in op_skips.get(name, set()):
-    #             self.skipTest(f"skipping {sample_input.name}")
+            if dtype in op_skips.get(name, set()):
+                self.skipTest(f"skipping {sample_input.name}")
 
-    #         with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
-    #             expected = func(*args, **kwargs)
-    #             if isinstance(expected, torch.Tensor) and op.supports_out:
-    #                 func(*args, **kwargs, out=expected)
+            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
+                expected = func(*args, **kwargs)
+                if isinstance(expected, torch.Tensor) and op.supports_out:
+                    func(*args, **kwargs, out=expected)
 
 instantiate_device_type_tests(TestMeta, globals())
 
