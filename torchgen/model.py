@@ -791,6 +791,9 @@ class NativeFunction:
             backend_metadata,
         )
 
+    def symints_to_ints(self) -> "NativeFunction":
+        return dataclasses.replace(self, func=self.func.symints_to_ints())
+
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
         # at once
@@ -1183,6 +1186,9 @@ class FunctionSchema:
         )
 
     decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
+
+    def symints_to_ints(self) -> "FunctionSchema":
+        return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
 
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
@@ -1623,6 +1629,9 @@ class Type:
     def is_list_like(self) -> Optional["ListType"]:
         raise NotImplementedError
 
+    def symint_to_int(self) -> "Type":
+        raise NotImplementedError
+
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum(
@@ -1663,6 +1672,11 @@ class BaseType(Type):
     def is_nullable(self) -> bool:
         return False
 
+    def symint_to_int(self) -> "BaseType":
+        if self.name == BaseTy.SymInt:
+            return BaseType(BaseTy.int)
+        return self
+
     def is_list_like(self) -> Optional["ListType"]:
         return None
 
@@ -1680,6 +1694,9 @@ class OptionalType(Type):
 
     def is_nullable(self) -> bool:
         return True
+
+    def symint_to_int(self) -> "Type":
+        return dataclasses.replace(self, elem=self.elem.symint_to_int())
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1706,6 +1723,9 @@ class ListType(Type):
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
+
+    def symint_to_int(self) -> "ListType":
+        return ListType(self.elem.symint_to_int(), self.size)
 
     def is_list_like(self) -> Optional["ListType"]:
         return self
@@ -1779,6 +1799,9 @@ class Argument:
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
+
+    def symint_to_int(self) -> "Argument":
+        return dataclasses.replace(self, type=self.type.symint_to_int())
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -1968,6 +1991,37 @@ class Arguments:
             for a in self.flat_all
             if a.annotation is not None and a.annotation.is_write
         ]
+
+    def symints_to_ints(self) -> "Arguments":
+        arguments = self
+
+        if arguments.self_arg:
+            arguments = dataclasses.replace(
+                arguments,
+                pre_self_positional=[
+                    x.symint_to_int() for x in arguments.pre_self_positional
+                ],
+            )
+
+        if self.tensor_options:
+            arguments = dataclasses.replace(
+                arguments,
+                post_tensor_options_kwarg_only=[
+                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
+                ],
+            )
+
+        arguments = dataclasses.replace(
+            arguments,
+            post_self_positional=[
+                x.symint_to_int() for x in arguments.post_self_positional
+            ],
+            pre_tensor_options_kwarg_only=[
+                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
+            ],
+        )
+
+        return arguments
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less
