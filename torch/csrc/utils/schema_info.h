@@ -27,7 +27,7 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable();
 
-  bool is_mutable(size_t index);
+  bool is_mutable(const c10::SchemaArgument& argument);
 
   bool is_mutable(c10::string_view name);
 
@@ -63,6 +63,8 @@ struct TORCH_API SchemaInfo {
   void addArgumentValues(
       const std::unordered_map<std::string, at::IValue>& values);
 
+  bool hasInputArgumentNamed(const std::string& name) const;
+
  private:
   // This function enforces more conservative results when the TORCH_WARN is
   // triggered from above due to duplicates in an argument list
@@ -80,6 +82,8 @@ struct TORCH_API SchemaInfo {
       const c10::SchemaArgument& rhs);
 
   static std::vector<c10::FunctionSchema> getNonDeterministicOps();
+
+  static std::vector<c10::FunctionSchema> getTrainingOps();
 
   // Set of all wildcard arguments
   std::unordered_set<c10::SchemaArgument> wildcard_set_;

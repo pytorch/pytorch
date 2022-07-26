@@ -9,7 +9,7 @@ void FunctionSchema::dump() const {
   std::cout << *this << "\n";
 }
 
-std::vector<Argument> FunctionSchema::getCorrectList(SchemaArgType type) const {
+const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) const {
   if (type == SchemaArgType::input) {
     return arguments();
   } else {
