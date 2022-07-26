@@ -70,8 +70,6 @@ class APoTQuantizer():
 
         result = torch.from_numpy(result_temp).reshape(orig_size)
 
-        print(result)
-
         return result
 
     def q_apot_alpha(self) -> float:
