@@ -5327,7 +5327,7 @@
 
 - func: zeros.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutogradNonFunctional: zeros
+    CompositeExplicitAutogradNonFunctional: zeros_symint
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

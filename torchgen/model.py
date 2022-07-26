@@ -669,7 +669,10 @@ class NativeFunction:
                 name.startswith("new_")
                 or name.endswith("_like")
                 # TODO: maybe it's better to test the return
-                or (func.arguments.tensor_options and not func.arguments.has_tensor_arg())
+                or (
+                    func.arguments.tensor_options
+                    and not func.arguments.has_tensor_arg()
+                )
             ), (
                 f"expected {name} to have a CompositeExplicitAutogradNonFunctional "
                 "dispatch entry, but there was no dispatch table.  Factory functions "
