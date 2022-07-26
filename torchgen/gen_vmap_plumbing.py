@@ -1,23 +1,22 @@
-from torchgen.api.types import (
-    DispatcherSignature,
-)
+import textwrap
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+from torchgen.api.translate import translate
+from torchgen.api.types import DispatcherSignature
+from torchgen.context import method_with_native_function
 from torchgen.model import (
+    Argument,
     BaseTy,
-    OptionalType,
     BaseType,
     ListType,
     NativeFunction,
-    Type,
-    Argument,
+    OptionalType,
     Return,
     SchemaKind,
+    Type,
 )
-from torchgen.api.translate import translate
-from torchgen.context import method_with_native_function
 from torchgen.utils import mapMaybe
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
-import textwrap
 
 
 def is_tensor(typ: Type) -> bool:
