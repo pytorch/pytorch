@@ -264,7 +264,8 @@ class Optimizer(object):
                                 tmp_group.append(p)
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-                torch._foreach_zero_(tmp_group)
+                if tmp_group:
+                    torch._foreach_zero_(tmp_group)
             if foreach:
                 for _, per_dtype_grads in per_device_and_dtype_grads.items():
                     for grads in per_dtype_grads.values():
