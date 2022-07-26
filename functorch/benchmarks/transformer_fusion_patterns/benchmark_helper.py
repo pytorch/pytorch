@@ -63,7 +63,9 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
     print("################################################\n\n\n\n")
 
 
-def time_with_torch_timer(fn, args, string_id, kwargs={}):
+def time_with_torch_timer(fn, args, string_id, kwargs=None):
+    if kwargs is None:
+        kwargs = {}
     print("################################################")
     print(f"#### Torch Timer for {string_id} starts #########")
     print("################################################")

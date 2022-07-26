@@ -176,6 +176,20 @@ void QueryPool::print_results() {
   std::cout << generate_string_report() << std::endl;
 }
 
+double QueryPool::get_time(std::string op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  double sum = 0;
+  for (ShaderDuration& entry : shader_log_) {
+    std::chrono::duration<size_t, std::nano> exec_duration_ns(
+        entry.execution_duration_ns);
+
+    if (entry.kernel_name == op_name) {
+      sum += exec_duration_ns.count();
+    }
+  }
+  return sum / 1000000;
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
