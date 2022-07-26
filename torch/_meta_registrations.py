@@ -101,7 +101,7 @@ def meta_max(self):
 
 @register_meta(aten.angle.default)
 def meta_angle(self):
-    if self.is_complex:
+    if self.is_complex():
         result_dtype = corresponding_real_dtype(self.dtype)
     else:
         _, result_dtype = elementwise_dtypes(
