@@ -369,13 +369,6 @@ struct TORCH_API FunctionSchema {
   bool is_varret() const {
     return is_varret_;
   }
-  bool is_aliasing(const c10::SchemaArgument &argument) const {
-    TORCH_INTERNAL_ASSERT(
-    argument.index < getCorrectList(argument.type).size(),
-    "Invalid index for schema.");
-    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
-    return aliasInfo;
-  }
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
