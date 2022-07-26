@@ -41,7 +41,7 @@ flatbuffers==2.0
 #Pinned versions:
 #test that import:
 
-hypothesis==4.53.2
+hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
 #Pinned versions: 3.44.6, 4.53.2
@@ -142,6 +142,16 @@ pytest
 #Description: testing framework
 #Pinned versions:
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
+
+pytest-xdist
+#Description: plugin for running pytest in parallel
+#Pinned versions:
+#test that import:
+
+pytest-rerunfailures
+#Description: plugin for rerunning tests in pytest
+#Pinned versions:
+#test that import:
 
 #pytest-benchmark
 #Description: fixture for benchmarking code
