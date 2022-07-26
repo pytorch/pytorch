@@ -53,40 +53,44 @@ void autogradNotImplementedFallbackImpl(
   // See gen_variable_type.py
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
-  const auto num_arguments = schema.arguments().size();
-  const auto num_returns = schema.returns().size();
+  const auto& arguments = schema.arguments();
+  const auto& returns = schema.returns();
+  const auto num_arguments = arguments.size();
+  const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
   const bool grad_mode = GradMode::is_enabled();
   std::vector<const at::Tensor*> tensors_requiring_grad_on_stack;
 
   // Keep track of which outputs are output of in-place modification
   // so we can rebase_history if necessary
-  std::vector<bool> is_inplace_output(num_returns, false);
+  std::vector<bool> is_inplace_output;
   bool any_is_inplace_output = false;
-  std::vector<bool> is_aliased_output(num_returns, false);
-  int aliased_output_idx = -1;
+  std::vector<bool> is_aliased_output;
+  is_inplace_output.reserve(num_returns);
+  is_aliased_output.reserve(num_returns);
 
   for (const auto i : c10::irange(num_returns)) {
-    if (schema.is_aliasing({c10::SchemaArgType::output, i})) {
-      if (schema.is_mutable({c10::SchemaArgType::output, i})) {
-        is_inplace_output[i] = true;
-        any_is_inplace_output = true;
-      } else {
-        TORCH_CHECK(
-            aliased_output_idx == -1,
-            "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
-            "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
-            "Please rewrite your function as a composite function.");
-        aliased_output_idx = i;
-      }
-      is_aliased_output[i] = true;
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    is_inplace_output.push_back(alias_info != nullptr && alias_info->isWrite());
+    any_is_inplace_output |= alias_info != nullptr && alias_info->isWrite();
+    is_aliased_output.push_back(alias_info != nullptr);
+  }
+  int aliased_input_idx = -1;
+  int aliased_output_idx = -1;
+  for (const auto i : c10::irange(num_returns)) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
+      TORCH_CHECK(
+          aliased_output_idx == -1,
+          "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
+          "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
+          "Please rewrite your function as a composite function.");
+      aliased_output_idx = i;
     }
   }
-
-  int aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
-    if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
-        !schema.is_mutable({c10::SchemaArgType::input, i})) {
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
           aliased_input_idx == -1,
           "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
@@ -117,7 +121,8 @@ void autogradNotImplementedFallbackImpl(
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
-        if (schema.is_mutable({c10::SchemaArgType::input, i})) {
+        const at::AliasInfo* alias_info = arguments[i].alias_info();
+        if (alias_info != nullptr && alias_info->isWrite()) {
           check_inplace(t, any_requires_grad);
         }
       },
@@ -268,16 +273,18 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
   //   that is not allowed in the gen_inplace_or_view logic
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
-  const auto num_arguments = schema.arguments().size();
-  const auto num_returns = schema.returns().size();
+  const auto& arguments = schema.arguments();
+  const auto& returns = schema.returns();
+  const auto num_arguments = arguments.size();
+  const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
 
   at::Tensor aliased_input;
 
   int64_t aliased_output_idx = -1;
   for (const auto i : c10::irange(num_returns)) {
-    if (schema.is_aliasing({c10::SchemaArgType::output, i}) &&
-        !schema.is_mutable({c10::SchemaArgType::output, i})) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info != nullptr && !alias_info->isWrite()) {
       TORCH_CHECK(
           aliased_output_idx == -1,
           "Fallback ADInplaceOrView kernel expects only a single output in the operator schema to have a "
@@ -290,22 +297,25 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
 
   int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
-    if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
-        !schema.is_mutable({c10::SchemaArgType::input, i})) {
-      TORCH_CHECK(
-          aliased_input_idx == -1,
-          "Fallback ADInplaceOrView kernel expects only a single input in the operator schema to have a "
-          "non-write alias annotation (i.e., 'Tensor(a)'). "
-          "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
-          "Please rewrite your function as a composite function.");
-      aliased_input_idx = i;
-      const c10::IValue& aliased_input_iv =
-          (*stack)[stack_start + i]; // get a reference to an ivalue on the
-                                     // stack
-      TORCH_CHECK(aliased_input_iv.isTensor());
-      aliased_input =
-          aliased_input_iv.toTensor(); // TODO: Can we avoid saving this tensor
-                                       // and incurring the refcount bump?
+    const at::AliasInfo* alias_info = arguments[i].alias_info();
+    if (alias_info != nullptr) {
+      if (!alias_info->isWrite()) {
+        TORCH_CHECK(
+            aliased_input_idx == -1,
+            "Fallback ADInplaceOrView kernel expects only a single input in the operator schema to have a "
+            "non-write alias annotation (i.e., 'Tensor(a)'). "
+            "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
+            "Please rewrite your function as a composite function.");
+        aliased_input_idx = i;
+        const c10::IValue& aliased_input_iv =
+            (*stack)[stack_start + i]; // get a reference to an ivalue on the
+                                       // stack
+        TORCH_CHECK(aliased_input_iv.isTensor());
+        aliased_input =
+            aliased_input_iv
+                .toTensor(); // TODO: Can we avoid saving this tensor and
+                             // incurring the refcount bump?
+      }
     }
   }
   // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
@@ -324,7 +334,8 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
   }
 
   for (const auto i : c10::irange(num_returns)) {
-    if (schema.is_mutable({c10::SchemaArgType::output, i})) {
+    const at::AliasInfo* alias_info = returns[i].alias_info();
+    if (alias_info->isWrite()) {
       increment_version((*stack)[stack->size() - num_returns + i].toTensor());
     }
   }
