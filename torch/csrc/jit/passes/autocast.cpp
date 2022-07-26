@@ -216,6 +216,39 @@ void castInputsToWidestType(Node* node, const AutocastContext& context) {
   }
 }
 
+// Users can call torch.is_autocast_enabled() or is_autocast_cpu_enabled() to
+// determine whether autocasting is enabled. With JIT-scripted functions, we
+// actually need to return true if eager autocast OR jit autocast are enabled.
+//
+// In the case where JIT autocast is enabled, we replace
+//    %x : bool = aten::is_autocast_enabled()
+// with a constant "True".
+//
+// More context on eager vs JIT autocasting:
+//
+// Autocasting actually has two settings: eager autocasting, and JIT
+// autocasting. Eager autocasting is the thread-local setting that turns on
+// the relevant bit in the dispatcher settings. JIT autocasting is the pass
+// implemented in this file, which makes changes to the graph to insert casting
+// ops in order to achieve the same behavior as eager autocasting.
+//
+// If eager autocasting is enabled at the time when a JIT-scripted function is
+// invoked, then autocasting will occur regardless of what the JIT-autocasting
+// settings are.
+void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
+  if (!is_jit_enabled) {
+    return;
+  }
+
+  auto graph = node->owningGraph();
+
+  WithInsertPoint insert_point(node);
+
+  Value* true_constant = graph->insertConstant(IValue(true));
+  node->output()->replaceAllUsesWith(true_constant);
+  node->destroy();
+}
+
 // [Note: implicit type promotion in Autocast]
 //
 // Casting policy below mostly follows pytorch/aten/src/ATen/autocast.cpp, with
@@ -317,6 +350,14 @@ void handleBlock(Block* block, AutocastContext initial_state) {
           incompatible_amp = false;
           autocast_stack.pop();
         }
+        break;
+
+      case aten::is_autocast_enabled:
+        updateAutocastEnabledCheck(node, current_state().gpu_enabled);
+        break;
+
+      case aten::is_autocast_cpu_enabled:
+        updateAutocastEnabledCheck(node, current_state().cpu_enabled);
         break;
 
       // CastPolicy::fp16 (cast all inputs to float16)
