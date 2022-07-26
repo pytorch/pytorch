@@ -5,6 +5,7 @@
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
+#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 
@@ -998,6 +999,16 @@ Tensor new_empty_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor new_empty_symint_batching_rule(
+    const Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return new_empty_batching_rule(self, asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+}
+
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
     IntArrayRef size,
@@ -1263,6 +1274,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   // Tensor.new_* operators
   m.impl("new_empty", new_empty_batching_rule);
+  m.impl("new_empty.SymInt", new_empty_symint_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 
