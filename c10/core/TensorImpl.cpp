@@ -188,16 +188,17 @@ void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
   bool reset_tensor = false;
+  int concrete_numel = numel_.expect_int();
   if (reserved_) {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
     reset_tensor =
-        storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
+        storage_.nbytes() < (storage_offset_ + concrete_numel) * data_type_.itemsize();
   } else {
     reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize() ||
+            (storage_offset_ + concrete_numel) * data_type_.itemsize() ||
         !FLAGS_caffe2_keep_on_shrink ||
-        storage_.nbytes() - (storage_offset_ + numel_) * data_type_.itemsize() >
+        storage_.nbytes() - (storage_offset_ + concrete_numel) * data_type_.itemsize() >
             static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
   }
 
@@ -676,7 +677,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
           (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
-  auto oldSize = numel_;
+  auto oldSize = numel_.expect_int();
   Resize(newCapacity);
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
@@ -752,7 +753,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
     new_size *= d;
   }
   TORCH_CHECK(
-      new_size == numel_,
+      new_size == numel_.expect_int(),
       "New size and old size are not equal. You cannot use Reshape, "
       "but should use Resize."
       // TODO(jiayq): remove the following warning after pending diffs
@@ -815,7 +816,7 @@ void TensorImpl::ShareExternalPointer(
       "To share with a raw external pointer you need to pass in an "
       "initialized data_type(TypeMeta).");
   if (!size_bytes) {
-    size_bytes = numel_ * data_type.itemsize();
+    size_bytes = numel_.expect_int() * data_type.itemsize();
   }
   if (storage_.unique()) {
     storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
