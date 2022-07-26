@@ -1209,15 +1209,13 @@ def native_batch_norm_backward(
 
     if output_mask[1]:
         grad_weight = dot_p * invstd
-    elif weight is not None:
-        grad_weight = torch.zeros_like(weight_cast)  # type: ignore[arg-type]
     else:
-        grad_weight = torch.zeros(())
+        grad_weight = None  # "None" doesn't work with vjp, should use zeros for vjp
 
     if output_mask[2]:
         grad_bias = grad_output_sum
     else:
-        grad_bias = torch.zeros_like(grad_output_sum)
+        grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
 
     return (
         grad_input.to(input_dtype),
