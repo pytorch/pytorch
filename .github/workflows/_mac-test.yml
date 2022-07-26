@@ -71,6 +71,7 @@ jobs:
           use-gha: true
 
       - name: Setup miniconda
+        if: inputs.build-environment == 'macos-12-py3-x86-64'
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
