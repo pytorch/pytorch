@@ -10766,6 +10766,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
 
+               # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
+               # We don't have an op for aten::arange but it isn't a special case.
+               # Argument types: bool, bool, bool, int, int, Device, boo
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+
                # Captured graph does not contain aten::arange (succeeds on complex!)
                # g: graph():
                #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
