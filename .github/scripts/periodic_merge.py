@@ -37,7 +37,7 @@ query ($owner: String!, $name: String!, $labels: [String!], $with_labels: Boolea
   repository(owner: $owner, name: $name) {
     pullRequests(first: 10, labels: $labels, states: OPEN){
         nodes{
-        ...tuhjunhnvittvhnegdrtirjfjhnjjeklvljcetehuntjbtfcdtljgdtidhbjhvuv
+        ...PullRequestFragment
       }
     }
   }
