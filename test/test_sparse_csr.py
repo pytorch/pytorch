@@ -954,10 +954,7 @@ class TestSparseCSR(TestCase):
                 dense_selected = sparse_non_batched.to_dense().select(*select_args)
                 self.assertEqual(dense_selected, sparse_selected)
 
-            # select single element
-            # SEE: https://github.com/pytorch/pytorch/issues/82150
-            if not (dtype in integral_types() + (torch.bool, )):
-                self.assertEqual(sparse[0, 0, 0, 0], sparse.to_dense()[0, 0, 0, 0])
+            self.assertEqual(sparse[0, 0, 0, 0], sparse.to_dense()[0, 0, 0, 0])
             # assigning to sparse through indexing is disabled, not tested generally because only layouts supporting
             # sparse dim select will get far enough to test
             with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
