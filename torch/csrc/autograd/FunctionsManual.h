@@ -157,6 +157,11 @@ at::Tensor sum_backward(
     at::IntArrayRef sizes,
     at::OptionalIntArrayRef opt_dims,
     bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
