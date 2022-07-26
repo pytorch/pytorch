@@ -1,4 +1,6 @@
+import os
 import collections
+from packaging import version
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
@@ -563,8 +565,8 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
             ("hip/hip_texture_types.h", CONV_INCLUDE, API_RUNTIME),
         ),
         ("vector_types.h", ("hip/hip_vector_types.h", CONV_INCLUDE, API_RUNTIME)),
-        ("cublas.h", ("rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
-        ("cublas_v2.h", ("rocblas/rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
+        ("cublas.h", ("{}rocblas.h".format("rocblas/" if version.parse(os.environ["GPU_ARCH_VERSION"]) >= version.parse("5.2.0") else ""), CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
+        ("cublas_v2.h", ("{}rocblas.h".format("rocblas/" if version.parse(os.environ["GPU_ARCH_VERSION"]) >= version.parse("5.2.0") else ""), CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
         ("curand.h", ("hiprand/hiprand.h", CONV_INCLUDE_CUDA_MAIN_H, API_RAND)),
         ("curand_kernel.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_discrete.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
