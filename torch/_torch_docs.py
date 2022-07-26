@@ -4552,8 +4552,9 @@ Example::
     ),
 )
 
-add_docstr(torch.unflatten,
-           r"""
+add_docstr(
+    torch.unflatten,
+    r"""
 unflatten(input, dim, sizes) -> Tensor
 
 Expands a dimension of the input tensor over multiple dimensions.
@@ -4581,10 +4582,14 @@ Examples::
     torch.Size([3, 2, 2, 1])
     >>> torch.unflatten(torch.randn(5, 12, 3), -1, (2, 2, 3, 1, 1)).shape
     torch.Size([5, 2, 2, 3, 1, 1, 3])
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr(torch.gather,
-           r"""
+add_docstr(
+    torch.gather,
+    r"""
 gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
 
 Gathers values along an axis specified by `dim`.
