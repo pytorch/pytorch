@@ -1261,6 +1261,17 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  // Note [is_nested check]
+  // We intercept reshape for nested tensor because from our understanding:
+  // reshape is CompositeImplicit, so in order to make autograd work for nested tensor
+  // we need to intercept reshape to call an op who has a backward formula
+  // Here the op is at::_reshape_nested
+  // TODO: We can remove this interception in the future if
+  //       we find a way to register reshape backward formula dedicated to nested tensor backends
+  //       without affecting the CompositeImplicit-ness
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, proposed_shape);
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }

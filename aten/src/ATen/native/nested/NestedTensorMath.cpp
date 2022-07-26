@@ -896,7 +896,7 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   return wrap_buffer(self_ptr->get_buffer(), sizemat_transposed, stridemat_transposed, self_ptr->get_offsets());
 }
 
-// utilities supporting `reshape`
+// utilities supporting `_reshape_nested`
 namespace {
 // Args:
 //     sizes: the sizes of original nested tensor
@@ -1029,7 +1029,7 @@ inline void NestedTensor_reshape_copy(
 // 2. Instead of infering size, -1 means "inherit the old size", so:
 //    * negative size is legal for a ragged dimension
 //    * multiple sizes can be -1
-Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
+Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
       proposed_shape.size() > 0,
       "shape '[]' is invalid for a nested tensor");
