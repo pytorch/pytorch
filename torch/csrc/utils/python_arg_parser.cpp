@@ -649,12 +649,29 @@ bool is_float_or_complex_list(PyObject* obj) {
 
 static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+    auto len = PySequence_Size(obj);
+    if (len == 0) {
       return true;
     }
 
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+    bool int_first = false;
     if (THPUtils_checkIndex(item.ptr())) {
+      // we still have to check that the rest of items are NOT symint nodes
+      int_first = true;
+    }
+
+    // Make sure none of the later arguments are SymInt
+    // NB: do NOT check that the later arguments are ints, as this is
+    // BC-breaking for FX
+    for (int i = 1; i < len; i++) {
+      if (torch::is_symint_node(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+        return false;
+      }
+    }
+
+    if (int_first) {
       return true;
     }
 
@@ -1227,10 +1244,14 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
+  int int_list_overload = false;
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
+    if (params[0].type_ == ParameterType::INT_LIST) {
+      int_list_overload = true;
+    }
   }
 
   if (nargs > max_pos_args && !allow_varargs_intlist) {
@@ -1287,7 +1308,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        is_int_or_symint(obj)) {
+        (is_int_list(args, param.size) ||
+         ((is_int_or_symint_list(args, param.size) && !int_list_overload)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

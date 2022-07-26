@@ -156,6 +156,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -239,10 +241,8 @@ def normalize_op_input_output2(
 def upcast_tensor(x, dtype=torch.float32):
     if isinstance(x, Tensor) and x.dtype.is_floating_point:
         return x.to(dtype=dtype)
-    elif (
-        isinstance(x, torch.dtype)
-        and x in [torch.float16, torch.bfloat16]
-    ):
+    elif (isinstance(x, torch.dtype)
+          and x in [torch.float16, torch.bfloat16, torch.float]):
         return dtype
     else:
         return x

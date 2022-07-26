@@ -158,6 +158,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
           hasPreviousPage
         }
       }
+      labels(first: 100) {
+        edges {
+          node {
+            name
+          }
+        }
+      }
     }
   }
 }
@@ -364,6 +371,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     re.MULTILINE
 )
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
+CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -449,6 +457,11 @@ def gh_get_team_members(org: str, name: str) -> List[str]:
         rc += [member["login"] for member in team_members["nodes"]]
     return rc
 
+def get_check_run_name_prefix(workflow_run: Any) -> str:
+    if workflow_run is None:
+        return ""
+    else:
+        return f'{workflow_run["workflow"]["name"]} / '
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -490,6 +503,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.labels: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, Tuple[str, str]]] = None
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
@@ -611,6 +625,13 @@ class GitHubPR:
     def get_committer_author(self, num: int = 0) -> str:
         return self._fetch_authors()[num][1]
 
+    def get_labels(self) -> List[str]:
+        if self.labels is not None:
+            return self.labels
+        labels = [node['node']['name'] for node in self.info["labels"]["edges"]] if "labels" in self.info else []
+        self.labels = labels
+        return self.labels
+
     def get_checkrun_conclusions(self) -> Dict[str, Tuple[str, str]]:
         """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
@@ -631,7 +652,9 @@ class GitHubPR:
                     for checkrun_node in checkruns["nodes"]:
                         if checkrun_node["conclusion"] == 'FAILURE':
                             has_failing_check = True
-                        conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                        conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                            checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                        )
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
                                         name=self.project,
@@ -972,7 +995,9 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
                 for checkrun_node in checkruns["nodes"]:
                     if checkrun_node["conclusion"] == 'FAILURE':
                         has_failing_check = True
-                    conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
+                    conclusions[f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'] = (
+                        checkrun_node["conclusion"], checkrun_node["detailsUrl"]
+                    )
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
                     rc = gh_graphql(GH_GET_COMMIT_NEXT_CHECK_RUNS,
                                     name=project,
@@ -1096,6 +1121,9 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     if len(pending_checks) > 0:
         raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
 
+def has_ciflow_label(labels: List[str]) -> bool:
+    return len(list(filter(CIFLOW_LABEL.match, labels))) > 0
+
 def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
                       required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
@@ -1213,11 +1241,12 @@ def main() -> None:
         return
 
     try:
+        on_green = args.on_green or has_ciflow_label(pr.get_labels())
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               force=args.force,
               comment_id=args.comment_id,
-              on_green=args.on_green,
+              on_green=on_green,
               mandatory_only=args.on_mandatory,
               land_checks=args.land_checks)
     except Exception as e:
