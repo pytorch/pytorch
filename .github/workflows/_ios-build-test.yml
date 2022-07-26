@@ -158,6 +158,7 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
+          # use the pytorch nightly build to generate models
           pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
