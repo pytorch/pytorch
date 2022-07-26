@@ -8,15 +8,29 @@ from torch.fx.subgraph_rewriter import Match
 
 from typing import Dict, List
 
+__all__ = ['SubgraphMatcher']
 
 @compatibility(is_backward_compatible=False)
 class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
-                 match_placeholder: bool = False) -> None:
+                 match_placeholder: bool = False,
+                 fully_contained: bool = True) -> None:
+        """
+        Args:
+            pattern: the targeted matching pattern, represented in fx.Graph
+            match_output: If True, output node in the pattern graph will be treated as a part of the targeted pattern.
+                If False, output node is ignored during match.
+            match_placeholder: If True, placeholder node in the pattern graph will be treated as a part of
+                the targeted pattern. If False, placeholder nodes are ignored during match.
+            fully_contained: If True, nodes (except placeholder and output_link_nodes ) can only be consumed
+                by nodes within th pattern.
+        """
+
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
+        self.fully_contained = fully_contained
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -28,7 +42,14 @@ class SubgraphMatcher:
 
         # TODO: assert pattern is a connected graph
 
+        placeholder_nodes = [n for n in pattern.nodes if n.op == "placeholder"]
+
+        # mapping from placeholder to user nodes
+        self.inlink_nodes: Dict[Node, List[Node]] = {n : list(n.users) for n in placeholder_nodes}
+
         output_node = next(iter(reversed(pattern.nodes)))
+        # nodes returned by outputs
+        self.outlink_nodes: List[Node] = output_node.all_input_nodes
 
         self.pattern_anchors: List[Node] = []
         if match_output:
@@ -46,6 +67,26 @@ class SubgraphMatcher:
                 return True
             return pn.target == gn.target
         return False
+
+    def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
+        # `lookup` represents all the nodes in `original_graph`
+        # that are part of `pattern`
+        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items()}
+        for gn, pn in lookup.items():
+            # Placeholders can be used by other nodes in the graphs
+            if pn.op == "placeholder":
+                continue
+
+            # nodes returned by output are allowed to be used in other areas of the graph
+            if pn in self.outlink_nodes:
+                continue
+
+            for user in gn.users:
+                # If this node has users that were not in `lookup`, then it must leak out of the
+                # pattern subgraph
+                if user not in lookup:
+                    return False
+        return True
 
     def _match_nodes(self, pn: Node, gn: Node, match: Match) -> bool:
 
@@ -70,9 +111,9 @@ class SubgraphMatcher:
 
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
-        match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes)
-                        and all(self._match_nodes(pn_, gn_, match) for pn_, gn_
-                                in zip(pn.all_input_nodes, gn.all_input_nodes)))
+        match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes) and
+                       all(self._match_nodes(pn_, gn_, match) for pn_, gn_
+                           in zip(pn.all_input_nodes, gn.all_input_nodes)))
 
         if not match_found:
             match.nodes_map.pop(pn)
@@ -88,8 +129,8 @@ class SubgraphMatcher:
                 if SubgraphMatcher._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
-
         matches: List[Match] = []
+
         def backtracking(anchor_index, match):
             if anchor_index == len(match_candidates_list):
                 matches.append(match)
@@ -107,7 +148,11 @@ class SubgraphMatcher:
                     # revert to saved_match before matching with current anchor
                     match = copy.copy(saved_match)
 
-        match = Match(anchor=None, nodes_map={})
+        # TODO: anchor is set to the first of self.pattern_anchors for now, need to update the sematics of this field
+        match = Match(anchor=self.pattern_anchors[0], nodes_map={})
         backtracking(0, match)
+
+        if self.fully_contained:
+            matches = [match for match in matches if self._is_contained(match.nodes_map)]
 
         return matches

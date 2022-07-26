@@ -6,7 +6,7 @@ from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.fx._compatibility import compatibility
 
 
-__all__ = ['HolderModule', 'lift_subgraph_as_module']
+__all__ = ['HolderModule', 'lift_subgraph_as_module', 'compare_graphs']
 
 @compatibility(is_backward_compatible=False)
 class HolderModule(Module):

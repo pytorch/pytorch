@@ -1,9 +1,8 @@
 # Owner(s): ["oncall: fx"]
 
+from dataclasses import dataclass
 import operator
 import logging
-
-from torch import sigmoid
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -275,106 +274,71 @@ class TestFXGraphPasses(JitTestCase):
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
 
-
+@dataclass
 class TestCase:
+    match_output: bool
+    match_placeholder: bool
+    num_matches: int
+    fully_contained: bool = True
+
+class SingleNodePattern:
+    @staticmethod
     def forward(x):
         val = torch.neg(x)
         return torch.add(val, val)
 
+    @staticmethod
     def pattern(a):
         return torch.neg(a)
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 0),
-        (False, True, 1),
-        (True, True, 0)
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
     ]
-
-class TestCase1:
-    def forward(x):
-        val = torch.neg(x) + torch.relu(x)
-        return torch.add(val, val)
-
-    def pattern(a):
-        return torch.neg(a) + torch.relu(a)
-
-    expects = [
-        # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 0),
-        (False, True, 1),
-        (True, True, 0)
-    ]
-
-class TestCase2:
+class SimplePattern:
+    @staticmethod
     def forward(x, w1, w2):
         m1 = torch.cat([w1, w2]).sum()
         m2 = torch.cat([w2, w1]).sum()
         m3 = torch.cat([m1, m2]).sum()
         return x + torch.max(m1) + torch.max(m2) + m3
 
+    @staticmethod
     def pattern(a, b):
         return torch.cat([a, b]).sum()
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 3),
-        (True, False, 0),
-        (False, True, 2),
-        (True, True, 0)
+        TestCase(False, False, 3),
+        TestCase(True, False, 0),
+        TestCase(False, True, 2),
+        TestCase(True, True, 0)
     ]
 
-class TestCase3:
-    def forward(x, y):
-        return torch.mm(x, y)
-
-    def pattern(x, y):
-        return torch.mm(x, y)
-
-    expects = [
-        # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 1),
-        (False, True, 1),
-        (True, True, 1)
-    ]
-
-class TestCase4:
-    def forward(x, y):
-            val = torch.neg(y) + torch.relu(x)
-            return torch.add(val, val)
-
-    def pattern(x):
-        return torch.relu(x)
-
-    expects = [
-        # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 0),
-        (False, True, 1),
-        (True, True, 0)
-    ]
-
-class TestCase5:
+class SimpleFullGraphMatching:
+    @staticmethod
     def forward(x):
         a = torch.neg(x)
         return torch.add(a, a)
 
+    @staticmethod
     def pattern(x):
         a = torch.neg(x)
         return torch.add(a, a)
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 1),
-        (False, True, 1),
-        (True, True, 1)
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 1)
     ]
 
-class DiamondShapePatternTestCast:
+class DiamondShapePatternTestCase:
+    @staticmethod
     def forward(x):
         a = torch.neg(x)
 
@@ -385,6 +349,7 @@ class DiamondShapePatternTestCast:
 
         return out
 
+    @staticmethod
     def pattern(a):
         a = a.relu()
         left = a.sigmoid()
@@ -392,55 +357,69 @@ class DiamondShapePatternTestCast:
         out = left + right
         return out
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 1),
-        (False, True, 0),
-        (True, True, 0)
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
     ]
 
-class TestCase7:
+class NonFullyContainedMatches:
+    @staticmethod
     def forward(x, w1, w2, b1, b2):
-        m0 = torch.cat([w1, w2])
+        # fully contained matched subgraph
         m1 = torch.cat([w1, w2])
         m2 = torch.cat([x, b2])
         t0 = torch.addmm(b1, m1, m2.t())
-        t1 = torch.sum(w1, 1)
-        t2 = torch.addmm(b1, m1, m2.t())
-        return torch.sum(t1), torch.sum(t2)
+        t0_sum = torch.sum(t0)   # use of t0 is not leaking
 
+        # leaking matched subgraph, m3 is leaked
+        m3 = torch.cat([w1, w2])
+        m4 = torch.cat([x, b2])
+        t1 = torch.addmm(b1, m3, m4.t())
+        m3_sum = torch.sum(m3)
+
+        return t0_sum, m3_sum
+
+    @staticmethod
     def pattern(x, w1, w2, b1, b2):
         m1 = torch.cat([w1, w2])
         m2 = torch.cat([x, b2])
         return torch.addmm(b1, m1, m2.t())
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 2),
-        (True, False, 0),
-        (False, True, 2),
-        (True, True, 0)
+        TestCase(False, False, 1, fully_contained=True),
+        TestCase(False, False, 2, fully_contained=False),
+
+        TestCase(True, False, 0),
+
+        TestCase(False, True, 1, fully_contained=True),     # leaked used of placeholder is not leaking
+        TestCase(False, True, 2, fully_contained=False),
     ]
 
-class TestCase8:
+class ChainRepeatedPattern:
+    @staticmethod
     def forward(x):
         x = torch.sigmoid(x)
         x = torch.sigmoid(x)
         return torch.sigmoid(x)
 
+    @staticmethod
     def pattern(x):
         return torch.sigmoid(torch.sigmoid(x))
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 2),
-        (True, False, 1),
-        (False, True, 1),
-        (True, True, 0)
+        TestCase(False, False, 2),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
     ]
 
-class JerryZhangTestCase:
+class QuantizationModel:
+    @staticmethod
     def forward(x):
         x += 3
         x = x.dequantize()
@@ -448,41 +427,44 @@ class JerryZhangTestCase:
         x = x.to(torch.float16)
         return x
 
+    @staticmethod
     def pattern(x):
         x = x.dequantize()
         x = torch.sigmoid(x)
         x = x.to(torch.float16)
         return x
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 1),
-        (False, True, 0),
-        (True, True, 0)
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
     ]
 
 class MultipleOutputsWithDependency:
+    @staticmethod
     def forward(x):
         y = x.relu()
         z = y.sigmoid()
         return z, y
 
+    @staticmethod
     def pattern(a):
         b = a.relu()
         c = b.sigmoid()
         return b, c     # outputs have data dependency
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 0),
-        (False, True, 1),
-        (True, True, 0)
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
     ]
 
 class MultipleOutputsWithoutDependency:
-
+    @staticmethod
     def forward(x):
         x = x + 1
 
@@ -494,22 +476,23 @@ class MultipleOutputsWithoutDependency:
         out = y.sigmoid() + z.sum()
         return out
 
+    @staticmethod
     def pattern(a):
         a = a.relu()
         b = a.sigmoid()
         c = a.sum()
         return b, c
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 1),
-        (True, False, 0),
-        (False, True, 0),
-        (True, True, 0)
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
     ]
 
 class MultipleOutputsMultipleOverlappingMatches:
-
+    @staticmethod
     def forward(x):
         x = x + 1
 
@@ -522,19 +505,20 @@ class MultipleOutputsMultipleOverlappingMatches:
 
         return z + z1 + y + y1
 
+    @staticmethod
     def pattern(a):
         a = a.relu()
         b = a.sigmoid()
         c = a.sum()
-        return b, c
+        return b, c, a
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 4),
+        TestCase(False, False, 4),
     ]
 
 class MultipleOutputsMultipleNonOverlappingMatches:
-
+    @staticmethod
     def forward(x):
         x = x + 1
 
@@ -547,25 +531,23 @@ class MultipleOutputsMultipleNonOverlappingMatches:
         z1 = x.sum()
         y1 = x.sigmoid()
 
-        x = x.relu()
-        z2 = x.sum()
-        y2 = x.sigmoid()
+        return z + z1 + y + y1
 
-        return z + z1 + y + y1 + z2 + y2
-
+    @staticmethod
     def pattern(a):
         a = a.relu()
         b = a.sigmoid()
         c = a.sum()
         return b, c
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
-        (False, False, 3),
+        TestCase(False, False, 2, fully_contained=False),
+        TestCase(False, False, 1, fully_contained=True),
     ]
 
 class MultipleOutputsIdenticalAnchor:
-
+    @staticmethod
     def forward(x):
         x = x + 1
 
@@ -574,60 +556,58 @@ class MultipleOutputsIdenticalAnchor:
         y = x.sigmoid()
         y1 = x.sigmoid()
 
-        return  y, y1
+        return y, y1
 
+    @staticmethod
     def pattern(a):
         a = a.relu()
         b = a.sigmoid()
         b1 = a.sigmoid()
         return b, b1
 
-    expects = [
+    test_cases = [
         # match_output, match_placeholder, num_matches
         # (False, False, 2),  # FIXME: currently still matches to 2, should fix to 1
-        (True, False, 1),
-        (False, True, 0),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
     ]
 
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
-    @parametrize("test_case", [
-        TestCase,
-        TestCase1,
-        TestCase2,
-        TestCase3,
-        TestCase4,
-        TestCase5,
-        DiamondShapePatternTestCast,
-        TestCase7,
-        TestCase8,
-        JerryZhangTestCase,
+    @parametrize("test_model", [
+        SingleNodePattern,
+        SimplePattern,
+        SimpleFullGraphMatching,
+        DiamondShapePatternTestCase,
+        NonFullyContainedMatches,
+        ChainRepeatedPattern,
+        QuantizationModel,
         MultipleOutputsWithDependency,
         MultipleOutputsWithoutDependency,
         MultipleOutputsMultipleOverlappingMatches,
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
     ])
-    def test_pattern_matcher(self, test_case):
+    def test_subgraph_matcher(self, test_model):
+        traced = symbolic_trace(test_model.forward)
+        pattern_traced = symbolic_trace(test_model.pattern)
 
-        traced = symbolic_trace(test_case.forward)
-        pattern_traced = symbolic_trace(test_case.pattern)
-
-        for match_output, match_placeholder, num_matches in test_case.expects:
+        for test_case in test_model.test_cases:
 
             matcher = SubgraphMatcher(pattern_traced.graph,
-                                    match_output=match_output,
-                                    match_placeholder=match_placeholder)
+                                      match_output=test_case.match_output,
+                                      match_placeholder=test_case.match_placeholder,
+                                      fully_contained=test_case.fully_contained)
             matches = matcher.match(traced.graph)
 
-            assert len(matches) == num_matches
+            assert len(matches) == test_case.num_matches
 
             for match in matches:
                 for node in pattern_traced.graph.nodes:
-                    if not match_placeholder and node.op == "placeholder":
+                    if not test_case.match_placeholder and node.op == "placeholder":
                         continue
-                    if not match_output and node.op == "output":
+                    if not test_case.match_output and node.op == "output":
                         continue
                     assert node in match.nodes_map
 
