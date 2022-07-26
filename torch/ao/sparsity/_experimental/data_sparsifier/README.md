@@ -17,7 +17,7 @@ The BaseDataSparsifier handles all the housekeeping while allowing the user to j
 
 `add_data`: Accepts name, data tuple and registers the data as a parametrized buffer inside the container model. Note that the data is always associated to a name. A custom sparse config can be provided along with the name, data pair. If not provided, the default config will be applied while doing the sparsification.
 If the named data already exists, then it is replaced with the new data. The config and mask will be retained for the new data unless not specified to.
-To not the old mask, set `use_old_mask=False`. If the `config` is explicitly passed in, it will be updated.
+To not the old mask, set `reuse_mask=False`. If the `config` is explicitly passed in, it will be updated.
 
 **Note**: name containing '.' is not a valid name for the data sparsifier
 
@@ -25,20 +25,33 @@ To not the old mask, set `use_old_mask=False`. If the `config` is explicitly pas
 data_sparsifier = ImplementedDataSparsifier()
 data_sparsifier.add_data(name=name, data=data, **some_config)
 ```
+
 `step`: applies the update_mask() logic to all the data.
 
 ```
 data_sparsifier.step()
 ```
+
 `get_mask`: retrieves the mask given the name of the data.
+
+`get_data`: retrieves the data given the `name` argument. Accepts additional argument `return_original` which when set to `True` does not apply the mask while returning
+the data tensor. Example:
+
+```
+original_data = data_sparsifier.get_data(name=name, return_original=True)  # returns data with no mask applied
+sparsified_data = data_sparsifier.get_data(name=name, return_original=False)  # returns data * mask
+```
 
 `squash_mask`: removes the parametrizations on the data and applies mask to the data when `leave_parametrized=True`.Also, accepts list of strings to squash mask for. If none, squashes mask for all the keys.
 ```
 data_sparsifier.squash_mask()
 ```
 
+`state_dict`: Returns dictionary that can be serialized.
+
 ## Write your own data sparsifier.
 The custom data sparsifier should be inherited from the BaseDataSparsifier class and the `update_mask()` should be implemented. For example, the following data sparsifier zeros out all entries of the tensor smaller than some threshold value.
+
 ```
 class ImplementedDataSparsifier(BaseDataSparsifier):
     def __init__(self, threshold):
@@ -51,6 +64,7 @@ class ImplementedDataSparsifier(BaseDataSparsifier):
 
 ## Using Data Sparsifier
 ### Simple example
+
 ```
 tensor1 = torch.randn(100, 100)
 param1 = nn.Parameter(torch.randn(200, 32))
@@ -63,7 +77,9 @@ my_sparsifier.step()  # computes mask
 
 my_sparsifier.squash_mask()  # applies and removes mask
 ```
+
 ### Sparsifying model embeddings
+
 ```
 class Model(nn.Module):
     def __init__(self, feature_dim, emb_dim, num_classes):
@@ -90,6 +106,7 @@ my_sparsifier.step()  # creates mask for embeddings
 
 my_sparsifier.squash_mask()  # applies and removes mask
 ```
+
 ### Using in the context of training data
 Sometimes if the input data can be sparsified before sending it to the model, then we can do so by using the data sparsifier.
 
@@ -125,4 +142,4 @@ for x, y in train_data_loader:
 
     1. Reassignment of a mask: `mask = torch.zeros_like(mask)`
     2. Non-inplace arithmetic operations: `mask = mask * another_mask`
-3. The name of the data cannot contain a `'.'` (period)
+3. Data sparsifier `name` argument cannot have a '.' in it.

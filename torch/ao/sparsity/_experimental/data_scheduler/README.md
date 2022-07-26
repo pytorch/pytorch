@@ -16,6 +16,7 @@ the data sparsifier class and varies it across the training process (or across t
 ## Write your own data scheduler
 The custom data scheduler must be inherit from the `BaseDataScheduler` class and should have the `get_schedule_param()` function implemented. For example, that gradually multiplies the sparsity level by `gamma` every epoch.
 It also takes an argument `threshold_sl` which when reached does not increase further.
+
 ```
 class GammaScheduler(BaseDataScheduler):
     def __init__(self, data_sparsifier, gamma, threshold_sl):
@@ -34,6 +35,7 @@ class GammaScheduler(BaseDataScheduler):
 Suppose the need is to vary data sparsity levels (or any sparsity `param`) during training, then a custom data scheduler can be implemented and used along with the data sparsifier.
 
 Example:
+
 ```
 model = SomeModel()
 optimizer = SomeOptimizer(model.parameters(), lr=...)
@@ -58,6 +60,7 @@ for epoch in range(EPOCHS):
 
     data_scheduler.step()
 ```
+
 ### Note:
 1. `get_schedule_param()` should return a dictionary wherein the keys are the names of the data and the values are the corresponding values of the `schedule_param` for the next step.
 2. It is the responsibility of the `BaseDataScheduler` to call the `get_schedule_param()` when necessary.

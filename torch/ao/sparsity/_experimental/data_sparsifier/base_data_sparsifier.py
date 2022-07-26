@@ -11,6 +11,7 @@ import sys
 import warnings
 
 if not sys.warnoptions:
+    # to suppress repeated warnings when being used in a training loop.
     warnings.simplefilter("once")
 
 __all__ = ['BaseDataSparsifier']
@@ -78,13 +79,13 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         elif type(data) in EMBEDDING_TYPES:
             return data.weight
 
-    def add_data(self, name: str, data, use_old_mask=True, **config):
+    def add_data(self, name: str, data, reuse_mask=True, **config):
         r""" Configures and parametrizes the internal container model with name and data.
 
         **Note**:
             1. If the data with name already exists, it replaces the data.
-            2. While replacing, the old mask is reused when `use_old_mask=True`
-            3. If `use_old_mask=True`, then the replacing data needs to have the same shape as that of old data.
+            2. While replacing, the old mask is reused when `reuse_mask=True`
+            3. If `reuse_mask=True`, then the replacing data needs to have the same shape as that of old data.
             4. By default, the config of the replaced data is used as config for the replacing data, unless something
                is specified in the config dictionary.
         """
@@ -107,7 +108,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             local_args = copy.deepcopy(old_args)
             local_args.update(config)
 
-            if use_old_mask:
+            if reuse_mask:
                 current_data = self.get_data(name=name)
                 assert weight.shape == current_data.shape, \
                     "to retain the old mask, the shape of the new data must be the same as the previous one"
