@@ -1994,6 +1994,11 @@
   dispatch:
     CompositeExplicitAutograd: new_empty
 
+- func: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: new_empty_symint
+
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
