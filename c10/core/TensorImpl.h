@@ -765,7 +765,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
-    return numel_;
+    return numel_.expect_int();
   }
 
  public:
@@ -1950,9 +1950,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
-      if (numel_ == 0 ||
+      if (numel_.expect_int() == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
-           (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
+           (storage_.nbytes() >= (numel_.expect_int() * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
         return storage_.data();
@@ -1969,18 +1969,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
-        auto size = numel_;
+        auto size = numel_.expect_int();
         auto dtor = data_type_.placementDelete();
-        auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
+        auto data_ptr = allocator->allocate(numel_.expect_int() * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.placementNew()(storage_.data(), numel_);
+        data_type_.placementNew()(storage_.data(), numel_.expect_int());
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr_noswap(
-            allocator->allocate(numel_ * data_type_.itemsize()));
+            allocator->allocate(numel_.expect_int() * data_type_.itemsize()));
       }
-      storage_.set_nbytes(numel_ * data_type_.itemsize());
+      storage_.set_nbytes(numel_.expect_int() * data_type_.itemsize());
       TORCH_INTERNAL_ASSERT(
           storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
@@ -2479,7 +2479,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // time, we will immediately set sizes to {0} and reset numel to 0.
   // (Can't do that in the default initializers, because there's no way to
   // spell "allocate a one-element array" for strides_).
-  int64_t numel_ = 1;
+  SymInt numel_ = c10::SymInt(1);
 
   // INVARIANT: When storage is non-null, this type meta must
   // agree with the type meta in storage
