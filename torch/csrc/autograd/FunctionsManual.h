@@ -996,6 +996,11 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     bool include_self,
     const Tensor& result);
 
+Tensor take_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& indices);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
