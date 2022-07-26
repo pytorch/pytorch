@@ -1,37 +1,77 @@
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.observer import (
-    default_observer
+    MinMaxObserver
+)
+from torch.ao.quantization.fake_quantize import (
+    default_symmetric_fake_quant
 )
 import torch
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
 
-# uniform activation and weight
-uniform_qconfig = QConfig(activation=default_observer.with_args(quant_min=0, quant_max=255, dtype=torch.quint8),
-                          weight=default_observer.with_args(quant_min=0, quant_max=255, dtype=torch.qint8))
+# uniform activation and weight, b=8 k=2
+uniform_qconfig_8bit = QConfig(activation=default_symmetric_fake_quant.with_args(observer=MinMaxObserver, dtype=torch.quint8),
+                               weight=default_symmetric_fake_quant.with_args(observer=MinMaxObserver, dtype=torch.qint8))
 
-# uniform activation, APoT weight
-apot_weight_qconfig = QConfig(activation=default_observer.with_args(dtype=torch.quint8),
-                              weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
+# uniform activation, APoT weight, b=8 k=2
+apot_weight_qconfig_8bit = QConfig(activation=default_symmetric_fake_quant.with_args(observer=MinMaxObserver, dtype=torch.quint8),
+                                   weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
 
-# APoT activation and uniform weight
-apot_qconfig = QConfig(activation=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.quint8),
-                       weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
+# APoT activation and uniform weight, b=8 k=2
+apot_qconfig_8bit = QConfig(activation=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.quint8),
+                            weight=APoTFakeQuantize.with_args(b=8, k=2, dtype=torch.qint8))
 
-def get_uniform_qconfig():
+# uniform activation and weight, b=4 k=2
+uniform_qconfig_4bit = QConfig(activation=default_symmetric_fake_quant.with_args(quant_min=0,
+                                                                                 quant_max=15,
+                                                                                 observer=MinMaxObserver,
+                                                                                 dtype=torch.quint8),
+                               weight=default_symmetric_fake_quant.with_args(observer=MinMaxObserver, dtype=torch.qint8))
+
+# uniform activation, APoT weight, b=4 k=2
+apot_weight_qconfig_4bit = QConfig(activation=default_symmetric_fake_quant.with_args(quant_min=0,
+                                                                                     quant_max=15,
+                                                                                     observer=MinMaxObserver,
+                                                                                     dtype=torch.quint8),
+                                   weight=APoTFakeQuantize.with_args(b=4, k=2, dtype=torch.qint8))
+
+# APoT activation and uniform weight, b=4 k=2
+apot_qconfig_4bit = QConfig(activation=APoTFakeQuantize.with_args(b=4, k=2, dtype=torch.quint8),
+                            weight=APoTFakeQuantize.with_args(b=4, k=2, dtype=torch.qint8))
+
+def get_uniform_qconfig_8bit():
     """
     Returns the uniform qconfig
     """
-    return uniform_qconfig
+    return uniform_qconfig_8bit
 
-def get_apot_weights_qconfig():
+def get_uniform_qconfig_4bit():
+    """
+    Returns the uniform qconfig
+    """
+    return uniform_qconfig_4bit
+
+def get_apot_weights_qconfig_8bit():
     """
     Returns qconfig with uniform activation,
     APoT weight
     """
-    return apot_weight_qconfig
+    return apot_weight_qconfig_8bit
 
-def get_apot_qconfig():
+def get_apot_weights_qconfig_4bit():
+    """
+    Returns qconfig with uniform activation,
+    APoT weight
+    """
+    return apot_weight_qconfig_4bit
+
+def get_apot_qconfig_8bit():
     """
     Returns the APoT qconfig
     """
-    return apot_qconfig
+    return apot_qconfig_8bit
+
+def get_apot_qconfig_4bit():
+    """
+    Returns the APoT qconfig
+    """
+    return apot_qconfig_4bit

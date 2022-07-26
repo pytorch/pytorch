@@ -3,7 +3,7 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms.transforms as transforms
 import os
-# from torch.ao.quantization import QConfigMapping
+import torch.quantization
 
 # Setup warnings
 import warnings
@@ -23,8 +23,6 @@ Define helper functions
 
 # Specify random seed for repeatable results
 _ = torch.manual_seed(191009)
-
-from torchvision.models.resnet import resnet18
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -71,10 +69,12 @@ def evaluate(model, criterion, data_loader):
     model.eval()
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
+    cnt = 0
     with torch.no_grad():
         for image, target in data_loader:
             output = model(image)
             loss = criterion(output, target)
+            cnt += 1
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], image.size(0))
             top5.update(acc5[0], image.size(0))
@@ -150,7 +150,7 @@ Prepare models
 """
 
 # Note that this is temporary, we'll expose these functions to torch.quantization after official releasee
-from torch.quantization.quantize_fx import prepare_qat_fx, convert_fx
+from torch.quantization.quantize_fx import prepare_fx, convert_fx
 
 def calibrate(model, data_loader):
     model.eval()
@@ -158,46 +158,113 @@ def calibrate(model, data_loader):
         for image, target in data_loader:
             model(image)
 
+from torch.ao.quantization.experimental.qconfig import (
+    get_uniform_qconfig_8bit,
+    get_apot_weights_qconfig_8bit,
+    get_apot_qconfig_8bit,
+    get_uniform_qconfig_4bit,
+    get_apot_weights_qconfig_4bit,
+    get_apot_qconfig_4bit
+)
+
 """
-Model with uniform activation, uniform weight
+Prepare full precision model
 """
-from torch.ao.quantization.experimental.qconfig import get_uniform_qconfig, get_apot_weights_qconfig, get_apot_qconfig
-qconfig1 = get_uniform_qconfig()
+full_precision_model = float_model
+
+top1, top5 = evaluate(full_precision_model, criterion, data_loader_test)
+print("Model #0 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
+
+"""
+Prepare model with uniform activation, uniform weight
+b=8, k=2
+"""
+
+qconfig1 = get_uniform_qconfig_8bit()
 qconfig_dict1 = {"object_type": [(torch.nn.Linear, qconfig1)]}
-prepared_model1 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict1)  # fuse modules and insert observers
+prepared_model1 = prepare_fx(float_model, qconfig_dict1)  # fuse modules and insert observers
 calibrate(prepared_model1, data_loader_test)  # run calibration on sample data
 quantized_model1 = convert_fx(prepared_model1)  # convert the calibrated model to a quantized model
 
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)
-print("Model #1 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
+print("Model #1 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
-Model with uniform activation, APoT weight
+Prepare model with uniform activation, uniform weight
+b=4, k=2
 """
-qconfig2 = get_apot_weights_qconfig()
+
+qconfig1 = get_uniform_qconfig_4bit()
+qconfig_dict1 = {"object_type": [(torch.nn.Linear, qconfig1)]}
+prepared_model1 = prepare_fx(float_model, qconfig_dict1)  # fuse modules and insert observers
+calibrate(prepared_model1, data_loader_test)  # run calibration on sample data
+quantized_model1 = convert_fx(prepared_model1)  # convert the calibrated model to a quantized model
+
+top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)
+print("Model #1 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+
+"""
+Prepare model with uniform activation, APoT weight
+(b=8, k=2)
+"""
+
+qconfig2 = get_apot_weights_qconfig_8bit()
 qconfig_dict2 = {"object_type": [(torch.nn.Linear, qconfig2)]}
-prepared_model2 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict2)  # fuse modules and insert observers
+prepared_model2 = prepare_fx(float_model, qconfig_dict2)  # fuse modules and insert observers
 calibrate(prepared_model2, data_loader_test)  # run calibration on sample data
+quantized_model2 = convert_fx(prepared_model2)  # convert the calibrated model to a quantized model
 
-top1, top5 = evaluate(prepared_model2, criterion, data_loader_test)
-print("Model #2 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
+top1, top5 = evaluate(quantized_model2, criterion, data_loader_test)
+print("Model #2 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+
+"""
+Prepare model with uniform activation, APoT weight
+(b=4, k=2)
+"""
+
+qconfig2 = get_apot_weights_qconfig_4bit()
+qconfig_dict2 = {"object_type": [(torch.nn.Linear, qconfig2)]}
+prepared_model2 = prepare_fx(float_model, qconfig_dict2)  # fuse modules and insert observers
+calibrate(prepared_model2, data_loader_test)  # run calibration on sample data
+quantized_model2 = convert_fx(prepared_model2)  # convert the calibrated model to a quantized model
+
+top1, top5 = evaluate(quantized_model2, criterion, data_loader_test)
+print("Model #2 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 
 """
-Model with APoT activation and weight
+Prepare model with APoT activation and weight
+(b=8, k=2)
 """
-qconfig3 = get_apot_qconfig()
+
+qconfig3 = get_apot_qconfig_8bit()
 qconfig_dict3 = {"object_type": [(torch.nn.Linear, qconfig3)]}
-prepared_model3 = prepare_qat_fx(copy.deepcopy(float_model), qconfig_dict3)  # fuse modules and insert observers
+prepared_model3 = prepare_fx(float_model, qconfig_dict3)  # fuse modules and insert observers
 calibrate(prepared_model3, data_loader_test)  # run calibration on sample data
+quantized_model3 = convert_fx(prepared_model3)  # convert the calibrated model to a quantized model
 
-top1, top5 = evaluate(prepared_model3, criterion, data_loader_test)
-print("Model #3 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
-
+top1, top5 = evaluate(quantized_model3, criterion, data_loader_test)
+print("Model #3 Evaluation accuracy on test dataset (b=8, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
-Eager Mode quantized model
+Prepare model with APoT activation and weight
+(b=4, k=2)
 """
+
+qconfig3 = get_apot_qconfig_4bit()
+qconfig_dict3 = {"object_type": [(torch.nn.Linear, qconfig3)]}
+prepared_model3 = prepare_fx(float_model, qconfig_dict3)  # fuse modules and insert observers
+calibrate(prepared_model3, data_loader_test)  # run calibration on sample data
+quantized_model3 = convert_fx(prepared_model3)  # convert the calibrated model to a quantized model
+
+top1, top5 = evaluate(quantized_model3, criterion, data_loader_test)
+print("Model #3 Evaluation accuracy on test dataset (b=4, k=2): %2.2f, %2.2f" % (top1.avg, top5.avg))
+
+"""
+Prepare eager mode quantized model
+"""
+
+from torchvision.models.quantization.resnet import resnet18
 eager_quantized_model = resnet18(pretrained=True, quantize=True).eval()
 top1, top5 = evaluate(eager_quantized_model, criterion, data_loader_test)
 print("Eager mode quantized model evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))

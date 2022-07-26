@@ -328,6 +328,8 @@ default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver
 Default fake_quant for activations.
 """
 
+default_symmetric_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, qscheme=torch.per_tensor_symmetric)
+
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
