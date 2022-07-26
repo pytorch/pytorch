@@ -221,8 +221,8 @@ def _single_tensor_sgd(params: List[Tensor],
                        has_sparse_grad: bool):
 
     for i, param in enumerate(params):
+        d_p = d_p_list[i] if not maximize else -d_p_list[i]
 
-        d_p = d_p_list[i]
         if weight_decay != 0:
             d_p = d_p.add(param, alpha=weight_decay)
 
@@ -240,8 +240,7 @@ def _single_tensor_sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        alpha = lr if maximize else -lr
-        param.add_(d_p, alpha=alpha)
+        param.add_(d_p, alpha=-lr)
 
 
 def _multi_tensor_sgd(params: List[Tensor],
@@ -261,6 +260,9 @@ def _multi_tensor_sgd(params: List[Tensor],
 
     if has_sparse_grad is None:
         has_sparse_grad = any(grad.is_sparse for grad in grads)
+
+    if maximize:
+        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
@@ -295,10 +297,9 @@ def _multi_tensor_sgd(params: List[Tensor],
         else:
             grads = bufs
 
-    alpha = lr if maximize else -lr
     if not has_sparse_grad:
-        torch._foreach_add_(params, grads, alpha=alpha)
+        torch._foreach_add_(params, grads, alpha=-lr)
     else:
         # foreach APIs dont support sparse
         for i in range(len(params)):
-            params[i].add_(grads[i], alpha=alpha)
+            params[i].add_(grads[i], alpha=-lr)
