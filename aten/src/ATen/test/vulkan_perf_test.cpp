@@ -57,7 +57,12 @@ static void add_op_benchmark(benchmark::State& state) {
 
   // Act
   for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_out = at::add(in_vulkan1, in_vulkan2).cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
@@ -103,9 +108,14 @@ static void add_op_q_benchmark(benchmark::State& state) {
   const double scale2 = 0.15;
   const int zero_point2 = 15;
   for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_add = at::native::vulkan::ops::quantized_add(
         out_vulkan1, out_vulkan2, scale2, zero_point2);
     const auto vulkan_out = vulkan_to_cpu(vulkan_add, out_cpu1);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
