@@ -45,7 +45,7 @@ static void CommonBenchmarkSettings(benchmark::internal::Benchmark* b) {
 
 } // namespace
 
-BENCHMARK(add_op_benchmark)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(10)->Args({3, 40, 221, 193});
+BENCHMARK(add_op_benchmark)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 40, 221, 193});
 
 BENCHMARK_MAIN();
 
