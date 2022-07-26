@@ -104,7 +104,8 @@ def _find_cuda_home() -> Optional[str]:
             if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
-        print(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
+        print(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'",
+              file=sys.stderr)
     return cuda_home
 
 def _find_rocm_home() -> Optional[str]:
@@ -127,7 +128,8 @@ def _find_rocm_home() -> Optional[str]:
             if not os.path.exists(rocm_home):
                 rocm_home = None
     if rocm_home and torch.version.hip is None:
-        print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
+        print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'",
+              file=sys.stderr)
     return rocm_home
 
 
@@ -1455,7 +1457,8 @@ def _jit_compile(name,
     if version > 0:
         if version != old_version and verbose:
             print(f'The input conditions for extension module {name} have changed. ' +
-                  f'Bumping to version {version} and re-building as {name}_v{version}...')
+                  f'Bumping to version {version} and re-building as {name}_v{version}...',
+                  file=sys.stderr)
         name = f'{name}_v{version}'
 
     if version != old_version:
@@ -1500,10 +1503,11 @@ def _jit_compile(name,
             baton.wait()
     elif verbose:
         print('No modifications detected for re-loaded extension '
-              f'module {name}, skipping build step...')
+              f'module {name}, skipping build step...',
+              file=sys.stderr)
 
     if verbose:
-        print(f'Loading extension module {name}...')
+        print(f'Loading extension module {name}...', file=sys.stderr)
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -1532,7 +1536,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
     _write_ninja_file(
         path=build_file_path,
         cflags=cflags,
@@ -1546,7 +1550,7 @@ def _write_ninja_file_and_compile_objects(
         library_target=None,
         with_cuda=with_cuda)
     if verbose:
-        print('Compiling objects...')
+        print('Compiling objects...', file=sys.stderr)
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1581,7 +1585,7 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
     # NOTE: Emitting a new ninja build file does not cause re-compilation if
     # the sources did not change, so it's ok to re-emit (and it's fast).
     _write_ninja_file_to_build_library(
@@ -1596,7 +1600,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        print(f'Building extension module {name}...')
+        print(f'Building extension module {name}...', file=sys.stderr)
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1675,7 +1679,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
     if with_cuda:
         if verbose:
-            print('Detected CUDA files, patching ldflags')
+            print('Detected CUDA files, patching ldflags', file=sys.stderr)
         if IS_WINDOWS:
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib/x64")}')
             extra_ldflags.append('cudart.lib')
@@ -1812,12 +1816,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        print(f'Using {root_extensions_directory} as PyTorch extensions root...')
+        print(f'Using {root_extensions_directory} as PyTorch extensions root...', file=sys.stderr)
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating extension directory {build_directory}...')
+            print(f'Creating extension directory {build_directory}...', file=sys.stderr)
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -1828,11 +1832,13 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
+            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...',
+                  file=sys.stderr)
         return int(max_jobs)
     if verbose:
         print('Allowing ninja to set a default number of workers... '
-              '(overridable by setting the environment variable MAX_JOBS=N)')
+              '(overridable by setting the environment variable MAX_JOBS=N)',
+              file=sys.stderr)
     return None
 
 
