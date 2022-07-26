@@ -323,7 +323,16 @@ def _module_has_activation_post_process(model, fqn_of_module):
     return False
 
 class TestFxComposability(TestCase):
+    r"""This series of tests checks that various steps of the quantization and sparsity flow
+    compose cleanly despite variation in sequencing.
+    """
     def test_q_prep_fx_before_s_prep(self):
+        r"""
+        This test checks that the ordering of prepare_fx -> sparse prepare -> convert_fx
+        compose cleanly without issue and that the final result is sparsified without
+        having to call squash mask between sparse prepare and convert_fx. This also tests the
+        automatic fusion that occurs during prepare_fx.
+        """
         (
             mod,
             sparsifier,
@@ -337,7 +346,7 @@ class TestFxComposability(TestCase):
             .set_module_name("5", qconfig)
 
 
-        mod = prepare_fx(mod, qconfig_mapping, (example))
+        mod = prepare_fx(mod, qconfig_mapping, (example,))
 
         # its absolutely broken by auto fusion in fx
         # but will still work if you put the correct fqn in
@@ -378,6 +387,11 @@ class TestFxComposability(TestCase):
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
     def test_s_prep_before_q_prep_fx(self):
+        r"""
+        This test checks that the ordering of sparse prepare -> prepare_fx -> convert_fx
+        compose cleanly without issue and that the final result is sparsified without
+        having to call squash mask before convert_fx.
+        """
         (
             mod,
             sparsifier,
@@ -390,7 +404,7 @@ class TestFxComposability(TestCase):
         qconfig_mapping = tq.QConfigMapping() \
             .set_module_name("4", qconfig) \
             .set_module_name("5", qconfig)
-        mod = prepare_fx(mod, qconfig_mapping, (example))
+        mod = prepare_fx(mod, qconfig_mapping, (example,))
 
         # check that correct modules had parametrizations added and
         # that none were lost during prepare
