@@ -8,18 +8,19 @@ compiled code has been executed. This means that even if the code chunk is merel
 marked as covered.
 """
 
-from coverage import CoveragePlugin, CoverageData  # type: ignore[import]
 from inspect import (
-    ismodule,
-    isclass,
-    ismethod,
-    isfunction,
-    iscode,
     getsourcefile,
     getsourcelines,
+    isclass,
+    iscode,
+    isfunction,
+    ismethod,
+    ismodule,
 )
 from time import time
 from typing import Any
+
+from coverage import CoverageData, CoveragePlugin  # type: ignore[import]
 
 # All coverage stats resulting from this plug-in will be in a separate .coverage file that should be merged later with
 # `coverage combine`. The convention seems to be .coverage.dotted.suffix based on the following link:

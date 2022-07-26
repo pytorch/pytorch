@@ -1,29 +1,30 @@
 from dataclasses import dataclass
-from typing import Union, Optional, List, Tuple, Dict, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import torchgen.api.ufunc as ufunc
 from torchgen.api.translate import translate
+from torchgen.api.types import (
+    BaseCType,
+    Binding,
+    CType,
+    Expr,
+    NamedCType,
+    opmath_t,
+    scalar_t,
+    StructuredImplSignature,
+    VectorizedCType,
+)
+from torchgen.api.ufunc import UfunctorBindings
+from torchgen.context import with_native_function
 from torchgen.model import (
+    Argument,
+    BaseTy,
+    BaseType,
+    DispatchKey,
     NativeFunctionsGroup,
     ScalarType,
     UfuncKey,
-    DispatchKey,
-    BaseType,
-    BaseTy,
-    Argument,
 )
-import torchgen.api.ufunc as ufunc
-from torchgen.api.ufunc import UfunctorBindings
-from torchgen.api.types import (
-    StructuredImplSignature,
-    scalar_t,
-    opmath_t,
-    Binding,
-    CType,
-    BaseCType,
-    Expr,
-    NamedCType,
-    VectorizedCType,
-)
-from torchgen.context import with_native_function
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #

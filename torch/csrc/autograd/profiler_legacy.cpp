@@ -197,7 +197,7 @@ void ProfilerLegacyThreadLocalState::mark(std::string name, bool include_cuda) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
-    torch::profiler::impl::cudaStubs()->nvtxMarkA(name.c_str());
+    torch::profiler::impl::cudaStubs()->mark(name.c_str());
   } else {
     LegacyEvent evt(
         EventKind::Mark,
@@ -229,7 +229,7 @@ void ProfilerLegacyThreadLocalState::pushRange(
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
-    torch::profiler::impl::cudaStubs()->nvtxRangePushA(
+    torch::profiler::impl::cudaStubs()->rangePush(
         torch::profiler::impl::getNvtxStr(fn.name(), fn.seqNr(), shapes)
             .c_str());
   } else {
@@ -277,7 +277,7 @@ void ProfilerLegacyThreadLocalState::popRange(
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
-    torch::profiler::impl::cudaStubs()->nvtxRangePop();
+    torch::profiler::impl::cudaStubs()->rangePop();
   } else {
     // In some cases RecordFunction (and popRange) may be
     // called on a different thread than pushRange

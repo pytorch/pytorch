@@ -50,6 +50,9 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSparseMeta.cpp",
+    "aten/src/ATen/RegisterQuantizedMeta.cpp",
+    "aten/src/ATen/RegisterNestedTensorMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
     "aten/src/ATen/CPUFunctions_inl.h",
@@ -1605,6 +1608,7 @@ cc_library(
         "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
+        "third_party/kineto/libkineto/include",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1656,6 +1660,7 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
+        "@kineto",
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
