@@ -162,7 +162,7 @@ Tensor _mps_linear_backward_input(
 
   TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double
               || grad_output.scalar_type() == ScalarType::Float
-              || grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");  
+              || grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");
 
   const Tensor weight_reshaped = weight.is_contiguous() ? weight : weight.contiguous();
 
