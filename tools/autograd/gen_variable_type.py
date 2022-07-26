@@ -48,6 +48,7 @@ from torchgen.api.types import (
     scalarT,
     SpecialArgName,
     stringT,
+    symIntArrayRefT,
     tensorListT,
     tensorT,
     TupleCType,
@@ -1090,6 +1091,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
+                expr = expr + ".vec()"
+            elif type == BaseCType(symIntArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
