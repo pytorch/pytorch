@@ -6,7 +6,8 @@ import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
 from torch.testing._internal import common_utils
-
+import io
+import onnx
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -267,6 +268,60 @@ class TestONNXShapeInference(common_utils.TestCase):
             nearest_mode_s="floor",
         )
         self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
+
+    def test_autograd_layernorm_shape(self):
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+            return g.op("com.microsoft::PythonOp")
+
+        torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "prim::PythonOp", 1)
+
+        # necessay parameters for transformer embeddings
+        hidden_size, max_position_embeddings, batch_size = (
+            48,
+            32,
+            2,
+        )
+
+        # wrap nn.layernorm into autograd.func repro the same
+        # issue as using apex fusedlayernorm
+        class CustomLayerNorm(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, embedding):
+                layer_norm = torch.nn.LayerNorm(hidden_size, eps=1e-12)
+                return layer_norm(embedding)
+
+        class EmbeddingModule(torch.nn.Module):
+            def forward(
+                self,
+                embeddings=None,
+            ):
+                embedding_output = CustomLayerNorm.apply(embeddings)
+                query = embedding_output.transpose(0, 1)
+                tgt_len, bsz, embed_dim = query.size()
+                query = (query.reshape(tgt_len, bsz, embed_dim))
+                return query
+
+        embeddings = torch.randn(batch_size, max_position_embeddings, hidden_size)
+        
+        f = io.BytesIO()
+        torch.onnx.export(
+            EmbeddingModule().eval(),
+            (embeddings),
+            f,
+            opset_version=self.opset_version,
+            input_names=["embeddings"],
+            dynamic_axes={"embeddings": [0, 1, 2]},
+            custom_opsets={"com.microsoft": 1},
+        )
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+
+        # If there is a onnx::Constant node with dim=3, it is making the shape static
+        dim = 3
+        for node in graph.graph.node:
+            if node.op_type == "Constant":
+                if node.attribute[0].t.dims:
+                    self.assertNotEqual(node.attribute[0].t.dims[0], dim)
 
 
 if __name__ == "__main__":
