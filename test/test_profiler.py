@@ -28,7 +28,11 @@ from torch.profiler import (
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
     _utils
 )
-from torch.profiler._pattern_matcher import Pattern, NamePattern, ExtraCUDACopyPattern
+from torch.profiler._pattern_matcher import (Pattern, NamePattern,
+                                             ExtraCUDACopyPattern,
+                                             ForLoopIndexingPattern,
+                                             FP32MatMulPattern,
+                                             OptimizerSingleTensorPattern)
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
@@ -648,6 +652,46 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    def test_oom_tracing(self):
+        def run_profiler(tensor_creation_fn):
+            with _profile(profile_memory=True, record_shapes=True) as prof:
+                with self.assertRaisesRegex(RuntimeError, ".*[tT]ried to allocate.*"):
+                    x = tensor_creation_fn()
+                return prof
+
+        def create_cuda_tensor_oom():
+            device = torch.device("cuda:0")
+            return torch.empty(1024, 1024, 1024, 20, dtype=torch.float32, device=device)
+
+        def check_trace(fname):
+            prof.export_chrome_trace(fname)
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                self.assertTrue("traceEvents" in trace)
+                events = trace["traceEvents"]
+                found_out_of_memory_events = False
+                for evt in events:
+                    self.assertTrue("name" in evt)
+                    if evt["name"] == "[OutOfMemory]":
+                        found_out_of_memory_events = True
+                        self.assertTrue("args" in evt)
+                        self.assertTrue("Device Type" in evt["args"])
+                        self.assertTrue("Device Id" in evt["args"])
+                        self.assertTrue("Bytes" in evt["args"])
+
+                        # Memory should be an instantaneous event.
+                        self.assertTrue("dur" not in evt["args"])
+                        self.assertTrue("cat" not in evt["args"])
+                self.assertTrue(found_out_of_memory_events)
+
+        if torch.cuda.is_available():
+            with TemporaryFileName(mode="w+") as fname:
+                prof = run_profiler(create_cuda_tensor_oom)
+                check_trace(fname)
+
+
+
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
@@ -1144,9 +1188,9 @@ class TestTorchTidyProfiler(TestCase):
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
 
-    def test_tensor_sizes(self):
-        x = torch.ones(10, 10)
-        y = torch.ones(1, 10)
+    def test_tensor_properties(self):
+        x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
+        y = torch.ones(4, 1)
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + y
@@ -1159,9 +1203,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._autograd._ExtraFields_TorchOp)
 
-        # The alpha scalar has a [] size
-        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
-        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch.strided, torch.strided, None])
 
 
 @dataclass(frozen=True)
@@ -1498,6 +1546,7 @@ aten::mm""")
         self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
         self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_extra_cuda_copy_pattern(self):
         cases = (
@@ -1514,9 +1563,95 @@ aten::mm""")
         )
         num_matched = []
         for _, fn in cases:
-            with profile(with_stack=True) as prof:
+            with profile(with_stack=True, record_shapes=True) as prof:
                 fn()
             pattern = ExtraCUDACopyPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+    @unittest.skipIf(TEST_WITH_CROSSREF,
+                     "crossref intercepts calls and changes the callsite.")
+    def test_profiler_for_loop_indexing_pattern(self):
+        x = torch.ones((100, 100))
+
+        def case1():
+            for i in range(100):
+                x[i] = i
+
+        def case2():
+            y = 0
+            for i in range(100):
+                y += x[i]
+
+        def case3():
+            y = 1
+            for i in range(100):
+                y *= x[i]
+
+        def case4():
+            y = x
+            for _ in range(100):
+                y = y @ x
+
+        def case5():
+            for i in range(100):
+                x[i, :] = torch.arange(100) + i
+
+        cases = ((1, case1), (1, case2), (1, case3), (0, case4), (1, case5))
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                fn()
+            pattern = ForLoopIndexingPattern(prof)
+            num_matched.append(len(pattern.matched_events()))
+        self.assertEqual(num_matched, [i for i, _ in cases])
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_fp32_matmul_pattern(self):
+        x = torch.ones((100, 100), device="cuda")
+        with profile(with_stack=True) as prof:
+            x = x @ x
+        pattern = FP32MatMulPattern(prof)
+        has_tf32 = 0 if pattern.skip else 1
+        num_matched = len(pattern.matched_events())
+        self.assertEqual(num_matched, has_tf32)
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern_benchmark(self):
+        with profile(with_stack=True, record_shapes=True) as prof:
+            x = torch.ones((100, 100)).to("cuda")
+            x = torch.ones((50, 50)).to("cuda")
+        pattern = ExtraCUDACopyPattern(prof)
+        shapes_factor_map = pattern.benchmark(pattern.matched_events())
+        self.assertEqual(len(shapes_factor_map), 2)
+
+    def test_profiler_optimizer_single_tensor_pattern(self):
+        x = torch.ones((100, 100))
+        cases = (
+            (1, lambda: torch.optim.Adam(model.parameters())),
+            (1, lambda: torch.optim.SGD(model.parameters(), lr=0.01)),
+            (1, lambda: torch.optim.AdamW(model.parameters())),
+            (0, lambda: torch.optim.Adam(model.parameters(), foreach=True)),
+            (0, lambda: torch.optim.SGD(model.parameters(), lr=0.01, foreach=True)),
+            (0, lambda: torch.optim.AdamW(model.parameters(), foreach=True)),
+        )
+        num_matched = []
+        for _, fn in cases:
+            with profile(with_stack=True) as prof:
+                model = nn.Sequential(
+                    nn.Linear(100, 100),
+                    nn.ReLU(),
+                    nn.Linear(100, 10),
+                )
+                optimizer = fn()
+                optimizer.zero_grad()
+                y_hat = model(x)
+                loss = torch.nn.functional.cross_entropy(y_hat, torch.randint(0, 10, (100,)))
+                loss.backward()
+                optimizer.step()
+            pattern = OptimizerSingleTensorPattern(prof)
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
