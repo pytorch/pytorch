@@ -2,12 +2,11 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, capture_logs
+from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import unittest
-import logging
 
 def are_aliased(x, y):
     if x._base is None and y._base is None:
@@ -17,46 +16,6 @@ def are_aliased(x, y):
     if x._base is None and y._base is not None:
         return y._base is x
     return x._base is y._base
-
-# Just for testing: a logging tensor that also transforms out-of-place ops into inplace ops.
-# That way even if the outer wrapper is functionalized, the inner wrapper will also need functionalization.
-class InplaceLoggingTensor(LoggingTensorReentrant):
-    @staticmethod
-    def __new__(cls, e):
-        r = torch.Tensor._make_wrapper_subclass(cls, e.shape, dtype=e.dtype, requires_grad=False)
-        r.elem = e
-        return r
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    def __str__(self):
-        return f'InplaceLoggingTensor({self.elem})'
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e):
-            if isinstance(e, InplaceLoggingTensor):
-                return e.elem
-            else:
-                return e
-
-        def wrap(e):
-            if isinstance(e, torch.Tensor):
-                return InplaceLoggingTensor(e)
-            else:
-                return e
-        f = func
-        # this subclass converts all `add()` ops into `add_()` ops
-        if f is torch.ops.aten.add.Tensor:
-            f = torch.ops.aten.add_.Tensor
-
-        with cls.context():
-            rs = tree_map(wrap, f(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        # after running the (potentially transformed) op,
-        # log the original op that we saw.
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
-        return rs
-
 
 
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
@@ -171,7 +130,7 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([4, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
-    empty_1 = torch.ops.aten.empty.SymInt([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
     return mul_tensor
@@ -192,8 +151,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    empty_1 = torch.ops.aten.empty.SymInt([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty_1 = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
@@ -299,7 +258,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.SymInt([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
     """)
@@ -694,8 +653,8 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    expand_copy_sym_int = torch.ops.aten.expand_copy.SymInt(a_1, [2, 2]);  a_1 = None
-    return expand_copy_sym_int
+    expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2, 2]);  a_1 = None
+    return expand_copy_default
     """)
 
     def test_fill_(self):
