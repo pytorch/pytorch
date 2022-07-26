@@ -714,7 +714,7 @@ meta_dispatch_expected_failures = {
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
-    aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c64, c128},
+    aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
@@ -826,15 +826,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             device_type=self.device_type,
         )
 
-# TODO: get rid of. _to_copy failing with input meta and device specified as cpu
-op_skips = {
-    "log_softmax_dtype": {c32, c64, c128},
-    "softmax_with_dtype": {c32, c64, c128},
-    "softmin_with_dtype": {c32, c64, c128},
-    "__rpow__": {c32, c64, c128},
-    "nn.functional.softmin_with_dtype": {c32, c64, c128}
-}
-
 # NB: we're running these tests only on CUDA because there are some
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
@@ -842,7 +833,7 @@ op_skips = {
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
+    # @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -871,13 +862,6 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-
-            name = op.name
-            if op.variant_test_name:
-                name += "_" + op.variant_test_name
-
-            if dtype in op_skips.get(name, set()):
-                self.skipTest(f"skipping {sample_input.name}")
 
             with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
                 expected = func(*args, **kwargs)
