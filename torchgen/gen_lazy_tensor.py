@@ -359,6 +359,11 @@ def run_gen_lazy_tensor(
     autograd_key = parsed_backend_yaml.autograd_key
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     backend_indices = parsed_backend_yaml.backend_indices
+    # the following 3 keys are all processed differently
+    # for full_codegen, we generate IR, kernels, etc
+    # for ir_gen, we generate only IR
+    # non_native is used to register kernels not declared in
+    # native_functions.yaml
     full_codegen, non_native, ir_gen = parse_native_functions_keys(
         source_yaml, grouped_native_functions
     )
