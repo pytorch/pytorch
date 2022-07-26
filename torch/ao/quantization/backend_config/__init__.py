@@ -1,5 +1,7 @@
-from .tensorrt import get_tensorrt_backend_config_dict
+from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
 from .native import get_native_backend_config_dict
+from .observation_type import ObservationType
+from .tensorrt import get_tensorrt_backend_config_dict
 
 # TODO: add more validations
 def validate_backend_config_dict(backend_config_dict):

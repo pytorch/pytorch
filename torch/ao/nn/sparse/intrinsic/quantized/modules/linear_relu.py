@@ -1,5 +1,4 @@
 import torch
-import torch.ao.nn.sparse.quantized as ao_qsparsenn
 from typing import Type, Any
 
 __all__ = ['SparseQuantizedLinearReLU']
