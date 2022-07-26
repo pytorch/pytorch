@@ -170,7 +170,7 @@ void filterNormalization11(const TensorCPU& WQ, TensorCPU* WQN) {
     for (auto j = 0; j < WQs; ++j) {
       bitSum += __builtin_popcount(WQdata[f * WQs + j]);
     }
-    DCHECK_LE(bitSum, WQbits);
+    TORCH_DCHECK_LE(bitSum, WQbits);
     WQNdata[f] = 2 * bitSum - WQbits;
   }
 }
