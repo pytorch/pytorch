@@ -1,32 +1,33 @@
+import contextlib
+import math
+import operator
+import weakref
+from enum import Enum
+from functools import partial, reduce
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
+
 import torch
-from torch import Tensor, _TypedStorage
 
 import torch._prims_common as utils
+import torch.library
+from torch import _TypedStorage, Tensor
+from torch._C import _get_default_device
 from torch._prims_common import (
     check,
-    TensorLike,
-    TensorLikeType,
-    ShapeType,
-    getnvFuserDtype,
-    DimsType,
     DimsSequenceType,
-    StrideType,
+    DimsType,
+    getnvFuserDtype,
     Number,
     NumberType,
+    ShapeType,
+    StrideType,
+    TensorLike,
+    TensorLikeType,
     type_to_dtype,
 )
-from torch.overrides import has_torch_function, handle_torch_function
-import torch.library
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
-import contextlib
-from typing import Sequence, Optional, Union, Callable, List, Tuple, Any, Type
-from functools import reduce, partial
-from enum import Enum
-import operator
-import math
-import weakref
+from torch.overrides import handle_torch_function, has_torch_function
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -176,6 +177,7 @@ __all__ = [
     #
     "empty_strided",
     "scalar_tensor",
+    "arange",
     #
     # Linear algebra (linalg) Prims
     #
@@ -1403,7 +1405,7 @@ _broadcast_in_dim_doc = """
   """
 
 broadcast_in_dim = _make_prim(
-    schema="broadcast_in_dim(Tensor(a) a, int[] shape, int[] broadcast_dimensions) -> Tensor(a)",
+    schema="broadcast_in_dim(Tensor(a) a, SymInt[] shape, int[] broadcast_dimensions) -> Tensor(a)",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
     impl_nvfuser=_broadcast_in_dim_nvfuser,
@@ -2473,6 +2475,86 @@ amin = _make_reduction_prim(
     impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
+
+
+_arange_doc = """
+    Constructs a 1-D tensor with values from the interval [start, end) taken
+    with common difference `step` beginning from `start`.
+"""
+
+
+# TODO: layout, pin_memory, memory_format
+# TODO: model requires_grad on TensorMeta
+def _arange_meta(
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
+    *,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
+) -> TensorLikeType:
+    assert not (
+        isinstance(start, complex)
+        and isinstance(end, complex)
+        and isinstance(step, complex)
+    )
+    utils.check(
+        step != 0,
+        lambda: "step must be nonzero",
+    )
+    utils.check(
+        math.isfinite(start) and math.isfinite(end),
+        lambda: f"unsupported range: {start} -> {end}",
+    )
+    utils.check(
+        (step > 0 and end >= start) or (step < 0 and end <= start),
+        lambda: "upper bound and lower bound inconsistent with step sign",
+    )
+    if dtype is not None:
+        pass
+    elif all(isinstance(arg, int) for arg in (start, end, step)):
+        dtype = torch.int64
+    else:
+        dtype = torch.get_default_dtype()
+    device = _get_default_device() if device is None else device
+    shape = (math.ceil((end - start) / step),)
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _arange_aten(
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
+    *,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
+) -> TensorLikeType:
+    # mypy: Not all union combinations were tried because there are too many unions
+    return torch.arange(  # type: ignore[call-overload, misc]
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        layout=torch.strided,
+        pin_memory=False,
+        requires_grad=requires_grad,
+    )
+
+
+# TODO: maybe prims should not have requires_grad arg
+# see: https://github.com/pytorch/pytorch/pull/77542/files#r873943255
+arange = _make_prim(
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype, Device? device, bool requires_grad) -> Tensor",  # noqa: B950
+    return_type=RETURN_TYPE.NEW,
+    meta=_arange_meta,
+    impl_aten=_arange_aten,
+    doc=_arange_doc,
+)
+
 
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
