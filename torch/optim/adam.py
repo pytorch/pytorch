@@ -1,7 +1,7 @@
 import math
 import torch
 from torch import Tensor
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['Adam', 'adam']
@@ -74,7 +74,8 @@ class Adam(Optimizer):
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
-                 maximize: bool = False, capturable: bool = False):
+                 maximize: bool = False, capturable: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -87,7 +88,8 @@ class Adam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
-                        maximize=maximize, foreach=foreach, capturable=capturable)
+                        maximize=maximize, foreach=foreach, capturable=capturable,
+                        differentiable=differentiable)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -103,7 +105,7 @@ class Adam(Optimizer):
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -284,7 +286,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+                max_exp_avg_sqs[i][:] = torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq)
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
@@ -305,7 +307,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+                max_exp_avg_sqs[i][:] = torch.maximum(max_exp_avg_sqs[i].clone(), exp_avg_sq)
                 # Use the max. for normalizing running avg. of gradient
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
             else:
