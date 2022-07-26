@@ -66,7 +66,7 @@ def make_traced(fn: Callable):
             kwargs = dict(zip(kwargs_keys, args[nargs:]))
             return fn(*fn_args, **kwargs)
 
-        with TorchRefsMode.push():
+        with TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
