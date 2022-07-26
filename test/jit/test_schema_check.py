@@ -5,9 +5,9 @@ import sys
 import torch
 from torch.utils._pytree import tree_map
 
-
+from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.schema_check_mode import SchemaCheckMode
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 from torch.testing._internal.jit_utils import JitTestCase
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -24,7 +24,7 @@ if __name__ == '__main__':
 class IncorrectAliasTensor(torch.Tensor):
     ALIAS_ARG_OUT = {"aten::add"}
     ALIAS_OUT_OUT = {"aten::aminmax"}
-
+    MUTATE_ARGS_OUT = {"aten::sub"}
 
     elem: torch.Tensor
 
@@ -62,6 +62,8 @@ class IncorrectAliasTensor(torch.Tensor):
         out = func(*unwrapped_args, **tree_map(unwrap, kwargs))
         if func._schema.name in IncorrectAliasTensor.ALIAS_ARG_OUT:
             args[0].elem = out
+        if func._schema.name in IncorrectAliasTensor.MUTATE_ARGS_OUT:
+            args[0].elem = torch.rand(args[0].elem.shape)
         if func._schema.name in IncorrectAliasTensor.ALIAS_OUT_OUT:
             incorrect_out = list(out)
             incorrect_out[0] = incorrect_out[1]
@@ -77,7 +79,7 @@ class TestSchemaCheck(JitTestCase):
         with enable_torch_dispatch_mode(schema_check):
             x = torch.rand((3, 3), requires_grad=True)
             x.relu().sin()
-            self.assertEqual(["aten::rand", "aten::relu", "aten::sin"], schema_check.ops)
+        self.assertEqual(["aten::rand", "aten::relu", "aten::sin"], schema_check.ops)
 
     # Tests that SchemaCheckMode records operator order without grad
     def test_schema_check_mode_operator_order_without_grad(self):
@@ -85,7 +87,7 @@ class TestSchemaCheck(JitTestCase):
         with enable_torch_dispatch_mode(schema_check):
             x = torch.rand((3, 3), requires_grad=False)
             x.relu().sin()
-            self.assertEqual(["aten::rand", "aten::relu", "aten::sin"], schema_check.ops)
+        self.assertEqual(["aten::rand", "aten::relu", "aten::sin"], schema_check.ops)
 
     # Tests that SchemaCheckMode records mutations and aliases with none expected
     def test_schema_check_mode_mutated_aliasing_none(self):
@@ -284,30 +286,67 @@ class TestSchemaCheck(JitTestCase):
             torch.aminmax(x, dim=0, out=[actual, actual])
         self.assertEqual(torch.amax(x, dim=0), actual)
 
+    # Tests that SchemaCheckMode wraps Torch.tensor in ops with real Device input
+    def test_schema_check_mode_functionality_device_input(self):
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            x = torch.rand((3, 3), device="cpu", dtype=torch.double)
+            y = x + x
+        self.assertEqual(x + x, y)
+
+    # Tests that SchemaCheckMode wraps Torch.tensor in special training op edge case
+    def test_schema_check_mode_functionality_training_op(self):
+        x = torch.rand((3, 3), requires_grad=True)
+        batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
+        expected = batch(x)
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual = batch(x)
+        self.assertEqual(expected, actual)
+
+    # Tests that SchemaCheckMode wraps Torch.tensor with nested training op edge case
+    def test_schema_check_mode_functionality_nested_training_op(self):
+        actual = torch.rand((3, 3))
+        batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
+        expected = torch.clone(actual)
+        expected.sinh_()
+        expected.tanh_()
+        expected.relu_()
+        expected = batch(expected)
+
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual.sinh_()
+            actual.tanh_()
+            actual.relu_()
+            actual = batch(actual)
+        self.assertEqual(expected, actual)
+
+    # Tests that SchemaCheckMode wraps Torch.tensor with empty list input
+    def test_schema_check_mode_empty_list_input(self):
+        expected = torch.atleast_1d([])
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual = torch.atleast_1d([])
+        self.assertEqual(expected, actual)
+
     # Tests that an exception is raised for a mismatching mutation
     def test_mutation_check_fail(self):
-        with self.assertRaisesRegex(RuntimeError, "Argument running_mean is not defined as mutable but was mutated"):
-            x = torch.rand((3, 3), requires_grad=True)
-            batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
+        with self.assertRaisesRegex(RuntimeError, "Argument input is not defined as mutable but was mutated"):
+            x = torch.rand((3, 3))
+            y = torch.rand((3, 3))
             with enable_torch_dispatch_mode(SchemaCheckMode()):
-                batch(x)
+                IncorrectAliasTensor(x).sub(IncorrectAliasTensor(y))
 
-    # Tests that an exception is raised for a mismatching mutation over multiple ops
+    # # Tests that an exception is raised for a mismatching mutation over multiple ops
     def test_mutation_check_fail_multiple_operators(self):
-        with self.assertRaisesRegex(RuntimeError, "Argument running_mean is not defined as mutable but was mutated"):
-            x = torch.rand((3, 3), requires_grad=True)
-            batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
+        with self.assertRaisesRegex(RuntimeError, "Argument input is not defined as mutable but was mutated"):
+            x = torch.rand((3, 3))
+            y = torch.rand((3, 3))
             with enable_torch_dispatch_mode(SchemaCheckMode()):
-                x = x.sinh()
-                x = x.tanh()
-                x = x.relu()
-                batch(x)
+                IncorrectAliasTensor(x).sin().cos().sub(IncorrectAliasTensor(y))
 
     # Tests that an exception is raised for a mismatching alias
     def test_alias_check_fail_simple(self):
         with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
-            y = torch.zeros((3, 3))
+            y = torch.rand((3, 3))
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).add(IncorrectAliasTensor(y), alpha=2)
 
@@ -335,10 +374,72 @@ class TestSchemaCheck(JitTestCase):
             with enable_torch_dispatch_mode(s):
                 IncorrectAliasTensor(x).aminmax(dim=0)
 
-    # Tests that isAliasOf returns as expected
-    def test_is_alias_of(self):
+    # Tests that is_alias_of returns as expected
+    def test_is_alias_of_basic(self):
         x = torch.rand((3, 3), requires_grad=True)
         y = torch.rand((3, 3), requires_grad=True)
         y = x.add(x, alpha=2)
         self.assertTrue(torch._C._is_alias_of(x, x))
         self.assertFalse(torch._C._is_alias_of(x, y))
+
+    # Tests that is_alias_of returns as expected with empty containers
+    def test_is_alias_of_empty_container(self):
+        x = []
+        y = torch.rand((3, 3), requires_grad=True)
+        self.assertFalse(torch._C._is_alias_of(x, x))
+        self.assertFalse(torch._C._is_alias_of(x, y))
+
+    # Tests that overlaps returns as expected
+    def test_overlaps_basic(self):
+        x = torch.rand((3, 3), requires_grad=True)
+        y = torch.rand((3, 3), requires_grad=True)
+        z = [x, y]
+        self.assertTrue(torch._C._overlaps(x, x))
+        self.assertFalse(torch._C._overlaps(x, y))
+        self.assertTrue(torch._C._overlaps(z, x))
+        self.assertTrue(torch._C._overlaps(z, y))
+
+    # Tests that overlaps returns correctly with empty containers
+    def test_overlaps_empty_container(self):
+        x = []
+        y = [torch.rand((3, 3), requires_grad=True)]
+        # Anything overlaps nothing
+        self.assertTrue(torch._C._overlaps(y, x))
+        self.assertTrue(torch._C._overlaps(y, y))
+
+    # Tests that SchemaInfo Bindings work as expected
+    def test_schema_info_bind_basic(self):
+        class SchemaInfoBindTestMode(TorchDispatchMode):
+            def __init__(self, test_self):
+                self.test_self = test_self
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                named_arg_list = normalize_function(
+                    func,
+                    args,
+                    kwargs,
+                    normalize_to_only_use_kwargs=True
+                ).kwargs
+                schema_info_value_test = torch._C._SchemaInfo(func._schema)
+                schema_info_values_test = torch._C._SchemaInfo(func._schema)
+                self.test_self.assertFalse(schema_info_value_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                self.test_self.assertFalse(schema_info_values_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                for i in named_arg_list:
+                    schema_info_value_test.add_argument_value(i, named_arg_list[i])
+                schema_info_values_test.add_argument_values(named_arg_list)
+                self.test_self.assertTrue(schema_info_value_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+                self.test_self.assertTrue(schema_info_values_test.may_alias(
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 0),
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, 1)))
+
+                return func(*args, **kwargs)
+        x = torch.rand((3, 3))
+        schemaInfoCheck = SchemaInfoBindTestMode(self)
+        with enable_torch_dispatch_mode(schemaInfoCheck):
+            x.add(x)
