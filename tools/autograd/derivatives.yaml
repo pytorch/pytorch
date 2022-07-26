@@ -2769,6 +2769,10 @@
   self: non_differentiable
   output_differentiability: [False]
 
+- name: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  self: non_differentiable
+  output_differentiability: [False]
+
 - name: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   self: non_differentiable
   output_differentiability: [False]
