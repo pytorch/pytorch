@@ -95,7 +95,6 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(a, b, is_train=is_train)
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     def test_multiple_functors(self, device):
         code_string = '''
         template <typename T> T fn(T x, T mask) { return x * mask; }
@@ -133,7 +132,6 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
-    @skipCUDAIfRocm
     @parametrize("num_outputs", [1, 4, 8])
     def test_various_num_outputs(self, num_outputs):
         input = torch.rand(3, device='cuda')
@@ -162,7 +160,6 @@ class TestPythonJiterator(TestCase):
         for i in range(num_outputs):
             self.assertEqual(expected[i], result[i])
 
-    @skipCUDAIfRocm
     @parametrize("code_string", [
         "template <typename T> T my _kernel(T x) { return x; }",
         "template <typename T> Tmy_kernel(T x) { return x; }",
