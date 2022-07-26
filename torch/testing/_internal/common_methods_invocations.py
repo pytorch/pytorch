@@ -3094,9 +3094,9 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1, 4, 50)
     starts = (-2., 0, 4.3, 50)
     nsteps = (0, 1, 50)
-    for start, end, nstep in product(starts, ends, nsteps):
-        if not dtype.is_floating_point and not dtype.is_complex and (isinstance(start, float) or isinstance(end, float)):
-            continue
+    # Extra case to replicate off-by-one issue on CUDA
+    cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
+    for start, end, nstep in cases:
         if dtype == torch.uint8 and end < 0 or start < 0:
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
@@ -3105,19 +3105,18 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
 def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
     ends = (-3, 0, 1.2, 2, 4)
     starts = (-2., 0, 1, 2, 4.3)
-    n_steps = (0, 1, 2, 4)
+    nsteps = (0, 1, 2, 4)
     bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
-    for start, end, n_step, base in product(starts, ends, n_steps, bases):
-        if not dtype.is_floating_point and not dtype.is_complex and (isinstance(start, float) or isinstance(end, float)):
-            continue
+    for start, end, nstep, base in product(starts, ends, nsteps, bases):
         if dtype == torch.uint8 and end < 0 or start < 0:
             continue
-        if start > end:
+        if nstep == 1 and isinstance(start, float) and not (dtype.is_complex or dtype.is_floating_point):
+            # https://github.com/pytorch/pytorch/issues/82242
             continue
         if base is None:
-            yield SampleInput(start, args=(end, n_step), kwargs={"dtype": dtype, "device": device})
+            yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
         else:
-            yield SampleInput(start, args=(end, n_step, base), kwargs={"dtype": dtype, "device": device})
+            yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
@@ -13079,12 +13078,20 @@ op_db: List[OpInfo] = [
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
 
-               # linspace CPU implementation is wrong on integers (except uint8, int8)
+               # cpu implementation is wrong on some integral types
                # https://github.com/pytorch/pytorch/issues/81996
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
                             dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
                             dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+               # cuda implementation is off-by-one on some inputs due to precision issues
+               # https://github.com/pytorch/pytorch/issues/82230
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
+                            dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                            device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                            device_type="cuda"),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -16748,6 +16755,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16770,6 +16778,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
            aten_name='linalg_svdvals',
+           decomp_aten_name='_linalg_svd',
            dtypes=floating_and_complex_types(),
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
@@ -20678,23 +20687,25 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # cpu implementation is wrong https://github.com/pytorch/pytorch/issues/81996
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
-            # precision issues on both cpu and cuda
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.float16,), device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.float16,), device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.bfloat16, torch.float16)),
 
+            # cpu implementation is wrong on some integral types
+            # https://github.com/pytorch/pytorch/issues/81996
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+
+            # cuda implementation is off-by-one on some inputs due to precision issues
+            # https://github.com/pytorch/pytorch/issues/82230
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
         ),
         decorators=(
             DecorateInfo(
@@ -20717,15 +20728,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
-            # Off-by-one issue when casting floats to ints + precision issue on bfloat16
+            # Off-by-one issue when casting floats to ints
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.bfloat16, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
         ),
         decorators=(
@@ -21810,6 +21821,16 @@ python_ref_db = [
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.norm",
+        torch_opinfo_name="norm",
+        supports_out=True,
+        # Uses svdvals which does not support nvfuser
+        supports_nvfuser=False,
+        # Uses vector_norm inside and vector_norm is affected by
+        # https://github.com/pytorch/pytorch/issues/77216
+        validate_view_consistency=False,
     ),
     #
     # torch.linalg

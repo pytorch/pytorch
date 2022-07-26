@@ -3076,13 +3076,20 @@ def linspace(
 ) -> TensorLikeType:
     if dtype is None:
         dtype = torch.get_default_dtype()
+
+    # NB: NumPy actually doesn't do this cast, but for this ref, I'd rather have this
+    #     cast than not, because it allows us to always go into the precise path
+    #     if dtype is integral and not worry about whether start/end are float
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, float):
+            start = int(start)
+        if isinstance(end, float):
+            end = int(end)
+
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         raise NotImplementedError
     assert not isinstance(start, complex) and not isinstance(end, complex)  # for mypy
-    if (isinstance(start, float) or isinstance(end, float)) and not (
-        dtype.is_floating_point or dtype.is_complex
-    ):
-        raise NotImplementedError
+
     check(
         isinstance(steps, int),
         lambda: "steps must be int, not float",
@@ -3101,7 +3108,7 @@ def linspace(
         res = torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     elif steps == 1:
         res = torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    elif end - start == 0:
+    elif start == end:
         res = torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     else:
         if not dtype.is_complex and not dtype.is_floating_point:
@@ -3149,10 +3156,14 @@ def logspace(
 ) -> TensorLikeType:
     if dtype is None:
         dtype = torch.get_default_dtype()
-    if (isinstance(start, float) or isinstance(end, float)) and not (
-        dtype.is_floating_point or dtype.is_complex
-    ):
-        raise NotImplementedError
+
+    # NB: NumPy doesn't have this cast
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, float):
+            start = int(start)
+        if isinstance(end, float):
+            end = int(end)
+
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
         raise NotImplementedError
@@ -3330,6 +3341,32 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@out_wrapper(exact_dtype=True)
+def norm(
+    input: TensorLikeType,
+    p: Optional[Union[float, str]] = "fro",
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # In these cases we compute the "Frobenius norm"
+    if (
+        p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2)
+    ) or p is None:
+        p = 2
+    if isinstance(dim, int):
+        dim = [dim]
+    if isinstance(p, str):
+        # Here we either call the nuclear norm, or we call matrix_norm with some arguments
+        # that will throw an error
+        if dim is None:
+            dim = tuple(range(input.ndim))
+        return torch.linalg.matrix_norm(input, p, dim, keepdim, dtype=dtype)
+    else:
+        return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype)
+
+
 @register_decomposition(torch.ops.aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
     utils.check(
@@ -3339,5 +3376,6 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 
 
 import torch._refs.fft
+import torch._refs.linalg
 import torch._refs.nn.functional
 import torch._refs.special

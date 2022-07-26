@@ -445,6 +445,8 @@ class TestCommon(TestCase):
             # If the results are not close, checks that the
             # reference is more accurate than the torch op
             def _make_precise(x):
+                if isinstance(x, torch.dtype):
+                    return precise_dtype
                 if isinstance(x, torch.Tensor) and x.dtype is dtype:
                     return x.to(precise_dtype)
                 return x
@@ -1576,6 +1578,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.trunc_divide',
         '_refs.vsplit',
         '_refs.vstack',
+        '_refs.linalg.matrix_norm',
+        '_refs.linalg.norm',
+        '_refs.linalg.svd',
+        '_refs.linalg.svdvals',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
