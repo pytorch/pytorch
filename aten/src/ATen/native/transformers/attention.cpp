@@ -694,16 +694,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
             attn_mask->dtype())
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
-    const auto query = query_ / ::sqrt(static_cast<double>(embed_size));
+    const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
+                "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
 
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
         const auto L = query.size(-2), S = key.size(-2);
         attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
     }
     if (attn_mask.has_value()) {
+        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
+                "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
+                "when an explicit attn_mask is set");
         // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
         auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
         new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());

@@ -335,6 +335,7 @@ class parametrize(_TestParametrizer):
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
+            values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
                 if isinstance(values, subtest):
@@ -369,6 +370,10 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
                 yield (gen_test, test_name, param_kwargs)
+
+            if values is check_exhausted_iterator:
+                raise ValueError('An empty arg_values was passed to @parametrize. '
+                                 'Note that this may result from reuse of a generator.')
 
 
 class ProfilingMode(Enum):
@@ -507,6 +512,8 @@ torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
 CI_TEST_PREFIX = str(Path(os.getcwd()))
+CI_PT_ROOT = str(Path(os.getcwd()).parent)
+CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p):
     try:
@@ -570,6 +577,15 @@ def sanitize_test_filename(filename):
         filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
+
+# hack until https://github.com/pytorch/pytorch/issues/82109 is resolved
+def sanitize_if_functorch_test_filename(filename):
+    # absolute filenames must be converted to relative paths, otherwise,
+    # we cannot prepend test-reports/ to it
+    # (e.g. test-reports\\C:\\... on windows is nonsense)
+    if filename.startswith(CI_FUNCTORCH_ROOT):
+        filename = filename[len(CI_PT_ROOT) + 1:]
+    return filename
 
 def lint_test_case_extension(suite):
     succeed = True
@@ -691,7 +707,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
-        test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
+        test_filename = inspect.getfile(sys._getframe(1))
+        test_filename = sanitize_if_functorch_test_filename(test_filename)
+        test_filename = sanitize_test_filename(test_filename)
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         if test_filename in PYTEST_FILES and not IS_SANDCASTLE and not (
@@ -1967,7 +1985,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+                stack.enter_context(CrossRefMode())
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(
                 result=result,
@@ -3112,6 +3130,14 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
+def is_slow_gradcheck_env() -> bool:
+    return os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1"
+
+skipIfSlowGradcheckEnv = unittest.skipIf(
+    is_slow_gradcheck_env(),
+    "Tests that don't use gradcheck don't need to run on slow_gradcheck CI"
+)
+
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
@@ -3124,7 +3150,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -3144,7 +3170,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
+    if is_slow_gradcheck_env():
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
