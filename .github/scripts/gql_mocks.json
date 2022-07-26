@@ -1,5 +1,5 @@
 {
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=73811 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=73811 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -401,6 +401,15 @@
               "startCursor": "Y3Vyc29yOnYyOpHOP6yFeQ==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
           }
         }
       }
@@ -2018,11 +2027,11 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=31093 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=31093 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
-          "closed": false,
+          "closed": true,
           "isCrossRepository": true,
           "author": {
             "login": "mingxiaoh"
@@ -2525,6 +2534,30 @@
               "startCursor": "Y3Vyc29yOnYyOpHOKCmhXQ==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "triaged"
+                }
+              },
+              {
+                "node": {
+                  "name": "open source"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "Stale"
+                }
+              }
+            ]
           }
         }
       }
@@ -3727,11 +3760,11 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=76118 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=76118 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
-          "closed": false,
+          "closed": true,
           "isCrossRepository": false,
           "author": {
             "login": "malfet"
@@ -3802,9 +3835,7 @@
               {
                 "commit": {
                   "author": {
-                    "user": {
-                      "login": "alanwaketan"
-                    },
+                    "user": null,
                     "email": "jwtan@fb.com",
                     "name": "Jiewen Tan"
                   },
@@ -3824,9 +3855,7 @@
               {
                 "commit": {
                   "author": {
-                    "user": {
-                      "login": "alanwaketan"
-                    },
+                    "user": null,
                     "email": "jwtan@fb.com",
                     "name": "Jiewen Tan"
                   },
@@ -5809,6 +5838,20 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQdD9Sg==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "Stale"
+                }
+              }
+            ]
           }
         }
       }
@@ -6196,7 +6239,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=76123 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=76123 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -7733,6 +7776,20 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQqri9w==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "oncall: distributed"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
           }
         }
       }
@@ -7808,7 +7865,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=71759 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=71759 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -8629,12 +8686,41 @@
               "startCursor": "Y3Vyc29yOnYyOpHOPoR4Lg==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "triaged"
+                }
+              },
+              {
+                "node": {
+                  "name": "open source"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: nn"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: performance"
+                }
+              }
+            ]
           }
         }
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=75095 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=75095 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -10043,12 +10129,31 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQebHmg==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: not user facing"
+                }
+              },
+              {
+                "node": {
+                  "name": "module: primTorch"
+                }
+              }
+            ]
           }
         }
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=77700 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=77700 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -10789,6 +10894,20 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQ1FKZg==",
               "hasPreviousPage": false
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
           }
         }
       }
@@ -10850,7 +10969,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=68111 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=68111 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -12535,6 +12654,40 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQAuLsw==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "oncall: jit"
+                }
+              },
+              {
+                "node": {
+                  "name": "triaged"
+                }
+              },
+              {
+                "node": {
+                  "name": "open source"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "Reverted"
+                }
+              },
+              {
+                "node": {
+                  "name": "intel priority"
+                }
+              }
+            ]
           }
         }
       }
@@ -12730,7 +12883,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=73969 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=73969 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -13237,6 +13390,20 @@
               "startCursor": "Y3Vyc29yOnYyOpHOP11MjQ==",
               "hasPreviousPage": false
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "fb-exported"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
           }
         }
       }
@@ -13768,7 +13935,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=73099 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=73099 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -14555,6 +14722,35 @@
               "startCursor": "Y3Vyc29yOnYyOpHOPniAWQ==",
               "hasPreviousPage": true
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "oncall: jit"
+                }
+              },
+              {
+                "node": {
+                  "name": "open source"
+                }
+              },
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: onnx"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: bug fixes"
+                }
+              }
+            ]
           }
         }
       }
@@ -14762,7 +14958,7 @@
       }
     }
   },
-  "query_sha=5b6396d887f65ac906ed1de7d8832ee45013b4806d4d1ad5a40c8b75419af372 name=pytorch number=74649 owner=pytorch": {
+  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=74649 owner=pytorch": {
     "data": {
       "repository": {
         "pullRequest": {
@@ -15387,6 +15583,15 @@
               "startCursor": "Y3Vyc29yOnYyOpHOQDAOUg==",
               "hasPreviousPage": false
             }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "cla signed"
+                }
+              }
+            ]
           }
         }
       }
@@ -15594,6 +15799,9 @@
                 "login": "jfix71"
               },
               {
+                "login": "atuljangra"
+              },
+              {
                 "login": "idning"
               },
               {
@@ -15607,6 +15815,9 @@
               },
               {
                 "login": "radkris-git"
+              },
+              {
+                "login": "xunnanxu"
               },
               {
                 "login": "javier-m"
@@ -15691,29 +15902,29 @@
               },
               {
                 "login": "smessmer"
-              },
-              {
-                "login": "ananthsub"
-              },
-              {
-                "login": "d1jang"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOACRxtQ=="
+              "endCursor": "Y3Vyc29yOnYyOpHOACQ5JQ=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACRxtQ== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACQ5JQ== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "ananthsub"
+              },
+              {
+                "login": "d1jang"
+              },
               {
                 "login": "firstprayer"
               },
@@ -16007,29 +16218,29 @@
               },
               {
                 "login": "fduwjj"
-              },
-              {
-                "login": "frank-wei"
-              },
-              {
-                "login": "esqu1"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAGs5XQ=="
+              "endCursor": "Y3Vyc29yOnYyOpHOAGncmA=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAGs5XQ== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAGncmA== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "frank-wei"
+              },
+              {
+                "login": "esqu1"
+              },
               {
                 "login": "prabhat00155"
               },
@@ -16083,9 +16294,6 @@
               },
               {
                 "login": "Jack-Khuu"
-              },
-              {
-                "login": "alanwaketan"
               },
               {
                 "login": "mehtanirav"
@@ -16221,9 +16429,6 @@
               },
               {
                 "login": "robieta"
-              },
-              {
-                "login": "amirhmk"
               },
               {
                 "login": "davidxili"
@@ -16780,6 +16985,9 @@
                 "login": "yuguo68"
               },
               {
+                "login": "c-odrin"
+              },
+              {
                 "login": "chowarfb"
               },
               {
@@ -16829,11 +17037,14 @@
               },
               {
                 "login": "izaitsevfb"
+              },
+              {
+                "login": "weiwangmeta"
               }
             ],
             "pageInfo": {
               "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOBnF_2w=="
+              "endCursor": "Y3Vyc29yOnYyOpHOBoQSVA=="
             }
           }
         }
@@ -17718,11 +17929,14 @@
               },
               {
                 "login": "izaitsevfb"
+              },
+              {
+                "login": "weiwangmeta"
               }
             ],
             "pageInfo": {
               "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOBnF_2w=="
+              "endCursor": "Y3Vyc29yOnYyOpHOBoQSVA=="
             }
           }
         }
