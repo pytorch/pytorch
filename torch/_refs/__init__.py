@@ -1,43 +1,44 @@
+import builtins
+import collections
+import math
+import operator
+import warnings
+
+from collections.abc import Iterable
+from enum import Enum
+from functools import partial, reduce, wraps
+from typing import Callable, List, Optional, Sequence, Tuple, Union
+
 import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
 from torch._prims_common import (
     check,
+    DeviceLikeType,
+    DimsSequenceType,
     DimsType,
+    dtype_to_type,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_weakly_lesser_type,
+    Number,
+    NumberType,
+    REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     StrideType,
     TensorLike,
     TensorLikeType,
-    DeviceLikeType,
     TensorOrNumberLikeType,
-    DimsSequenceType,
     TensorSequenceType,
-    Number,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
-    REDUCTION_OUTPUT_TYPE_KIND,
-    is_weakly_lesser_type,
-    dtype_to_type,
 )
 from torch._prims_common.wrappers import (
-    elementwise_type_promotion_wrapper,
-    out_wrapper,
     _maybe_convert_to_dtype,
     _maybe_resize_out,
-    elementwise_unary_scalar_wrapper,
     _safe_copy_out,
+    elementwise_type_promotion_wrapper,
+    elementwise_unary_scalar_wrapper,
+    out_wrapper,
 )
-
-from collections.abc import Iterable
-from functools import reduce, partial, wraps
-from typing import Sequence, Optional, Union, Callable, List, Tuple
-import operator
-import builtins
-import warnings
-import math
-from enum import Enum
-import collections
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -3146,6 +3147,32 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@out_wrapper(exact_dtype=True)
+def norm(
+    input: TensorLikeType,
+    p: Optional[Union[float, str]] = "fro",
+    dim: Optional[DimsType] = None,
+    keepdim: bool = False,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # In these cases we compute the "Frobenius norm"
+    if (
+        p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2)
+    ) or p is None:
+        p = 2
+    if isinstance(dim, int):
+        dim = [dim]
+    if isinstance(p, str):
+        # Here we either call the nuclear norm, or we call matrix_norm with some arguments
+        # that will throw an error
+        if dim is None:
+            dim = tuple(range(input.ndim))
+        return torch.linalg.matrix_norm(input, p, dim, keepdim, dtype=dtype)
+    else:
+        return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype)
+
+
 @register_decomposition(torch.ops.aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
     utils.check(
@@ -3154,6 +3181,7 @@ def trace(self: TensorLikeType) -> TensorLikeType:
     return torch.sum(torch.diag(self, 0))
 
 
+import torch._refs.fft
+import torch._refs.linalg
 import torch._refs.nn.functional
 import torch._refs.special
-import torch._refs.fft
