@@ -115,7 +115,7 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
              std::isfinite(static_cast<double>(xend)),
              "unsupported range: ", xstart, " -> ", xend);
     TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-             "upper bound and larger bound inconsistent with step sign");
+             "upper bound and lower bound inconsistent with step sign");
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
       result.resize_({size});
