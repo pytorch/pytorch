@@ -76,7 +76,7 @@ class MklSparseCsrDescriptor
     : public MklSparseDescriptor<sparse_matrix, &mkl_sparse_destroy> {
  public:
   MklSparseCsrDescriptor(const Tensor& input) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_any_layout(input, kSparseCsr, kSparseBsr));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY((input.layout() == kSparseCsr || input.layout() == kSparseBsr));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
