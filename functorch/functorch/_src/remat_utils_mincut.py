@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Set
+from typing import Tuple, Dict, Set, Any
 import torch
 import torch.fx as fx
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -402,11 +402,6 @@ def find_min_cut(node_pair: Tuple[fx.Node, fx.Node], node_users_map: Dict[str, S
     return partition, cut_nodes, local_memory_reduced
 
 
-def check_remat(partition):
-    _, non_reachable = partition
-    return non_reachable != {"sink"}
-
-
 def get_fused_graph(traced_graph):
     supported_ops = NvFuserOperatorSupport()
     partitioner = CapabilityBasedPartitioner(traced_graph, supported_ops)
@@ -414,7 +409,7 @@ def get_fused_graph(traced_graph):
     return fused_graph
 
 
-def rematerialize_fused_graph(fused_graph, node_users_map):
+def rematerialize_fused_graph(fused_graph: fx.GraphModule, node_users_map: Dict[str, Set[fx.Node]]):
     """
     Modify the fused graph to rematerialize the nodes.
 
@@ -436,7 +431,13 @@ def rematerialize_fused_graph(fused_graph, node_users_map):
     return fused_graph
 
 
-def rematerialize(traced_graph):
+def rematerialize(traced_graph: fx.GraphModule):
+    """
+    Modify traced_graph to a graph with rematerialization.
+    The returned graph has a submodule fused_* for each fusion group.
+
+    It first obtains a fused graph, then rematerialize the fused graph.
+    """
     traced_graph.graph.eliminate_dead_code()
     traced_graph.recompile()
     node_users_map = {node.name: set(node.users.keys()) for node in traced_graph.graph.nodes}
@@ -445,9 +446,13 @@ def rematerialize(traced_graph):
     return rematerialize_fused_graph(fused_graph, node_users_map)
 
 
-def rematerialize_stat(traced_graph, stat):
+def rematerialize_stat(traced_graph: fx.GraphModule, stat: Dict[str, int]):
     """
     Modify traced_graph to a graph with rematerialization.
+    The returned graph has a submodule fused_* for each fusion group.
+
+    It first obtains a fused graph, then rematerialize the fused graph.
+
     ``stat`` is a dictionary and the stats of rematerialization will be stored in it.
     """
     global num_group_remat, memory_reduced, num_node_pairs
