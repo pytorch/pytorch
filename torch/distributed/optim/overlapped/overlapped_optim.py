@@ -11,17 +11,21 @@ class OverlappedOptimizer(object):
         self.zero_grad = zero_grad
         
     def step_param(self, param: Tensor, grad: Optional[Tensor]):
-        self._pre_step()
+        self._pre_step(param=param, grad=grad)
         self._step_param(param=param, grad=grad)
-        self._post_step()
+        self._post_step(param=param, grad=grad)
+
     def reset_lr(self, lr):
         self._functional_optim.defaults['lr'] = lr
-    def _pre_step(self):
+
+    def _pre_step(self, param, grad):
         if self.grad_scaler is not None:
-            self.grad_scaler.unscale_()
-    def _post_step(self, param):
+            self.grad_scaler.unscale_(param)
+
+    def _post_step(self, param, grad):
         if self.zero_grad:
             param.zero_grad()
+            
     def _step_param(self, param: Tensor, grad: Optional[Tensor]):
         """The actual optimizing algorithm"""
         raise NotImplementedError(

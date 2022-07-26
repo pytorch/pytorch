@@ -5,7 +5,7 @@ from .overlapped_optim import OverlappedOptimizer
 class OverlappedSGD(OverlappedOptimizer):
     def __init__(
         self,
-        params: Union(None, List[Tensor]),
+        params: Union[None, List[Tensor]],
         lr: float = 1e-2,
         momentum: float = 0.0,
         dampening: float = 0.0,
