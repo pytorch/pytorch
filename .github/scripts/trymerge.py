@@ -371,7 +371,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     re.MULTILINE
 )
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
-CIFLOW_LABEL = re.compile(r"ciflow/*")
+CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
