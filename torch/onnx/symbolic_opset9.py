@@ -7,8 +7,8 @@ release on 01/23/19
 import functools
 import math
 import sys
-import typing
 import warnings
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1400,9 +1400,9 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(
         g,
         input: _C.Value,
-        kernel_size: typing.Tuple[int, ...],
-        stride: typing.Tuple[int, ...],
-        padding: typing.Union[int, typing.Tuple[int, ...]],
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
         ceil_mode: int,
         count_include_pad: int,
         divisor_override=None,
@@ -2207,14 +2207,14 @@ def batch_norm(
 
 def _layer_norm_returns_normalized_input_mean_rstd(
     g,
-    input: _C.Value,
-    normalized_shape: typing.Sequence[int],
-    weight: _C.Value,
-    bias: _C.Value,
+    input: torch._C.Value,
+    normalized_shape: Sequence[int],
+    weight: torch._C.Value,
+    bias: torch._C.Value,
     eps: float,
     cudnn_enable: bool,
     return_mean_rstd: bool,
-) -> typing.Tuple[_C.Value, typing.Optional[_C.Value], typing.Optional[_C.Value]]:
+) -> Tuple[torch._C.Value, Optional[torch._C.Value], Optional[torch._C.Value]]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
@@ -4651,7 +4651,7 @@ def linalg_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
-    dim: typing.List[int],
+    dim: List[int],
     keepdim: int,
     dtype: torch._C.Value,
 ):
@@ -4683,11 +4683,11 @@ def linalg_norm(
 @symbolic_helper.parse_args("v", "f", "is", "i", "v")
 def linalg_vector_norm(
     g,
-    self: _C.Value,
+    self: torch._C.Value,
     ord: float,
-    dim: typing.List[int],
+    dim: List[int],
     keepdim: int,
-    dtype: _C.Value,
+    dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
@@ -4724,7 +4724,7 @@ def linalg_matrix_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
-    dim: typing.List[int],
+    dim: List[int],
     keepdim: int,
     dtype: torch._C.Value,
 ):
@@ -4827,7 +4827,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 @symbolic_helper.parse_args("v", "s")
-def meshgrid(g, tensor_list, indexing: typing.Optional[str] = None):
+def meshgrid(g, tensor_list, indexing: Optional[str] = None):
     if indexing is None:
         indexing = "ij"
     elif indexing not in {"ij", "xy"}:
@@ -5047,7 +5047,7 @@ def as_strided(g, self, sizes, strides, offset=None):
     self_1d = symbolic_helper._reshape_helper(
         g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
     )
-    ind: typing.Optional[torch.Tensor]
+    ind: Optional[torch.Tensor]
     if not symbolic_helper._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
         for i, (size, stride) in enumerate(zip(sizes, strides)):
@@ -5415,7 +5415,7 @@ class Prim:
         return None
 
     @staticmethod
-    def ListUnpack(g, *inputs, **kwargs) -> typing.Optional[typing.List[_C.Value]]:
+    def ListUnpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
         if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
             # Cancel the previous node if it is ListConstruct by returning its inputs
             # TODO(justinchuby): Use a public method in the helper module
