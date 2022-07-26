@@ -816,7 +816,10 @@ def signature(
                 default_init=(
                     "self.device()"
                     if is_like_or_new_function
-                    else topt_default_init("device") or "torch::tensors::get_default_device()"
+                    else (
+                        topt_default_init("device")
+                        or "torch::tensors::get_default_device()"
+                    )
                 ),
             )
         )
@@ -1228,9 +1231,9 @@ def arg_parser_unpack_method(
     elif isinstance(t, OptionalType):
         if str(t.elem) == "Tensor":
             return "optionalTensor"
-        elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Generator:
+        elif str(t.elem) == "Generator":
             return "generator"
-        elif isinstance(t.elem, ListType) and t.elem.elem.name == BaseTy.Dimname:
+        elif str(t.elem) == "Dimname[]":
             return "toDimnameListOptional"
         elif not has_default_init and default in (None, "None", "c10::nullopt"):
             # If default is None: append 'Optional' to elem's unpacking method
