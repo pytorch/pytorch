@@ -115,10 +115,21 @@ bool SchemaInfo::is_nondeterministic() const {
     return false;
   }
 
+#if defined C10_MOBILE
+  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
+      getNonDeterministicOps();
+  return std::any_of(
+      nondeterministic_ops.begin(),
+      nondeterministic_ops.end(),
+      [this](const c10 ::FunctionSchema& nondeterministic_op) {
+        return nondeterministic_op == this->schema_;
+      });
+#else
   const auto& op = c10::Dispatcher::singleton().findOp(
       c10::OperatorName(schema_.name(), schema_.overload_name()));
 
   return op && op->hasTag(at::Tag::nondeterministic_seeded);
+#endif
 }
 
 bool SchemaInfo::may_alias(
@@ -214,6 +225,42 @@ void SchemaInfo::ensureConservativity(
       }
     }
   }
+}
+
+std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
+  // This list of nondeterministic ops is copied from JIT ir.cpp.
+  static const std::vector<std::string> nondeterministic_op_strings = {
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
+      "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
+      "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
+      "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
+      "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
+      "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
+
+  std::vector<c10::FunctionSchema> nondeterministic_ops;
+  nondeterministic_ops.reserve(nondeterministic_op_strings.size());
+  for (const std::string& signature : nondeterministic_op_strings) {
+    nondeterministic_ops.push_back(torch::jit::parseSchema(signature));
+  }
+
+  return nondeterministic_ops;
 }
 
 std::vector<c10::FunctionSchema> SchemaInfo::getTrainingOps() {
