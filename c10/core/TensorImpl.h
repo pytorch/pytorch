@@ -564,7 +564,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
-    // TODO: make it non-virtual after a change to XLA
+  // TODO: make it non-virtual after a change to XLA
   virtual c10::SymInt sym_numel() const {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
@@ -579,7 +579,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual c10::SymInt sym_numel_custom() const;
-
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
@@ -1952,7 +1951,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // constructor.
       if (numel_.expect_int() == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
-           (storage_.nbytes() >= (numel_.expect_int() * data_type_.itemsize())))) {
+           (storage_.nbytes() >=
+            (numel_.expect_int() * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
         return storage_.data();
@@ -1971,7 +1971,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_.expect_int();
         auto dtor = data_type_.placementDelete();
-        auto data_ptr = allocator->allocate(numel_.expect_int() * data_type_.itemsize());
+        auto data_ptr =
+            allocator->allocate(numel_.expect_int() * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_.expect_int());

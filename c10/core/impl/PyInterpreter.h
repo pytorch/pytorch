@@ -136,8 +136,7 @@ struct C10_API PyInterpreter {
   using sym_sizes_sig =
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
-  using sym_numel_sig =
-      c10::SymInt(const PyInterpreter*, const TensorImpl*);
+  using sym_numel_sig = c10::SymInt(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -241,7 +240,8 @@ struct C10_API PyInterpreter {
     return (*layout_fn_)(this, self);
   }
 
-  __ubsan_ignore_function__ c10::SymInt sym_numel(const TensorImpl* self) const {
+  __ubsan_ignore_function__ c10::SymInt sym_numel(
+      const TensorImpl* self) const {
     return (*sym_numel_fn_)(this, self);
   }
 
