@@ -68,7 +68,7 @@ static void add_op_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("add"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("add"));
 #endif
 }
 
@@ -121,7 +121,7 @@ static void add_op_q_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
-  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("quantized_add"));
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_time("quantized_add"));
 #endif
 }
 
