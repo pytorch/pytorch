@@ -68,17 +68,13 @@ static void add_op_benchmark(benchmark::State& state) {
 
   // Act
   for (auto _ : state) {
-    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_out = at::add(in_vulkan1, in_vulkan2).cpu();
-    auto end = std::chrono::high_resolution_clock::now();
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("add"));
 #endif
 }
 
@@ -118,19 +114,15 @@ static void add_op_q_benchmark(benchmark::State& state) {
   const double scale2 = 0.15;
   const int zero_point2 = 15;
   for (auto _ : state) {
-    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_add = at::native::vulkan::ops::quantized_add(
         out_vulkan1, out_vulkan2, scale2, zero_point2);
     const auto vulkan_out = vulkan_to_cpu(vulkan_add, out_cpu1);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("quantized_add"));
 #endif
 }
 
@@ -196,7 +188,6 @@ static void conv2d_op_benchmark(benchmark::State& state) {
 
   // Act
   for (auto _ : state) {
-    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_out = at::conv2d(
                                 input_cpu.vulkan(),
                                 weights_cpu,
@@ -206,15 +197,12 @@ static void conv2d_op_benchmark(benchmark::State& state) {
                                 dilation,
                                 groups)
                                 .cpu();
-    auto end = std::chrono::high_resolution_clock::now();
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("conv2d"));
 #endif
 }
 
@@ -299,9 +287,8 @@ static void conv2d_op_q_benchmark(benchmark::State& state) {
   const double scale2 = 0.15;
   const int zero_point2 = 15;
   const auto shape_match =
-      at::rand({1, 1, 4, 4}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+      at::rand({1, 1, 64, 199}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   for (auto _ : state) {
-    auto start = std::chrono::high_resolution_clock::now();
     const auto vulkan_conv2d = at::native::vulkan::ops::conv2d(
         out_vulkan1,
         weight_q,
@@ -313,15 +300,12 @@ static void conv2d_op_q_benchmark(benchmark::State& state) {
         scale2,
         zero_point2);
     const auto vulkan_out = vulkan_to_cpu(vulkan_conv2d, shape_match);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    state.SetIterationTime(elapsed.count());
   }
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_time("quantized_conv2d"));
 #endif
 }
 
@@ -336,26 +320,26 @@ BENCHMARK(add_op_benchmark)
     ->Apply(CommonBenchmarkSettings)
     ->UseManualTime()
     ->Threads(1)
-    ->Iterations(10)
+    ->Iterations(100)
     ->Args({3, 40, 221, 193});
 BENCHMARK(add_op_q_benchmark)
     ->Apply(CommonBenchmarkSettings)
     ->UseManualTime()
     ->Threads(1)
-    ->Iterations(10)
+    ->Iterations(100)
     ->Args({3, 40, 221, 193});
 BENCHMARK(conv2d_op_benchmark)
     ->Apply(CommonBenchmarkSettings)
     ->UseManualTime()
     ->Threads(1)
-    ->Iterations(10)
-    ->Args({1, 3, 8, 8});
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
 BENCHMARK(conv2d_op_q_benchmark)
     ->Apply(CommonBenchmarkSettings)
     ->UseManualTime()
     ->Threads(1)
-    ->Iterations(10)
-    ->Args({1, 3, 8, 8});
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
 
 BENCHMARK_MAIN();
 
