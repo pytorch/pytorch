@@ -92,7 +92,16 @@ class MetadataIndex:
     """If the object is a tensor, offset into the tensor we're looking for"""
 
     index: Optional[int] = field(hash=False, compare=False, default=None)
-    """Index hint when searching for tensor chunk to speedup lookups (optional)"""
+    """
+    Index hint when searching for tensor chunk to speedup lookups (optional)
+
+    A common representation of a sharded tensor is as a list of chunks so to
+    find the index in such a list you need to linear search it.
+
+    When constructing an instance of MetadataIndex that points to that list,
+    one can provide the index as a hint and it will be probed first before
+    the linear search and thus making it significantly faster.
+    """
 
     def __init__(self, fqn: str, offset: Optional[Sequence[int]] = None, index: Optional[int] = None):
         # We must use object.__setattr__ due to frozen=True
