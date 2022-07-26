@@ -391,14 +391,6 @@ if (${tensor_name}_storage_saved.has_value() &&
 """
 )
 
-# See [Note: ITensorListRef]
-# Materialize the tensor list once before using.
-MATERIALIZE_TENSORLIST = CodeTemplate(
-    """\
-auto ${tensorlist_name}_materialized = ${tensorlist_name}.materialize();
-"""
-)
-
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
@@ -1172,12 +1164,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg),
                 ]
                 stmts_after_call += [
-                    ENFORCE_SAME_TENSORLIST_STORAGE.substitute(
-                        tensorlist_name=arg
-                    ),
-                    ENFORCE_SAME_TENSORLIST_IMPL.substitute(
-                        tensorlist_name=arg
-                    ),
+                    ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                    ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg),
                 ]
             elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
                 stmts_before_call += [

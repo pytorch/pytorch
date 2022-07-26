@@ -313,7 +313,10 @@ using _MaterializedIListRefElem = typename std::conditional<
     T>::type;
 
 template <typename T>
-using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConstRef<T>>>;
+using MaterializedIListRefElem = _MaterializedIListRefElem<IListRefConstRef<T>>;
+
+template <typename T>
+using MaterializedIListRef = std::vector<MaterializedIListRefElem<T>>;
 
 } // namespace detail
 
