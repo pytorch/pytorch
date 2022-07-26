@@ -65,7 +65,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
 cudaStream_t getStreamForHandle(cublasHandle_t handle) {
   cudaStream_t stream = nullptr;
   CUBLAS_ENFORCE(cublasGetStream(handle, &stream));
-  CHECK_NOTNULL(stream);
+  TORCH_CHECK_NOTNULL(stream);
   return stream;
 }
 
