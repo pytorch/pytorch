@@ -2,7 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 
 namespace at {
 namespace native {

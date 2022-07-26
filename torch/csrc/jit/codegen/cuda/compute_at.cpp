@@ -905,7 +905,7 @@ ComputeAt::ComputeAt(
       " producer: ",
       producer_);
   TORCH_INTERNAL_ASSERT(
-      reference_position_ >= 0 && reference_position_ <= reference_->nDims(),
+      reference_position_ <= reference_->nDims(),
       "Invalid computeAt axis, received ",
       reference_position_,
       " but should be > -",

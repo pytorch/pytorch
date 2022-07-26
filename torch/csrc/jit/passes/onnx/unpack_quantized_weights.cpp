@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -193,7 +193,6 @@ std::vector<Node*> CreateQuantizedWeights(
       at::from_blob(
           data, c10::IntArrayRef(shapes), c10::IntArrayRef(strides), at::kChar)
           .to(at::kCPU);
-  auto options = c10::TensorOptions().dtype(at::kChar).device(at::kCPU);
   // Need clone because at::from_blob does not take ownership of data.
   data_node->t_(Symbol::attr("value"), data_value.clone());
 

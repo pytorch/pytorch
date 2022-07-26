@@ -246,18 +246,17 @@ void DistAutogradContainer::sendReleaseContextRpc(
           CleanupAutogradContextReq(context_id).toMessage(),
           options);
 
-      cleanupFuture->addCallback(
-          [worker_id](rpc::JitFuture& future) {
-            if (future.hasError()) {
-              std::string errorMsg = c10::str(
-                  "Could not release Dist Autograd Context on node ",
-                  worker_id,
-                  ": ",
-                  future.tryRetrieveErrorMessage());
-              LOG(ERROR) << errorMsg;
-              return;
-            }
-          });
+      cleanupFuture->addCallback([worker_id](rpc::JitFuture& future) {
+        if (future.hasError()) {
+          std::string errorMsg = c10::str(
+              "Could not release Dist Autograd Context on node ",
+              worker_id,
+              ": ",
+              future.tryRetrieveErrorMessage());
+          LOG(ERROR) << errorMsg;
+          return;
+        }
+      });
     } catch (const std::exception& e) {
       LOG(INFO)
           << "Failed to send RPC to clear Dist Autograd context to worker id: "

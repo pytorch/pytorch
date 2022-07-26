@@ -384,6 +384,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
+    .. note:: This setting alone is not always enough to make an application
+        reproducible. Refer to :ref:`reproducibility` for more information.
+
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
         interface for this feature.
 
@@ -577,13 +580,47 @@ def get_float32_matmul_precision() -> builtins.str:
     return _C._get_float32_matmul_precision()
 
 def set_float32_matmul_precision(precision):
-    r"""Sets the precision of float32 matrix multiplication (one of HIGHEST, HIGH, MEDIUM).
-    Original RFC: https://github.com/pytorch/pytorch/issues/76440
+    r"""Sets the internal precision of float32 matrix multiplications.
+
+    Running float32 matrix multiplications in lower precision may significantly increase
+    performance, and in some programs the loss of precision has a negligible impact.
+
+    Supports three settings:
+
+        * "highest", float32 matrix multiplications use the float32 datatype for
+          internal computations.
+        * "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
+          datatypes for internal computations, if fast matrix multiplication algorithms
+          using those datatypes internally are available. Otherwise float32
+          matrix multiplications are computed as if the precision is "highest".
+        * "medium", float32 matrix multiplications use the bfloat16 datatype for
+          internal computations, if a fast matrix multiplication algorithm
+          using that datatype internally is available. Otherwise float32
+          matrix multiplications are computed as if the precision is "high".
+
+    .. note::
+
+        This does not change the output dtype of float32 matrix multiplications,
+        it controls how the internal computation of the matrix multiplication is performed.
+
+    .. note::
+
+        This does not change the precision of convolution operations. Other flags,
+        like `torch.backends.cudnn.allow_tf32`, may control the precision of convolution
+        operations.
+
+    .. note::
+
+        This flag currently only affects one native device type: CUDA.
+        If "high" or "medium" are set then the TensorFloat32 datatype will be used
+        when computing float32 matrix multiplications, equivalent to setting
+        `torch.backends.cuda.matmul.allow_tf32 = True`. When "highest" (the default)
+        is set then the float32 datatype is used for internal computations, equivalent
+        to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
+
     Args:
-        precision(str): default "highest": avoid internally reducing precision with
-        formats such as TF32.
-        If "high," allow TF32.
-        If "medium," allow TF32.
+        precision(str): can be set to "highest" (default), "high", or "medium" (see above).
+
     """
     _C._set_float32_matmul_precision(precision)
 
@@ -920,9 +957,12 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+    torch_module_name = '.'.join([__name__, device_type])
+    sys.modules[torch_module_name] = module
 
 # expose return_types
 from . import return_types
 if sys.executable != 'torch_deploy':
     from . import library
-    from . import _meta_registrations
+    if not TYPE_CHECKING:
+        from . import _meta_registrations

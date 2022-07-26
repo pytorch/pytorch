@@ -28,7 +28,6 @@ const IrBuilder* getIrBuilder() {
   return builder;
 }
 
-
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
@@ -50,5 +49,5 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
   return getBackend()->CreateLoweringContext(name, device);
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

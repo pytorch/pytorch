@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/codegen/cuda/type_promotion.h>
@@ -191,6 +192,73 @@ TensorView* unsqueeze(TensorView* x, int dim) {
   std::vector<bool> broadcast_axes(ndims + 1, false);
   broadcast_axes[dim] = true;
   return broadcast(x, broadcast_axes);
+}
+
+TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
+  std::vector<IterDomain*> out_domain(inp_domain.size());
+
+  auto normalized_new2old =
+      ir_utils::normalizeNew2Old(new2old, inp_domain.size());
+
+  for (const auto i : c10::irange(out_domain.size())) {
+    auto in_id = inp_domain[new2old[i]];
+    out_domain[i] = in_id->cloneWithoutRFactor();
+  }
+
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      x->getDataType().value());
+  IrBuilder::create<TransposeOp>(out_tensor, x, normalized_new2old);
+  return out_tensor;
+}
+
+TensorView* transpose(TensorView* x, int64_t dim0, int64_t dim1) {
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  if (dim0 < 0) {
+    dim0 = ndims + dim0;
+  }
+
+  if (dim1 < 0) {
+    dim1 = ndims + dim1;
+  }
+
+  TORCH_CHECK(
+      dim0 >= 0 && dim0 <= ndims, "Invalid transpose dimension 0: ", dim0);
+
+  TORCH_CHECK(
+      dim1 >= 0 && dim1 <= ndims, "Invalid transpose dimension 1: ", dim1);
+
+  std::vector<int64_t> new2old(ndims);
+  for (const auto i : c10::irange(ndims)) {
+    if (i == dim0) {
+      new2old[i] = dim1;
+    } else if (i == dim1) {
+      new2old[i] = dim0;
+    } else {
+      new2old[i] = i;
+    }
+  }
+  return permute(x, new2old);
+}
+
+TensorView* transpose(TensorView* x) {
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_CHECK(
+      ndims <= 2,
+      "Expected a tensor with <= 2 dimensions, but it has ",
+      ndims,
+      "D.");
+
+  // short-circuit: return original tensorview if less than 2 dimensions
+  if (ndims < 2) {
+    return x;
+  }
+
+  return transpose(x, 0, 1);
 }
 
 } // namespace cuda

@@ -1,5 +1,5 @@
-#include <torch/csrc/CudaIPCTypes.h>
 #include <ATen/MapAllocator.h>
+#include <torch/csrc/CudaIPCTypes.h>
 #include <map>
 #include <mutex>
 #include <random>
@@ -32,7 +32,9 @@ struct CudaIPCGlobalEntities {
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  CudaIPCGlobalEntities() { alive = true; }
+  CudaIPCGlobalEntities() {
+    alive = true;
+  }
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
@@ -77,7 +79,8 @@ bool CudaIPCSentDataLimbo::collect() {
     }
     shared_blocks_ = std::move(kept_blocks);
   }
-  // Need to reset blocks out of the critical section here, otherwise it deadlocks.
+  // Need to reset blocks out of the critical section here, otherwise it
+  // deadlocks.
   for (auto& sd : reset_blocks) {
     sd.reset();
   }
@@ -107,7 +110,7 @@ uint64_t CudaIPCSentDataLimbo::size() {
 void CudaIPCSentDataDelete(void* ptr) {
   std::unique_ptr<CudaIPCSentData> sent_data(
       static_cast<CudaIPCSentData*>(ptr));
-  if(!CudaIPCGlobalEntities::alive) {
+  if (!CudaIPCGlobalEntities::alive) {
     return;
   }
   if (sent_data->counter_value() > 0) {
@@ -117,7 +120,7 @@ void CudaIPCSentDataDelete(void* ptr) {
 }
 
 void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
-  if(!CudaIPCGlobalEntities::alive) {
+  if (!CudaIPCGlobalEntities::alive) {
     return;
   }
   std::lock_guard<std::mutex> lock(
@@ -145,23 +148,25 @@ CudaIPCSentData::CudaIPCSentData(
       original_ptr_(),
       device_(device) {
 #if !defined(USE_ROCM)
-  // CUDA have the unofficial limit on the number of recorded blocking interprocess
-  // events, to prevent using of all events, we are switching to StreamSync
-  // before limit reached.
+  // CUDA have the unofficial limit on the number of recorded blocking
+  // interprocess events, to prevent using of all events, we are switching to
+  // StreamSync before limit reached.
   //
   //  ```python
   //  import torch
   //  a = [ torch.cuda.Event(
-  //      enable_timing=False, blocking=True, interprocess=True) for i in range(30000) ]
+  //      enable_timing=False, blocking=True, interprocess=True) for i in
+  //      range(30000) ]
   //  [i.record() for i in a]
   //  ```
   //
-  if (cuda_ipc_global_entities.sync_events_used_.load() < CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
+  if (cuda_ipc_global_entities.sync_events_used_.load() <
+      CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
-    cuda_ipc_global_entities.sync_events_used_ ++;
+    cuda_ipc_global_entities.sync_events_used_++;
     C10_CUDA_CHECK(cudaEventCreateWithFlags(
         &event_,
         cudaEventDisableTiming | cudaEventInterprocess |
@@ -191,10 +196,10 @@ CudaIPCSentData::~CudaIPCSentData() {
     if (event_sync_required_) {
       at::cuda::CUDAGuard device_guard(device_.index());
       cudaEventDestroy(event_);
-      if(!CudaIPCGlobalEntities::alive) {
+      if (!CudaIPCGlobalEntities::alive) {
         return;
       }
-      cuda_ipc_global_entities.sync_events_used_ --;
+      cuda_ipc_global_entities.sync_events_used_--;
     }
   } catch (...) { /* No throw */
   }
@@ -212,7 +217,8 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
       std::string ref_counter_handle = at::NewProcessWideShmHandle();
 
-      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+      int flags =
+          at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
       at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
@@ -240,7 +246,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
 }
 
 bool CudaIPCCollect() {
-  if(!CudaIPCGlobalEntities::alive) {
+  if (!CudaIPCGlobalEntities::alive) {
     return true;
   }
   bool freed_memory = cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();

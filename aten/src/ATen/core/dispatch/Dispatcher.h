@@ -14,8 +14,11 @@
 #include <type_traits>
 
 #include <ATen/core/grad_mode.h>
+#include <ATen/core/enum_tag.h>
 
 namespace c10 {
+
+TORCH_API bool show_dispatch_trace();
 
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
@@ -177,7 +180,7 @@ public:
    * If a schema with the same operator name and overload name already exists,
    * this function will check that both schemas are exactly identical.
    */
-  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug);
+  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug, std::vector<at::Tag> tags = {});
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -336,6 +339,19 @@ public:
 
   void checkInvariants() const {
     return operatorDef_->op.checkInvariants();
+  }
+
+  c10::ArrayRef<at::Tag> getTags() const {
+    return operatorDef_->op.getTags();
+  }
+
+  bool hasTag(const at::Tag& tag) const {
+    for(const auto& tag_: getTags()) {
+      if (tag == tag_) {
+        return true;
+      }
+    }
+    return false;
   }
 
   template<class FuncType>
@@ -543,11 +559,16 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(!step_callbacks.empty() && op.operatorDef_->op.isObserved())) {
-    return callWithDispatchKeySlowPath<Return, Args...>(op, step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
+  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(step_callbacks.has_value() && op.operatorDef_->op.isObserved())) {
+    return callWithDispatchKeySlowPath<Return, Args...>(op, *step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
@@ -558,6 +579,11 @@ template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
@@ -566,11 +592,16 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(!step_callbacks.empty() && entry.isObserved())) {
-    at::RecordFunction guard(std::move(step_callbacks));
+  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(step_callbacks.has_value() && entry.isObserved())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
     auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
@@ -592,6 +623,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
+#ifdef DEBUG
+  if (show_dispatch_trace()) {
+      std::cout << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+  }
+#endif
   const auto& kernel = entry.lookup(dispatchKeySet);
   return kernel.callBoxed(op, dispatchKeySet, stack);
 }

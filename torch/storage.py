@@ -16,7 +16,6 @@ except ModuleNotFoundError:
 T = TypeVar('T', bound='Union[_StorageBase, _TypedStorage]')
 class _StorageBase(object):
     _cdata: Any
-    is_cuda: bool = False
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
@@ -63,12 +62,24 @@ class _StorageBase(object):
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs) -> T: ...  # noqa: E704
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
+    @classmethod
+    def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
+    @property
+    def is_cuda(self): ...  # noqa: E704
+    @classmethod
+    def from_file(cls, filename, shared, nbytes) -> T: ...  # noqa: E704
+    @classmethod
+    def _expired(cls, *args, **kwargs) -> T: ...  # noqa: E704
 
     def __str__(self):
-        data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        return data_str + (
-            f'\n[{torch.typename(self)}(device={self.device}) '
+        info_str = (
+            f'[{torch.typename(self)}(device={self.device}) '
             f'of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -107,6 +118,13 @@ class _StorageBase(object):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
         if self.device.type != 'cpu':
             return torch._UntypedStorage(self.size()).copy_(self, False)
+        else:
+            return self
+
+    def mps(self):
+        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        if self.device.type != 'mps':
+            return torch._UntypedStorage(self.size(), device="mps").copy_(self, False)
         else:
             return self
 
@@ -209,8 +227,14 @@ class _StorageBase(object):
 
 
 class _UntypedStorage(torch._C.StorageBase, _StorageBase):
-    pass
+    def __getitem__(self, *args, **kwargs):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+        return super().__getitem__(*args, **kwargs)
 
+    @property
+    def is_cuda(self):
+        return self.device.type == 'cuda'
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
@@ -330,7 +354,7 @@ class _TypedStorage:
                 return _TypedStorage(
                     *args,
                     dtype=cls.dtype,
-                    device='cuda' if eval(cls.__module__) is torch.cuda else 'cpu')
+                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu')
 
             else:
                 if len(args) != 0:
@@ -426,7 +450,7 @@ class _TypedStorage:
 
     @property
     def is_cuda(self):
-        return self._storage.device.type == 'cuda'
+        return self.device.type == 'cuda'
 
     def _untyped(self):
         return self._storage
@@ -470,6 +494,8 @@ class _TypedStorage:
     def __setitem__(self, idx, value):
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
+        if torch.is_storage(value):
+            raise RuntimeError(f'cannot set item with value type {type(value)}')
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
@@ -488,6 +514,9 @@ class _TypedStorage:
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+
         # NOTE: Before _TypedStorage existed, indexing with a slice used to be
         # possible for <type>Storage objects. However, it would return
         # a storage view, which would be a hassle to implement in _TypedStorage,
@@ -545,10 +574,14 @@ class _TypedStorage:
         return self._storage.get_device()
 
     def __str__(self):
-        data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        return data_str + (
-            f'\n[{torch.typename(self)}(dtype={self.dtype}, '
+        info_str = (
+            f'[{torch.typename(self)}(dtype={self.dtype}, '
             f'device={self.device}) of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -633,7 +666,7 @@ class _TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._free_weak_ref(*args, **kwargs)
+        return _UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)
@@ -739,7 +772,7 @@ class _TypedStorage:
         """
         if cls == _TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
-        untyped_storage = eval(cls.__module__)._UntypedStorage.from_file(
+        untyped_storage: _UntypedStorage = _UntypedStorage.from_file(
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
@@ -748,7 +781,7 @@ class _TypedStorage:
 
     @classmethod
     def _expired(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._expired(*args, **kwargs)
+        return _UntypedStorage._expired(*args, **kwargs)
 
     def is_pinned(self):
         return self._storage.is_pinned()
@@ -800,10 +833,10 @@ class _TypedStorage:
         if self.device.type not in ['cpu', 'cuda']:
             return None
 
-        module = 'torch.' if self.device.type == 'cpu' else 'torch.cuda.'
+        module = torch if self.device.type == 'cpu' else torch.cuda
 
         try:
-            return eval(module + storage_name)
+            return getattr(module, storage_name)
         except AttributeError:
             return None
 

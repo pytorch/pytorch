@@ -555,39 +555,41 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
 }
 
 // Debug function that prints the current state of the sorter.
-std::string ExprSegmentationSorter::toString(int verbosity) const {
-  std::stringstream ss;
-  ss << "{\n";
-  for (auto& group : groups_) {
-    ss << "  " << group.get() << "\n";
+//
+// Uncomment if needed.
+// std::string ExprSegmentationSorter::toString(int verbosity) const {
+//   std::stringstream ss;
+//   ss << "{\n";
+//   for (auto& group : groups_) {
+//     ss << "  " << group.get() << "\n";
 
-    if (verbosity > 1) {
-      if (group->producerEdges().size() > 0) {
-        ss << "Produced by groups with edges: { \n";
-        for (auto producer_edge : group->producerEdges()) {
-          ss << producer_edge->producer_val_ << " -> "
-             << producer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
+//     if (verbosity > 1) {
+//       if (group->producerEdges().size() > 0) {
+//         ss << "Produced by groups with edges: { \n";
+//         for (auto producer_edge : group->producerEdges()) {
+//           ss << producer_edge->producer_val_ << " -> "
+//              << producer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
 
-    if (verbosity > 1) {
-      if (group->consumerEdges().size() > 0) {
-        ss << "Consumed by groups with edges: { \n";
-        for (auto consumer_edge : group->consumerEdges()) {
-          ss << consumer_edge->producer_val_ << " -> "
-             << consumer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
-  }
-  ss << "}\n";
-  return ss.str();
-}
+//     if (verbosity > 1) {
+//       if (group->consumerEdges().size() > 0) {
+//         ss << "Consumed by groups with edges: { \n";
+//         for (auto consumer_edge : group->consumerEdges()) {
+//           ss << consumer_edge->producer_val_ << " -> "
+//              << consumer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
+//   }
+//   ss << "}\n";
+//   return ss.str();
+// }
 
 namespace {
 

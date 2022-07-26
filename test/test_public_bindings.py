@@ -188,6 +188,7 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
+            "SymbolicIntNode",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -241,6 +242,13 @@ class TestPublicBindings(TestCase):
             "vitals_enabled",
 
             "wait",
+            "Tag",
+            "inplace_view",
+            "view_copy",
+            "generated",
+            "dynamic_output_shape",
+            "nondeterministic_bitwise",
+            "nondeterministic_seeded",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
@@ -289,7 +297,8 @@ class TestPublicBindings(TestCase):
                 if elem_module is None:
                     why_not_looks_public = "because it does not have a `__module__` attribute"
                 elem_modname_starts_with_mod = elem_module is not None and \
-                    elem_module.startswith(modname) and '._' not in elem_module
+                    elem_module.startswith(allow_dict["being_migrated"].get(modname, modname)) and \
+                    '._' not in elem_module
                 if not why_not_looks_public and not elem_modname_starts_with_mod:
                     why_not_looks_public = f"because its `__module__` attribute (`{elem_module}`) is not within the " \
                         f"torch library or does not start with the submodule where it is defined (`{modname}`)"
