@@ -271,6 +271,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "new_empty"),
     # decomp has problem even with opmath
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
