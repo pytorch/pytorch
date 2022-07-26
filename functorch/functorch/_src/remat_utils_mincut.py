@@ -1,4 +1,6 @@
+from typing import Tuple, Dict, Set
 import torch
+import torch.fx as fx
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.backends.nvfuser import NvFuserOperatorSupport
 from torch.fx.passes.tools_common import legalize_graph
@@ -293,9 +295,19 @@ def copy_nodes(node_pair, fused_graph, name_to_node, partition, cut_nodes):
     remove_unused_output(fused_graph, module_origin)
 
 
-def find_min_cut(node_pair, node_users_map, fused_graph):
+def find_min_cut(node_pair: Tuple[fx.Node, fx.Node], node_users_map: Dict[str, Set[fx.Node]], fused_graph: fx.GraphModule):
     """
-        The mincut value is the cost of reading/writing between the two fusion groups
+    Use a min-cut algorithm to determine whether rematerialization between the ```node_pair``` 
+    is needed and which nodes should be rematerialized. 
+    This algorithm minimizes the memory reading/writing cost of computing the outputs of these two fusion groups. 
+    The mincut value is the cost of reading/writing between the two fusion groups.
+
+    Args:
+        node_pair (Tuple[fx.Node, fx.Node]): a pair of nodes in the fusion graph. We want to find the mincut between them. 
+            The first node is the origin node and the second node is the destination node. They should be "touching", 
+            meaning the destination node should use the outputs of the origin node, either directly or through a getitem node.
+        node_users_map (Dict[str, Set[fx.Node]]): map from a node's name its users in the original graph G
+        fused_graph (fx.GraphModule): the fused graph (of some FX graph G) where each fusion group is a submodule
     """
 
     try:
@@ -403,6 +415,13 @@ def get_fused_graph(traced_graph):
 
 
 def rematerialize_fused_graph(fused_graph, node_users_map):
+    """
+    Modify the fused graph to rematerialize the nodes.
+
+    Args:
+        fused_graph: the fused graph (of some FX graph G) where each fusion group is a submodule
+        node_users_map (Dict[str, Set[fx.Node]]): map from a node's name its users in the original graph G
+    """
     global num_group_remat, num_node_pairs, memory_reduced
     name_to_node = {node.name: node for node in fused_graph.graph.nodes}
 

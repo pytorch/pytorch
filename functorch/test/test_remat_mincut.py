@@ -508,7 +508,7 @@ class RandomOpTestCase(TestCase):
                 vals.append(new_val)
             return vals[-1]
 
-        a = torch.rand(5, device='cuda')
+        a = torch.rand(5)
 
         for _ in range(30):
             traced_graph = make_fx(frandom, decomposition_table={torch.ops.aten.detach.default: lambda x: x})(a)
