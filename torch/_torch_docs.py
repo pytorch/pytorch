@@ -3835,7 +3835,7 @@ Example::
     >>> torch.dist(x, y, 3)
     tensor(1.6973)
     >>> torch.dist(x, y, 0)
-    tensor(inf)
+    tensor(4.)
     >>> torch.dist(x, y, 1)
     tensor(2.6537)
 """.format(
