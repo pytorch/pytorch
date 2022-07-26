@@ -225,7 +225,8 @@ void initONNXBindings(PyObject* module) {
           "Write `args` to the previously specified ONNX log stream.")
       .def(
           "_jit_onnx_create_full_scope_name",
-          ::torch::jit::onnx::ONNXScopeName::createFullScopeName,
+          ::torch::wrap_pybind_function(
+              ::torch::jit::onnx::ONNXScopeName::createFullScopeName),
           "Create a full scope name from class name and variable name.");
 
   m.def(
