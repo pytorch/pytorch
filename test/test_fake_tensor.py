@@ -88,10 +88,12 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertTrue(isinstance(out, FakeTensor))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_setitem(self):
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
-            x = torch.rand([16, 1], device="cpu")
-            x[..., 0] = 0
+        for device in ["cpu", "cuda"]:
+            with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+                x = torch.rand([16, 1], device=device)
+                x[..., 0] = 0
 
     def test_constructor(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
@@ -147,8 +149,9 @@ class FakeTensorTest(TestCase):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_fallback_kernels=False)):
             filters = torch.randn(8, 4, 3, 3).cuda()
             inputs = torch.randn(1, 4, 5, 5).cuda()
-            with self.assertRaises(NotImplementedError):
-                torch.nn.functional.conv2d(inputs, filters, padding=1)
+            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
+            self.assertEqual(out.device.type, "cuda")
+            self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_fallback_kernels=True)):
             # intentionally bad inputs
@@ -167,7 +170,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):
-        with FakeTensorMode.push():
+        with FakeTensorMode():
             x = torch.empty(1, device="cuda")
             y = torch.empty(1, device=f"cuda:{torch.cuda.current_device()}")
             out = x + y
