@@ -25,7 +25,7 @@ There are 2 types of data sparsity callbacks
         'sparse_block_shape': (1, 4),
         'zeros_per_block': 4
     }
-    pt_callback = PostTrainingDataSparsity(DataNormSparsifier, sparsifier_args)
+    pt_callback = PostTrainingDataSparsity(data_sparsifier_class=DataNormSparsifier, data_sparsifier_args=sparsifier_args)
     ```
 
 2. ```TrainingAwareDataSparsity```: callback class to sparsify model during training. In addition to ```data_sparsifier_class``` and ```data_sparsifier_args```,
@@ -35,6 +35,7 @@ There are 2 types of data sparsity callbacks
     2. ```data_scheduler_args```: the arguments/config for the data scheduler constructor that will be used while creating the object.
 
     Example:
+
     ```
     from data_sparsity import TrainingAwareDataSparsity
     sparsifier_args = {
@@ -64,10 +65,10 @@ There are 2 types of data sparsity callbacks
 ```
 pl_module = SomePLModule()  # pl_module.model should specify the pytorch model
 
-ds_callback = SomeDataSparsifierCallback(..)
+ds_callback = SomeDataSparsifierCallback(data_sparsifier_class=..., data_sparsifier_args=..., ...)  # add scheduler if TrainingAwareDataSparsifier
 trainer = Trainer(callbacks=[ds_callback])
 
-trainer.fit(pl_module, ...)
+trainer.fit(pl_module, train_data_loader, val_data_loader)
 
 # NOTE: pl_module.model is not sparsified
 

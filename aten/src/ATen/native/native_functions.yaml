@@ -1122,6 +1122,10 @@
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
+- func: _NestedTensor_GeneralizedBMM(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _NestedTensor_GeneralizedBMM
+
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
   device_guard: False
@@ -1972,7 +1976,7 @@
     MPS: empty_mps
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
-    SparseCPU, SparseCUDA: empty_sparse
+    SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
 
@@ -1983,7 +1987,7 @@
     MPS: empty_symint_mps
     Meta: empty_symint_meta
     MkldnnCPU: empty_symint_mkldnn
-    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCPU, SparseCUDA, SparseMeta: empty_symint_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
     QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
 
@@ -2061,7 +2065,7 @@
   dispatch:
     CompositeExplicitAutograd: empty_like
     QuantizedCPU, QuantizedCUDA: empty_like_quantized
-    SparseCPU, SparseCUDA: empty_like_sparse_coo
+    SparseCPU, SparseCUDA, SparseMeta: empty_like_sparse_coo
     SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3757,15 +3761,15 @@
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
 
-- func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint(int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
 
-- func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
 
-- func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3901,6 +3905,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: reshape
+    NestedTensorCPU, NestedTensorCUDA: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4382,9 +4389,6 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: softmax
-    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4409,6 +4413,8 @@
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   structured_delegate: _softmax_backward_data.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_softmax_backward
 
 - func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -4857,6 +4863,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
+    NestedTensorCPU, NestedTensorCUDA: transpose_nested
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
@@ -5435,7 +5442,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
-    SparseCPU, SparseCUDA: zero_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
   autogen: zero, zero.out
@@ -5728,24 +5735,24 @@
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: new_with_dims_sparse
+    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_sparse
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
+    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_and_tensor_sparse
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_resize_
+    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_
   autogen: sparse_resize, sparse_resize.out
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_resize_and_clear_
+    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_and_clear_
   autogen: sparse_resize_and_clear, sparse_resize_and_clear.out
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
@@ -5774,7 +5781,7 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5790,7 +5797,7 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5799,14 +5806,14 @@
 - func: _dimV(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _nnz(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _nnz_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _nnz_sparse
     SparseCsrCPU, SparseCsrCUDA: _nnz_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -5827,21 +5834,21 @@
 - func: is_coalesced(Tensor self) -> bool
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: is_coalesced_sparse
+    SparseCPU, SparseCUDA, SparseMeta: is_coalesced_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _indices_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _indices_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _values_sparse
+    SparseCPU, SparseCUDA, SparseMeta: _values_sparse
   device_check: NoCheck
   device_guard: False
 
@@ -5851,7 +5858,7 @@
 - func: _coalesced_(Tensor(a!) self, bool coalesced) -> Tensor(a!)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: _coalesced_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: _coalesced_sparse_
   device_check: NoCheck
   device_guard: False
   autogen: _coalesced, _coalesced.out
@@ -5859,14 +5866,14 @@
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: indices_sparse
+    SparseCPU, SparseCUDA, SparseMeta: indices_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: values_sparse
+    SparseCPU, SparseCUDA, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
   device_check: NoCheck
   device_guard: False
@@ -6467,6 +6474,8 @@
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: put
 
 - func: index_add.out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10886,6 +10895,7 @@
   dispatch:
     CompositeExplicitAutograd: isinf
     SparseCPU, SparseCUDA: isinf_sparse
+    SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()

@@ -50,26 +50,26 @@ __version__ = "1.4.4"
 __version_info__ = tuple(int(segment) for segment in __version__.split("."))
 
 
-import sys
 import os
+import sys
 
 unicode = str
 
-if sys.platform.startswith('java'):
+if sys.platform.startswith("java"):
     import platform
+
     os_name = platform.java_ver()[3][0]
-    if os_name.startswith('Windows'): # "Windows XP", "Windows 7", etc.
-        system = 'win32'
-    elif os_name.startswith('Mac'): # "Mac OS X", etc.
-        system = 'darwin'
-    else: # "Linux", "SunOS", "FreeBSD", etc.
+    if os_name.startswith("Windows"):  # "Windows XP", "Windows 7", etc.
+        system = "win32"
+    elif os_name.startswith("Mac"):  # "Mac OS X", etc.
+        system = "darwin"
+    else:  # "Linux", "SunOS", "FreeBSD", etc.
         # Setting this to "linux2" is not ideal, but only Windows or Mac
         # are actually checked for and the rest of the module expects
         # *sys.platform* style strings.
-        system = 'linux2'
+        system = "linux2"
 else:
     system = sys.platform
-
 
 
 def user_data_dir(appname=None, appauthor=None, version=None, roaming=False):
@@ -114,12 +114,12 @@ def user_data_dir(appname=None, appauthor=None, version=None, roaming=False):
                 path = os.path.join(path, appauthor, appname)
             else:
                 path = os.path.join(path, appname)
-    elif system == 'darwin':
-        path = os.path.expanduser('~/Library/Application Support/')
+    elif system == "darwin":
+        path = os.path.expanduser("~/Library/Application Support/")
         if appname:
             path = os.path.join(path, appname)
     else:
-        path = os.getenv('XDG_DATA_HOME', os.path.expanduser("~/.local/share"))
+        path = os.getenv("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
         if appname:
             path = os.path.join(path, appname)
     if appname and version:
@@ -167,16 +167,19 @@ def site_data_dir(appname=None, appauthor=None, version=None, multipath=False):
                 path = os.path.join(path, appauthor, appname)
             else:
                 path = os.path.join(path, appname)
-    elif system == 'darwin':
-        path = os.path.expanduser('/Library/Application Support')
+    elif system == "darwin":
+        path = os.path.expanduser("/Library/Application Support")
         if appname:
             path = os.path.join(path, appname)
     else:
         # XDG default for $XDG_DATA_DIRS
         # only first, if multipath is False
-        path = os.getenv('XDG_DATA_DIRS',
-                         os.pathsep.join(['/usr/local/share', '/usr/share']))
-        pathlist = [os.path.expanduser(x.rstrip(os.sep)) for x in path.split(os.pathsep)]
+        path = os.getenv(
+            "XDG_DATA_DIRS", os.pathsep.join(["/usr/local/share", "/usr/share"])
+        )
+        pathlist = [
+            os.path.expanduser(x.rstrip(os.sep)) for x in path.split(os.pathsep)
+        ]
         if appname:
             if version:
                 appname = os.path.join(appname, version)
@@ -224,12 +227,12 @@ def user_config_dir(appname=None, appauthor=None, version=None, roaming=False):
     """
     if system == "win32":
         path = user_data_dir(appname, appauthor, None, roaming)
-    elif system == 'darwin':
-        path = os.path.expanduser('~/Library/Preferences/')
+    elif system == "darwin":
+        path = os.path.expanduser("~/Library/Preferences/")
         if appname:
             path = os.path.join(path, appname)
     else:
-        path = os.getenv('XDG_CONFIG_HOME', os.path.expanduser("~/.config"))
+        path = os.getenv("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
         if appname:
             path = os.path.join(path, appname)
     if appname and version:
@@ -267,19 +270,21 @@ def site_config_dir(appname=None, appauthor=None, version=None, multipath=False)
 
     WARNING: Do not use this on Windows. See the Vista-Fail note above for why.
     """
-    if system == 'win32':
+    if system == "win32":
         path = site_data_dir(appname, appauthor)
         if appname and version:
             path = os.path.join(path, version)
-    elif system == 'darwin':
-        path = os.path.expanduser('/Library/Preferences')
+    elif system == "darwin":
+        path = os.path.expanduser("/Library/Preferences")
         if appname:
             path = os.path.join(path, appname)
     else:
         # XDG default for $XDG_CONFIG_DIRS
         # only first, if multipath is False
-        path = os.getenv('XDG_CONFIG_DIRS', '/etc/xdg')
-        pathlist = [os.path.expanduser(x.rstrip(os.sep)) for x in path.split(os.pathsep)]
+        path = os.getenv("XDG_CONFIG_DIRS", "/etc/xdg")
+        pathlist = [
+            os.path.expanduser(x.rstrip(os.sep)) for x in path.split(os.pathsep)
+        ]
         if appname:
             if version:
                 appname = os.path.join(appname, version)
@@ -336,12 +341,12 @@ def user_cache_dir(appname=None, appauthor=None, version=None, opinion=True):
                 path = os.path.join(path, appname)
             if opinion:
                 path = os.path.join(path, "Cache")
-    elif system == 'darwin':
-        path = os.path.expanduser('~/Library/Caches')
+    elif system == "darwin":
+        path = os.path.expanduser("~/Library/Caches")
         if appname:
             path = os.path.join(path, appname)
     else:
-        path = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
+        path = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
         if appname:
             path = os.path.join(path, appname)
     if appname and version:
@@ -383,7 +388,7 @@ def user_state_dir(appname=None, appauthor=None, version=None, roaming=False):
     if system in ["win32", "darwin"]:
         path = user_data_dir(appname, appauthor, None, roaming)
     else:
-        path = os.getenv('XDG_STATE_HOME', os.path.expanduser("~/.local/state"))
+        path = os.getenv("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
         if appname:
             path = os.path.join(path, appname)
     if appname and version:
@@ -424,9 +429,7 @@ def user_log_dir(appname=None, appauthor=None, version=None, opinion=True):
     This can be disabled with the `opinion=False` option.
     """
     if system == "darwin":
-        path = os.path.join(
-            os.path.expanduser('~/Library/Logs'),
-            appname)
+        path = os.path.join(os.path.expanduser("~/Library/Logs"), appname)
     elif system == "win32":
         path = user_data_dir(appname, appauthor, version)
         version = False
@@ -444,8 +447,10 @@ def user_log_dir(appname=None, appauthor=None, version=None, opinion=True):
 
 class AppDirs(object):
     """Convenience wrapper for getting application dirs."""
-    def __init__(self, appname=None, appauthor=None, version=None,
-            roaming=False, multipath=False):
+
+    def __init__(
+        self, appname=None, appauthor=None, version=None, roaming=False, multipath=False
+    ):
         self.appname = appname
         self.appauthor = appauthor
         self.version = version
@@ -454,41 +459,43 @@ class AppDirs(object):
 
     @property
     def user_data_dir(self):
-        return user_data_dir(self.appname, self.appauthor,
-                             version=self.version, roaming=self.roaming)
+        return user_data_dir(
+            self.appname, self.appauthor, version=self.version, roaming=self.roaming
+        )
 
     @property
     def site_data_dir(self):
-        return site_data_dir(self.appname, self.appauthor,
-                             version=self.version, multipath=self.multipath)
+        return site_data_dir(
+            self.appname, self.appauthor, version=self.version, multipath=self.multipath
+        )
 
     @property
     def user_config_dir(self):
-        return user_config_dir(self.appname, self.appauthor,
-                               version=self.version, roaming=self.roaming)
+        return user_config_dir(
+            self.appname, self.appauthor, version=self.version, roaming=self.roaming
+        )
 
     @property
     def site_config_dir(self):
-        return site_config_dir(self.appname, self.appauthor,
-                             version=self.version, multipath=self.multipath)
+        return site_config_dir(
+            self.appname, self.appauthor, version=self.version, multipath=self.multipath
+        )
 
     @property
     def user_cache_dir(self):
-        return user_cache_dir(self.appname, self.appauthor,
-                              version=self.version)
+        return user_cache_dir(self.appname, self.appauthor, version=self.version)
 
     @property
     def user_state_dir(self):
-        return user_state_dir(self.appname, self.appauthor,
-                              version=self.version)
+        return user_state_dir(self.appname, self.appauthor, version=self.version)
 
     @property
     def user_log_dir(self):
-        return user_log_dir(self.appname, self.appauthor,
-                            version=self.version)
+        return user_log_dir(self.appname, self.appauthor, version=self.version)
 
 
-#---- internal support stuff
+# ---- internal support stuff
+
 
 def _get_win_folder_from_registry(csidl_name):
     """This is a fallback technique at best. I'm not sure if using the
@@ -505,14 +512,15 @@ def _get_win_folder_from_registry(csidl_name):
 
     key = _winreg.OpenKey(
         _winreg.HKEY_CURRENT_USER,
-        r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
     )
     dir, type = _winreg.QueryValueEx(key, shell_folder_name)
     return dir
 
 
 def _get_win_folder_with_pywin32(csidl_name):
-    from win32com.shell import shellcon, shell
+    from win32com.shell import shell, shellcon
+
     dir = shell.SHGetFolderPath(0, getattr(shellcon, csidl_name), 0, 0)
     # Try to make this a unicode path because SHGetFolderPath does
     # not return unicode strings when there is unicode data in the
@@ -530,6 +538,7 @@ def _get_win_folder_with_pywin32(csidl_name):
         if has_high_char:
             try:
                 import win32api
+
                 dir = win32api.GetShortPathName(dir)
             except ImportError:
                 pass
@@ -564,15 +573,23 @@ def _get_win_folder_with_ctypes(csidl_name):
 
     return buf.value
 
+
 def _get_win_folder_with_jna(csidl_name):
     import array
+
     from com.sun import jna
     from com.sun.jna.platform import win32
 
     buf_size = win32.WinDef.MAX_PATH * 2
-    buf = array.zeros('c', buf_size)
+    buf = array.zeros("c", buf_size)
     shell = win32.Shell32.INSTANCE
-    shell.SHGetFolderPath(None, getattr(win32.ShlObj, csidl_name), None, win32.ShlObj.SHGFP_TYPE_CURRENT, buf)
+    shell.SHGetFolderPath(
+        None,
+        getattr(win32.ShlObj, csidl_name),
+        None,
+        win32.ShlObj.SHGFP_TYPE_CURRENT,
+        buf,
+    )
     dir = jna.Native.toString(buf.tostring()).rstrip("\0")
 
     # Downgrade to short path name if have highbit chars. See
@@ -583,42 +600,48 @@ def _get_win_folder_with_jna(csidl_name):
             has_high_char = True
             break
     if has_high_char:
-        buf = array.zeros('c', buf_size)
+        buf = array.zeros("c", buf_size)
         kernel = win32.Kernel32.INSTANCE
         if kernel.GetShortPathName(dir, buf, buf_size):
             dir = jna.Native.toString(buf.tostring()).rstrip("\0")
 
     return dir
 
+
 if system == "win32":
     try:
         import win32com.shell
+
         _get_win_folder = _get_win_folder_with_pywin32
     except ImportError:
         try:
             from ctypes import windll
+
             _get_win_folder = _get_win_folder_with_ctypes
         except ImportError:
             try:
                 import com.sun.jna
+
                 _get_win_folder = _get_win_folder_with_jna
             except ImportError:
                 _get_win_folder = _get_win_folder_from_registry
 
 
-#---- self test code
+# ---- self test code
 
 if __name__ == "__main__":
     appname = "MyApp"
     appauthor = "MyCompany"
 
-    props = ("user_data_dir",
-             "user_config_dir",
-             "user_cache_dir",
-             "user_state_dir",
-             "user_log_dir",
-             "site_data_dir",
-             "site_config_dir")
+    props = (
+        "user_data_dir",
+        "user_config_dir",
+        "user_cache_dir",
+        "user_state_dir",
+        "user_log_dir",
+        "site_data_dir",
+        "site_config_dir",
+    )
 
     print("-- app dirs %s --" % __version__)
 
