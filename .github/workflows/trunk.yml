@@ -212,6 +212,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
