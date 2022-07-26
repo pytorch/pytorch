@@ -655,17 +655,24 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
 
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+    bool int_first = false;
     if (THPUtils_checkIndex(item.ptr())) {
-      return true;
+      // we still have to check that the rest of items are NOT symint nodes
+      int_first = true;
     }
 
     // Make sure none of the later arguments are SymInt
     // NB: do NOT check that the later arguments are ints, as this is
     // BC-breaking for FX
     for (int i = 1; i < len; i++) {
-      if (torch::is_symint_node(py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+      if (torch::is_symint_node(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
         return false;
       }
+    }
+
+    if (int_first) {
+      return true;
     }
 
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
@@ -1301,7 +1308,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        ((int_list_overload && is_int_list(args, param.size)) || is_int_or_symint_list(args, param.size))) {
+        (is_int_list(args, param.size) ||
+         ((is_int_or_symint_list(args, param.size) && !int_list_overload)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
