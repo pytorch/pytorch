@@ -46,6 +46,14 @@ class C10_API SymbolicIntNode
       const std::shared_ptr<SymbolicIntNode>& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual std::shared_ptr<SymbolicIntNode> le(
+      const std::shared_ptr<SymbolicIntNode>& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> ge(
+      const std::shared_ptr<SymbolicIntNode>& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual std::shared_ptr<SymbolicIntNode> wrap(int64_t num) {
     TORCH_CHECK(false, "NYI");
   };
