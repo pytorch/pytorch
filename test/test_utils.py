@@ -623,7 +623,7 @@ class TestAssert(TestCase):
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
-    @unittest.skipIf(IS_ARM64, "foo")
+    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
         try:
