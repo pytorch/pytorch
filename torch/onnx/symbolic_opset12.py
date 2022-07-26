@@ -9,6 +9,27 @@ from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, utils
 
 # This file exports ONNX ops for opset 12
 
+__all__ = [
+    "argmax",
+    "argmin",
+    "binary_cross_entropy_with_logits",
+    "celu",
+    "cross_entropy_loss",
+    "dropout",
+    "einsum",
+    "einsum_helper",
+    "ge",
+    "le",
+    "native_dropout",
+    "nll_loss",
+    "nll_loss2d",
+    "nll_loss_nd",
+    "outer",
+    "pow",
+    "tensordot",
+    "unfold",
+]
+
 
 def einsum_helper(g, equation, tensors):
     if not tensors:
