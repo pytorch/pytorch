@@ -60,7 +60,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         parent_name += "_cpu_output_blob_" + base_def_.type();
       }
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
-      CHECK_NOTNULL(local_output_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_output_blobs_.back());
       forwarded_output_blobs[base_def_.output(i)] = parent_name;
       output_inplace_.push_back(false);
       for (const string &input_name : base_def_.input()) {
@@ -74,7 +74,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Set up the symbols for the local workspace.
     for (const string& name : base_def_.input()) {
       local_input_blobs_.push_back(local_ws_->CreateBlob(name));
-      CHECK_NOTNULL(local_input_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_input_blobs_.back());
     }
     input_share_.resize(local_input_blobs_.size(), false);
     base_op_.reset(new CPUOp(base_def_, local_ws_.get()));
