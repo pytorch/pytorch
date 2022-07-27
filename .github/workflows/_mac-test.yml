@@ -32,15 +32,16 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: arch -arch ${{ github.event.inputs.arch }} bash -e -l {0}
 
 jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
+    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+    # Also ensure that we always run with the right architecture
+    defaults:
+      run:
+        shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -62,7 +63,6 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
-        shell: bash
         run: |
           python3 -m pip install psutil==5.9.1
           python3 -m pip install pynvml==11.4.1
@@ -127,8 +127,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stop monitoring script
-        if: always() && steps.monitor-script.outputs.monitor-script-pid
-        shell: bash
+        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
@@ -160,7 +159,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
           GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        shell: bash
         run: |
           set -x
           python3 -m pip install -r requirements.txt
