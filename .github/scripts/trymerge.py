@@ -10,7 +10,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
-from typing import Iterable, cast, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Iterable, Pattern, cast, Any, Callable, Dict, List, Optional, Tuple, Union
 from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
 from functools import lru_cache
 from warnings import warn
@@ -372,6 +372,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 )
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
+CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -1121,8 +1122,8 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
     if len(pending_checks) > 0:
         raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
 
-def has_ciflow_label(labels: List[str]) -> bool:
-    return len(list(filter(CIFLOW_LABEL.match, labels))) > 0
+def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
+    return len(list(filter(pattern.match, labels))) > 0
 
 def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
                       required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
@@ -1151,6 +1152,7 @@ def merge(pr_num: int, repo: GitRepo,
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
+    has_ciflow_trunk = has_label(pr.get_labels(), CIFLOW_TRUNK_LABEL)
     initial_commit_sha = pr.last_commit()['oid']
     check_for_sev(org, project, force)
     if force or can_skip_internal_checks(pr, comment_id):
@@ -1159,7 +1161,7 @@ def merge(pr_num: int, repo: GitRepo,
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
-    if land_checks:
+    if land_checks and not has_ciflow_trunk:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
     start_time = time.time()
@@ -1191,7 +1193,7 @@ def merge(pr_num: int, repo: GitRepo,
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            if land_checks:
+            if land_checks and not has_ciflow_trunk:
                 validate_land_time_checks(org, project, land_check_commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
@@ -1241,7 +1243,7 @@ def main() -> None:
         return
 
     try:
-        on_green = args.on_green or has_ciflow_label(pr.get_labels())
+        on_green = args.on_green or has_label(pr.get_labels(), CIFLOW_LABEL)
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               force=args.force,
