@@ -728,11 +728,31 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   TORCH_CHECK(mat2_ptr->dim() == 3, "batch2 must be a 3D tensor");
   TORCH_CHECK(
       self.size(0) == mat2.size(0),
-      "Expected leading sizes of inputs to match but got ",
+      "Expected size for the 1st dimension of batch2 tensor to be: ",
       self.size(0),
-      " and ",
+      " but got: ",
       mat2.size(0),
-      " instead.");
+      ".");
+
+  // TODO: In the future we might want to add a similar utility
+  // such as map_nested_size, but for nested_sizes.
+  auto self_shapes = NestedTensor_get_shapes(self_ptr);
+  auto mat2_shapes = NestedTensor_get_shapes(mat2_ptr);
+  for (int64_t i = 0; i < self.size(0); i++) {
+    TORCH_CHECK(
+        self_shapes[i][1] == mat2_shapes[i][0],
+        i,
+        "-th nested matrices in batch cannot be multiplied (",
+        self_shapes[i][0],
+        "x",
+        self_shapes[i][1],
+        " and ",
+        mat2_shapes[i][0],
+        "x",
+        mat2_shapes[i][1],
+        ")");
+  }
+
   return map_nested_tensor(
       [](Tensor self_i, Tensor mat2_i) -> Tensor {
         return at::mm(self_i, mat2_i);

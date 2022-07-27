@@ -168,7 +168,6 @@ inline Tensor wrap_tensor_node(
   std::vector<Tensor> sizes;
   std::vector<Tensor> flat_tensors;
   for (const auto i : c10::irange(tensor_node.degree())) {
-    // TODO: Remove call to contiguous once we support strides.
     flat_tensors.push_back(
         tensor_node.children(i).reshape(-1).contiguous());
     sizes.push_back(
@@ -183,6 +182,8 @@ inline Tensor wrap_tensor_node(
 
 } // namespace impl
 
+// This function is meant to ease rapid operator coverage for
+// NestedTensor kernels. It is not meant to be efficient. Use it judiciously.
 template <class F, class... A>
 inline at::Tensor map_nested_tensor(F&& fn, A... a) {
   return wrap_tensor_node(
