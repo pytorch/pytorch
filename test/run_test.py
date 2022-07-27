@@ -871,7 +871,7 @@ def get_selected_tests(options):
             )
             selected_tests = selected_tests[which_shard - 1:: num_shards]
         else:
-            print("found test stats from artifacts")
+            print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[os.environ["TEST_CONFIG"]]
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
             _, tests_from_shard = shards[which_shard - 1]
