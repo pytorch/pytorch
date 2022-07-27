@@ -168,6 +168,8 @@ full_codegen:
   - slice_scatter
   - diagonal_scatter
   - as_strided_scatter
+ir_gen:
+  - selu
 supported:
   - clone
   - _copy_from
