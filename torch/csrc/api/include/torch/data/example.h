@@ -25,7 +25,7 @@ namespace example {
 using NoTarget = void;
 } //  namespace example
 
-/// A specialization for `Example` that does not have have a target.
+/// A specialization for `Example` that does not have a target.
 ///
 /// This class exists so that code can be written for a templated `Example`
 /// type, and work both for labeled and unlabeled datasets.

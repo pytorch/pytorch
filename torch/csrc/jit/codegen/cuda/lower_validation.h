@@ -9,11 +9,28 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class ContigIDs;
+
 void validateIr(Fusion* fusion);
 
 //! Validate vectorization and collect information on vectorization
 //! used in code generation as well as runtime validation.
 void validateAndCollectVectorizeInfo(Fusion* fusion);
+
+//! Find the contig root domains that a vectorized leaf domain
+//! of a consumer TV depends on. Required for runtime validation.
+void fillConsumerVectorizedContigRootDomains(
+    const TensorView* consumer_tv,
+    const ContigIDs& contig_finder);
+
+//! Find the contig root domains that a vectorized leaf domain
+//! of a producer TV depends on. Required for runtime validation.
+//! Producer must be transformed as consumer.
+void fillProducerVectorizedContigRootDomains(
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& c2p_map,
+    const ContigIDs& contig_finder);
 
 //! Validates partial split expressions. Partial split only uses an
 //! inner subdomain specified by start and stop offsets, ignoring the

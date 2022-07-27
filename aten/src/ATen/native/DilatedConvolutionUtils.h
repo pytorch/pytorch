@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <ATen/div_rtn.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
 #define TORCH_CHECK_DIM_SIZE(T, DIM, DIM_SIZE, SIZE) \

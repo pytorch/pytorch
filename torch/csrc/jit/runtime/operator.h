@@ -160,6 +160,16 @@ struct TORCH_API Operator {
         });
   }
 
+  c10::ArrayRef<at::Tag> getTags() const {
+    return op_.fold<c10::ArrayRef<at::Tag>>(
+        [](const C10Operator& op) { return op.handle_.getTags(); },
+        [](const JitOnlyOperator& op) {
+          // Returns empty list of tags for JitOnlyOperators since it
+          // doesn't save c10::OperatorHandle
+          return c10::ArrayRef<at::Tag>();
+        });
+  }
+
   bool isC10Op() const {
     return op_.is_left();
   }

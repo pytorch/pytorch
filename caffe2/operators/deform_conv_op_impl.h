@@ -156,6 +156,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.
     for (const auto image_id : c10::irange(N)) {
+      (void)image_id; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
       for (const auto group_id : c10::irange(group_)) {
         DeformableIm2col(
             Xdata + group_id * input_offset,
@@ -343,6 +344,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
 
   for (const auto image_id : c10::irange(N)) {
+    (void)image_id; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
     for (const auto group_id : c10::irange(group_)) {
       math::Gemm<T, Context>(
           CblasTrans,

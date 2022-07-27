@@ -183,22 +183,22 @@ if(BLAS STREQUAL "Eigen")
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenBLAS_LIB})
   set(BLAS_INFO "open")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLIS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -225,19 +225,24 @@ elseif(BLAS STREQUAL "MKL")
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
   set(BLAS_INFO "veclib")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
 elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  find_library(BLAS_LIBRARIES blas)
+  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+    set(GENERIC_BLAS "blas")
+  else()
+    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
+  endif()
+  find_library(BLAS_LIBRARIES NAMES ${GENERIC_BLAS})
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
   set(GENERIC_BLAS_FOUND TRUE)
   set(BLAS_INFO "generic")
   set(BLAS_FOUND 1)
@@ -817,8 +822,13 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
-        # See https://github.com/pytorch/pytorch/issues/74352
-        target_compile_options(asmjit PRIVATE -Wno-deprecated-copy -Wno-unused-but-set-variable)
+      # See https://github.com/pytorch/pytorch/issues/74352
+      target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
+      if(("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.1.6)
+        OR("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0.0))
+        # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
+        target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
+      endif()
     endif()
   endif()
 
@@ -952,6 +962,19 @@ if(USE_FFMPEG)
   endif()
 endif()
 
+if(USE_ITT)
+  find_package(ITT)
+  if(ITT_FOUND)
+    include_directories(SYSTEM ${ITT_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${ITT_LIBRARIES})
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ITT_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with ITT. Suppress this warning with -DUSE_ITT=OFF")
+    set(USE_ITT OFF CACHE BOOL "" FORCE)
+    caffe2_update_option(USE_ITT OFF)
+  endif()
+endif()
+
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
 if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -1075,23 +1098,16 @@ if(BUILD_PYTHON)
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
     add_library(python::python INTERFACE IMPORTED)
-    set_property(TARGET python::python PROPERTY
-        INTERFACE_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
-    set_property(TARGET python::python PROPERTY
-        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
+    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
     if(WIN32)
-      set_property(TARGET python::python PROPERTY
-          INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
     endif()
 
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
       caffe2_update_option(USE_NUMPY ON)
       add_library(numpy::numpy INTERFACE IMPORTED)
-      set_property(TARGET numpy::numpy PROPERTY
-          INTERFACE_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
-      set_property(TARGET numpy::numpy PROPERTY
-          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
+      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1102,7 +1118,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(USE_SYSTEM_BIND11)
+if(USE_SYSTEM_PYBIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
@@ -1119,12 +1135,8 @@ else()
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
-set_property(TARGET pybind::pybind11 PROPERTY
-    INTERFACE_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
-set_property(TARGET pybind::pybind11 PROPERTY
-    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
-set_property(TARGET pybind::pybind11 PROPERTY
-    INTERFACE_LINK_LIBRARIES python::python)
+target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
+target_link_libraries(pybind::pybind11 INTERFACE python::python)
 
 # ---[ MPI
 if(USE_MPI)
@@ -1309,7 +1321,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1363,6 +1375,16 @@ if(USE_NCCL)
   endif()
 endif()
 
+# ---[ UCC
+if(USE_UCC)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(WARNING "UCC is currently only supported under Linux.")
+    caffe2_update_option(USE_UCC OFF)
+  else()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/ucc.cmake)
+  endif()
+endif()
+
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
@@ -1373,18 +1395,39 @@ if(USE_CUDA)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(USE_CUDA)
+      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
+      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
+    endif()
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
+  endif()
+endif()
+
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    if(MSVC)
-      # Don't install gloo on Windows
-      # It is already handled in builder scripts
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-    else()
-      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
-    endif()
+    # Don't install gloo
+    set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1396,6 +1439,10 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      if(USE_DISTRIBUED AND USE_TENSORPIPE)
+        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
+        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
@@ -1430,32 +1477,6 @@ if(USE_GLOO)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
-  endif()
-endif()
-
-if(USE_DISTRIBUTED AND USE_TENSORPIPE)
-  if(MSVC)
-    message(WARNING "Tensorpipe cannot be used on Windows.")
-  else()
-    if(USE_CUDA)
-      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
-      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
-    endif()
-    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
-
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-    elseif(USE_ROCM)
-      message(WARNING "TensorPipe doesn't yet support ROCm")
-      # Not yet...
-      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
-    endif()
   endif()
 endif()
 
@@ -1630,17 +1651,13 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(NOT MSVC)
-    if(CMAKE_VERSION VERSION_LESS "3.1")
-      set(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-    else()
-      set(CMAKE_C_STANDARD 11)
-    endif()
+    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14)
+    set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
   endif()
 
   # use cub in a safe manner, see:
@@ -1754,7 +1771,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
-  set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1770,11 +1786,11 @@ if(NOT INTERN_BUILD_MOBILE)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       if(BUILD_CAFFE2_OPS)
-        set(CAFFE2_USE_MKLDNN ON)
-        list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
+        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
+      caffe2_update_option(USE_MKLDNN OFF)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
@@ -1847,10 +1863,6 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
-if(USE_BREAKPAD)
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
-endif()
-
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
 # profiling. Thus we dont need USE_CUDA/USE_ROCM
@@ -1910,7 +1922,8 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib64)
+        ${CUDA_SOURCE_DIR}/lib64
+        NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
         ${CUDA_SOURCE_DIR}/extras/CUPTI/include

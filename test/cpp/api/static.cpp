@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/irange.h>
-#include <torch/detail/static.h>
 #include <torch/csrc/utils/variadic.h>
+#include <torch/detail/static.h>
 #include <torch/torch.h>
 
 #include <string>

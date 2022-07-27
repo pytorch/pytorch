@@ -452,8 +452,11 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
-  if (self != c10::nullopt && failure_messages) {
-    err() << "Provided self argument not used in schema.\n";
+  if (self != c10::nullopt) {
+    if (failure_messages) {
+      err() << "Provided self argument not used in schema.\n";
+    }
+    return c10::nullopt;
   }
 
   if (schema.is_vararg()) {

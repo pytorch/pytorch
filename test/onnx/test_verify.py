@@ -1,15 +1,14 @@
 # Owner(s): ["module: onnx"]
 
+import caffe2.python.onnx.backend as backend
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
-import caffe2.python.onnx.backend as backend
+from torch.testing._internal import common_utils
 from verify import verify
 
-from test_pytorch_common import TestCase, run_tests
 
-
-class TestVerify(TestCase):
+class TestVerify(common_utils.TestCase):
     maxDiff = None
 
     def assertVerifyExpectFail(self, *args, **kwargs):
@@ -50,7 +49,7 @@ class TestVerify(TestCase):
     def test_jumbled_params(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 y = x * x
@@ -64,7 +63,7 @@ class TestVerify(TestCase):
     def test_dynamic_model_structure(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.iters = 0
 
             def forward(self, x):
@@ -81,7 +80,7 @@ class TestVerify(TestCase):
     def test_embedded_constant_difference(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.iters = 0
 
             def forward(self, x):
@@ -106,4 +105,4 @@ class TestVerify(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

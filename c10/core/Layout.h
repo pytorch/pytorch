@@ -6,12 +6,24 @@
 #include <ostream>
 
 namespace c10 {
-enum class Layout : int8_t { Strided, Sparse, SparseCsr, Mkldnn, NumOptions };
+enum class Layout : int8_t {
+  Strided,
+  Sparse,
+  SparseCsr,
+  Mkldnn,
+  SparseCsc,
+  SparseBsr,
+  SparseBsc,
+  NumOptions
+};
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;
 constexpr auto kSparseCsr = Layout::SparseCsr;
 constexpr auto kMkldnn = Layout::Mkldnn;
+constexpr auto kSparseCsc = Layout::SparseCsc;
+constexpr auto kSparseBsr = Layout::SparseBsr;
+constexpr auto kSparseBsc = Layout::SparseBsc;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -25,7 +37,9 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Mkldnn;
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
-      return Layout::SparseCsr;
+      TORCH_CHECK(
+          false,
+          "Cannot map Backend SparseCsrCPU|SparseCsrCUDA to a unique layout.");
     default:
       return Layout::Strided;
   }
@@ -39,6 +53,12 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Sparse";
     case at::kSparseCsr:
       return stream << "SparseCsr";
+    case at::kSparseCsc:
+      return stream << "SparseCsc";
+    case at::kSparseBsr:
+      return stream << "SparseBsr";
+    case at::kSparseBsc:
+      return stream << "SparseBsc";
     case at::kMkldnn:
       return stream << "Mkldnn";
     default:

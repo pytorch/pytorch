@@ -2,9 +2,12 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -153,19 +156,14 @@ class TORCH_CUDA_CU_API TransformReplay {
       const TensorDomain* self);
 };
 
-class TORCH_CUDA_CU_API TransformPropagator {
- private:
-  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
-  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
-
-  TransformPropagator(TensorView* from);
-
- private:
-  std::unordered_map<TensorView*, unsigned int> replayed_pos;
-  TensorView* starting_tv = nullptr;
+class TORCH_CUDA_CU_API TransformPropagator
+    : public MaxRootDomainInfoSpanningTree::Propagator {
+  std::unordered_map<TensorView*, size_t> replayed_pos_;
 
  public:
-  static void from(TensorView* tv);
+  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
+  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  TransformPropagator(TensorView* from, int64_t pos = -1);
 };
 
 } // namespace cuda

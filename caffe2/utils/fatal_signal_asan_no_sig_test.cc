@@ -108,7 +108,7 @@ bool forkAndPipe(
       keyPhraseCount += 1;                                                   \
       loc += 1;                                                              \
     }                                                                        \
-    EXPECT_EQ(keyPhraseCount, expected);                                     \
+    EXPECT_GE(keyPhraseCount, expected);                                     \
   } while (0)
 
 #define TEST_FATAL_SIGNAL(signum, name, threadCount) \

@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -7,6 +8,14 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .lazy import LazyModuleMixin
+
+
+__all__ = [
+    'Bilinear',
+    'Identity',
+    'LazyLinear',
+    'Linear',
+]
 
 
 class Identity(Module):
@@ -29,7 +38,7 @@ class Identity(Module):
         torch.Size([128, 20])
 
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(Identity, self).__init__()
 
     def forward(self, input: Tensor) -> Tensor:
@@ -40,6 +49,8 @@ class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     Args:
         in_features: size of each input sample

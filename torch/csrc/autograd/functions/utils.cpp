@@ -8,10 +8,13 @@
 #include <sstream>
 #include <vector>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
-variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                           const function_constructor& ctr) {
+variable_list wrap_outputs(
+    const variable_list& inputs,
+    tensor_list&& outputs,
+    const function_constructor& ctr) {
   variable_list result;
   result.reserve(outputs.size());
   if (!any_variable_requires_grad(inputs)) {
@@ -23,10 +26,12 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
       }
     }
   } else {
-    auto grad_fn = ctr(GradMode::is_enabled() ? collect_next_edges(inputs) : edge_list());
+    auto grad_fn =
+        ctr(GradMode::is_enabled() ? collect_next_edges(inputs) : edge_list());
     for (auto& output : outputs) {
       if (output.defined()) {
-        auto variable = autograd::make_variable(output, /*requires_grad=*/false);
+        auto variable =
+            autograd::make_variable(output, /*requires_grad=*/false);
         autograd::create_gradient_edge(variable, grad_fn);
         result.push_back(std::move(variable));
       } else {
@@ -38,7 +43,12 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   return result;
 }
 
-void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args, bool allow_undefined) {
+void check_input_variables(
+    const char* name,
+    const variable_list& inputs,
+    int args,
+    int required_args,
+    bool allow_undefined) {
   if (required_args == -1) {
     required_args = args;
   }
@@ -56,4 +66,5 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
     }
   }
 }
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
