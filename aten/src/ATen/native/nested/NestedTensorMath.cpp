@@ -264,7 +264,6 @@ Tensor nested_tensor(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  std::vector<impl::TensorNode> tensor_nodes;
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       int64_t dim_i = list[i].dim();
@@ -282,10 +281,9 @@ Tensor nested_tensor(
           i - 1,
           ".");
     }
-    tensor_nodes.push_back(impl::TensorNode(at::Tensor(list[i])));
   }
   return impl::wrap_tensor_node(
-      impl::TensorNode(std::move(tensor_nodes)),
+      impl::TensorNode(list),
       dtype,
       layout,
       device,

@@ -34,28 +34,24 @@ namespace impl {
 template <typename T>
 struct NestedNode {
   NestedNode() = delete;
-  explicit NestedNode(std::vector<NestedNode<T>>&& children)
-      : _is_leaf(false), _children(children) {
-    for (const auto& child : children) {
-      TORCH_CHECK(
-          child.is_leaf(),
-          "Expected children to be leafs. No support for multiple nested dimensions yet.");
-    }
-  }
+  explicit NestedNode(std::vector<T>&& children)
+      : _is_leaf(false), _children(children) {}
+  explicit NestedNode(TensorList children)
+      : _is_leaf(false), _children(children.vec()) {}
   // NestedNode(NestedNode&) = delete;
   // NestedNode(const NestedNode&) = delete;
   // NestedNode& operator=(NestedNode) = delete;
-  explicit NestedNode(T&& payload) : _is_leaf(true), _payload(payload) {}
+  explicit NestedNode(T payload) : _is_leaf(true), _payload(payload) {}
   inline bool is_leaf() const {
     return _is_leaf;
   }
   inline size_t degree() const {
     return _children.size();
   }
-  inline const std::vector<NestedNode<T>> unbind() const {
+  inline const std::vector<T> unbind() const {
     return _children;
   }
-  inline NestedNode<T> children(size_t i) const {
+  inline T children(size_t i) const {
     return _children[i];
   }
   inline const T& payload() const {
@@ -67,7 +63,7 @@ struct NestedNode {
 
  private:
   bool _is_leaf;
-  std::vector<NestedNode<T>> _children;
+  std::vector<T> _children;
   T _payload;
 };
 
@@ -79,6 +75,11 @@ class _map;
 template <class F, class A, class... Args>
 class _map<F, A, c10::guts::typelist::typelist<Args...>> {
  public:
+  static A function_one(
+      F&& fn,
+      const Args&... nested_node) {
+      return std::forward<F>(fn)(nested_node...);
+  }
   // NOTE: We must move F to avoid copying objects if it is a lambda with
   // captures.
   static NestedNode<A> function(
@@ -97,19 +98,23 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
           }
           return nullptr;
         });
+    // All NestedNodes just wrap regular Tensors.
     if (all_leaf) {
       return NestedNode<A>(std::forward<F>(fn)(nested_node.payload()...));
     }
-    std::vector<NestedNode<A>> result;
+    // Some NestedNodes wrap NestedTensors
+    std::vector<A> result;
     for (size_t i = 0; i < degree; i++) {
-      std::tuple<NestedNode<Args>...> children = c10::guts::tuple_map(
+      std::tuple<Args...> children = c10::guts::tuple_map(
           std::forward_as_tuple(nested_node...), [&i](auto a) {
             static_assert(
                 c10::guts::is_instantiation_of<NestedNode, decltype(a)>::value,
                 "Internal error.");
+            // Broadcast regular Tensor arguments across NestedTensor constituents.
             if (a.is_leaf()) {
-              return a;
+              return a.payload();
             }
+            // Broadcast NestedTensors with one constituent.
             if (a.degree() == 1 && !a.is_leaf()) {
               return a.children(0);
             }
@@ -117,8 +122,8 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             return a.children(i);
           });
       c10::guts::apply(
-          [&result, &fn](NestedNode<Args>... filtered) {
-            result.emplace_back(function(std::forward<F>(fn), filtered...));
+          [&result, &fn](Args... filtered) {
+            result.emplace_back(function_one(std::forward<F>(fn), filtered...));
           },
           std::move(children));
     }
@@ -142,11 +147,7 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
   if (get_nested_tensor_impl_or_null(tensor) == nullptr) {
     return TensorNode(std::move(tensor));
   }
-  std::vector<TensorNode> structure;
-  for (auto tensor_i : tensor.unbind()) {
-    structure.push_back(TensorNode(std::move(tensor_i)));
-  }
-  return TensorNode(std::move(structure));
+  return TensorNode(tensor.unbind());
 }
 
 inline Tensor wrap_tensor_node(
@@ -168,9 +169,9 @@ inline Tensor wrap_tensor_node(
   for (const auto i : c10::irange(tensor_node.degree())) {
     // TODO: Remove call to contiguous once we support strides.
     flat_tensors.push_back(
-        tensor_node.children(i).payload().reshape(-1).contiguous());
+        tensor_node.children(i).reshape(-1).contiguous());
     sizes.push_back(
-        tensor(c10::IntArrayRef(tensor_node.children(i).payload().sizes())));
+        tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
   }
 
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
