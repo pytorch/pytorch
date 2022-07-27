@@ -176,7 +176,7 @@ top1, top5 = evaluate(full_precision_model, criterion, data_loader_test)
 print("Model #0 Evaluation accuracy on test dataset: %2.2f, %2.2f" % (top1.avg, top5.avg))
 
 """
-Prepare model PTQ for specified qconfig
+Prepare model PTQ for specified qconfig for torch.nn.Linear
 """
 def prepare_ptq_linear(qconfig):
     qconfig_dict = {"object_type": [(torch.nn.Linear, qconfig)]}
