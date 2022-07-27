@@ -1521,9 +1521,10 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
 
-  // Update reliable before processing constantvaluemap prevents unreliable
-  // nodes making static shape
-  UpdateReliable(n);
+  // Update the shape reliability for each node before processing 
+  // ConstantValueMap to prevent unreliable nodes from producing static 
+  // shapes
+  // UpdateReliable(n);
 
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
   for (auto i : c10::irange(n->outputs().size())) {

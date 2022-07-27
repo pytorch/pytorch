@@ -4,6 +4,7 @@ import io
 
 import numpy as np
 import onnx
+from onnx import numpy_helper
 
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
@@ -271,7 +272,7 @@ class TestONNXShapeInference(common_utils.TestCase):
         )
         self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
 
-    def test_autograd_layernorm_shape(self):
+    def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
         def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
 
@@ -279,14 +280,13 @@ class TestONNXShapeInference(common_utils.TestCase):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "prim::PythonOp", 1)
 
         # necessay parameters for transformer embeddings
-        hidden_size, max_position_embeddings, batch_size = (
-            48,
-            32,
-            2,
-        )
+        hidden_size = 48 
+        max_position_embeddings = 32 
+        batch_size = 2
 
-        # wrap nn.layernorm into autograd.func repro the same
-        # issue as using apex fusedlayernorm
+        # issue found that autograd.function making downstream 
+        # node unreliable but with static shape. The issue was first 
+        # discovered with using Apex FusedLayerNorm in Transformers
         class CustomLayerNorm(torch.autograd.Function):
             @staticmethod
             def forward(ctx, embedding):
@@ -300,8 +300,10 @@ class TestONNXShapeInference(common_utils.TestCase):
             ):
                 embedding_output = CustomLayerNorm.apply(embeddings)
                 query = embedding_output.transpose(0, 1)
-                tgt_len, bsz, embed_dim = query.size()
-                query = query.reshape(tgt_len, bsz, embed_dim)
+                target_len, batch_size, embedding_dim = query.size()
+                # Reshape is used for consuming batch_size, and if it is static,
+                # this will be a Constant node in the graph
+                query = query.reshape(target_len, batch_size, embedding_dim)
                 return query
 
         embeddings = torch.randn(batch_size, max_position_embeddings, hidden_size)
@@ -309,21 +311,25 @@ class TestONNXShapeInference(common_utils.TestCase):
         f = io.BytesIO()
         torch.onnx.export(
             EmbeddingModule().eval(),
-            (embeddings),
+            (embeddings, ),
             f,
             opset_version=self.opset_version,
             input_names=["embeddings"],
-            dynamic_axes={"embeddings": [0, 1, 2]},
+            dynamic_axes={"embeddings": {0:"batch_size", 1:"max_position_embeddings", 2:"hidden_size"}},
             custom_opsets={"com.microsoft": 1},
         )
-        graph = onnx.load(io.BytesIO(f.getvalue()))
+        model = onnx.load(io.BytesIO(f.getvalue()))
 
-        # If there is a onnx::Constant node with dim=3, it is making the shape static
-        dim = 3
-        for node in graph.graph.node:
-            if node.op_type == "Constant":
-                if node.attribute[0].t.dims:
-                    self.assertNotEqual(node.attribute[0].t.dims[0], dim)
+        const_node = [n for n in model.graph.node if n.op_type == "Constant"]
+        self.assertNotEqual(len(const_node), 0)
+        for node in const_node:
+            for a in node.attribute:
+                if a.name == "value":
+                    shape = numpy_helper.to_array(a.t)
+                    # If there is a constant node with dim=3 and these values, 
+                    # it means the shape becomes static. Normally, should be with 
+                    # dynamic batch size 
+                    self.assertNotEqual(shape.tolist(), [max_position_embeddings, batch_size, hidden_size])
 
 
 if __name__ == "__main__":
