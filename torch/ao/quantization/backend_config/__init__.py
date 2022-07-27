@@ -8,4 +8,5 @@ def validate_backend_config_dict(backend_config_dict):
 __all__ = [
     "get_native_backend_config_dict",
     "get_tensorrt_backend_config_dict",
+    "validate_backend_config_dict",
 ]

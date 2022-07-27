@@ -71,6 +71,17 @@ Tensor empty_mps(
   return at::detail::empty_mps(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
+Tensor empty_symint_mps(
+    c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+
+  return at::native::empty_mps(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+}
+
 Tensor empty_strided_mps(
     IntArrayRef size,
     IntArrayRef stride,
@@ -98,7 +109,6 @@ const Tensor& resize_mps_(
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  //std::cout << "resize mps  size " << size << std::endl;
   resize_impl_mps_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =

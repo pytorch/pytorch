@@ -270,7 +270,7 @@ class TestShardingPlan(ShardedTensorTestBase):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
 
         with self.assertRaisesRegex(
-            TypeError, "Only `ShardingSpec` is supported to shard"
+            TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
         ):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_plan)
@@ -329,3 +329,34 @@ class TestShardingPlan(ShardedTensorTestBase):
         self.assertTrue(isinstance(megatron_lm.fc2.weight, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc1.bias, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc2.bias, ShardedTensor))
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_shard_module_sub_process_group(self):
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
+        colwise_sharding_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
+            ],
+        )
+        rowwise_sharding_spec = ChunkShardingSpec(
+            dim=1,
+            placements=[
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
+            ],
+        )
+        sharding_plan = ShardingPlan(
+            plan={
+                "fc1.weight": colwise_sharding_spec,
+                "fc2.weight": rowwise_sharding_spec
+            }
+        )
+
+        pg = dist.new_group([2, 3])
+
+        if self.rank >= 2:
+            shard_module(megatron_lm, sharding_plan, process_group=pg)

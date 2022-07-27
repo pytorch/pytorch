@@ -97,8 +97,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    auto new_input = new_node->addInput(input);
+    new_node->addInput(input);
   }
   return new_node;
 }
@@ -166,6 +165,16 @@ Node* createONNXUnsqueeze(
     unsqueeze_node->is_(attr::axes, {0});
   }
   return unsqueeze_node;
+}
+
+Node* createONNXConstant(
+    Graph* graph,
+    Node* n_to_insert_before,
+    at::Tensor value) {
+  Node* constant_node = graph->create(onnx::Constant, 1);
+  constant_node->insertBefore(n_to_insert_before);
+  constant_node->t_(attr::value, value);
+  return constant_node;
 }
 
 bool isValidToTransformToONNXConcatNode(Node* lc_node) {

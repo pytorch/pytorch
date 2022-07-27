@@ -41,5 +41,75 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_clone(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        st = sharded_tensor.rand(spec, (12, 5))
+        copied_st = st.clone()
+        self.assertTrue(type(copied_st) is type(st))
+        self.assertEqual(copied_st.local_tensor(), st.local_tensor())
+        self.assertFalse(copied_st is st)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_detach(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        st = sharded_tensor.rand(spec, (12, 5), requires_grad=True)
+        local_shards = st.local_shards()
+        # before set requires_grad, all local shards should not require grads
+        for local_shard in local_shards:
+            self.assertTrue(local_shard.tensor.requires_grad)
+
+        detached_st = st.detach()
+        self.assertFalse(detached_st.requires_grad)
+
+        for local_shard in detached_st.local_shards():
+            self.assertFalse(local_shard.tensor.requires_grad)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_set_requires_grad(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        st = sharded_tensor.rand(spec, (12, 5))
+        local_shards = st.local_shards()
+        # before set requires_grad, all local shards should not require grads
+        for local_shard in local_shards:
+            self.assertFalse(local_shard.tensor.requires_grad)
+
+        st.requires_grad_()
+        self.assertTrue(st.requires_grad)
+
+        for local_shard in local_shards:
+            self.assertTrue(local_shard.tensor.requires_grad)
+
+
 if __name__ == "__main__":
     run_tests()

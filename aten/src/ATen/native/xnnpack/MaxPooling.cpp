@@ -186,7 +186,7 @@ Tensor max_pool2d(
       },
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.names());
+      input_padded_contig_nhwc.opt_names());
 
   xnn_operator_t max_pool_op{};
 

@@ -57,17 +57,21 @@ runs:
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
-      uses: seemethere/upload-artifact-s3@v4
+      uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: warn
         path: test-jsons-*.zip
 
     - name: Store Test Reports on S3
-      uses: seemethere/upload-artifact-s3@v4
+      uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: error
         path: test-reports-*.zip

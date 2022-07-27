@@ -123,3 +123,8 @@ graph(%x.1 : Tensor):
 
     def test_generic_list(self):
         self.assertEqual(torch.ops._test.get_first([['hello']]), 'hello')
+
+    # https://github.com/pytorch/pytorch/issues/80508
+    def test_where_no_scalar(self):
+        x = torch.rand(1, 3, 224, 224)
+        torch.ops.aten.where(x > 0.5, -1.5, 1.5)  # does not raise
