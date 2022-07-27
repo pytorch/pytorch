@@ -457,11 +457,10 @@ def _make_prim(
     _meta_impl = _wrap_tensor_meta(meta)
 
     def _backend_select_impl(*args, **kwargs):
-        assert "device" in kwargs
-        if kwargs["device"].type == "meta":
+        if "device" in kwargs and kwargs["device"].type == "meta":
             return _meta_impl(*args, **kwargs)
         else:
-            return _aten_impl(*args, **kwargs)
+            return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
