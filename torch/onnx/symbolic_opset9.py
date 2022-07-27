@@ -429,7 +429,9 @@ def _trunc_divide(g, self, other):
             out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         else:
             out = g.op(
-                "Cast", out, to_i=_type_utils.ScalarType.from_name(scalar_type).onnx_type()
+                "Cast",
+                out,
+                to_i=_type_utils.ScalarType.from_name(scalar_type).onnx_type(),
             )
     else:
         out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
@@ -1143,7 +1145,9 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:
-        self = g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(dtype_0).onnx_type())
+        self = g.op(
+            "Cast", self, to_i=_type_utils.ScalarType.from_name(dtype_0).onnx_type()
+        )
 
     return self
 
@@ -1876,9 +1880,7 @@ def __lshift_(g, self, other):
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
-        condition = g.op(
-            "Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL
-        )
+        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = nonzero(g, condition)
         return symbolic_helper._unbind_helper(
@@ -2555,7 +2557,9 @@ def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not symbolic_helper._is_fp(self):
         f_dtype = "Float"
-        self = g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(f_dtype).onnx_type())
+        self = g.op(
+            "Cast", self, to_i=_type_utils.ScalarType.from_name(f_dtype).onnx_type()
+        )
     if not symbolic_helper._is_fp(exponent):
         exponent = g.op(
             "Cast", exponent, to_i=_type_utils.ScalarType.from_name(f_dtype).onnx_type()
@@ -2593,7 +2597,9 @@ def clamp_min(g, self, min):
         )
     else:
         dtype = self.type().scalarType()
-        min = g.op("Cast", min, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+        min = g.op(
+            "Cast", min, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
+        )
         return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
@@ -2605,7 +2611,9 @@ def clamp_max(g, self, max):
         )
     else:
         dtype = self.type().scalarType()
-        max = g.op("Cast", max, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+        max = g.op(
+            "Cast", max, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
+        )
         return op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
@@ -2765,12 +2773,43 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
         symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11)
 
 
-# TODO(justinchuby): Clean up this function generation magic by defining the functions
-# explicitly.
-for k, v in symbolic_helper.cast_pytorch_to_onnx.items():  # type: ignore[has-type]
-    name = f"_cast_{k}"
-    globals()[name] = symbolic_helper.parse_args("v", "i")(
-        functools.partial(symbolic_helper._cast_func_template, v)
+def _cast_func_template(to_i, g, input, non_blocking):
+    """Template for creating a cast function."""
+    return g.op("Cast", input, to_i=to_i)
+
+
+# def _cast_Byte
+# def _cast_Char
+# def _cast_Short
+# def _cast_Int
+# def _cast_Long
+# def _cast_Half
+# def _cast_Float
+# def _cast_Double
+# def _cast_ComplexFloat
+# def _cast_ComplexDouble
+# def _cast_Bool
+# def _cast_BFloat16
+for scalar_type in (
+    "Byte",
+    "Char",
+    "Short",
+    "Int",
+    "Long",
+    "Half",
+    "Float",
+    "Double",
+    "ComplexFloat",
+    "ComplexDouble",
+    "Bool",
+    "BFloat16",
+):
+    func_name = f"_cast_{scalar_type}"
+    globals()[func_name] = symbolic_helper.parse_args("v", "i")(
+        functools.partial(
+            _cast_func_template,
+            _type_utils.ScalarType.from_name(scalar_type).onnx_type(),
+        )
     )
 
 
@@ -3257,7 +3296,9 @@ def to(g, self, *args):
         if symbolic_helper._is_value(dtype) or isinstance(dtype, torch.Tensor):
             # aten::to(Tensor, Tensor, bool, bool, memory_format)
             dtype = args[0].type().scalarType()
-            return g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+            return g.op(
+                "Cast", self, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
+            )
         else:
             # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             # memory_format is ignored
@@ -4060,7 +4101,9 @@ def bernoulli(g, input, generator=None, out=None):
         dtype_i=_type_utils.ScalarType.from_name(dtype).onnx_type(),
     )
     output = g.op("Less", p, input)
-    return g.op("Cast", output, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+    return g.op(
+        "Cast", output, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
+    )
 
 
 @symbolic_helper.parse_args("v")
@@ -4185,7 +4228,9 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
+                to_i=_type_utils.ScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
@@ -4234,10 +4279,8 @@ def __isnot_(g, self, other):
 def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
-    if num_classes.type().scalarType() in ("Byte", "Char", "Int", "Short"):
-        num_classes = g.op(
-            "Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64
-        )
+    if num_classes.type().scalarType() in {"Byte", "Char", "Int", "Short"}:
+        num_classes = g.op("Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
 
@@ -4764,7 +4807,9 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
         g.op("Cast", alpha, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()),
     )
     mul_b = mul(
-        g, self, g.op("Cast", beta, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+        g,
+        self,
+        g.op("Cast", beta, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()),
     )
     return add(g, mul_a, mul_b)
 

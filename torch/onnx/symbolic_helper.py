@@ -1463,10 +1463,6 @@ pytorch_name_to_type = {
 }
 
 
-def _cast_func_template(to_i, g, input, non_blocking):
-    return g.op("Cast", input, to_i=to_i)
-
-
 # Deprecated. Internally use _type_utils.ScalarType
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],  # 0
