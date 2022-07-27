@@ -280,6 +280,7 @@ class TestCase:
     match_placeholder: bool
     num_matches: int
     fully_contained: bool = True
+    remove_overlapping_matches: bool = True
 
 class SingleNodePattern:
     @staticmethod
@@ -404,6 +405,7 @@ class ChainRepeatedPattern:
     def forward(x):
         x = torch.sigmoid(x)
         x = torch.sigmoid(x)
+        x = torch.sigmoid(x)
         return torch.sigmoid(x)
 
     @staticmethod
@@ -412,7 +414,8 @@ class ChainRepeatedPattern:
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 2),
+        TestCase(False, False, 3, remove_overlapping_matches=False),
+        TestCase(False, False, 2, remove_overlapping_matches=True),
         TestCase(True, False, 1),
         TestCase(False, True, 1),
         TestCase(True, True, 0)
@@ -510,11 +513,13 @@ class MultipleOutputsMultipleOverlappingMatches:
         a = a.relu()
         b = a.sigmoid()
         c = a.sum()
-        return b, c, a
+        return b, c
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 4),
+        TestCase(False, False, 0, fully_contained=True),
+        TestCase(False, False, 4, fully_contained=False, remove_overlapping_matches=False),
+        TestCase(False, False, 1, fully_contained=False, remove_overlapping_matches=True),
     ]
 
 class MultipleOutputsMultipleNonOverlappingMatches:
@@ -598,7 +603,8 @@ class TestFXMatcherUtils(JitTestCase):
             matcher = SubgraphMatcher(pattern_traced.graph,
                                       match_output=test_case.match_output,
                                       match_placeholder=test_case.match_placeholder,
-                                      fully_contained=test_case.fully_contained)
+                                      fully_contained=test_case.fully_contained,
+                                      remove_overlapping_matches=test_case.remove_overlapping_matches)
             matches = matcher.match(traced.graph)
 
             assert len(matches) == test_case.num_matches

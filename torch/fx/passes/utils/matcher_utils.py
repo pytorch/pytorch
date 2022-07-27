@@ -6,7 +6,7 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx.subgraph_rewriter import Match
 
-from typing import Dict, List
+from typing import Dict, List, Set
 
 __all__ = ['SubgraphMatcher']
 
@@ -15,7 +15,8 @@ class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 fully_contained: bool = True) -> None:
+                 fully_contained: bool = True,
+                 remove_overlapping_matches: bool = True) -> None:
         """
         Args:
             pattern: the targeted matching pattern, represented in fx.Graph
@@ -25,12 +26,15 @@ class SubgraphMatcher:
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
             fully_contained: If True, nodes (except placeholder and output_link_nodes ) can only be consumed
                 by nodes within th pattern.
+            remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
+                will be returned.
         """
 
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
         self.fully_contained = fully_contained
+        self.remove_overlapping_matches = remove_overlapping_matches
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -88,6 +92,24 @@ class SubgraphMatcher:
                     return False
         return True
 
+    def _remove_overlapping_matches(self, matches: List[Match]) -> List[Match]:
+        non_overlapping_matches: List[Match] = list()
+        nodes_matched: Set[Node] = set()
+
+        for match in matches:
+            found_overlap = False
+            for pn, gn in match.nodes_map.items():
+                if pn.op not in {"placeholder", "output"} and gn in nodes_matched:
+                    found_overlap = True
+                    break
+
+            if not found_overlap:
+                non_overlapping_matches.append(match)
+                for pn, gn in match.nodes_map.items():
+                    if pn.op not in {"placeholder", "output"}:
+                        nodes_matched.add(gn)
+        return non_overlapping_matches
+
     def _match_nodes(self, pn: Node, gn: Node, match: Match) -> bool:
 
         # Check if we've already matched these nodes in the current
@@ -121,6 +143,33 @@ class SubgraphMatcher:
         return True
 
     def match(self, graph: Graph) -> List[Match]:
+        """
+        Subgraph pattern matcher is implemented with the backtracking style in the following steps:
+
+        1. We first identify all the anchor nodes in the pattern graph. The anchor nodes
+        are the "sinks" (nodes with no user other than the output node) of the pattern graph.
+        One pattern graph could have multiple anchors if it has multiple return values.
+
+        2. In the target graph, we identify the potential candidate nodes that can be matched
+        with each anchor. These anchor-candidate pairs are the starting points for
+        pairwise per-node matching.
+
+        3. For each anchor-candidate pair, we simultaneously traverse backwards (DFS) in both
+        pattern and target graphs. For every pattern nodes along traversal path, we compare it
+        against the target nodes. In case any comparison failed, the match for this anchor-candidate
+        pair fails. A match is found when DFS completes traversing the graph. See `self._match_nodes`
+        for more details.
+
+        4. In the case of multiple anchors, every anchor will need to find a match using step 3.
+        In addition, the matches found between anchors need to have a common intersection node
+        in order for the match to be valid. This is implemented with backtracking. See `backtracking`
+        for more details.
+
+        Notice: graph traversal must be done in the reverser order because a tensor can have multiple
+        consumers, but can only have a single producer. Only with reverser order, we can we jointly
+        traverse the pattern and target graph in a deterministic path.
+        """
+
         # find candidate nodes to match with pattern anchors
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
@@ -149,11 +198,15 @@ class SubgraphMatcher:
                     # revert to saved_match before matching with current anchor
                     match = copy.copy(saved_match)
 
-        # TODO: anchor is set to the first of self.pattern_anchors for now, need to update the sematics of this field
+        # TODO: Match's anchor is set to the first of self.pattern_anchors[0] for now,
+        # need to update the sematics of this field
         match = Match(anchor=self.pattern_anchors[0])
         backtracking(0, match)
 
         if self.fully_contained:
             matches = [match for match in matches if self._is_contained(match.nodes_map)]
+
+        if self.remove_overlapping_matches:
+            matches = self._remove_overlapping_matches(matches)
 
         return matches
