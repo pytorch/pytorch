@@ -64,7 +64,9 @@ def outer(g, input, other):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.ScalarType.from_name(input.type().scalarType()).onnx_type(),
+            to_i=_type_utils.ScalarType.from_name(
+                input.type().scalarType()
+            ).onnx_type(),
         )
     return einsum_helper(g, "i,j->ij", [input, other])
 
