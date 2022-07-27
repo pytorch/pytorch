@@ -51,9 +51,11 @@ __all__ = [
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
+    'scaled_modified_bessel_k0',
     'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
+    'spherical_bessel_j0',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1178,11 +1180,25 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_k0,
+                                        r"""
+scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
                                         r"""
 scaled_modified_bessel_k1(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`0`.
+Scaled modified Bessel function of the second kind of order :math:`1`.
 
 """ + r"""
 Args:
@@ -1247,6 +1263,20 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
+                                  r"""
+spherical_bessel_j0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}

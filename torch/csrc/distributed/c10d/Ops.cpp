@@ -118,6 +118,26 @@ c10::intrusive_ptr<ProcessGroup::Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> send(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> recv_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -153,6 +173,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
+  m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
+  m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
 
@@ -326,6 +348,36 @@ c10::intrusive_ptr<ProcessGroup::Work> barrier(
                            const std::vector<int64_t>&,
                            int64_t)>();
   return op.call(process_group, opts.device_ids, opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> send(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    int64_t dstRank,
+    int64_t tag) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::send", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
+  return op.call(tensors, process_group, dstRank, tag);
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> recv(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    int64_t srcRank,
+    int64_t tag) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::recv_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
+  return op.call(tensors, process_group, srcRank, tag);
 }
 
 } // namespace ops

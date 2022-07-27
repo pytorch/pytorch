@@ -134,6 +134,7 @@ def get_generate_code_bin_outs():
 
     if is_arvr_mode():
         outs.update({
+            "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
             "autograd/generated/python_fft_functions.cpp": ["autograd/generated/python_fft_functions.cpp"],
             "autograd/generated/python_functions.h": ["autograd/generated/python_functions.h"],
             "autograd/generated/python_functions_0.cpp": ["autograd/generated/python_functions_0.cpp"],
@@ -150,7 +151,6 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
             "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
             "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
-            "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
         })
     return outs
 

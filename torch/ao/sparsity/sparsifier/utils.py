@@ -1,47 +1,58 @@
+from typing import Any, Dict, Optional
+
 from torch import nn
-from typing import Dict, Any, Optional
 
-__all__ = ["module_to_fqn", "fqn_to_module", "get_arg_info_from_tensor_fqn", "FakeSparsity"]
+__all__ = [
+    "module_to_fqn",
+    "fqn_to_module",
+    "get_arg_info_from_tensor_fqn",
+    "FakeSparsity",
+]
 
-def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = '') -> Any:
+
+def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> Optional[str]:
+    """
+    Returns the fqn for a module or None if module not a descendent of model.
+    """
+    if module is model:
+        return ""
     for name, child in model.named_children():
-        new_name = prefix + '.' + name
-        if child is module:
-            return new_name
-        child_path = module_to_fqn(child, module, prefix=new_name)
-        if child_path is not None:
-            return child_path
+        fqn = module_to_fqn(child, module, ".")
+        if isinstance(fqn, str):
+            return prefix + name + fqn
     return None
 
+
 def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
-    for name in path.split('.'):
-        model = getattr(model, name, None)
-        if model is None:
-            return None
+    """
+    Given an fqn, returns the corresponding module or tensor or None if the fqn given by `path`
+    doesn't correspond to anything. Similar to model.get_submodule(path) but works for tensors.
+    """
+    if path != "":
+        for name in path.split("."):
+            model = getattr(model, name, None)
     return model
 
-def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
-    # remove starting '.' from tensor_fqn if it exists
-    if tensor_fqn[0] == '.':
-        tensor_fqn = tensor_fqn[1:]
 
+def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
+    """
+    Uses tensor_fqn to obtain a dict containing module_fqn, module and tensor_name
+    """
     # string manip to split tensor_fqn into module_fqn and tensor_name
     # if tensor_fqn is 'weight' then module_fqn and tensor_name are '' and 'weight'
     # if tensor_fqn is 'linear.weight' then module_fqn and tensor_name are 'linear' and 'weight'
-    tensor_name = tensor_fqn.split('.')[-1]
-    module_fqn = tensor_fqn[:-len(tensor_name) - ('.' in tensor_fqn)]
-
+    tensor_name = tensor_fqn.split(".")[-1]
+    module_fqn = tensor_fqn[: -len(tensor_name) - ("." in tensor_fqn)]
 
     module = fqn_to_module(model, module_fqn)
-    if module is None:  # handling for module_fqn=''
-        module = model
 
     return {
-        'module_fqn': module_fqn,
-        'module': module,
-        'tensor_name': tensor_name,
-        'tensor_fqn': tensor_fqn,
+        "module_fqn": module_fqn,
+        "module": module,
+        "tensor_name": tensor_name,
+        "tensor_fqn": tensor_fqn,
     }
+
 
 # Parametrizations
 class FakeSparsity(nn.Module):
@@ -56,7 +67,7 @@ class FakeSparsity(nn.Module):
     """
     def __init__(self, mask):
         super().__init__()
-        self.register_buffer('mask', mask)
+        self.register_buffer("mask", mask)
 
     def forward(self, x):
         assert self.mask.shape == x.shape

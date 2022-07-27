@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+import numpy as np
 from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # class to store APoT quantizer and
@@ -32,11 +33,14 @@ class APoTQuantizer():
     def quantize(self, tensor2quantize: Tensor):
         result = torch.tensor([])
 
-        # clip tensor2quantize values based on alpha qparam
-        tensor2quantize = torch.clamp(tensor2quantize, -self.alpha, self.alpha)
-
         # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+        tensor2quantize = tensor2quantize.detach().apply_(lambda x: float_to_apot(x,
+                                                                                  self.quantization_levels,
+                                                                                  self.level_indices,
+                                                                                  self.alpha))
+
+        # convert to APoT int representation for dtype
+        tensor2quantize = tensor2quantize.int()
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
@@ -53,10 +57,18 @@ class APoTQuantizer():
         result: fp representation of input Tensor
     """
     def dequantize(self, apot_tensor) -> Tensor:
-        apot_tensor_data = apot_tensor.data
+        orig_size = apot_tensor.data.size()
+        apot_tensor_data = apot_tensor.data.flatten()
+
+        print(apot_tensor_data)
 
         # map apot_to_float over tensor2quantize elements
-        result = apot_tensor_data.apply_(lambda x: float(apot_to_float(x, self.quantization_levels, self.level_indices)))
+        result_temp = np.empty(shape=apot_tensor_data.size())
+        for i in range(len(apot_tensor_data)):
+            new_ele = apot_to_float(apot_tensor_data[i], self.quantization_levels, self.level_indices)
+            result_temp[i] = new_ele
+
+        result = torch.from_numpy(result_temp).reshape(orig_size)
 
         return result
 
@@ -81,14 +93,10 @@ def quantize_APoT(tensor2quantize: Tensor, alpha: Tensor, gamma: Tensor, quantiz
 r""" Global method to create quantizer and call quantizer dequantize_APoT
     Args:
         apot_tensor: APoT Tensor to dequantize
-        alpha: Tensor qparam alpha (clipping level)
-        gamma: Tensor qparam gamma (scale factor for quantization levels)
-        quantization levels: Tensor with fp quantization levels
-        level indices: Tensor with integer quantization level indices
     Returns:
         result: fp Tensor dequantized from apot_tensor
 """
-def dequantize_APoT(apot_tensor, alpha: Tensor, gamma: Tensor, quantization_levels: Tensor, level_indices: Tensor) -> Tensor:
-    quantizer = APoTQuantizer(alpha=alpha, gamma=gamma, quantization_levels=quantization_levels, level_indices=level_indices)
-    result = apot_tensor.quantizer.dequantize(apot_tensor)
+def dequantize_APoT(apot_tensor) -> Tensor:
+    quantizer = apot_tensor.quantizer
+    result = quantizer.dequantize(apot_tensor)
     return result

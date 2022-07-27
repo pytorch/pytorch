@@ -28,6 +28,7 @@ constexpr DispatchKeySet non_functional_backend_dispatch_keyset =
     backend_dispatch_keyset
         // XLA and LazyTensor are currently the only 2 backends in core
         // that use functionalization pass in eager mode.
+        .remove(DispatchKey::Sparse)
         .remove_backend(BackendComponent::XLABit)
         .remove_backend(BackendComponent::LazyBit);
 
@@ -38,8 +39,7 @@ bool isBackendDispatchKey(DispatchKey t) {
       // Note [NestedTensor Not Included in Backend Keys]
       // NestedTensor has been explicitly removed from the "backend keyset" due
       // to incompatibility with some kernels, so we don't want it to be
-      // included in CompositeImplicitAutograd or CompositeExplicitAutograd
-      // kernels.
+      // included in CompositeExplicitAutograd kernels.
       && t != DispatchKey::NestedTensor && backend_dispatch_keyset.has(t);
 }
 
@@ -77,7 +77,7 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       return autograd_dispatch_keyset.has(toFunctionalityKey(k));
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
-      return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);
+      return math_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
@@ -118,6 +118,9 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::PrivateUse2);
     case DispatchKey::AutogradPrivateUse3:
       return DispatchKeySet(DispatchKey::PrivateUse3);
+    case DispatchKey::AutogradNestedTensor:
+      return DispatchKeySet(DispatchKey::NestedTensor) |
+          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::AutogradOther:
       return autogradother_backends;
     default:
