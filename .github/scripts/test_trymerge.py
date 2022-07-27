@@ -12,6 +12,8 @@ import os
 from hashlib import sha256
 
 from trymerge import (find_matching_merge_rule,
+                      get_land_checkrun_conclusions,
+                      validate_land_time_checks,
                       gh_graphql,
                       gh_get_team_members,
                       read_merge_rules,
@@ -119,7 +121,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                   approved_by=["pytorch/metamates"],
                   mandatory_checks_name=["Lint",
                                          "Facebook CLA Check",
-                                         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                                         "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
                                          ],
                   ),
     ]
@@ -255,7 +257,23 @@ class TestGitHubPR(TestCase):
         """
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
-        self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
+        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_many_land_checks(self, mocked_gql: Any) -> None:
+        """ Tests that all checkruns can be fetched for a commit
+        """
+        conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
+        self.assertGreater(len(conclusions), 100)
+        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_failed_land_checks(self, mocked_gql: Any) -> None:
+        """ Tests that PR with Land Checks fail with a RunTime error
+        """
+        self.assertRaisesRegex(RuntimeError,
+                               ".*Failed to merge; some land checks failed.*",
+                               lambda: validate_land_time_checks('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684'))
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))

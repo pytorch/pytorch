@@ -39,6 +39,7 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -58,6 +59,11 @@ try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupUCC
+except ImportError:
+    _UCC_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +92,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
 
 class Backend(object):
     """
-    An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+    An enum-like class of available backends: GLOO, NCCL, UCC, MPI, and other registered
     backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
@@ -105,6 +111,7 @@ class Backend(object):
     UNDEFINED = "undefined"
     GLOO = "gloo"
     NCCL = "nccl"
+    UCC = "ucc"
     MPI = "mpi"
     TCP = "tcp"
     _plugins: Dict[str, Callable] = {}
@@ -122,7 +129,7 @@ class Backend(object):
             )
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
 
@@ -145,9 +152,12 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        assert not hasattr(Backend, name.upper()), (
-            f"{name.upper()} c10d backend already exist"
-        )
+        # Allow UCC plugin if Pytorch is not built with native support.
+        # TODO: remove this exception once UCC plugin is fully deprecated.
+        if (name != Backend.UCC or (name == Backend.UCC and is_ucc_available())):
+            assert not hasattr(Backend, name.upper()), (
+                f"{name.upper()} c10d backend already exist"
+            )
         assert name.upper() not in Backend._plugins, (
             f"{name.upper()} c10d backend creator function already exist"
         )
@@ -412,6 +422,13 @@ def is_gloo_available():
     return _GLOO_AVAILABLE
 
 
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
+
+
 def is_initialized():
     """
     Checking if the default process group has been initialized
@@ -511,12 +528,13 @@ def init_process_group(
     Args:
         backend (str or Backend): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            and ``nccl``. This field should be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
+            ``nccl``, and ``ucc``. This field should be given as a lowercase
+            string (e.g., ``"gloo"``), which can also be accessed via
             :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
             multiple processes per machine with ``nccl`` backend, each process
             must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks.
+            between processes can result in deadlocks. ``ucc`` backend is
+            experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -547,6 +565,9 @@ def init_process_group(
             continue executing user code since failed async NCCL operations
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
+            For ``ucc``, blocking wait is supported similar to NCCL. However,
+            async error handling is done differently since with UCC we have
+            progress thread and not watch-dog thread.
         group_name (str, optional, deprecated): Group name.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
@@ -682,7 +703,7 @@ def _new_process_group_helper(
     is_default_group = len(group_ranks) == 0
 
     backend = Backend(backend)
-    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
+    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL, ProcessGroupUCC]
     if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError(
@@ -766,6 +787,33 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
+            _pg_names[pg] = group_name
+        elif backend == Backend.UCC and is_ucc_available():
+            # TODO: once UCC plugin is fully deprecated, remove
+            # is_ucc_available() from above elif-condition and raise
+            # RuntimeError if is_ucc_available() returns false.
+
+            pg = ProcessGroupUCC(prefix_store, rank, world_size, timeout=timeout)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if get_debug_level() == DebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout,
+                    )
+            _pg_map[pg] = (Backend.UCC, store)
             _pg_names[pg] = group_name
         else:
             assert backend.upper() in Backend._plugins, (
@@ -1064,7 +1112,7 @@ def batch_isend_irecv(p2p_op_list):
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
     Process each of the operations in ``p2p_op_list`` and return the corresponding
-    requests. NCCL and Gloo backend are currently supported.
+    requests. NCCL, Gloo, and UCC backend are currently supported.
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is

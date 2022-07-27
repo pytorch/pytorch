@@ -14,6 +14,7 @@
 #else
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
@@ -131,7 +132,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = at::resize_functional(self_, size, memory_format);
+    tmp_output = at::resize(self_, size, memory_format);
   }
 
   auto itemsize = self.dtype().itemsize();
@@ -174,6 +175,22 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
 at::Tensor lift_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   return at::functionalization::impl::to_functional_tensor(self);
+}
+
+at::Tensor lift_functionalize_copy(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self.clone());
+}
+
+at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  return at::functionalization::impl::to_functional_tensor(self);
+}
+
+at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  at::AutoDispatchSkipFunctionalize guard;
+  return at::functionalization::impl::to_functional_tensor(at::lift_fresh_copy(self));
 }
 
 bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
@@ -276,6 +293,8 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("resize_", TORCH_FN(resize__functionalization));
   m.impl("lift", TORCH_FN(lift_functionalize));
+  m.impl("lift_fresh", TORCH_FN(lift_fresh_functionalize));
+  m.impl("lift_fresh_copy", TORCH_FN(lift_fresh_functionalize_copy));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
 }
