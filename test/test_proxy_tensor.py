@@ -442,7 +442,6 @@ fake_tensor_failures = {
     xfail('complex'),
     xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
-    xfail('linalg.matrix_power'),
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('mvlgamma', 'mvlgamma_p_1'),
@@ -595,6 +594,7 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
     xfail('linalg.matrix_norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition

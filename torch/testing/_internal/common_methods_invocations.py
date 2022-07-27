@@ -14159,7 +14159,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=2e-05), }),
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
                    active_if=TEST_CUDNN)],
            skips=(

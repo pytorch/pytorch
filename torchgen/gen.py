@@ -38,6 +38,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_view_inverse_declaration,
     gen_symint_view_copy_kernel,
 )
+from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
 from torchgen.model import (
     Argument,
@@ -903,14 +904,12 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
-                assert f.func.arguments.has_tensor_arg()
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
-                assert not f.func.arguments.has_tensor_arg()
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
@@ -1841,6 +1840,10 @@ def gen_headers(
                 for f in native_functions
             ],
         },
+    )
+
+    cpu_fm.write(
+        "VmapGeneratedPlumbing.h", lambda: gen_all_vmap_plumbing(native_functions)
     )
 
     def gen_aten_interned_strings() -> Dict[str, str]:

@@ -665,15 +665,7 @@ class NativeFunction:
             )
         elif not structured and structured_delegate is None:
             name = str(func.name.name)
-            assert not (
-                name.startswith("new_")
-                or name.endswith("_like")
-                # TODO: maybe it's better to test the return
-                or (
-                    func.arguments.tensor_options
-                    and not func.arguments.has_tensor_arg()
-                )
-            ), (
+            assert not (name.startswith("new_") or name.endswith("_like")), (
                 f"expected {name} to have a CompositeExplicitAutograd "
                 "dispatch entry, but there was no dispatch table.  Factory functions "
                 "should not have implicit dispatch as they should not be decomposed "
@@ -2037,9 +2029,6 @@ class Arguments:
         )
 
         return arguments
-
-    def has_tensor_arg(self) -> bool:
-        return any(a.type.is_tensor_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less
