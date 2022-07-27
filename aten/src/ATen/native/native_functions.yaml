@@ -2012,6 +2012,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutogradNonFunctional: new_zeros
+    SparseCPU, SparseCUDA, SparseMeta: new_zeros
 
 - func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
