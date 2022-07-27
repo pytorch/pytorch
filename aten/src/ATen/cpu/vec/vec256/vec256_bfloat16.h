@@ -26,7 +26,7 @@ static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
 }
 
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
-  __m128i lo = _mm256_castsi256_si128(a);
+  __m128i lo = _mm256_extractf128_si256(a, 0);
   __m128i hi = _mm256_extractf128_si256(a, 1);
   cvtbf16_fp32(lo, o1);
   cvtbf16_fp32(hi, o2);
