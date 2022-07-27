@@ -2,19 +2,19 @@ file_identifier "PTMF";
 
 namespace torch.jit.mobile.serialization;
 
-struct Int {
+table Int {
   int_val:long;
 }
 
-struct Bool {
+table Bool {
   bool_val:bool;
 }
 
-struct Double{
+table Double{
   double_val:double;
 }
 
-struct PerTensorAffineSchema {
+table PerTensorAffineSchema {
   q_scale:double;
   q_zero_point:int;
 }
@@ -99,7 +99,7 @@ table Object {
   setstate_func:uint;
 }
 
-struct ComplexDouble {
+table ComplexDouble {
   real:double;
   imag:double;
 }

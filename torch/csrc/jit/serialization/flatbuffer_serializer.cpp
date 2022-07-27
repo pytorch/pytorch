@@ -678,22 +678,23 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
     offset = tupleToFB(fbb, ivalue).Union();
   } else if (ivalue.isDouble()) {
     ivalue_type = IValueUnion::Double;
-    offset = fbb.CreateStruct(mobile::serialization::Double(ivalue.toDouble()))
-                 .Union();
+    offset =
+        mobile::serialization::CreateDouble(fbb, ivalue.toDouble()).Union();
   } else if (ivalue.isComplexDouble()) {
     auto comp = ivalue.toComplexDouble();
     ivalue_type = IValueUnion::ComplexDouble;
-    offset = fbb.CreateStruct(mobile::serialization::ComplexDouble(
-                                  comp.real(), comp.imag()))
+    offset =
+        mobile::serialization::CreateComplexDouble(fbb,
+                                  comp.real(), comp.imag())
                  .Union();
   } else if (ivalue.isInt()) {
     ivalue_type = IValueUnion::Int;
     offset =
-        fbb.CreateStruct(mobile::serialization::Int(ivalue.toInt())).Union();
+        mobile::serialization::CreateInt(fbb, ivalue.toInt()).Union();
   } else if (ivalue.isBool()) {
     ivalue_type = IValueUnion::Bool;
     offset =
-        fbb.CreateStruct(mobile::serialization::Bool(ivalue.toBool())).Union();
+        mobile::serialization::CreateBool(fbb, ivalue.toBool()).Union();
   } else if (ivalue.isString()) {
     ivalue_type = IValueUnion::String;
     offset = mobile::serialization::CreateString(

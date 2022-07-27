@@ -12,12 +12,16 @@ namespace mobile {
 namespace serialization {
 
 struct Int;
+struct IntBuilder;
 
 struct Bool;
+struct BoolBuilder;
 
 struct Double;
+struct DoubleBuilder;
 
 struct PerTensorAffineSchema;
+struct PerTensorAffineSchemaBuilder;
 
 struct QuantizedSchema;
 struct QuantizedSchemaBuilder;
@@ -56,6 +60,7 @@ struct Object;
 struct ObjectBuilder;
 
 struct ComplexDouble;
+struct ComplexDoubleBuilder;
 
 struct EnumValue;
 struct EnumValueBuilder;
@@ -274,129 +279,6 @@ template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Function>
 bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type);
 bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types);
 
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int FLATBUFFERS_FINAL_CLASS {
- private:
-  int64_t int_val_;
-
- public:
-  Int()
-      : int_val_(0) {
-  }
-  Int(int64_t _int_val)
-      : int_val_(flatbuffers::EndianScalar(_int_val)) {
-  }
-  int64_t int_val() const {
-    return flatbuffers::EndianScalar(int_val_);
-  }
-  void mutate_int_val(int64_t _int_val) {
-    flatbuffers::WriteScalar(&int_val_, _int_val);
-  }
-};
-FLATBUFFERS_STRUCT_END(Int, 8);
-
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(1) Bool FLATBUFFERS_FINAL_CLASS {
- private:
-  uint8_t bool_val_;
-
- public:
-  Bool()
-      : bool_val_(0) {
-  }
-  Bool(bool _bool_val)
-      : bool_val_(flatbuffers::EndianScalar(static_cast<uint8_t>(_bool_val))) {
-  }
-  bool bool_val() const {
-    return flatbuffers::EndianScalar(bool_val_) != 0;
-  }
-  void mutate_bool_val(bool _bool_val) {
-    flatbuffers::WriteScalar(&bool_val_, static_cast<uint8_t>(_bool_val));
-  }
-};
-FLATBUFFERS_STRUCT_END(Bool, 1);
-
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Double FLATBUFFERS_FINAL_CLASS {
- private:
-  double double_val_;
-
- public:
-  Double()
-      : double_val_(0) {
-  }
-  Double(double _double_val)
-      : double_val_(flatbuffers::EndianScalar(_double_val)) {
-  }
-  double double_val() const {
-    return flatbuffers::EndianScalar(double_val_);
-  }
-  void mutate_double_val(double _double_val) {
-    flatbuffers::WriteScalar(&double_val_, _double_val);
-  }
-};
-FLATBUFFERS_STRUCT_END(Double, 8);
-
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PerTensorAffineSchema FLATBUFFERS_FINAL_CLASS {
- private:
-  double q_scale_;
-  int32_t q_zero_point_;
-  int32_t padding0__;
-
- public:
-  PerTensorAffineSchema()
-      : q_scale_(0),
-        q_zero_point_(0),
-        padding0__(0) {
-    (void)padding0__;
-  }
-  PerTensorAffineSchema(double _q_scale, int32_t _q_zero_point)
-      : q_scale_(flatbuffers::EndianScalar(_q_scale)),
-        q_zero_point_(flatbuffers::EndianScalar(_q_zero_point)),
-        padding0__(0) {
-    (void)padding0__;
-  }
-  double q_scale() const {
-    return flatbuffers::EndianScalar(q_scale_);
-  }
-  void mutate_q_scale(double _q_scale) {
-    flatbuffers::WriteScalar(&q_scale_, _q_scale);
-  }
-  int32_t q_zero_point() const {
-    return flatbuffers::EndianScalar(q_zero_point_);
-  }
-  void mutate_q_zero_point(int32_t _q_zero_point) {
-    flatbuffers::WriteScalar(&q_zero_point_, _q_zero_point);
-  }
-};
-FLATBUFFERS_STRUCT_END(PerTensorAffineSchema, 16);
-
-FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ComplexDouble FLATBUFFERS_FINAL_CLASS {
- private:
-  double real_;
-  double imag_;
-
- public:
-  ComplexDouble()
-      : real_(0),
-        imag_(0) {
-  }
-  ComplexDouble(double _real, double _imag)
-      : real_(flatbuffers::EndianScalar(_real)),
-        imag_(flatbuffers::EndianScalar(_imag)) {
-  }
-  double real() const {
-    return flatbuffers::EndianScalar(real_);
-  }
-  void mutate_real(double _real) {
-    flatbuffers::WriteScalar(&real_, _real);
-  }
-  double imag() const {
-    return flatbuffers::EndianScalar(imag_);
-  }
-  void mutate_imag(double _imag) {
-    flatbuffers::WriteScalar(&imag_, _imag);
-  }
-};
-FLATBUFFERS_STRUCT_END(ComplexDouble, 16);
-
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) Instruction FLATBUFFERS_FINAL_CLASS {
  private:
   int8_t op_;
@@ -439,6 +321,195 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) Instruction FLATBUFFERS_FINAL_CLASS {
   }
 };
 FLATBUFFERS_STRUCT_END(Instruction, 8);
+
+struct Int FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef IntBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_INT_VAL = 4
+  };
+  int64_t int_val() const {
+    return GetField<int64_t>(VT_INT_VAL, 0);
+  }
+  bool mutate_int_val(int64_t _int_val = 0) {
+    return SetField<int64_t>(VT_INT_VAL, _int_val, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<int64_t>(verifier, VT_INT_VAL) &&
+           verifier.EndTable();
+  }
+};
+
+struct IntBuilder {
+  typedef Int Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_int_val(int64_t int_val) {
+    fbb_.AddElement<int64_t>(Int::VT_INT_VAL, int_val, 0);
+  }
+  explicit IntBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<Int> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<Int>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<Int> CreateInt(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    int64_t int_val = 0) {
+  IntBuilder builder_(_fbb);
+  builder_.add_int_val(int_val);
+  return builder_.Finish();
+}
+
+struct Bool FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef BoolBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_BOOL_VAL = 4
+  };
+  bool bool_val() const {
+    return GetField<uint8_t>(VT_BOOL_VAL, 0) != 0;
+  }
+  bool mutate_bool_val(bool _bool_val = 0) {
+    return SetField<uint8_t>(VT_BOOL_VAL, static_cast<uint8_t>(_bool_val), 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_BOOL_VAL) &&
+           verifier.EndTable();
+  }
+};
+
+struct BoolBuilder {
+  typedef Bool Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_bool_val(bool bool_val) {
+    fbb_.AddElement<uint8_t>(Bool::VT_BOOL_VAL, static_cast<uint8_t>(bool_val), 0);
+  }
+  explicit BoolBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<Bool> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<Bool>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<Bool> CreateBool(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    bool bool_val = false) {
+  BoolBuilder builder_(_fbb);
+  builder_.add_bool_val(bool_val);
+  return builder_.Finish();
+}
+
+struct Double FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef DoubleBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_DOUBLE_VAL = 4
+  };
+  double double_val() const {
+    return GetField<double>(VT_DOUBLE_VAL, 0.0);
+  }
+  bool mutate_double_val(double _double_val = 0.0) {
+    return SetField<double>(VT_DOUBLE_VAL, _double_val, 0.0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<double>(verifier, VT_DOUBLE_VAL) &&
+           verifier.EndTable();
+  }
+};
+
+struct DoubleBuilder {
+  typedef Double Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_double_val(double double_val) {
+    fbb_.AddElement<double>(Double::VT_DOUBLE_VAL, double_val, 0.0);
+  }
+  explicit DoubleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<Double> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<Double>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<Double> CreateDouble(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    double double_val = 0.0) {
+  DoubleBuilder builder_(_fbb);
+  builder_.add_double_val(double_val);
+  return builder_.Finish();
+}
+
+struct PerTensorAffineSchema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef PerTensorAffineSchemaBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_Q_SCALE = 4,
+    VT_Q_ZERO_POINT = 6
+  };
+  double q_scale() const {
+    return GetField<double>(VT_Q_SCALE, 0.0);
+  }
+  bool mutate_q_scale(double _q_scale = 0.0) {
+    return SetField<double>(VT_Q_SCALE, _q_scale, 0.0);
+  }
+  int32_t q_zero_point() const {
+    return GetField<int32_t>(VT_Q_ZERO_POINT, 0);
+  }
+  bool mutate_q_zero_point(int32_t _q_zero_point = 0) {
+    return SetField<int32_t>(VT_Q_ZERO_POINT, _q_zero_point, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<double>(verifier, VT_Q_SCALE) &&
+           VerifyField<int32_t>(verifier, VT_Q_ZERO_POINT) &&
+           verifier.EndTable();
+  }
+};
+
+struct PerTensorAffineSchemaBuilder {
+  typedef PerTensorAffineSchema Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_q_scale(double q_scale) {
+    fbb_.AddElement<double>(PerTensorAffineSchema::VT_Q_SCALE, q_scale, 0.0);
+  }
+  void add_q_zero_point(int32_t q_zero_point) {
+    fbb_.AddElement<int32_t>(PerTensorAffineSchema::VT_Q_ZERO_POINT, q_zero_point, 0);
+  }
+  explicit PerTensorAffineSchemaBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<PerTensorAffineSchema> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<PerTensorAffineSchema>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<PerTensorAffineSchema> CreatePerTensorAffineSchema(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    double q_scale = 0.0,
+    int32_t q_zero_point = 0) {
+  PerTensorAffineSchemaBuilder builder_(_fbb);
+  builder_.add_q_scale(q_scale);
+  builder_.add_q_zero_point(q_zero_point);
+  return builder_.Finish();
+}
 
 struct QuantizedSchema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef QuantizedSchemaBuilder Builder;
@@ -1365,6 +1436,63 @@ inline flatbuffers::Offset<Object> CreateObjectDirect(
       state,
       attrs__,
       setstate_func);
+}
+
+struct ComplexDouble FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef ComplexDoubleBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_REAL = 4,
+    VT_IMAG = 6
+  };
+  double real() const {
+    return GetField<double>(VT_REAL, 0.0);
+  }
+  bool mutate_real(double _real = 0.0) {
+    return SetField<double>(VT_REAL, _real, 0.0);
+  }
+  double imag() const {
+    return GetField<double>(VT_IMAG, 0.0);
+  }
+  bool mutate_imag(double _imag = 0.0) {
+    return SetField<double>(VT_IMAG, _imag, 0.0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<double>(verifier, VT_REAL) &&
+           VerifyField<double>(verifier, VT_IMAG) &&
+           verifier.EndTable();
+  }
+};
+
+struct ComplexDoubleBuilder {
+  typedef ComplexDouble Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_real(double real) {
+    fbb_.AddElement<double>(ComplexDouble::VT_REAL, real, 0.0);
+  }
+  void add_imag(double imag) {
+    fbb_.AddElement<double>(ComplexDouble::VT_IMAG, imag, 0.0);
+  }
+  explicit ComplexDoubleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<ComplexDouble> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<ComplexDouble>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<ComplexDouble> CreateComplexDouble(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    double real = 0.0,
+    double imag = 0.0) {
+  ComplexDoubleBuilder builder_(_fbb);
+  builder_.add_imag(imag);
+  builder_.add_real(real);
+  return builder_.Finish();
 }
 
 struct EnumValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -2457,16 +2585,20 @@ inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, 
       return true;
     }
     case IValueUnion::Int: {
-      return verifier.Verify<torch::jit::mobile::serialization::Int>(static_cast<const uint8_t *>(obj), 0);
+      auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Int *>(obj);
+      return verifier.VerifyTable(ptr);
     }
     case IValueUnion::Bool: {
-      return verifier.Verify<torch::jit::mobile::serialization::Bool>(static_cast<const uint8_t *>(obj), 0);
+      auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Bool *>(obj);
+      return verifier.VerifyTable(ptr);
     }
     case IValueUnion::Double: {
-      return verifier.Verify<torch::jit::mobile::serialization::Double>(static_cast<const uint8_t *>(obj), 0);
+      auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Double *>(obj);
+      return verifier.VerifyTable(ptr);
     }
     case IValueUnion::ComplexDouble: {
-      return verifier.Verify<torch::jit::mobile::serialization::ComplexDouble>(static_cast<const uint8_t *>(obj), 0);
+      auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::ComplexDouble *>(obj);
+      return verifier.VerifyTable(ptr);
     }
     case IValueUnion::TensorMetadata: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::TensorMetadata *>(obj);
