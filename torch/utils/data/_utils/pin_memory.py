@@ -46,7 +46,9 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
 
 
 def pin_memory(data, device=None):
-    if isinstance(data, torch.Tensor):
+    if hasattr(data, "pin_memory"):
+        return data.pin_memory()
+    elif isinstance(data, torch.Tensor):
         return data.pin_memory(device)
     elif isinstance(data, string_classes):
         return data
@@ -66,7 +68,5 @@ def pin_memory(data, device=None):
         except TypeError:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [pin_memory(sample, device) for sample in data]
-    elif hasattr(data, "pin_memory"):
-        return data.pin_memory()
     else:
         return data
