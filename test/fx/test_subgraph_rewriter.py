@@ -4,8 +4,7 @@ import os
 import sys
 
 import torch
-from torch.fx import symbolic_trace #, subgraph_rewriter
-import torch.fx.passes.utils.replacer_utils as subgraph_rewriter
+from torch.fx import symbolic_trace , subgraph_rewriter
 from torch.fx.annotate import annotate
 # Make the helper files in test/ importable
 from torch.fx.experimental.rewriter import RewritingTracer
@@ -493,6 +492,38 @@ class TestSubgraphRewriter(JitTestCase):
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
 
+    def test_subgraph_rewriter_with_overlapping_matches(self):
+
+        def f(x):
+            x = torch.sigmoid(x)
+            x = torch.sigmoid(x)
+            x = torch.sigmoid(x)
+            return torch.sigmoid(x)
+
+        def pattern(x):
+            x = torch.sigmoid(x)
+            x = torch.sigmoid(x)
+            return x
+
+        def replacement(x):
+            return torch.neg(x)
+
+        def comparison(x):
+            x = torch.neg(x)
+            return torch.neg(x)
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
 
     def test_subgraph_rewriter_replace_with_multiple_outputs(self):
 
