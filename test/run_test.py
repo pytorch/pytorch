@@ -863,8 +863,11 @@ def get_selected_tests(options):
 
         # Download previous test times to make sharding decisions
         path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
-        with open(path, "r") as f:
-            test_file_times = cast(Dict[str, Any], json.load(f))
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                test_file_times = cast(Dict[str, Any], json.load(f))
+        else:
+            test_file_times = {}
         if os.environ["TEST_CONFIG"] not in test_file_times:
             print(
                 "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
