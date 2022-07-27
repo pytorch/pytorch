@@ -65,7 +65,7 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return blocks
 
-    def bitshift_multiplication(self, decomposed_weight, activation):
+    def bitshift_mul(self, decomposed_weight, activation):
         r"""
         Compute matrix multiplication result of input weight and activation using bitshifting
         Args:
@@ -100,6 +100,16 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return result
 
+    def matmul(self, decomposed_weight, activation):
+        r"""
+        Call bitshift_mul function to perform matrix multiplication between
+        decomposed_weight and activation.
+        Args:
+            decomposed_weight (Tensor): APoT quantized weight decomposed into binary
+            activation (Tensor): uniformly quantized activation
+        """
+        return self.bitshift_mul(decomposed_weight, activation)
+
     def linear_APoT_fn(self, activation: torch.Tensor) -> torch.FloatTensor:
         r"""
         Multiply APoT quantized weight and uniformly quantized activation (dtype: quint8)
@@ -124,7 +134,7 @@ class LinearAPoT(WeightedQuantizedModule):
         rows2 = activation.size(dim=0)
         cols2 = activation.size(dim=1)
 
-        result = self.bitshift_multiplication(decomposed_weight, activation).type(torch.FloatTensor)
+        result = self.matmul(decomposed_weight, activation).type(torch.FloatTensor)
 
         return result
 

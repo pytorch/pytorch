@@ -14,7 +14,7 @@ class TestNonUniformObserver(unittest.TestCase):
         # weight: fp tensor
         weight = 1000 * torch.rand(4, 4)
 
-        # activtion: uniformly quantized tensor
+        # activtion: fp32 tensor with ~ integer values
         activation = torch.randint(low=0, high=255, size=(4, 4), dtype=torch.float)
 
         # calculate result from calling linear forward method
