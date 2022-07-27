@@ -1,7 +1,7 @@
+import torch
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
-import torch
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
 
 """
