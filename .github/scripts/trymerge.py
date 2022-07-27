@@ -1152,7 +1152,6 @@ def merge(pr_num: int, repo: GitRepo,
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
-    has_ciflow_trunk = has_label(pr.get_labels(), CIFLOW_TRUNK_LABEL)
     initial_commit_sha = pr.last_commit()['oid']
     check_for_sev(org, project, force)
     if force or can_skip_internal_checks(pr, comment_id):
@@ -1161,7 +1160,7 @@ def merge(pr_num: int, repo: GitRepo,
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
-    if land_checks and not has_ciflow_trunk:
+    if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
     start_time = time.time()
@@ -1193,7 +1192,7 @@ def merge(pr_num: int, repo: GitRepo,
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            if land_checks and not has_ciflow_trunk:
+            if land_checks:
                 validate_land_time_checks(org, project, land_check_commit)
 
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
@@ -1213,6 +1212,7 @@ def main() -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
+    land_checks = args.land_checks and not has_label(pr.get_labels(), CIFLOW_TRUNK_LABEL)
 
     def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
         msg += f" due to {e}"
@@ -1222,7 +1222,7 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
-    if not args.land_checks:
+    if land_checks:
         msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
         msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
@@ -1250,7 +1250,7 @@ def main() -> None:
               comment_id=args.comment_id,
               on_green=on_green,
               mandatory_only=args.on_mandatory,
-              land_checks=args.land_checks)
+              land_checks=land_checks)
     except Exception as e:
         handle_exception(e)
 
