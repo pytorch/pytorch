@@ -27,6 +27,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      python_version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
 
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID:
@@ -68,7 +74,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
-          python-version: 3.8
+          python-version: inputs.python_version
           activate-environment: build
           miniconda-version: 4.7.12
 
