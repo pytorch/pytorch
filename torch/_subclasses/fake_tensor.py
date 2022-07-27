@@ -227,6 +227,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
         r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
         return fake_mode.fake_tensor_converter(fake_mode, r)
 
+
 # _to_copy fails when run with FakeTensors to cuda device
 # TODO: debug
 @register_op_impl(aten._to_copy.default)
@@ -552,8 +553,7 @@ class FakeTensorMode(TorchDispatchMode):
                     and type(x) is not torch.Tensor
                 )
                 non_meta_elem = non_meta_elem or (
-                    isinstance(x, FakeTensor)
-                    and not x.fake_is_meta
+                    isinstance(x, FakeTensor) and not x.fake_is_meta
                 )
 
             tree_map(check_non_fake_tensor, args)
@@ -606,7 +606,9 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 try:
                     if non_meta_elem:
-                        raise NotImplementedError("one input is not representable as meta")
+                        raise NotImplementedError(
+                            "one input is not representable as meta"
+                        )
                     r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
                     if not self.allow_fallback_kernels:
@@ -619,11 +621,14 @@ class FakeTensorMode(TorchDispatchMode):
 
             # Lazily initialized, in case there are no tensor returns
             common_device = None
+
             def wrap(e, device=None):
                 nonlocal common_device
                 if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                     if common_device is None:
-                        common_device = FakeTensor._find_common_device(func, args, kwargs)
+                        common_device = FakeTensor._find_common_device(
+                            func, args, kwargs
+                        )
                     if is_fallback:
                         # mikoHmm
                         # assert torch.device(device or common_device) == e.device

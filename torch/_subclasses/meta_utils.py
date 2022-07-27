@@ -149,7 +149,12 @@ class MetaConverter:
                 if t.is_sparse:
                     is_leaf = safe_is_leaf(t)
                     r = torch.ops.aten._sparse_coo_tensor_with_dims(
-                        t.sparse_dim(), t.dense_dim(), t.shape, dtype=t.dtype, layout=torch.sparse_coo, device='meta'
+                        t.sparse_dim(),
+                        t.dense_dim(),
+                        t.shape,
+                        dtype=t.dtype,
+                        layout=torch.sparse_coo,
+                        device="meta",
                     )
                     r._coalesced_(t.is_coalesced())
                     if t.requires_grad:
@@ -231,7 +236,7 @@ class MetaConverter:
                     t.is_mkldnn,
                     t.is_quantized,
                     t.is_nested,
-                    t._is_view() and t._base.is_sparse,
+                    t._is_view() and t._base and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     # these are supported in meta conversion but the fallbacks
                     # don't work

@@ -55,7 +55,18 @@ class CrossRefSparseFakeMode(TorchDispatchMode):
 
         # empty_like excluded for now due to sparse complex
         # aten._to_dense.default this one is getting called with csc
-        if func not in [torch.ops.aten.lift_fresh.default, torch.ops.aten.empty_like.default, torch.ops.aten.set_.source_Storage_storage_offset, torch.ops.aten.sspaddmm.out, torch.ops.aten._spdiags.default, torch.ops.aten._to_dense.default] and torch.Tag.dynamic_output_shape not in func.tags and torch.Tag.inplace_view not in func.tags:
+        if (
+            func not in [
+                torch.ops.aten.lift_fresh.default,
+                torch.ops.aten.empty_like.default,
+                torch.ops.aten.set_.source_Storage_storage_offset,
+                torch.ops.aten.sspaddmm.out,
+                torch.ops.aten._spdiags.default,
+                torch.ops.aten._to_dense.default
+            ]
+            and torch.Tag.dynamic_output_shape not in func.tags
+            and torch.Tag.inplace_view not in func.tags
+        ):
             from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
             from torch.utils._pytree import tree_map
             try:
@@ -70,8 +81,11 @@ class CrossRefSparseFakeMode(TorchDispatchMode):
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
-        with CrossRefSparseFakeMode():
-            super().run(result)
+        if TEST_WITH_CROSSREF:
+            with CrossRefSparseFakeMode():
+                return super().run(result)
+        else:
+            return super().run(result)
 
 class TestSparse(TestSparseBase):
 
@@ -1677,6 +1691,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
     def test_sparse_sum(self, device, dtype, coalesced):
 
         def run_tests(S, td=None):
@@ -3449,7 +3464,7 @@ class TestSparse(TestSparseBase):
                                       *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
                                       *[torch.complex64] if CUDA11OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
-    @unittest.skip("not working")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
