@@ -1,6 +1,6 @@
 import textwrap
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from torchgen.api.translate import translate
 from torchgen.api.types import DispatcherSignature
@@ -50,8 +50,8 @@ def unwrap_optional_tensor(name: str, cur_level_var: str) -> List[str]:
 
 
 def gen_unwraps(
-    flat_arguments: List[Argument], cur_level_var: str
-) -> Tuple[List[str], List[str]]:
+    flat_arguments: Sequence[Argument], cur_level_var: str
+) -> Tuple[str, List[str]]:
     arg_names = [a.name for a in flat_arguments]
     arg_types = [a.type for a in flat_arguments]
 
@@ -66,7 +66,7 @@ def gen_unwraps(
 
     for opt_tensor in optional_tensors:
         unwraps += unwrap_optional_tensor(opt_tensor, cur_level_var)
-    unwraps = "\n".join(unwraps)
+    unwrap_code = "\n".join(unwraps)
 
     unwrapped_arg_list = []
     for arg in arg_names:
@@ -74,7 +74,7 @@ def gen_unwraps(
             unwrapped_arg_list += [f"{arg}_value", f"{arg}_bdim"]
         else:
             unwrapped_arg_list.append(arg)
-    return unwraps, unwrapped_arg_list
+    return unwrap_code, unwrapped_arg_list
 
 
 def get_aten_op_call(schema) -> str:
@@ -101,7 +101,9 @@ if ({' && '.join(conditions)}) {{
 }}"""
 
 
-def gen_returns(returns: List[Return], cur_level_var: str, results_var: str) -> str:
+def gen_returns(
+    returns: Tuple[Return, ...], cur_level_var: str, results_var: str
+) -> str:
     idx = 0
     wrapped_returns = []
     for ret in returns:
@@ -119,10 +121,10 @@ def gen_returns(returns: List[Return], cur_level_var: str, results_var: str) -> 
             wrapped_returns.append(f"std::get<{idx}>({results_var})")
             idx += 1
     if len(wrapped_returns) == 1:
-        wrapped_returns = f"return {wrapped_returns[0]};"
+        result = f"return {wrapped_returns[0]};"
     else:
-        wrapped_returns = f'return std::make_tuple({", ".join(wrapped_returns)});'
-    return wrapped_returns
+        result = f'return std::make_tuple({", ".join(wrapped_returns)});'
+    return result
 
 
 def accepts_at_least_one_tensor_input(schema):
@@ -198,7 +200,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 }}"""
 
 
-def gen_vmap_plumbing(native_function: NativeFunction) -> str:
+def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     schema = native_function.func
     sig = DispatcherSignature.from_schema(schema)
     returns = schema.returns
