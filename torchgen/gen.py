@@ -2304,15 +2304,11 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
             # TODO: make this more first class in the data model
             g1_base_name = str(g1.view_copy.func.name.name)
             g2_base_name = str(g2.view_copy.func.name.name)
-            g1_stripped_schema = str(g1.view_copy.func.arguments).replace(
-                "SymInt", "int"
-            )
-            g2_stripped_schema = str(g2.view_copy.func.arguments).replace(
-                "SymInt", "int"
-            )
+
             same_base_op = (
                 g1_base_name == g2_base_name
-                and g1_stripped_schema == g2_stripped_schema
+                and g1.view_copy.func.arguments.symints_to_ints()
+                == g2.view_copy.func.arguments.symints_to_ints()
             )
             op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
             op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)

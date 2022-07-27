@@ -27,6 +27,7 @@ from torchgen.api.types import (
     optionalIntArrayRefT,
     scalarT,
     stringT,
+    symIntArrayRefT,
     tensorListT,
     tensorT,
 )
@@ -281,6 +282,20 @@ for (auto i : c10::irange(prop.size())) {
 return tup;
 """
 
+GETTER_BODY_ARRAYREF_SYMINT = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i : c10::irange(prop.size())) {
+    auto si = prop[i];
+    if (si.is_symbolic()) {
+      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
+    } else {
+       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.data()));
+    }
+}
+return tup;
+"""
+
 GETTER_BODY_ARRAYREF_DOUBLE = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
@@ -518,6 +533,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 GETTER_DEFINITION.substitute(
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == BaseCType(symIntArrayRefT):
+            saved_variables.append(f"std::vector<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
                 )
             )
         elif type == BaseCType(optionalIntArrayRefT):

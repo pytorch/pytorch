@@ -9,7 +9,7 @@ namespace jit {
 namespace tensorexpr {
 
 int PaddedBufferBase::Index(const std::vector<int>& indices) const {
-  DCHECK_EQ(dims_.size(), indices.size());
+  TORCH_DCHECK_EQ(dims_.size(), indices.size());
   int total_index = 0;
   for (const auto i : c10::irange(dims_.size())) {
     total_index += indices[i] * strides_[i];

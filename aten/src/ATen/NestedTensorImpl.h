@@ -76,7 +76,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
-  c10::SymIntArrayRef sym_strides() const override;
 
   Device device_custom() const override;
 

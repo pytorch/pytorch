@@ -41,6 +41,11 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
         false,
         "Internal error: sym_sizes_custom() not supported for UndefinedTensorImpl.");
   }
+  c10::SymIntArrayRef sym_strides_custom() const override {
+    TORCH_CHECK(
+        false,
+        "Internal error: sym_strides_custom() not supported for UndefinedTensorImpl.");
+  }
   IntArrayRef strides_custom() const override {
     TORCH_CHECK(
         false,
