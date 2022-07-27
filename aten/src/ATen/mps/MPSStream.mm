@@ -14,7 +14,7 @@ namespace mps {
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
-  _serialQueue = dispatch_queue_create("metal gpu stream", NULL);
+  _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
   _executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
                                              MPSGraphTensorData *> * resultsDictionary,
@@ -29,22 +29,31 @@ MPSStream::~MPSStream() {
   assert(_commandBuffer == nil);
 }
 
-id<MTLCommandBuffer> MPSStream::commandBuffer() {
+MPSCommandBuffer* MPSStream::commandBuffer() {
   if (!_commandBuffer) {
-    _commandBuffer =
-        [MPSCommandBuffer commandBufferFromCommandQueue:_commandQueue].retain;
+    _commandBuffer = [MPSCommandBuffer commandBufferFromCommandQueue:_commandQueue].retain;
   }
 
   return _commandBuffer;
 }
 
-void MPSStream::synchronize() {
-  dispatch_sync(queue(), ^() {
-    @autoreleasepool {
-      commandBuffer();
+void MPSStream::synchronize(SyncType syncType) {
+  if (!_commandBuffer)
+    return;
+  switch(syncType) {
+    case SyncType::NONE:
+      // typically in GPU to GPU copies we won't commit explicitly
+      break;
+    case SyncType::COMMIT:
+      flush();
+      break;
+    case SyncType::COMMIT_AND_WAIT:
       commitAndWait();
-    }
-  });
+      break;
+    case SyncType::COMMIT_AND_CONTINUE:
+      commitAndContinue();
+      break;
+  }
 }
 
 void MPSStream::commit(bool doFlush) {
@@ -87,6 +96,23 @@ void MPSStream::_flush(bool commitAndWait) const {
   [_commandBuffer release];
 }
 
+void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType)
+{
+  TORCH_INTERNAL_ASSERT(length >= offset);
+  if (length == 0) return;
+  dispatch_sync(_serialQueue, ^() {
+    @autoreleasepool {
+      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+
+      [blitEncoder fillBuffer:buffer
+                        range:NSMakeRange(offset, length)
+                        value:value];
+      [blitEncoder endEncoding];
+      synchronize(syncType);
+    }
+  });
+}
+
 void MPSStream::copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
                     size_t length, size_t srcOffset, size_t dstOffset, SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
@@ -99,20 +125,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
                 destinationOffset:(NSUInteger)dstOffset
                              size:(NSUInteger)length];
       [blitEncoder endEncoding];
-      switch(syncType) {
-        case SyncType::NONE:
-          // typically in GPU to GPU copies we won't commit explicitly
-          break;
-        case SyncType::COMMIT:
-          commit(true);
-          break;
-        case SyncType::COMMIT_AND_WAIT:
-          commitAndWait();
-          break;
-        case SyncType::COMMIT_AND_CONTINUE:
-          commitAndContinue();
-          break;
-      }
+      synchronize(syncType);
     }
   });
 }
@@ -123,7 +136,7 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer, 
        !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
 }
 
-void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
+void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
 #if USE_MPSCOMMANDBUFFER
     [mpsGraph encodeToCommandBuffer:commandBuffer()
@@ -131,6 +144,8 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                    targetOperations:nil
                   resultsDictionary:results
                 executionDescriptor:_executionDescriptor];
+    // mostly the syncType is NONE, but in some cases we may want to sync and wait (e.g., gatherViewTensor)
+    synchronize(syncType);
 #else
     commit(true);
     [mpsGraph runAsyncWithMTLCommandQueue:_commandQueue
