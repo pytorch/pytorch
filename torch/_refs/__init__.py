@@ -236,6 +236,8 @@ __all__ = [
     "zeros",
     "zeros_like",
     "arange",
+    "linspace",
+    "logspace",
     #
     # Randomness References
     #
@@ -1655,6 +1657,10 @@ def all(
         return prims.convert_element_type(result, torch.uint8)
 
     return result
+
+
+# Saves Python any
+py_any = any
 
 
 @register_decomposition(torch.ops.aten.any)
@@ -3089,6 +3095,127 @@ def arange(
         )
     else:
         raise AssertionError()
+
+
+@register_decomposition(torch.ops.aten.linspace)
+@out_wrapper()
+def linspace(
+    start: NumberType,
+    end: NumberType,
+    steps: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    # NB: NumPy actually doesn't do this cast, but for this ref, I'd rather have this
+    #     cast than not, because it allows us to always go into the precise path
+    #     if dtype is integral and not worry about whether start/end are float
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, float):
+            start = int(start)
+        if isinstance(end, float):
+            end = int(end)
+
+    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+        raise NotImplementedError
+    assert not isinstance(start, complex) and not isinstance(end, complex)  # for mypy
+
+    check(
+        isinstance(steps, int),
+        lambda: "steps must be int, not float",
+        exc_type=TypeError,
+    )
+    assert isinstance(steps, int)  # for mypy
+    check(steps >= 0, lambda: "number of steps must be non-negative")
+
+    factory_kwargs = {
+        "device": device,
+        # "layout":layout,
+        # "pin_memory":pin_memory,
+        "requires_grad": requires_grad,
+    }
+    if steps == 0:
+        ret = torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+    elif steps == 1:
+        ret = torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+    elif start == end:
+        ret = torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+    else:
+        if prims.utils.is_integer_dtype(dtype):
+            # We need to cast to int, so to avoid off-by-one issues
+            # do the entire computation with ints when we can
+            assert isinstance(start, int) and isinstance(end, int)
+            step_size_x_denom = end - start
+            eps = 1 if end > start else -1
+            denom = steps - 1
+            ret = prims.to_dtype(
+                torch.arange(
+                    start * denom,
+                    end * denom + eps,
+                    step_size_x_denom,
+                    dtype=torch.int64,
+                    **factory_kwargs,  # type: ignore[arg-type]
+                )
+                / denom,
+                dtype,
+            )
+        else:
+            step_size = (end - start) / (steps - 1)
+            eps = step_size / 2
+            ret = prims.to_dtype(
+                torch.arange(  # type: ignore[call-overload]
+                    start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
+                ),
+                dtype,
+            )
+
+    return ret
+
+
+@register_decomposition(torch.ops.aten.logspace)
+@out_wrapper()
+def logspace(
+    start: NumberType,
+    end: NumberType,
+    steps: NumberType,
+    base: NumberType = 10,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    # NB: NumPy doesn't have this cast
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, float):
+            start = int(start)
+        if isinstance(end, float):
+            end = int(end)
+
+    assert not isinstance(base, complex)  # for mypy
+    if base < 0:
+        raise NotImplementedError
+    ret = torch.linspace(
+        start,
+        end,
+        steps,
+        dtype=torch.float64,
+        device=device,
+        layout=layout,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+    return prims.to_dtype(torch.pow(base, ret), dtype)
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints

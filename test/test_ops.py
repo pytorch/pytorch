@@ -445,6 +445,8 @@ class TestCommon(TestCase):
             # If the results are not close, checks that the
             # reference is more accurate than the torch op
             def _make_precise(x):
+                if isinstance(x, torch.dtype):
+                    return precise_dtype
                 if isinstance(x, torch.Tensor) and x.dtype is dtype:
                     return x.to(precise_dtype)
                 return x
