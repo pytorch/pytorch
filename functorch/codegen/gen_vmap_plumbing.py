@@ -9,6 +9,7 @@ from torchgen.model import (
     Argument,
     BaseTy,
     BaseType,
+    FunctionSchema,
     ListType,
     NativeFunction,
     OptionalType,
@@ -77,13 +78,9 @@ def gen_unwraps(
     return unwrap_code, unwrapped_arg_list
 
 
-def get_aten_op_call(schema) -> str:
-    if schema.name.overload_name:
-        return f"ATEN_FN2({schema.name.name}, {schema.name.overload_name})"
-    return f"ATEN_FN({schema.name.name})"
-
-
-def gen_case_where_all_bdims_are_none(schema, cur_level_var) -> str:
+def gen_case_where_all_bdims_are_none(
+    schema: FunctionSchema, cur_level_var: str
+) -> str:
     conditions = []
     flat_args = schema.arguments.flat_all
     for arg in flat_args:
@@ -127,15 +124,15 @@ def gen_returns(
     return result
 
 
-def accepts_at_least_one_tensor_input(schema):
+def accepts_at_least_one_tensor_input(schema: FunctionSchema) -> bool:
     return any(a.type.is_tensor_like() for a in schema.arguments.flat_all)
 
 
-def is_mutated_arg(argument):
+def is_mutated_arg(argument: Argument) -> bool:
     return argument.annotation is not None and argument.annotation.is_write
 
 
-def gen_vmap_inplace_plumbing(native_function):
+def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # Assumptions:
     # - only one argument is being modified in-place
     # - the argument that is being modified in-place is the first argument
@@ -597,7 +594,7 @@ class ComputeBatchRulePlumbing:
         return result
 
 
-def gen_all_vmap_plumbing(native_functions):
+def gen_all_vmap_plumbing(native_functions: Sequence[NativeFunction]) -> str:
     body = "\n".join(list(mapMaybe(ComputeBatchRulePlumbing(), native_functions)))
     return f"""
 #pragma once
