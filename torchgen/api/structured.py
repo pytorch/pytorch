@@ -1,3 +1,25 @@
+from typing import List, Union
+
+from torchgen.api import cpp
+
+from torchgen.api.types import (
+    ArgName,
+    ArrayRefCType,
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    dimnameListT,
+    intArrayRefT,
+    iOptTensorListRefT,
+    iTensorListRefT,
+    NamedCType,
+    OptionalCType,
+    optionalIntArrayRefT,
+    optionalScalarRefT,
+    optionalTensorRefT,
+    scalarT,
+    tensorT,
+)
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -9,30 +31,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-
-from torchgen.api.types import (
-    ArgName,
-    BaseCType,
-    Binding,
-    ArrayRefCType,
-    ConstRefCType,
-    OptionalCType,
-    NamedCType,
-    tensorT,
-    scalarT,
-    intArrayRefT,
-    dimnameListT,
-    optionalTensorRefT,
-    optionalScalarRefT,
-    optionalIntArrayRefT,
-    iTensorListRefT,
-    iOptTensorListRefT,
-)
-
-from torchgen.api import cpp
 from torchgen.utils import assert_never
-
-from typing import Union, List
 
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native

@@ -20,6 +20,13 @@ on:
         type: string
         default: ""
         description: What xcode version to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID:

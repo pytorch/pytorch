@@ -4,8 +4,6 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from .gen_inplace_or_view_type import VIEW_FUNCTIONS
-
 from typing import List, Sequence, Tuple
 
 from torchgen.api.autograd import (
@@ -16,28 +14,31 @@ from torchgen.api.autograd import (
     uses_single_grad,
 )
 from torchgen.api.types import (
-    TENSOR_LIST_LIKE_CTYPES,
-    Binding,
+    ArrayRefCType,
     BaseCType,
-    OptionalCType,
-    tensorT,
-    longT,
+    Binding,
+    boolT,
     doubleT,
+    intArrayRefT,
+    iOptTensorListRefT,
+    iTensorListRefT,
+    ListCType,
+    longT,
+    MutRefCType,
+    OptionalCType,
+    optionalIntArrayRefT,
     scalarT,
     stringT,
-    boolT,
-    intArrayRefT,
+    symIntArrayRefT,
+    TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
-    iTensorListRefT,
-    iOptTensorListRefT,
-    MutRefCType,
-    ListCType,
-    ArrayRefCType,
-    optionalIntArrayRefT,
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.utils import FileManager
 from torchgen.model import Argument
+from torchgen.utils import FileManager
+
+from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
@@ -284,6 +285,20 @@ for (auto i : c10::irange(prop.size())) {
 return tup;
 """
 
+GETTER_BODY_ARRAYREF_SYMINT = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i : c10::irange(prop.size())) {
+    auto si = prop[i];
+    if (si.is_symbolic()) {
+      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
+    } else {
+       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.data()));
+    }
+}
+return tup;
+"""
+
 GETTER_BODY_ARRAYREF_DOUBLE = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
@@ -520,6 +535,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 GETTER_DEFINITION.substitute(
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == BaseCType(symIntArrayRefT):
+            saved_variables.append(f"std::vector<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
                 )
             )
         elif type == BaseCType(optionalIntArrayRefT):
