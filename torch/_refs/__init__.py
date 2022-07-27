@@ -195,6 +195,7 @@ __all__ = [
     "conj",
     "constant_pad_nd",
     "contiguous",
+    "diagonal",
     "dsplit",
     "dstack",
     "expand",
@@ -2875,6 +2876,101 @@ def vsplit(
 
     split_sizes = indices_or_sections
     return tensor_split(a, split_sizes, 0)
+
+
+# See maybe_wrap_dim in core
+def _maybe_wrap_dim(
+    dim: int,
+    dim_post_expr: int,
+    wrap_scalar: bool = True,
+) -> int:
+    # if dim_post_expr is 0 and wrap_scalar is true, then dim must be in the
+    # range [-1, 0]. This is a special case for scalar tensors and manifests in
+    # e.g. torch.sum(scalar_tensor, 0) Otherwise, dim should be in the range
+    # [-dim_post_expr, dim_post_expr-1].
+
+    # Fast path
+    if -dim_post_expr <= dim and dim < dim_post_expr:
+        # Branch-less version of dim + (dim < 0 ? dim_post_expr : 0)
+        return dim + dim_post_expr * (dim < 0)
+
+    # Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
+    return _maybe_wrap_dim_slow(dim, dim_post_expr, wrap_scalar)
+
+
+def _maybe_wrap_dim_slow(
+    dim: int,
+    dim_post_expr: int,
+    wrap_scalar: bool,
+) -> int:
+    if dim_post_expr <= 0:
+        check(
+            wrap_scalar,
+            lambda: f"dimension specified as {dim} but tensor has no dimensions",
+        )
+        return _maybe_wrap_dim(dim=dim, dim_post_expr=1, wrap_scalar=False)
+
+    min = -dim_post_expr
+    max = dim_post_expr - 1
+
+    check(
+        min <= dim and dim <= max,
+        lambda: (
+            "Dimension out of range (expected to be in range of "
+            f"[{min}, {max}], but got {dim})"
+        ),
+        exc_type=IndexError,
+    )
+
+    raise RuntimeError("should never reach here as dim should be out-of-bounds")
+
+
+@register_decomposition(torch.ops.aten.diagonal)
+def diagonal(
+    self: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.diagonal
+    """
+    num_dims = self.dim()
+    dim1 = _maybe_wrap_dim(dim=dim1, dim_post_expr=num_dims)
+    dim2 = _maybe_wrap_dim(dim=dim2, dim_post_expr=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    storage_offset = self.storage_offset()
+
+    if offset >= 0:
+        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+    else:
+        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+
+    if diag_size == 0:
+        pass  # skip
+    elif offset >= 0:
+        storage_offset += offset * self.stride()[dim2]
+    else:
+        storage_offset -= offset * self.stride()[dim1]
+
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    sizes.pop(max(dim1, dim2))
+    sizes.pop(min(dim1, dim2))
+    sizes.append(diag_size)
+
+    strides.pop(max(dim1, dim2))
+    strides.pop(min(dim1, dim2))
+    strides.append(self.stride()[dim1] + self.stride()[dim2])
+
+    result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
+
+    return result
 
 
 # CompositeImplicitAutograd - don't register decomp
