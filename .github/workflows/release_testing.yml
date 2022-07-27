@@ -101,7 +101,7 @@ jobs:
           . activate reltest
           . switch-cuda.sh ${CUDA_VERSION}
           nvcc --version
-          kdir -p ${RESULT_DIR}/wlm_gpu_lstm
+          mkdir -p ${RESULT_DIR}/wlm_gpu_lstm
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_lstm/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_gpu_lstm/result_mem.log
