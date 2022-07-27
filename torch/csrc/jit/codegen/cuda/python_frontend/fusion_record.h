@@ -137,7 +137,7 @@ struct BroadcastOpRecord : RecordFunctor {
         output_shape_.size(), nullptr);
     bool has_expand = false;
     for (const auto idx : c10::irange(output_shape_.size())) {
-      if (is_expand_dim[idx] && output_shape[idx] != 1 &&
+      if (is_expand_dim[idx] && output_shape_[idx] != 1 &&
           output_shape_[idx] != -1) {
         // TODO: this would be tricky to handle on dynamic shapes, we'll
         // need to pass-in a symbol instead somehow.
@@ -148,13 +148,11 @@ struct BroadcastOpRecord : RecordFunctor {
       }
     }
 
-    auto bcasted_input =
-        torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+    auto output = torch::jit::fuser::cuda::broadcast(arg, is_broadcast_dim);
     if (has_expand) {
-      bcasted_input =
-          torch::jit::fuser::cuda::expand(bcasted_input, output_shape_on_bcast);
+      output = torch::jit::fuser::cuda::expand(output, output_shape_on_bcast);
     }
-    fd.setFusionState(outputs.at(0), bcasted_input);
+    fd.setFusionState(outputs.at(0), output);
   }
 
  private:
