@@ -784,7 +784,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes)
+@register_decomposition(aten.split_with_sizes, disable_meta=True)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -798,7 +798,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor)
+@register_decomposition(aten.split.Tensor, disable_meta=True)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1250,7 +1250,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.transpose.int)
+@register_decomposition(aten.transpose.int, disable_meta=True)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
