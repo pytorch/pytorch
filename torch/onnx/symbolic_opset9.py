@@ -2778,6 +2778,9 @@ def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
+# Metaprogram symbolics for each ATen native specialized cast operator.
+# For e.g. we specify a function named `_cast_Byte` that instantiates an
+# ONNX cast node with `to` attribute "UINT8"
 # def _cast_Byte
 # def _cast_Char
 # def _cast_Short
