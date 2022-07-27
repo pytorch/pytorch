@@ -73,7 +73,17 @@ class ScalarType(enum.IntEnum):
 
     @classmethod
     def from_name(cls, name: Union[ScalarName, TorchName, Optional[str]]) -> ScalarType:
-        """Convert a JIT scalar type or torch type name to ScalarType."""
+        """Convert a JIT scalar type or torch type name to ScalarType.
+
+        Args:
+            name: JIT scalar type name (Byte) or torch type name (uint8_t).
+
+        Returns:
+            ScalarType.
+
+        Raises:
+            ValueError: if name is not a valid scalar type name or if it is None.
+        """
         if name is None:
             raise ValueError("Scalar type name cannot be None")
         if valid_scalar_name(name):
