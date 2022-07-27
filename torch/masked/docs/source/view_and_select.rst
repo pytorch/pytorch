@@ -4,10 +4,10 @@ View and select functions
 =========================
 
 In 0.11, we've included a number of different view and select functions -- under the hood, these are implemented
-as pass through functions -- i.e. functions that apply the operator to both the mask and the data. 
+as pass through functions -- i.e. functions that apply the operator to both the mask and the data.
 
 By way of example, consider :mod:`select`; this operation can be applied to both the data
-and the mask of a :mod:`MaskedTensor`, and the result will then be wrapped into a new :mod:`MaskedTensor`. 
+and the mask of a :mod:`MaskedTensor`, and the result will then be wrapped into a new :mod:`MaskedTensor`.
 
 A quick example of this:
 

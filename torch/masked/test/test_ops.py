@@ -4,7 +4,6 @@ from maskedtensor import masked_tensor
 from maskedtensor.binary import BINARY_NAMES
 from maskedtensor.reductions import REDUCE_NAMES
 from maskedtensor.unary import UNARY_NAMES
-from maskedtensor_additional_op_db import additional_op_db
 from torch._masked import _combine_input_and_mask
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -80,12 +79,7 @@ def _test_unary_binary_equality(device, dtype, op, layout=torch.strided):
             for arg in sample_args
         ]
 
-        print("input", input)
-        print("mask", mask)
-        print("args", mt_args)
-        print("calculating mt result")
         mt_result = op(mt, *mt_args, **sample_kwargs)
-        print("calculating t_result")
         t_result = op(sample.input, *sample_args, **sample_kwargs)
 
         _compare_mt_t(mt_result, t_result)
@@ -167,10 +161,6 @@ class TestOperators(TestCase):
     def test_reduction_all(self, device, dtype, op):
         _test_reduction_equality(device, dtype, op)
 
-    @ops(additional_op_db, allowed_dtypes=(torch.float,))
-    def test_maskedtensor_result(self, device, dtype, op):
-        _test_unary_binary_equality(device, dtype, op)
-
     @ops(mt_unary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
     def test_unary_core_sparse(self, device, dtype, op):
         # Skip tests that don't have len(kwargs) == 0
@@ -194,11 +184,6 @@ class TestOperators(TestCase):
     def test_reduction_all_sparse(self, device, dtype, op):
         _test_reduction_equality(device, dtype, op, torch.sparse_coo)
         _test_reduction_equality(device, dtype, op, torch.sparse_csr)
-
-    @ops(additional_op_db, allowed_dtypes=(torch.float,))
-    def test_maskedtensor_results_sparse(self, device, dtype, op):
-        _test_unary_binary_equality(device, dtype, op, torch.sparse_coo)
-        _test_unary_binary_equality(device, dtype, op, torch.sparse_csr)
 
 
 only_for = ("cpu", "cuda")

@@ -3,8 +3,8 @@
 Unary Operations
 ================
 
-Unary operators are operators that only contain only a single input. Applying them to MaskedTensors 
-is relatively straightforward at the moment: if the data is masked out at a given index, we apply the operator, 
+Unary operators are operators that only contain only a single input. Applying them to MaskedTensors
+is relatively straightforward at the moment: if the data is masked out at a given index, we apply the operator,
 and if not, then we'll continue to mask out the data.
 
 The available unary operators are:
