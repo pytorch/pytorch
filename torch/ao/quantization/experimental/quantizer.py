@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float, float_to_reduced_precision
+from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float, quant_dequant_util
 
 # class to store APoT quantizer and
 # implement quantize and dequantize
@@ -71,7 +71,7 @@ class APoTQuantizer():
     def quant_dequant(self, tensor2quantize: Tensor) -> Tensor:
         levels_lst = list(self.quantization_levels)
 
-        result = tensor2quantize.apply_(lambda x: float_to_reduced_precision(x, levels_lst))
+        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))
 
         return result
 

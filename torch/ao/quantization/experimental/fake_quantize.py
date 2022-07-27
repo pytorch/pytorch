@@ -13,12 +13,6 @@ class APoTFakeQuantize(FakeQuantizeBase):
     def __init__(self, observer=APoTObserver, **observer_kwargs):
         super().__init__()
         self.activation_post_process = observer(**observer_kwargs)
-        dtype = observer_kwargs.get("dtype", torch.quint8)
-        if hasattr(observer, "p"):
-            # If observer is _PartialWrapper, dtype can be stored in
-            # observer.p.keywords["dtype"]
-            dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
-                "dtype", dtype)
         self.dtype = self.activation_post_process.dtype
 
     def calculate_qparams(self, signed=False):  # type: ignore[override]
@@ -41,5 +35,4 @@ class APoTFakeQuantize(FakeQuantizeBase):
 
             X = quant_dequant_APoT(X, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
 
-        print("finished forward")
         return X
