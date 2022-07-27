@@ -646,7 +646,12 @@ class GitHubPR:
                 workflow_run = node["workflowRun"]
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
-                    conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+                    workflow_name = workflow_run["workflow"]["name"]
+                    workflow_conclusion = node["conclusion"]
+                    # Do not override existing status with cancelled
+                    if workflow_conclusion == "CANCELLED" and workflow_name in conclusions:
+                        continue
+                    conclusions[workflow_name] = (workflow_conclusion, node["url"])
                 has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:

@@ -260,6 +260,15 @@ class TestGitHubPR(TestCase):
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_cancelled_gets_ignored(self, mocked_gql: Any) -> None:
+        """ Tests that cancelled workflow does not override existing successfull status
+        """
+        pr = GitHubPR("pytorch", "pytorch", 82169)
+        conclusions = pr.get_checkrun_conclusions()
+        self.assertTrue("Lint" in conclusions.keys())
+        self.assertEqual(conclusions["Lint"][0], "SUCCESS")
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_many_land_checks(self, mocked_gql: Any) -> None:
         """ Tests that all checkruns can be fetched for a commit
         """
