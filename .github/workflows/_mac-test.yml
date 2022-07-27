@@ -115,6 +115,9 @@ jobs:
           # wreak havoc internally
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
+          python3 --version
+          python3 -c "import platform; print(platform.platform())"
+          arch
 
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
