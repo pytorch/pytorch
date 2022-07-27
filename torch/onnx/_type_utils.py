@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import enum
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from typing_extensions import Literal
 
@@ -72,11 +72,12 @@ class ScalarType(enum.IntEnum):
     UNDEFINED = enum.auto()  # 16
 
     @classmethod
-    def from_name(cls, name: Union[ScalarName, TorchName, str]) -> ScalarType:
+    def from_name(cls, name: Union[ScalarName, TorchName, Optional[str]]) -> ScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType."""
+        if name is None:
+            raise ValueError("Scalar type name cannot be None")
         if valid_scalar_name(name):
             return _SCALAR_NAME_TO_TYPE[name]  # type: ignore[index]
-
         if valid_torch_name(name):
             return _TORCH_NAME_TO_SCALAR_TYPE[name]  # type: ignore[index]
 
