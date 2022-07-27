@@ -41,7 +41,7 @@ flatbuffers==2.0
 #Pinned versions:
 #test that import:
 
-hypothesis==4.53.2
+hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
 #Pinned versions: 3.44.6, 4.53.2
@@ -86,11 +86,11 @@ mypy==0.960
 #Pinned versions: 0.960
 #test that import: test_typing.py, test_type_hints.py
 
-#networkx
+networkx==2.6.3
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
-#Pinned versions: 2.0
-#test that import:
+#Pinned versions: 2.6.3 (latest version that works with Python 3.7+)
+#test that import: functorch
 
 #ninja
 #Description: build system.  Note that it install from
@@ -142,6 +142,16 @@ pytest
 #Description: testing framework
 #Pinned versions:
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
+
+pytest-xdist
+#Description: plugin for running pytest in parallel
+#Pinned versions:
+#test that import:
+
+pytest-rerunfailures
+#Description: plugin for rerunning tests in pytest
+#Pinned versions:
+#test that import:
 
 #pytest-benchmark
 #Description: fixture for benchmarking code

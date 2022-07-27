@@ -60,7 +60,7 @@ class TORCH_API BackendDevice {
 
   // Use shared_ptr instead of unique_ptr so that BackendDevice can be copied.
   std::shared_ptr<BackendDeviceType> type_;
-  int64_t ordinal_{0};
+  int64_t ordinal_;
 };
 
 TORCH_API std::ostream& operator<<(

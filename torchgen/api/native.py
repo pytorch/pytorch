@@ -1,3 +1,25 @@
+from typing import List, Optional, Sequence, Union
+
+from torchgen import local
+from torchgen.api import cpp
+
+from torchgen.api.types import (
+    ArgName,
+    BaseCType,
+    Binding,
+    boolT,
+    ConstRefCType,
+    CType,
+    deviceT,
+    layoutT,
+    ListCType,
+    MutRefCType,
+    NamedCType,
+    OptionalCType,
+    scalarT,
+    scalarTypeT,
+    tensorT,
+)
 from torchgen.model import (
     Argument,
     FunctionSchema,
@@ -6,29 +28,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-
-from torchgen.api.types import (
-    ArgName,
-    BaseCType,
-    Binding,
-    ConstRefCType,
-    NamedCType,
-    CType,
-    MutRefCType,
-    ListCType,
-    OptionalCType,
-    tensorT,
-    scalarT,
-    layoutT,
-    deviceT,
-    boolT,
-    scalarTypeT,
-)
-from torchgen.api import cpp
-from torchgen import local
 from torchgen.utils import assert_never
-
-from typing import Union, Sequence, List, Optional
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the
