@@ -442,7 +442,6 @@ fake_tensor_failures = {
     xfail('complex'),
     xfail('linalg.eig'),
     # FakeTensor fallback doesn't work
-    xfail('linalg.matrix_power'),
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('mvlgamma', 'mvlgamma_p_1'),
@@ -477,7 +476,6 @@ symbolic_tensor_failures = {
     xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
     xfail('_masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
-    xfail('addbmm', ''),  # aten.addbmm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
@@ -561,14 +559,12 @@ symbolic_tensor_failures = {
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('hstack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_add', ''),  # Float
     xfail('index_copy', ''),  # Expected a long tensor for index, but got Float
     xfail('index_fill', ''),  # aten.index_fill.int_Scalar - couldn't find symbolic meta function/decomposition
     xfail('index_put', ''),  # aten.index_put.default - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
-    xfail('index_select', ''),  # Tensors of type TensorImpl do not have numel
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('int', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('inverse', ''),  # Tensors of type TensorImpl do not have numel
@@ -595,12 +591,11 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
     xfail('linalg.matrix_norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('norm', 'fro'),  # TensorImpl do not have numel
-    xfail('norm', 'inf'),  # TensorImpl do not have numel
     xfail('linalg.norm', ''),  # TensorImpl do not have numel
     xfail('linalg.norm', 'subgradients_at_zero'),  # TensorImpl do not have numel
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
@@ -623,7 +618,6 @@ symbolic_tensor_failures = {
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('long', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
@@ -646,6 +640,9 @@ symbolic_tensor_failures = {
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promot...
+    xfail('new_full', ''),
+    xfail('new_ones', ''),
+    xfail('new_zeros', ''),
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
@@ -694,6 +691,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.layer_norm', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type...
     xfail('nn.functional.linear', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('nn.functional.logsigmoid', ''),
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
@@ -709,7 +707,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pad', 'constant'),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta function/deco...
-    xfail('nn.functional.pairwise_distance', ''),  # TensorImpl does not have numel
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
@@ -826,6 +823,7 @@ symbolic_tensor_failures = {
     xfail('view', ''),  # Tensors of type TensorImpl do not have numel
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
+    xfail('xlogy', ''),
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
 }
