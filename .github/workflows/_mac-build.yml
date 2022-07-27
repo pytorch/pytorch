@@ -74,7 +74,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
-          python-version: inputs.python_version
+          python-version: ${{ inputs.python_version }}
           activate-environment: build
           miniconda-version: 4.7.12
 
