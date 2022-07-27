@@ -40,13 +40,13 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(LABEL);
 
 
-  DCHECK_EQ(X.dim(), 2);
+  TORCH_DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);
   // dimension, number of classes
   int D = X.dim32(1);
-  DCHECK_EQ(label.dim(), 1);
-  DCHECK_EQ(label.dim32(0), N);
+  TORCH_DCHECK_EQ(label.dim(), 1);
+  TORCH_DCHECK_EQ(label.dim32(0), N);
   auto* Y0 = Output(0, {D}, at::dtype<float>());
   auto* Y1 = Output(1, {D}, at::dtype<int>());
 
