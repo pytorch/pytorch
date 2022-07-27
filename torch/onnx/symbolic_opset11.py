@@ -284,7 +284,9 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
-        values = g.op("Cast", values, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
+        values = g.op(
+            "Cast", values, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
+        )
     scalar_type = _type_utils.ScalarType.from_name(dtype)
 
     if accumulate:
@@ -363,7 +365,9 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
+                to_i=_type_utils.ScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
         return g.op(
             "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
@@ -674,9 +678,7 @@ def _prepare_onnx_paddings(g, input, pad):
     paddings = symbolic_helper._reshape_helper(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
-    padding_c = g.op(
-        "Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64
-    )
+    padding_c = g.op("Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64)
     return padding_c
 
 

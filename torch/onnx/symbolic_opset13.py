@@ -270,9 +270,7 @@ def nonzero_numpy(g, input, _outputs=None):
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
-        condition = g.op(
-            "Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL
-        )
+        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = opset9.nonzero(g, condition)
         return symbolic_helper._unbind_helper(

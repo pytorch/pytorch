@@ -280,9 +280,7 @@ def _constant_fill(g, sizes, dtype: int, const_value):
             input_as_shape_i=1,
             value_f=const_value,
         )
-        return opset9._cast_func_template(
-            scalar_type.onnx_type(), g, result, None
-        )
+        return g.op("Cast", result, to_i=scalar_type.onnx_type())
     else:
         return g.op(
             "ConstantFill",

@@ -776,7 +776,9 @@ def _interpolate_get_scales(g, scale_factor, dim):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, [0])
-        scale_factor = g.op("Cast", scale_factor, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+        scale_factor = g.op(
+            "Cast", scale_factor, to_i=_C_onnx.TensorProtoDataType.FLOAT
+        )
         scales = [scale_factor for i in range(dim - 2)]
     scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
     return scale_factor
@@ -833,7 +835,9 @@ def _interpolate_helper(name, dim, interpolate_mode):
             input_size_beg = _slice_helper(
                 g, input_size, axes=[0], ends=[2], starts=[0]
             )
-            output_size = g.op("Cast", output_size, to_i=_C_onnx.TensorProtoDataType.INT64)
+            output_size = g.op(
+                "Cast", output_size, to_i=_C_onnx.TensorProtoDataType.INT64
+            )
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
             if GLOBALS.export_onnx_opset_version >= 13:
