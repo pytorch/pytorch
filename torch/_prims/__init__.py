@@ -11,6 +11,7 @@ import torch
 import torch._prims_common as utils
 import torch.library
 from torch import _TypedStorage, Tensor
+from torch._C import _get_default_device
 from torch._prims_common import (
     check,
     DimsSequenceType,
@@ -176,6 +177,7 @@ __all__ = [
     #
     "empty_strided",
     "scalar_tensor",
+    "arange",
     #
     # Linear algebra (linalg) Prims
     #
@@ -312,7 +314,7 @@ def _assert_nvfuser_op_exists(fname: str):
     try:
         from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
 
-        assert getattr(fd.Ops, fname)
+        assert getattr(fd.Operators, fname)
     except ImportError:
         # Not all PyTorch builds have nvfuser
         pass
@@ -325,7 +327,7 @@ for fname in _nvfuser_unary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.{fname}(a)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a)  # type: ignore[attr-defined]
 """
     )
 
@@ -355,7 +357,7 @@ for fname in _nvfuser_binary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.{fname}(a, b)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b)  # type: ignore[attr-defined]
 """
     )
 
@@ -370,7 +372,7 @@ for fname in _nvfuser_ternary_ops:
 _assert_nvfuser_op_exists("{fname}")
 
 def _{fname}_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType, c: TensorLikeType):
-    return fd.Ops.{fname}(a, b, c)  # type: ignore[attr-defined]
+    return fd.ops.{fname}(a, b, c)  # type: ignore[attr-defined]
 """
     )
 
@@ -995,7 +997,7 @@ tanh = _make_elementwise_unary_prim(
 
 
 def _trunc_nvfuser(fd: Any, a: TensorLikeType):
-    return fd.Ops.trunc(a)  # type: ignore[attr-defined]
+    return fd.ops.trunc(a)  # type: ignore[attr-defined]
 
 
 trunc = _make_elementwise_unary_prim(
@@ -1236,7 +1238,7 @@ pow = _make_elementwise_binary_prim(
 
 
 def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+    return fd.ops.remainder(a, b)  # type: ignore[attr-defined]
 
 
 remainder = _make_elementwise_binary_prim(
@@ -1388,7 +1390,7 @@ def _broadcast_in_dim_nvfuser(
     shape: ShapeType,
     broadcast_dimensions: ShapeType,
 ):
-    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
+    return fd.ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
 
 
 _broadcast_in_dim_doc = """
@@ -2097,7 +2099,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
+    return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
 _convert_element_type_doc = """
@@ -2391,7 +2393,7 @@ def _sum_nvfuser(
 ):
     keep_dims = False
     output_dtype = torch._C._nvfuser.DataType.Null
-    return fd.Ops.sum(a, dims, keep_dims, output_dtype)
+    return fd.ops.sum(a, dims, keep_dims, output_dtype)
 
 
 sum = _make_reduction_prim(
@@ -2432,7 +2434,7 @@ def _var_nvfuser(
     correction: int,
 ):
     keep_dims = False
-    return fd.Ops.var(a, dims, correction, keep_dims)
+    return fd.ops.var(a, dims, correction, keep_dims)
 
 
 def _amax_nvfuser(
@@ -2441,7 +2443,7 @@ def _amax_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.max(a, dims, keep_dims)
+    return fd.ops.max(a, dims, keep_dims)
 
 
 def _amin_nvfuser(
@@ -2450,7 +2452,7 @@ def _amin_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    return fd.Ops.min(a, dims, keep_dims)
+    return fd.ops.min(a, dims, keep_dims)
 
 
 var = _make_var_reduction_prim(
@@ -2473,6 +2475,86 @@ amin = _make_reduction_prim(
     impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
+
+
+_arange_doc = """
+    Constructs a 1-D tensor with values from the interval [start, end) taken
+    with common difference `step` beginning from `start`.
+"""
+
+
+# TODO: layout, pin_memory, memory_format
+# TODO: model requires_grad on TensorMeta
+def _arange_meta(
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
+    *,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
+) -> TensorLikeType:
+    assert not (
+        isinstance(start, complex)
+        and isinstance(end, complex)
+        and isinstance(step, complex)
+    )
+    utils.check(
+        step != 0,
+        lambda: "step must be nonzero",
+    )
+    utils.check(
+        math.isfinite(start) and math.isfinite(end),
+        lambda: f"unsupported range: {start} -> {end}",
+    )
+    utils.check(
+        (step > 0 and end >= start) or (step < 0 and end <= start),
+        lambda: "upper bound and lower bound inconsistent with step sign",
+    )
+    if dtype is not None:
+        pass
+    elif all(isinstance(arg, int) for arg in (start, end, step)):
+        dtype = torch.int64
+    else:
+        dtype = torch.get_default_dtype()
+    device = _get_default_device() if device is None else device
+    shape = (math.ceil((end - start) / step),)
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _arange_aten(
+    start: NumberType,
+    end: NumberType,
+    step: NumberType,
+    *,
+    dtype: Optional[torch.dtype],
+    device: Optional[torch.device],
+    requires_grad: bool,
+) -> TensorLikeType:
+    # mypy: Not all union combinations were tried because there are too many unions
+    return torch.arange(  # type: ignore[call-overload, misc]
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        layout=torch.strided,
+        pin_memory=False,
+        requires_grad=requires_grad,
+    )
+
+
+# TODO: maybe prims should not have requires_grad arg
+# see: https://github.com/pytorch/pytorch/pull/77542/files#r873943255
+arange = _make_prim(
+    schema="arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype, Device? device, bool requires_grad) -> Tensor",  # noqa: B950
+    return_type=RETURN_TYPE.NEW,
+    meta=_arange_meta,
+    impl_aten=_arange_aten,
+    doc=_arange_doc,
+)
+
 
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
