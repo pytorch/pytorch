@@ -2985,7 +2985,13 @@ def empty(
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(
-        shape, strides, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory, requires_grad=requires_grad
+        shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3022,7 +3028,9 @@ def new_zeros(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
     r.zero_()
     return r
 
@@ -3037,7 +3045,9 @@ def new_ones(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
     r.fill_(1)
     return r
 
@@ -3053,8 +3063,10 @@ def new_full(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
-    r.fill_(fill_value)
+    r = a.new_empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+    r.fill_(fill_value)  # type: ignore[arg-type]
     return r
 
 
@@ -3088,7 +3100,13 @@ def empty_like(
     # memory_format == torch.preserve_format
     strides = utils.compute_elementwise_output_strides(a)
     return torch.empty_strided(
-        a.shape, strides, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory, requires_grad=requires_grad
+        a.shape,
+        strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3304,7 +3322,11 @@ def empty_strided(
     device = torch.device("cpu") if device is None else device
 
     return prims.empty_strided(
-        shape, strides, dtype=dtype, device=device, requires_grad=requires_grad,
+        shape,
+        strides,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
     )
 
 
