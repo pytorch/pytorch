@@ -17251,7 +17251,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
     OpInfo('ones_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -17259,7 +17258,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
     OpInfo('randn_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
@@ -17308,7 +17306,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
     OpInfo('new_zeros',
            op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
