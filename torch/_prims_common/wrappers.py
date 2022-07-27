@@ -191,8 +191,21 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             )
         )
 
+        sig = inspect.signature(fn)
+        factory_kwargs = ("device", "dtype")
+        is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
+
         @wraps(fn)
         def _fn(*args, out=None, **kwargs):
+            if is_factory_fn and out is not None:
+                for k in factory_kwargs:
+                    if k not in kwargs:
+                        kwargs[k] = getattr(out, k)
+                    else:
+                        assert kwargs[k] == out.device, (
+                            f"{k} {kwargs[k]} does not match {k} of out parameter ({out.device})"
+                        )
+
             result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
@@ -238,7 +251,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             # mypy does not see through  the definition of out_type given that it's in a different scope
             return out if is_tensor else return_type(*out)  # type: ignore[operator]
 
-        sig = inspect.signature(fn)
         out_param = inspect.Parameter(
             "out",
             kind=inspect.Parameter.KEYWORD_ONLY,
