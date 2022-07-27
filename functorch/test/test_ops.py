@@ -692,7 +692,6 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
-        xfail('linalg.solve_triangular'),
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
@@ -700,7 +699,6 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('linalg.cholesky'),
         xfail('linalg.qr'),
         xfail('cross'),
         xfail('qr'),
@@ -713,13 +711,11 @@ class TestOperators(TestCase):
         xfail('linalg.pinv', 'hermitian'),
         xfail('pinverse'),
         skip('_masked.mean'),  # ???
-        xfail('linalg.cholesky_ex'),
         xfail('masked_scatter'),
         xfail('index_fill'),
         xfail('put'),
         xfail('take'),
         xfail('linalg.eigvals'),
-        xfail('linalg.qr'),
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
@@ -747,8 +743,6 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
-        xfail('linalg.eigh'),  # _linalg_eigh doesn't have batching rule
-        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
         xfail('logdet'),  # _linalg_slogdet doesn't have batching rule
         xfail('linalg.slogdet'),  # _linalg_slogdet doesn't have batching rule
     }))
@@ -781,7 +775,6 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
-        xfail('cholesky'),
         xfail('complex'),
         xfail('copysign'),
         xfail('cummax'),
@@ -793,17 +786,13 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('linalg.cholesky'),
-        xfail('linalg.cholesky_ex'),
         xfail('linalg.det'),
         xfail('linalg.eig'),
-        xfail('linalg.eigh'),
         xfail('linalg.eigvals'),
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.pinv'),
-        xfail('linalg.qr'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.slogdet'),
         xfail('linalg.solve'),
@@ -837,7 +826,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
-        xfail('linalg.solve_triangular'),
         xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
@@ -869,8 +857,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'amin'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
-        xfail('qr'),
-        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
