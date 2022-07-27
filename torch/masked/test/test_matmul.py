@@ -23,7 +23,7 @@ class TestMaskedTensorMatmul(TestCase):
         x = x.masked_fill(~x_mt.mask(), 0)
         attn_2 = torch.bmm(x, x.transpose(-2, -1))
         attn_3 = torch.bmm(x_mt, x_mt.transpose(-2, -1))
-        self.assertEqual(attn_3.masked_data.masked_fill(~attn_3.mask(), 0), attn_2)
+        self.assertEqual(attn_3.masked_data.masked_fill(~attn_3.mask(), 0), attn_2)  # type: ignore[attr-defined]
 
     def test_bmm_2(self):
         x = torch.arange(3 * 2 * 2).reshape(3, 2, 2).float()

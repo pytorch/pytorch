@@ -6,6 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import pytest
+from typing import Dict
 import torch
 from common_utils import _compare_mt_t
 from maskedtensor import masked_tensor
@@ -30,7 +31,7 @@ def _get_test_data(fn_name):
 def _get_sample_kwargs(fn_name):
     if fn_name[-1] == "_":
         fn_name = fn_name[:-1]
-    kwargs = {}
+    kwargs = {}   # type: Dict[str, str]
     return kwargs
 
 
@@ -86,7 +87,7 @@ def test_masks_match(fn_name):
     mt1 = masked_tensor(data1, mask1)
     try:
         fn(mt0, mt1)
-        assert False
+        raise AssertionError()
     except ValueError as e:
         assert (
             "Input masks must match. If you need support for this, please open an issue on Github."

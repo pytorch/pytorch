@@ -57,7 +57,7 @@ def _generate_sample_data(
     ]
     inputs = []
     for s in shapes:
-        data = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)
+        data = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)  # type: ignore[arg-type]
         mask = _create_random_mask(s, device)
         if layout == torch.sparse_coo:
             mask = mask.to_sparse_coo().coalesce()

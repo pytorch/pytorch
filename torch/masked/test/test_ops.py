@@ -141,7 +141,7 @@ def _test_reduction_equality(device, dtype, op, layout=torch.strided):
 
 
 class TestOperators(TestCase):
-    @ops(mt_unary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_unary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_unary_core(self, device, dtype, op):
         # Skip tests that don't have len(kwargs) == 0
         skip_variants = {
@@ -153,15 +153,15 @@ class TestOperators(TestCase):
             return
         _test_unary_binary_equality(device, dtype, op)
 
-    @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_binary_core(self, device, dtype, op):
         _test_unary_binary_equality(device, dtype, op)
 
-    @ops(mt_reduction_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_reduction_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_reduction_all(self, device, dtype, op):
         _test_reduction_equality(device, dtype, op)
 
-    @ops(mt_unary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_unary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_unary_core_sparse(self, device, dtype, op):
         # Skip tests that don't have len(kwargs) == 0
         skip_variants = {
@@ -175,12 +175,12 @@ class TestOperators(TestCase):
         _test_unary_binary_equality(device, dtype, op, torch.sparse_coo)
         _test_unary_binary_equality(device, dtype, op, torch.sparse_csr)
 
-    @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_binary_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_binary_core_sparse(self, device, dtype, op):
         _test_unary_binary_equality(device, dtype, op, torch.sparse_coo)
         _test_unary_binary_equality(device, dtype, op, torch.sparse_csr)
 
-    @ops(mt_reduction_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)
+    @ops(mt_reduction_ufuncs, allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
     def test_reduction_all_sparse(self, device, dtype, op):
         _test_reduction_equality(device, dtype, op, torch.sparse_coo)
         _test_reduction_equality(device, dtype, op, torch.sparse_csr)
