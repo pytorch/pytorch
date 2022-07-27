@@ -424,6 +424,18 @@ void SpanningTreePrinter::propagateSibling(TensorView* from, TensorView* to) {
   stream_ << "  to: " << to->toString() << std::endl;
 }
 
+bool SetSelector::allowC2P(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowP2C(TensorView* from, TensorView* to) {
+  return selected_.count(to) > 0;
+}
+
+bool SetSelector::allowSibling(TensorView* from, TensorView* to) {
+  return true;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

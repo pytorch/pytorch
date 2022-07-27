@@ -27,25 +27,9 @@ namespace {
 // Unused at the moment, commenting for clang tidy
 constexpr int64_t kThreadX = 128;
 
-// Returns number of non-reduction/non-broadcast dims in rfactor domain
-size_t nRootDims(const TensorView* tv) {
-  auto root_dom = tv->getMaybeRFactorDomain();
-  size_t tv_n_dims = 0;
-  for (auto dim : root_dom) {
-    if (!dim->isReduction() && !dim->isBroadcast()) {
-      tv_n_dims++;
-    }
-  }
-  return tv_n_dims;
-}
-
-// DomainMap uses the ComputeAtMap to find a reference TensorView
-// that maps to all iterDomains in the fusion.
-class DomainMap {
+class DomainMap : public pointwise_utils::DomainMap {
  public:
-  DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(ComputeAtMap(fusion)) {
-    view_tvs_ = scheduler_utils::getViewTVs(fusion);
-  }
+  using pointwise_utils::DomainMap::DomainMap;
 
   // The pointwise scheduler heuristics requires a minimum number of axes.
   // The output reference tensor should respect this requirement.
@@ -57,7 +41,7 @@ class DomainMap {
       if (isValidReference(output_tv) &&
           hasMinimumSize(output_tv, minimum_num_axes) &&
           !output_tv->isFusionInput()) {
-        int n_dims = nRootDims(output_tv);
+        int n_dims = pointwise_utils::nRootDims(output_tv);
         if (n_dims > max_dims) {
           result = output_tv;
           max_dims = n_dims;
@@ -89,7 +73,7 @@ class DomainMap {
         continue;
       }
 
-      if (!areAllMapped(input_tv, output_tv)) {
+      if (!areAllInputIdsMappedToOutput(input_tv, output_tv)) {
         return false;
       }
     }
@@ -101,87 +85,6 @@ class DomainMap {
     TORCH_INTERNAL_ASSERT(tv != nullptr);
     return (num_axes == 0 || tv->getMaybeRFactorDomain().size() > num_axes);
   }
-
-  // Determine if all iterDomains are mapped between input and output tvs
-  bool areAllMapped(TensorView* input_tv, TensorView* output_tv) const {
-    // Get concrete IDs for input root or rfactor domain
-    std::unordered_set<IterDomain*> in_concrete_ids;
-    for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-      if (!ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT)
-               ->isBroadcast() &&
-          !in_id->isReduction()) {
-        in_concrete_ids.insert(
-            ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT));
-      }
-    }
-
-    // Erase all input concrete IDs mapped to the output domain
-    // Ignore unresolved broadcast dimensions
-    for (auto out_id : output_tv->getMaybeRFactorDomain()) {
-      if (!out_id->isBroadcast()) {
-        if (!eraseIfMapped(in_concrete_ids, out_id)) {
-          eraseIfMappedThroughView(in_concrete_ids, out_id);
-        }
-      }
-    }
-    return in_concrete_ids.empty();
-  }
-
-  // Erase input concrete ID if it is mapped to output ID
-  bool eraseIfMapped(
-      std::unordered_set<IterDomain*>& in_concrete_ids,
-      IterDomain* out_id) const {
-    auto out_concrete_id =
-        ca_map_.getConcreteMappedID(out_id, IdMappingMode::EXACT);
-    auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
-    bool found_match = in_concrete_id_iter != in_concrete_ids.end();
-    if (found_match) {
-      in_concrete_ids.erase(in_concrete_id_iter);
-    }
-    return found_match;
-  }
-
-  // Check if in_id is mapped to out_id through any view rfactor domain
-  void eraseIfMappedThroughView(
-      std::unordered_set<IterDomain*>& in_concrete_ids,
-      IterDomain* out_id) const {
-    for (auto view : view_tvs_) {
-      // Find any ID in view rfactor domain that is mapped to output ID
-      auto view_rfactor_id = anyMapped(view->getRFactorDomain(), out_id);
-      if (view_rfactor_id == nullptr) {
-        continue;
-      }
-
-      if (view_rfactor_id->isRFactorProduct()) {
-        // Check if input ID is mapped to any input IDs of the view rfactor ID
-        auto root_inputs = InputsOf::outputs(fusion_, {view_rfactor_id});
-        auto filtered_root_ids =
-            ir_utils::filterByType<IterDomain>(root_inputs);
-        for (auto view_root_id : filtered_root_ids) {
-          eraseIfMapped(in_concrete_ids, view_root_id);
-        }
-      } else {
-        // Otherwise, the input ID must map to the view rfactor ID
-        eraseIfMapped(in_concrete_ids, view_rfactor_id);
-      }
-    }
-  }
-
-  // Find any id in domain that maps with target id
-  IterDomain* anyMapped(
-      const std::vector<IterDomain*> domain,
-      IterDomain* target) const {
-    for (auto id : domain) {
-      if (ca_map_.areMapped(id, target, IdMappingMode::EXACT)) {
-        return id;
-      }
-    }
-    return nullptr;
-  }
-
-  Fusion* fusion_ = nullptr;
-  ComputeAtMap ca_map_;
-  std::vector<TensorView*> view_tvs_;
 };
 
 } // namespace
@@ -207,9 +110,19 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
 
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
 
-  DomainMap domain_map(fusion);
+  auto domain_map_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::DomainMap>(
+          data_cache,
+          [fusion]() { return std::make_unique<DomainMap>(fusion); });
+  const auto& domain_map = dynamic_cast<DomainMap&>(domain_map_entry.get());
 
-  TensorView* largest_out = domain_map.findReferenceTensorView();
+  auto largest_out_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensors>(
+          data_cache, [&domain_map]() {
+            std::vector<TensorView*> data{domain_map.findReferenceTensorView()};
+            return std::make_unique<std::vector<TensorView*>>(std::move(data));
+          });
+  TensorView* largest_out = largest_out_entry.get()[0];
 
   TORCH_INTERNAL_ASSERT(largest_out != nullptr);
 
@@ -589,11 +502,11 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
   size_t max_dims = 0;
   for (auto inp : input_tvs) {
-    max_dims = std::max(nRootDims(inp), max_dims);
+    max_dims = std::max(pointwise_utils::nRootDims(inp), max_dims);
   }
 
   for (auto out : output_tvs) {
-    max_dims = std::max(nRootDims(out), max_dims);
+    max_dims = std::max(pointwise_utils::nRootDims(out), max_dims);
   }
 
   // If everything is zero dim tensors, just return.

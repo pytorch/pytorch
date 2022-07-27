@@ -10,21 +10,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-bool InlinePropagatorSelector::allowC2P(TensorView* from, TensorView* to) {
-  return selected_.count(to) > 0;
-}
-
-bool InlinePropagatorSelector::allowP2C(TensorView* from, TensorView* to) {
-  // If the producer is in the selected set, then the consumer must also be
-  // replayed to obtain a compatible loop structure so that this producer
-  // can be consumed in this loop.
-  return selected_.count(from) > 0 || selected_.count(to) > 0;
-}
-
-bool InlinePropagatorSelector::allowSibling(TensorView* from, TensorView* to) {
-  return true;
-}
-
 MaxPosCalculator::MaxPosCalculator(
     ComputeAtMode mode,
     std::unordered_set<IterDomain*> uninlinable_ids)

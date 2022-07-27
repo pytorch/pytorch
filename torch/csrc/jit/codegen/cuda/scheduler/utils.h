@@ -362,32 +362,6 @@ TORCH_CUDA_CU_API void canonicalizeMmaTvOrdering(TensorView* tv);
 
 } // namespace matmul_utils
 
-//! Custom selector for selecting subgraphs to build
-//!   spanning trees. The selector allows propagation
-//!   only to the given set of selected tensorviews, except
-//!   for sibiling propagation, which we should never block.
-struct BoundedPropagationSelector : public MaxInfoSpanningTree::Selector {
- public:
-  explicit BoundedPropagationSelector(
-      std::unordered_set<TensorView*> selected_tvs)
-      : selected_tvs_(std::move(selected_tvs)) {}
-
-  bool allowC2P(TensorView* from, TensorView* to) final {
-    return selected_tvs_.count(to);
-  }
-  bool allowP2C(TensorView* from, TensorView* to) final {
-    return selected_tvs_.count(to);
-  }
-  bool allowSibling(TensorView* from, TensorView* to) final {
-    // Always allow sibiling propagation to avoid
-    //  un-defined behaviors on multi-output expressions.
-    return true;
-  }
-
- private:
-  std::unordered_set<TensorView*> selected_tvs_;
-};
-
 //! Propagate current transformations on from_tv up to the given
 //!  position, to all tensorviews on the owning fusion that has
 //!  a connection with `from_tv` on the fusion graph.

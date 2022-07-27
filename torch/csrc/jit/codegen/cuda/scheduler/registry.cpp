@@ -1415,6 +1415,9 @@ HeuristicSummary::HeuristicSummary(
 void HeuristicSummary::validate() const {
   switch (heuristic_) {
     case ScheduleHeuristic::PointWise: {
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::DOMAIN_MAP));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::REFERENCE_TENSORS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
       TORCH_INTERNAL_ASSERT(
@@ -1483,6 +1486,8 @@ HeuristicSummaryEntry<EntryClass>::HeuristicSummaryEntry(
 }
 
 // Template instantiation for pre-defined cache entries
+template class HeuristicSummaryEntry<HeuristicCompileTime::DomainMap>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensors>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::VectorizableInputsAndOutputs>;
 template class HeuristicSummaryEntry<

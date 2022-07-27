@@ -11,26 +11,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Simple selector that only propagates across tensor views in the provided
-// unordered_set. Will also propagate to all consumers of those tensors, and the
-// siblings of those tensors.
-class TORCH_CUDA_CU_API InlinePropagatorSelector
-    : public MaxInfoSpanningTree::Selector {
-  std::unordered_set<TensorView*> selected_;
-
- public:
-  virtual bool allowC2P(TensorView* from, TensorView* to) override;
-  virtual bool allowP2C(TensorView* from, TensorView* to) override;
-  virtual bool allowSibling(TensorView* from, TensorView* to) override;
-
-  InlinePropagatorSelector(std::unordered_set<TensorView*> selected)
-      : selected_(std::move(selected)){};
-
-  const std::unordered_set<TensorView*>& selected() const {
-    return selected_;
-  }
-};
-
 class TORCH_CUDA_CU_API MaxPosCalculator {
   ComputeAtMode mode_ = ComputeAtMode::Standard;
 

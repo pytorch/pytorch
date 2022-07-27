@@ -1988,7 +1988,7 @@ void BoundedDirectionalTransformPropagator::propagate(
     std::unordered_set<TensorView*> included_tvs,
     Options options) {
   // Run transform propagation using the custom selector.
-  BoundedPropagationSelector selector(included_tvs);
+  SetSelector selector(included_tvs);
   TransformPropagator propagator(from_tv, pos);
   MaxRootDomainInfoSpanningTree(from_tv, &selector).traverse(&propagator);
 
