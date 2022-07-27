@@ -319,7 +319,7 @@ def get_local_rank(group: ProcessGroup, global_rank: int) -> int:
     if group is GroupMember.WORLD:
         return global_rank
     if group not in _pg_group_ranks:
-        raise RuntimeError("Group {group} is not registered with torch.distributed")
+        raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
     group_ranks = _pg_group_ranks[group]
     if global_rank not in group_ranks:
         raise RuntimeError(f"Global rank {global_rank} is not part of group {group}")
@@ -344,7 +344,7 @@ def get_global_rank(group: ProcessGroup, local_rank: int) -> int:
     if group is GroupMember.WORLD:
         return local_rank
     if group not in _pg_group_ranks:
-        raise RuntimeError("Group {group} is not registered with torch.distributed")
+        raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
     for rank, grp_rank in _pg_group_ranks[group].items():
         if grp_rank == local_rank:
             return rank
