@@ -20,6 +20,30 @@ struct RecordFunctor {
       : args(std::move(_args)), outputs(std::move(_outputs)) {}
   virtual ~RecordFunctor() = default;
 
+  //! The base virtual equality operator is defined so all child
+  //! classes can utilize the check for the same args and outputs.
+  virtual bool operator==(const RecordFunctor& other) {
+    auto result = (args.size() == other.args.size()) &&
+        (outputs.size() == other.outputs.size());
+    if (result) {
+      for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] != other.args[i]) {
+          result = false;
+          break;
+        }
+      }
+    }
+    if (result) {
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        if (outputs[i] != other.outputs[i]) {
+          result = false;
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
   //! Abstraction for an operation to build this record's nvFuser Fusion IR
   //! piece if the recording has a cache miss.
   virtual void operator()(FusionDefinition& fd) = 0;
