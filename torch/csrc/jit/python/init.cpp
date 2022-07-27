@@ -1191,7 +1191,7 @@ void initJITBindings(PyObject* module) {
       });
 
   py::class_<c10::SymIntNodeImpl, std::shared_ptr<c10::SymIntNodeImpl>>(
-      m, "SymIntNodeImpl")
+      m, "SymIntNode")
       .def_static(
           "new_symint",
           [](py::object obj) -> std::shared_ptr<c10::SymIntNodeImpl> {

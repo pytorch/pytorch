@@ -188,7 +188,7 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymIntNodeImpl",
+            "SymIntNode",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
