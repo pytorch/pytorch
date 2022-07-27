@@ -257,15 +257,7 @@ def check_no_bool_index_tensors(func, self, indices):
         if index is not None and index.dtype in (torch.bool, torch.uint8):
             raise DynamicOutputShapeException(func)
 
-
-# Dont default to default device handling,
-# Since op can take in non-zero sized cpu
-# index tensors with cuda self
-@register_op_impl(aten.index.Tensor)
-def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
-
+def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -276,6 +268,31 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 
     return FakeTensor(fake_mode, out, out_device)
 
+# Dont default to default device handling,
+# Since op can take in non-zero sized cpu
+# index tensors with cuda self
+@register_op_impl(aten.index.Tensor)
+def index_tensor(fake_mode, func, *args, **kwargs):
+    # dynamic shape op if indices are bool/uint8
+    check_no_bool_index_tensors(func, *args, **kwargs)
+
+    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+# takes in multiple-devices, dont default to default device handling
+@register_op_impl(aten.index_put.default)
+def index_put(fake_mode, func, *args, **kwargs):
+    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+# same with index_put, but return the input
+@register_op_impl(aten.index_put_.default)
+def index_put_(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True)
+
+    return new_kwargs["input"]
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
