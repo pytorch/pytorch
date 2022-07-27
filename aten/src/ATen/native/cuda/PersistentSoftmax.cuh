@@ -123,12 +123,14 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             if (is_masked) {
                 int idx = it*WARP_SIZE;
-                if (!is_transformer_mask) {
-                    idx += i*element_count;
-                }
-                if (!mask[idx]) {
-                    max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
-                    is_meaningful_max = true;
+                if ((idx + local_idx) < element_count) {
+                    if (!is_transformer_mask) {
+                        idx += i*element_count;
+                    }
+                    if (!mask[idx]) {
+                        max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
+                        is_meaningful_max = true;
+                    }
                 }
             } else {
                 max_value[i] = max_value[i] > elements[i][it] ? max_value[i] : elements[i][it];
@@ -156,22 +158,28 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 }
             } else {
                 int idx = it*WARP_SIZE;
+                bool valid = (idx + local_idx) < element_count;
                 if (!is_transformer_mask) {
                     idx += i*element_count;
                 }
-
-                if (!mask[idx]) {
-                    if (is_log_softmax) {
-                        sum[i] += std::exp(elements[i][it] - max_value[i]);
+                if (valid) {
+                    if (!mask[idx]) {
+                        if (is_log_softmax) {
+                            sum[i] += std::exp(elements[i][it] - max_value[i]);
+                        } else {
+                            elements[i][it] = std::exp(elements[i][it] - max_value[i]);
+                            sum[i] += elements[i][it];
+                        }
                     } else {
-                        elements[i][it] = std::exp(elements[i][it] - max_value[i]);
-                        sum[i] += elements[i][it];
+                        if (!is_log_softmax) {
+                            // Masked values are treated as -infinity, and std::exp(-infinity) is 0.
+                            elements[i][it] = 0;
+                        }
                     }
                 } else {
-                  if (!is_log_softmax) {
-                    // Masked values are treated as -infinity, and std::exp(-infinity) is 0.
-                    elements[i][it] = 0;
-                  }
+                    if (!is_log_softmax) {
+                        elements[i][it] = 0.;
+                    }
                 }
             }
         }
