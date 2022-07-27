@@ -25,6 +25,7 @@ from torch._prims_common import (
     TensorLikeType,
     type_to_dtype,
 )
+from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -331,23 +332,8 @@ def _make_prim(
     # argument that provides an implementation for backward here.)  Because we
     # don't have derivative formulas, we must setup a custom autograd function
     # that raises an error if backwards is invoked
-    class BackwardsNotSupported(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, args_spec, *flat_args):
-            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
-            g = torch._C._AutoDispatchBelowAutograd()
-            try:
-                return _prim(*args, **kwargs)
-            finally:
-                del g
-
-        @staticmethod
-        def backward(ctx, *args):
-            raise RuntimeError("backwards not supported on prim")
-
     def _autograd_impl(*args, **kwargs):
-        flat_args, args_spec = tree_flatten((args, kwargs))
-        return BackwardsNotSupported.apply(args_spec, *flat_args)
+        return backwards_not_supported(_prim)(*args, **kwargs)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)

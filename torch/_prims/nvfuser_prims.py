@@ -16,6 +16,7 @@ from torch._prims_common import (
     TensorLikeType,
 )
 
+from torch._prims_common.wrappers import backwards_not_supported
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 nvprim_namespace = "nvprims"
@@ -84,29 +85,6 @@ nvprim_names = [
     "amax",
     "amin",
 ]
-
-
-def _autograd_fn(prim):
-    class BackwardsNotSupported(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, args_spec, *flat_args):
-            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
-            g = torch._C._AutoDispatchBelowAutograd()
-            try:
-                return prim(*args, **kwargs)
-            finally:
-                del g
-
-        @staticmethod
-        def backward(ctx, *args):
-            raise RuntimeError("backwards not supported on prim")
-
-    def _autograd_impl(*args, **kwargs):
-        flat_args, args_spec = tree_flatten((args, kwargs))
-        return BackwardsNotSupported.apply(args_spec, *flat_args)
-
-    return _autograd_impl
-
 
 _nvfuser_impls: Dict[str, Any] = {}
 
@@ -290,12 +268,12 @@ def register_nvprims():
         nvprim_impl.impl(name, main_prim.prim_impl)
         nvprim_meta_impl.impl(name, main_prim.prim_meta_impl)
 
-        _prim_packet = getattr(torch.ops.nvprims, name)
-        _prim = _prim_packet.default
+        prim_packet = getattr(torch.ops.nvprims, name)
+        prim = prim_packet.default
 
-        nvprim_autograd_impl.impl(name, _autograd_fn(_prim))
+        nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
 
-        for p in (_prim_packet, _prim):
+        for p in (prim_packet, prim):
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
