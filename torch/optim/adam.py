@@ -259,6 +259,12 @@ def _single_tensor_adam(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)
+
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
@@ -333,6 +339,12 @@ def _multi_tensor_adam(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
+    # Handle complex parameters
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
+    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
+    params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
+
     # update steps
     torch._foreach_add_(state_steps, 1)
 
@@ -382,7 +394,7 @@ def _multi_tensor_adam(params: List[Tensor],
             torch._foreach_reciprocal_(eps_over_step_size)
             denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom)
+        torch._foreach_addcdiv_(params_, exp_avgs, denom)
     else:
         bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
         bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
@@ -404,4 +416,4 @@ def _multi_tensor_adam(params: List[Tensor],
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
+        torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
