@@ -2926,7 +2926,6 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
 
 # TODO: layout and pin_memory are not supported by refs, but are expected as
 # arguments
-@register_decomposition(torch.ops.aten.new_empty)
 def new_empty(
     self: TensorLikeType,
     size: Union[torch.Size, List[int], Tuple[int, ...]],
