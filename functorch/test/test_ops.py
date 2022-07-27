@@ -814,7 +814,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
-        xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('pinverse'),
         xfail('prod'),
@@ -1289,6 +1288,7 @@ class TestOperators(TestCase):
         xfail('to_sparse'),  # dispatch key issue
 
         # numerical inconsistencies, look like bugs
+        xfail('matrix_exp', device_type='cuda')
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
         skip('__rmatmul__'),  # flaky needs investigation
         skip('matmul'),  # flaky needs investigation
