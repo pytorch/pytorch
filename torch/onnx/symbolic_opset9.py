@@ -411,7 +411,7 @@ def _trunc_divide(g, self, other):
     # (eg. -0.1 should become -0 )
     # - if scalar_type information are not available, assume that
     # we need to call floor (treat as float)
-    out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.INT64)
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
@@ -426,13 +426,13 @@ def _trunc_divide(g, self, other):
             and other.type().scalarType() is not None
             and symbolic_helper._is_fp(other)
         ):
-            out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+            out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         else:
             out = g.op(
-                "Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx[scalar_type]
+                "Cast", out, to_i=_type_utils.ScalarType.from_name(scalar_type).onnx_type()
             )
     else:
-        out = g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return out
 
 
@@ -486,10 +486,10 @@ def true_divide(g, self, other):
     # Case 2: neither is floating
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
-    onnx_scalar_type = symbolic_helper.cast_pytorch_to_onnx["Float"]
+    onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
     assert scalar_type is torch.float or scalar_type is torch.double
     if torch.get_default_dtype() is torch.double:
-        onnx_scalar_type = symbolic_helper.cast_pytorch_to_onnx["Double"]
+        onnx_scalar_type = _C_onnx.TensorProtoDataType.DOUBLE
 
     self = g.op("Cast", self, to_i=onnx_scalar_type)
     other = g.op("Cast", other, to_i=onnx_scalar_type)
@@ -499,7 +499,7 @@ def true_divide(g, self, other):
 def reciprocal(g, self):
     # torch.reciprocal implicitly casts to float, so we do the same.
     if not symbolic_helper._is_fp(self):
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return g.op("Reciprocal", self)
 
 
@@ -1137,13 +1137,13 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
                 inputs[i] = g.op(
                     "Cast",
                     input,
-                    to_i=symbolic_helper.cast_pytorch_to_onnx[target_float_t],
+                    to_i=_type_utils.ScalarType.from_name(target_float_t).onnx_type(),
                 )
 
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype_0])
+        self = g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(dtype_0).onnx_type())
 
     return self
 
@@ -1748,8 +1748,8 @@ def gt_impl(g, input, other):
         and other.type().scalarType() is not None
         and other.type().scalarType() == "Bool"
     ):
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Greater", input, other)
 
 
@@ -1764,8 +1764,8 @@ def lt_impl(g, input, other):
         and other.type().scalarType() is not None
         and other.type().scalarType() == "Bool"
     ):
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Int"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Less", input, other)
 
 
@@ -1831,18 +1831,18 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -1855,18 +1855,18 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1877,7 +1877,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != "Bool":
         condition = g.op(
-            "Cast", condition, to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"]
+            "Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL
         )
     if self is None:
         condition = nonzero(g, condition)
@@ -1922,7 +1922,7 @@ def log_softmax(g, input, dim, dtype=None):
 @symbolic_helper.parse_args("v", "i", "i")
 def _log_softmax(g, input, dim, half_to_float):
     if half_to_float and input.type().scalarType() == "Half":
-        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return log_softmax(g, input, dim)
 
 
@@ -2477,7 +2477,7 @@ def type_as(g, self, other):
         return self
     if other_dtype is not None:
         return g.op(
-            "Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[other_dtype]
+            "Cast", self, to_i=_type_utils.ScalarType.from_name(other_dtype).onnx_type()
         )
     else:
         if symbolic_helper.is_caffe2_aten_fallback():
@@ -2555,10 +2555,10 @@ def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not symbolic_helper._is_fp(self):
         f_dtype = "Float"
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[f_dtype])
+        self = g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(f_dtype).onnx_type())
     if not symbolic_helper._is_fp(exponent):
         exponent = g.op(
-            "Cast", exponent, to_i=symbolic_helper.cast_pytorch_to_onnx[f_dtype]
+            "Cast", exponent, to_i=_type_utils.ScalarType.from_name(f_dtype).onnx_type()
         )
     pow = g.op("Pow", self, exponent)
     return pow
@@ -2593,7 +2593,7 @@ def clamp_min(g, self, min):
         )
     else:
         dtype = self.type().scalarType()
-        min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        min = g.op("Cast", min, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
         return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
@@ -2605,7 +2605,7 @@ def clamp_max(g, self, max):
         )
     else:
         dtype = self.type().scalarType()
-        max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        max = g.op("Cast", max, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
         return op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
@@ -3257,7 +3257,7 @@ def to(g, self, *args):
         if symbolic_helper._is_value(dtype) or isinstance(dtype, torch.Tensor):
             # aten::to(Tensor, Tensor, bool, bool, memory_format)
             dtype = args[0].type().scalarType()
-            return g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+            return g.op("Cast", self, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
         else:
             # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             # memory_format is ignored
@@ -4057,10 +4057,10 @@ def bernoulli(g, input, generator=None, out=None):
         input,
         high_f=1.0,
         low_f=0.0,
-        dtype_i=symbolic_helper.cast_pytorch_to_onnx[dtype],
+        dtype_i=_type_utils.ScalarType.from_name(dtype).onnx_type(),
     )
     output = g.op("Less", p, input)
-    return g.op("Cast", output, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    return g.op("Cast", output, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
 
 
 @symbolic_helper.parse_args("v")
@@ -4185,7 +4185,7 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
             )
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
@@ -4236,7 +4236,7 @@ def one_hot(g, self, num_classes):
     # onnxruntime supports limited type combinations for OneHot.
     if num_classes.type().scalarType() in ("Byte", "Char", "Int", "Short"):
         num_classes = g.op(
-            "Cast", num_classes, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64
         )
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
@@ -4253,7 +4253,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op(
         "Cast",
         g.op("OneHot", index, depth, values, axis_i=dim),
-        to_i=symbolic_helper.cast_pytorch_to_onnx[dtype],
+        to_i=_type_utils.ScalarType.from_name(dtype).onnx_type(),
     )
     mul = g.op("Mul", symbolic_helper._unsqueeze_helper(g, self, [dim + 1]), index)
     return symbolic_helper._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
@@ -4286,7 +4286,7 @@ def _var_mean(g, input, dim, correction, keepdim):
         correction = 1
     if correction != 0:
         num_elements = g.op(
-            "Cast", num_elements, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"]
+            "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
         )
         one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
         mul = g.op("Mul", var, num_elements)
@@ -4750,7 +4750,7 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op(
         "Multinomial",
         log_input,
-        dtype_i=symbolic_helper.cast_pytorch_to_onnx["Long"],
+        dtype_i=_C_onnx.TensorProtoDataType.INT64,
         sample_size_i=num_samples,
     )
 
@@ -4761,10 +4761,10 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     mul_a = mul(
         g,
         batch_mul,
-        g.op("Cast", alpha, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype]),
+        g.op("Cast", alpha, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()),
     )
     mul_b = mul(
-        g, self, g.op("Cast", beta, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        g, self, g.op("Cast", beta, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
     )
     return add(g, mul_a, mul_b)
 
@@ -5043,7 +5043,7 @@ def __derive_index(g, index, start, step):
 def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
-    return g.op("Cast", div, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    return g.op("Cast", div, to_i=_C_onnx.TensorProtoDataType.INT64)
 
 
 def linear(g, input, weight, bias):

@@ -521,8 +521,8 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
             )
 
     index_scalar_type = index.type().scalarType()
-    if index_scalar_type is None or index_scalar_type not in ["Long", "Int"]:
-        index = g.op("Cast", index, to_i=cast_pytorch_to_onnx["Long"])
+    if index_scalar_type is None or index_scalar_type not in {"Long", "Int"}:
+        index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
 
 
@@ -719,11 +719,11 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     if _is_value(output_size):
         offset = 2
         offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.float32))
-        dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
+        dividend = g.op("Cast", output_size, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         divisor = _slice_helper(
             g, g.op("Shape", input), axes=[0], ends=[sys.maxsize], starts=[offset]
         )
-        divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
+        divisor = g.op("Cast", divisor, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         scale_dims = g.op("Div", dividend, divisor)
         scales = g.op("Concat", offsets, scale_dims, axis_i=0)
     else:
@@ -776,7 +776,7 @@ def _interpolate_get_scales(g, scale_factor, dim):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, [0])
-        scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
+        scale_factor = g.op("Cast", scale_factor, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         scales = [scale_factor for i in range(dim - 2)]
     scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
     return scale_factor
@@ -833,7 +833,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             input_size_beg = _slice_helper(
                 g, input_size, axes=[0], ends=[2], starts=[0]
             )
-            output_size = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Long"])
+            output_size = g.op("Cast", output_size, to_i=_C_onnx.TensorProtoDataType.INT64)
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
             if GLOBALS.export_onnx_opset_version >= 13:
@@ -927,7 +927,7 @@ def __interpolate_helper(
             size = _unsqueeze_helper(g, size, [0])
             size = [size for i in range(rank - 2)]
             size = g.op("Concat", *size, axis_i=0)
-        size = g.op("Cast", size, to_i=cast_pytorch_to_onnx["Long"])
+        size = g.op("Cast", size, to_i=_C_onnx.TensorProtoDataType.INT64)
         size = g.op("Concat", input_size, size, axis_i=0)
 
         if GLOBALS.export_onnx_opset_version >= 13:
@@ -1257,10 +1257,10 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
-    input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
+    input_qdtype = _type_utils.ScalarType.from_name(tensor.type().scalarType())
     if qdtype is None:
         if input_qdtype is not None:
-            qdtype = input_qdtype
+            qdtype = input_qdtype.onnx_type()
         else:
             qdtype = _C_onnx.TensorProtoDataType.UINT8
     value = g.op("Cast", tensor, to_i=qdtype)

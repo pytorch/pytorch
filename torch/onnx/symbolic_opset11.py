@@ -6,6 +6,7 @@ from typing import Tuple, Union
 
 import torch
 from torch import _C
+from torch._C import _onnx as _C_onnx
 from torch.onnx import (
     _type_utils,
     symbolic_helper,
@@ -116,7 +117,7 @@ def clamp(g, self, min, max):
     def _cast_if_not_none(tensor, dtype):
         if tensor is not None and not symbolic_helper._is_none(tensor):
             return g.op(
-                "Cast", tensor, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype]
+                "Cast", tensor, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type()
             )
         else:
             return tensor
@@ -144,7 +145,7 @@ def clamp(g, self, min, max):
 @symbolic_helper.parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    min = g.op("Cast", min, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -157,7 +158,7 @@ def clamp_min(g, self, min):
 @symbolic_helper.parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    max = g.op("Cast", max, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -283,7 +284,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
-        values = g.op("Cast", values, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+        values = g.op("Cast", values, to_i=_type_utils.ScalarType.from_name(dtype).onnx_type())
     scalar_type = _type_utils.ScalarType.from_name(dtype)
 
     if accumulate:
@@ -362,7 +363,7 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
             )
         return g.op(
             "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
@@ -653,7 +654,7 @@ def _prepare_onnx_paddings(g, input, pad):
     )
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     # Currently ONNX only supports int64 type for Pad
-    pad = g.op("Cast", pad, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    pad = g.op("Cast", pad, to_i=_C_onnx.TensorProtoDataType.INT64)
     paddings = g.op(
         "Concat",
         pad,
@@ -674,7 +675,7 @@ def _prepare_onnx_paddings(g, input, pad):
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
     padding_c = g.op(
-        "Cast", paddings, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+        "Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64
     )
     return padding_c
 
@@ -919,7 +920,7 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -928,12 +929,12 @@ def __rshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -946,7 +947,7 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -955,12 +956,12 @@ def __lshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1133,7 +1134,7 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
         cond_op = g.op(
             "Cast",
             cond_op,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim

@@ -37,13 +37,13 @@ def einsum_helper(g, equation, tensors):
     # ONNX does not support bool for Einsum inputs.
     if tensors[0].type().scalarType() == "Bool":
         tensors = [
-            g.op("Cast", tensor, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+            g.op("Cast", tensor, to_i=_C_onnx.TensorProtoDataType.INT64)
             for tensor in tensors
         ]
         return g.op(
             "Cast",
             g.op("Einsum", *tensors, equation_s=equation),
-            to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"],
+            to_i=_C_onnx.TensorProtoDataType.BOOL,
         )
     else:
         return g.op("Einsum", *tensors, equation_s=equation)
@@ -62,7 +62,7 @@ def outer(g, input, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[input.type().scalarType()],
+            to_i=_type_utils.ScalarType.from_name(self.type().scalarType()).onnx_type(),
         )
     return einsum_helper(g, "i,j->ij", [input, other])
 
@@ -215,9 +215,9 @@ def celu(g, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
     # if the input is of type double cast it to float
     if self.type().scalarType() == "Double":
-        self = g.op("Cast", self, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         out = g.op("Celu", self, alpha_f=alpha)
-        return g.op("Cast", out, to_i=symbolic_helper.cast_pytorch_to_onnx["Double"])
+        return g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
 
     return g.op("Celu", self, alpha_f=alpha)
 
