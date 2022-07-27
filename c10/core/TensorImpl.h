@@ -575,7 +575,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline c10::SymInt sym_numel_default() const {
-    return c10::SymInt(numel_);
+    return numel_;
   }
 
   virtual c10::SymInt sym_numel_custom() const;
@@ -1935,6 +1935,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
+    #ifdef DEBUG
+    TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
+    #endif
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
