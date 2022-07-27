@@ -61,6 +61,7 @@ class C10_API SymInt {
 
   // This is needed for interoperability with IValue
   int64_t data() const {
+    TORCH_CHECK(!is_symbolic());
     return data_;
   }
 
