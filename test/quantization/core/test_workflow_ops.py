@@ -425,6 +425,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_forward_per_tensor_cpu(self, X):
         X, (_, _, _) = X
         scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
@@ -827,6 +830,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_backward_per_channel(self, device, X):
         r"""Tests the backward method.
         """
@@ -936,6 +942,9 @@ class TestFakeQuantizeOps(TestCase):
 
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X

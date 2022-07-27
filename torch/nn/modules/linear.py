@@ -50,6 +50,8 @@ class Linear(Module):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     Args:
         in_features: size of each input sample
         out_features: size of each output sample

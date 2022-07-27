@@ -74,6 +74,9 @@ class OptionalArrayRef final {
       Args&&... args)
       : wrapped_opt_array_ref(ip, il, args...) {}
 
+  constexpr OptionalArrayRef(const std::initializer_list<T>& Vec)
+      : wrapped_opt_array_ref(ArrayRef<T>(Vec)) {}
+
   // Destructor
 
   ~OptionalArrayRef() = default;

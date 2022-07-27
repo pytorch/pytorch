@@ -159,7 +159,8 @@ class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
 class TORCH_CUDA_CU_API BestEffortReplay {
  private:
   std::unordered_map<IterDomain*, IterDomain*> target2replay_id_map_;
-  std::unordered_map<IterDomain*, IterDomain*> forward_id_map_;
+  std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map_;
+  std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
   std::vector<IterDomain*> forwarded_ids_;
 
@@ -176,25 +177,45 @@ class TORCH_CUDA_CU_API BestEffortReplay {
   // deterministicly
   size_t counter = 0;
 
-  bool inForwardMap(IterDomain* id) const {
-    return forward_id_map_.find(id) != forward_id_map_.end();
+  bool inReplayForwardMap(IterDomain* id) const {
+    return replay_forward_id_map_.find(id) != replay_forward_id_map_.end();
   }
 
-  IterDomain* getForwardedId(IterDomain* id) const {
-    auto forwarded_id_it = forward_id_map_.find(id);
-    if (forwarded_id_it == forward_id_map_.end()) {
+  bool inTargetForwardMap(IterDomain* id) const {
+    return target_forward_id_map_.find(id) != target_forward_id_map_.end();
+  }
+
+  IterDomain* getReplayForwardedId(IterDomain* id) const {
+    auto forwarded_id_it = replay_forward_id_map_.find(id);
+    if (forwarded_id_it == replay_forward_id_map_.end()) {
       return id;
     } else {
-      return getForwardedId(forwarded_id_it->second);
+      return getReplayForwardedId(forwarded_id_it->second);
     }
   }
+
+  IterDomain* getTargetForwardedId(IterDomain* id) const {
+    auto forwarded_id_it = target_forward_id_map_.find(id);
+    if (forwarded_id_it == target_forward_id_map_.end()) {
+      return id;
+    } else {
+      return getTargetForwardedId(forwarded_id_it->second);
+    }
+  }
+
+  //! Adds complimenting IDs of forwarded IDs to the leaf map
+  void addComplimentLeafIDs(
+      const std::unordered_map<IterDomain*, IterDomain*>& forwarding_map,
+      const std::unordered_map<IterDomain*, std::vector<IterDomain*>>&
+          compliment_map);
 
  public:
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,
       std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
-      std::unordered_map<IterDomain*, IterDomain*> forward_id_map = {});
+      std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map = {},
+      std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map = {});
 
   // Return iter domain map from target_domain IDs to their "replayed"
   // replay_domain IDs. If not in map, was not replayed.

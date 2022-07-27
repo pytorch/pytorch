@@ -3,11 +3,11 @@
 import glob
 import os
 
+import caffe2.python.onnx.backend as c2
+
 import numpy as np
 import onnx.backend.test
 from onnx import numpy_helper
-
-import caffe2.python.onnx.backend as c2
 
 
 def load_tensor_as_numpy_array(f):
@@ -30,9 +30,7 @@ def run_generated_test(model_file, data_dir, device="CPU"):
     for i in range(input_num):
         inputs.append(
             numpy_helper.to_array(
-                load_tensor_as_numpy_array(
-                    os.path.join(data_dir, "input_{}.pb".format(i))
-                )
+                load_tensor_as_numpy_array(os.path.join(data_dir, f"input_{i}.pb"))
             )
         )
     output_num = len(glob.glob(os.path.join(data_dir, "output_*.pb")))
@@ -40,9 +38,7 @@ def run_generated_test(model_file, data_dir, device="CPU"):
     for i in range(output_num):
         outputs.append(
             numpy_helper.to_array(
-                load_tensor_as_numpy_array(
-                    os.path.join(data_dir, "output_{}.pb".format(i))
-                )
+                load_tensor_as_numpy_array(os.path.join(data_dir, f"output_{i}.pb"))
             )
         )
     prepared = c2.prepare(model, device=device)

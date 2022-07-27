@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -88,11 +89,7 @@ Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
 //  this constructor now leaving them to be resolved by later stages
 //
 Val::Val(const Val* src, IrCloner* ir_cloner)
-    : Statement(src, ir_cloner),
-      vtype_(src->vtype_),
-      dtype_(src->dtype_),
-      is_fusion_input_(src->is_fusion_input_),
-      is_fusion_output_(src->is_fusion_output_) {}
+    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
@@ -103,13 +100,21 @@ const std::vector<Expr*>& Val::uses() const {
   return uses_;
 }
 
+// Converts the data type of TensorView or Scalar representing index
+// values. The data type of the original input should be
+// DataType::Index, but DataType::Int is also allowed as it is used
+// for index expressions.
 void Val::resolveIndexDtype() {
   TORCH_INTERNAL_ASSERT(
-      vtype_ == ValType::TensorView,
-      "Resolving index type is currently only supported on tensor view values.");
+      vtype_ == ValType::TensorView || vtype_ == ValType::Scalar,
+      "Resolving index type is currently only supported on tensor view or scalar values. "
+      "Value type: ",
+      vtype_);
   TORCH_INTERNAL_ASSERT(
-      dtype_ == DataType::Index,
-      "Can only resolve index type if a tensor has an Index DataType.");
+      dtype_ == DataType::Index || dtype_ == DataType::Int,
+      "Can only resolve index type if a Val has an Index or Int DataType. ",
+      "Data type: ",
+      dtype_);
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(),
       "Index type can only be resolved at compile time.");
@@ -124,6 +129,11 @@ namespace {
 class ConstCheck : private OptOutConstDispatch {
  private:
   bool is_const_ = true;
+
+  // Returns true if all Val's in the hisotry of provided Val is an Int. Since
+  // our expression evaluator doesn't support any type besides int, it's
+  // important to check it is one.
+  bool is_int_ = true;
 
   void handle(const Bool* b) final {
     is_const_ = is_const_ && b->isConst();
@@ -148,6 +158,10 @@ class ConstCheck : private OptOutConstDispatch {
   }
 
   void handle(const Val* val) final {
+    if (!val->isAnInt()) {
+      is_int_ = false;
+    }
+
     if (val->definition() != nullptr) {
       handle(val->definition());
     } else {
@@ -161,6 +175,12 @@ class ConstCheck : private OptOutConstDispatch {
     cc.handle(val);
     return cc.is_const_;
   }
+
+  static bool isConstInt(const Val* val) {
+    ConstCheck cc;
+    cc.handle(val);
+    return cc.is_const_ && cc.is_int_;
+  }
 };
 
 } // namespace
@@ -170,6 +190,30 @@ bool Val::isConstScalar() const {
     return false;
   }
   return ConstCheck::isConst(this);
+}
+
+bool Val::isConstInt() const {
+  if (!isAnInt()) {
+    return false;
+  }
+  return ConstCheck::isConstInt(this);
+}
+
+int64_t Val::evaluateInt() {
+  TORCH_INTERNAL_ASSERT(
+      ConstCheck::isConstInt(this),
+      "Cannot get Int of not const integers through IR nodes, must use runtime ExpressionEvaluator.");
+
+  if (this->as<Int>()->value().has_value()) {
+    return this->as<Int>()->value().value();
+  }
+
+  ExpressionEvaluator ee(fusion());
+  auto evaluated_val = ee.evaluate(this);
+  TORCH_INTERNAL_ASSERT(
+      evaluated_val.has_value(),
+      "Detected a const integer but failed to infer its value.");
+  return evaluated_val.value();
 }
 
 c10::optional<int64_t> Val::getInt() const {

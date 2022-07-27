@@ -11,15 +11,20 @@ from ..utils.rnn import PackedSequence
 from .. import init
 from ... import _VF
 
+__all__ = ['RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell']
+
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
 }
 
 
-def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
+    return _apply_permutation(tensor, permutation, dim)
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
@@ -234,7 +239,7 @@ class RNNBase(Module):
     def permute_hidden(self, hx: Tensor, permutation: Optional[Tensor]):
         if permutation is None:
             return hx
-        return apply_permutation(hx, permutation)
+        return _apply_permutation(hx, permutation)
 
 
     def extra_repr(self) -> str:
@@ -702,7 +707,7 @@ class LSTM(RNNBase):
                        ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
-        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
+        return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
@@ -851,7 +856,7 @@ class GRU(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+        * **output**: tensor of shape :math:`(L, D * H_{out})` for unbatched input,
           :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
@@ -1153,6 +1158,8 @@ class LSTMCell(RNNCellBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
@@ -1243,6 +1250,8 @@ class GRUCell(RNNCellBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     Examples::
 

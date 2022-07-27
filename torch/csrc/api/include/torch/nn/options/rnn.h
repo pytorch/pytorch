@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/enum.h>
 #include <torch/csrc/Export.h>
+#include <torch/enum.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -13,12 +13,16 @@ namespace detail {
 /// Common options for RNN, LSTM and GRU modules.
 struct TORCH_API RNNOptionsBase {
   typedef c10::variant<
-    enumtype::kLSTM,
-    enumtype::kGRU,
-    enumtype::kRNN_TANH,
-    enumtype::kRNN_RELU> rnn_options_base_mode_t;
+      enumtype::kLSTM,
+      enumtype::kGRU,
+      enumtype::kRNN_TANH,
+      enumtype::kRNN_RELU>
+      rnn_options_base_mode_t;
 
-  RNNOptionsBase(rnn_options_base_mode_t mode, int64_t input_size, int64_t hidden_size);
+  RNNOptionsBase(
+      rnn_options_base_mode_t mode,
+      int64_t input_size,
+      int64_t hidden_size);
 
   TORCH_ARG(rnn_options_base_mode_t, mode);
   /// The number of features of a single sample in the input sequence `x`.
@@ -38,7 +42,8 @@ struct TORCH_API RNNOptionsBase {
   TORCH_ARG(double, dropout) = 0.0;
   /// Whether to make the RNN bidirectional.
   TORCH_ARG(bool, bidirectional) = false;
-  /// Cell projection dimension. If 0, projections are not added. Can only be used for LSTMs.
+  /// Cell projection dimension. If 0, projections are not added. Can only be
+  /// used for LSTMs.
   TORCH_ARG(int64_t, proj_size) = 0;
 };
 
@@ -48,7 +53,8 @@ struct TORCH_API RNNOptionsBase {
 ///
 /// Example:
 /// ```
-/// RNN model(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
+/// RNN model(RNNOptions(128,
+/// 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
 /// ```
 struct TORCH_API RNNOptions {
   typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
@@ -64,7 +70,8 @@ struct TORCH_API RNNOptions {
   /// with the second RNN taking in outputs of the first RNN and
   /// computing the final results. Default: 1
   TORCH_ARG(int64_t, num_layers) = 1;
-  /// The non-linearity to use. Can be either ``torch::kTanh`` or ``torch::kReLU``. Default: ``torch::kTanh``
+  /// The non-linearity to use. Can be either ``torch::kTanh`` or
+  /// ``torch::kReLU``. Default: ``torch::kTanh``
   TORCH_ARG(nonlinearity_t, nonlinearity) = torch::kTanh;
   /// If ``false``, then the layer does not use bias weights `b_ih` and `b_hh`.
   /// Default: ``true``
@@ -84,7 +91,8 @@ struct TORCH_API RNNOptions {
 ///
 /// Example:
 /// ```
-/// LSTM model(LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// LSTM model(LSTMOptions(2,
+/// 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
 struct TORCH_API LSTMOptions {
   LSTMOptions(int64_t input_size, int64_t hidden_size);
@@ -118,7 +126,8 @@ struct TORCH_API LSTMOptions {
 ///
 /// Example:
 /// ```
-/// GRU model(GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// GRU model(GRUOptions(2,
+/// 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
 struct TORCH_API GRUOptions {
   GRUOptions(int64_t input_size, int64_t hidden_size);
@@ -150,7 +159,11 @@ namespace detail {
 
 /// Common options for RNNCell, LSTMCell and GRUCell modules
 struct TORCH_API RNNCellOptionsBase {
-  RNNCellOptionsBase(int64_t input_size, int64_t hidden_size, bool bias, int64_t num_chunks);
+  RNNCellOptionsBase(
+      int64_t input_size,
+      int64_t hidden_size,
+      bool bias,
+      int64_t num_chunks);
   virtual ~RNNCellOptionsBase() = default;
 
   TORCH_ARG(int64_t, input_size);
@@ -165,7 +178,8 @@ struct TORCH_API RNNCellOptionsBase {
 ///
 /// Example:
 /// ```
-/// RNNCell model(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kReLU));
+/// RNNCell model(RNNCellOptions(20,
+/// 10).bias(false).nonlinearity(torch::kReLU));
 /// ```
 struct TORCH_API RNNCellOptions {
   typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
@@ -179,7 +193,8 @@ struct TORCH_API RNNCellOptions {
   /// If ``false``, then the layer does not use bias weights `b_ih` and `b_hh`.
   /// Default: ``true``
   TORCH_ARG(bool, bias) = true;
-  /// The non-linearity to use. Can be either ``torch::kTanh`` or ``torch::kReLU``. Default: ``torch::kTanh``
+  /// The non-linearity to use. Can be either ``torch::kTanh`` or
+  /// ``torch::kReLU``. Default: ``torch::kTanh``
   TORCH_ARG(nonlinearity_t, nonlinearity) = torch::kTanh;
 };
 
