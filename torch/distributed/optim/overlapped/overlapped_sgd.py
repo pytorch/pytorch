@@ -16,7 +16,7 @@ class OverlappedSGD(OverlappedOptimizer):
         grad_scaler=None,
         zero_grad=False
     ):
-        super.__init__(grad_scaler=grad_scaler, zero_grad=zero_grad)
+        super().__init__(grad_scaler=grad_scaler, zero_grad=zero_grad)
         self._functional_sgd = _FunctionalSGD(params,
                                               lr,
                                               momentum,
