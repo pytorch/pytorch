@@ -163,13 +163,15 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.state) == len(sparsifier2.state)
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
-        for name in sparsifier1.state.keys():
+        state1 = state_dict1['state']
+        for name in state1.keys():
             # compare mask
             assert name in sparsifier2.state
             assert 'mask' in sparsifier2.state[name]
             assert 'mask' in sparsifier1.state[name]
-            mask1, mask2 = sparsifier1.state[name]['mask'], sparsifier2.state[name]['mask']
-            assert torch.all(mask1 == mask2)
+            mask1, mask2 = state1[name]['mask'], sparsifier2.state[name]['mask']
+            assert mask1.is_sparse and not mask2.is_sparse
+            assert torch.all(mask1.to_dense() == mask2)  # mask1 is stored as sparse coo now
 
             # compare data_groups
             dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
