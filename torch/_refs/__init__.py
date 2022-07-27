@@ -230,6 +230,7 @@ __all__ = [
     "empty",
     "empty_like",
     "empty_strided",
+    "eye",
     "full",
     "full_like",
     "ones",
@@ -3375,6 +3376,41 @@ def empty_strided(
     return prims.empty_strided(
         shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
+
+
+# TODO: missing kwargs (e.g. layout)
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
+def eye(
+    n: int,
+    m: Optional[int] = None,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.eye
+    """
+    if m is None:
+        m = n
+
+    check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
+    check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
+
+    ones = torch.ones(
+        max(n, m), dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+    diag = torch.diag_embed(ones)[:n, :m]
+
+    result = torch.zeros(
+        (n, m), dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+    copy_to(result, diag)
+
+    return result
 
 
 # TODO: missing kwargs (e.g. layout)
