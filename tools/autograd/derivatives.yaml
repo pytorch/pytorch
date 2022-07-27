@@ -2772,21 +2772,6 @@
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
 
-# Empty factory functions have explicit non-differentiability so that they propagate the class
-# when used with a Tensor subclass together with __torch_dispatch__.
-# All the other factory functions are composite and call into one of these.
-- name: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
-
-- name: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
-
-- name: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
-
 - name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, *, int self_num_batch_dims=0) -> Tensor
   self: non_differentiable
   other: non_differentiable
