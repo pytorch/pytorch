@@ -426,7 +426,7 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     at::IntArrayRef size,
     bool implicit) {
-  CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(size.size(), self.dim());
   int64_t num_new_dimensions = size.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
@@ -442,7 +442,7 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     bool implicit) {
-  CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(size.size(), self.dim());
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
   int64_t num_new_dimensions = _sizes.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
@@ -497,6 +497,10 @@ std::vector<Shape> compute_shape_index_select(
 
 std::vector<Shape> compute_shape_inverse(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_isnan(const at::Tensor& self) {
+  return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
@@ -1039,7 +1043,7 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
 std::vector<Shape> compute_shape_repeat(
     const at::Tensor& self,
     at::IntArrayRef repeats) {
-  CHECK_GE(repeats.size(), self.dim());
+  TORCH_CHECK_GE(repeats.size(), self.dim());
   int64_t num_new_dimensions = repeats.size() - self.dim();
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(
