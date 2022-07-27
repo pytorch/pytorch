@@ -1467,6 +1467,8 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         try:
             output_size = symbolic_helper._parse_arg(output_size, "is")
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             return symbolic_helper._onnx_unsupported(
                 "adaptive pooling, since output_size is not constant."
             )
@@ -1476,6 +1478,8 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         try:
             dim = sizes[2:]
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             dim = None
         if dim is None or any([i is None for i in dim]):
             if output_size == [1] * len(output_size):
@@ -1555,6 +1559,8 @@ def _convert_padding_node(padding):
                 symbolic_helper._get_const(v, "i", "padding") for v in input_list
             ]
         except Exception:
+            # FIXME(justinchuby): Avoid catching Exception.
+            # Catch a more specific exception instead.
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "Pad", 9, 11, "The sizes of the padding must be constant"
             )
@@ -1566,6 +1572,8 @@ def constant_pad_nd(g, input, padding, value):
     try:
         value = symbolic_helper._get_const(value, "f", "value")
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Pad", 9, 11, "The value for the padding must be constant"
         )
@@ -1953,6 +1961,8 @@ def _convolution(
     try:
         kernel_shape = weight_size[2:]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         kernel_shape = None
 
     if kernel_shape is None or any([i is None for i in kernel_shape]):
@@ -2342,6 +2352,8 @@ def unfold(g, input, dimension, size, step):
     try:
         sizedim = sizes[dimension]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         sizedim = None
     if sizedim is not None:
         low_indices = range(0, sizedim, step)
@@ -3230,6 +3242,8 @@ def sort(g, self, dim, decending, out=None):
     try:
         dim_size = self_sizes[dim]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         dim_size = None
 
     if dim_size is None:

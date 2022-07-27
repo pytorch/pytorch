@@ -224,6 +224,8 @@ def parse_args(*arg_descriptors):
                 arg_names = list(sig.parameters.keys())[1:]
                 fn_name = fn.__name__
             except Exception:
+                # FIXME(justinchuby): Avoid catching Exception.
+                # Catch a more specific exception instead.
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
             args = [
@@ -437,6 +439,8 @@ def _get_tensor_dim_size(x, dim):
         sizes = _get_tensor_sizes(x)
         return sizes[dim]
     except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
         pass
     return None
 
@@ -1015,7 +1019,8 @@ def _arange_cast_helper(
                 if scalar.type().scalarType() != "Long":
                     return False
             except Exception:
-                # FIXME(justinchuby): Exception to broad
+                # FIXME(justinchuby): Avoid catching Exception.
+                # Catch a more specific exception instead.
                 pass
         return True
 
