@@ -1015,6 +1015,7 @@ def _arange_cast_helper(
                 if scalar.type().scalarType() != "Long":
                     return False
             except Exception:
+                # FIXME(justinchuby): Exception to broad
                 pass
         return True
 
@@ -1024,18 +1025,18 @@ def _arange_cast_helper(
     # Otherwise, the dtype is inferred to be torch.int64.
     if dtype is None or (_is_value(dtype) and _is_none(dtype)):
         if _is_all_integral([start, end, step]):
-            type_ = _type_utils.ScalarType.INT64
+            scalar_type = _type_utils.ScalarType.INT64
         else:
-            type_ = _type_utils.ScalarType.from_dtype(torch.get_default_dtype())
+            scalar_type = _type_utils.ScalarType.from_dtype(torch.get_default_dtype())
     else:
         assert isinstance(dtype, int)
         # TODO(justinchuby): Check if dtype is indeed a int.
-        type_ = _type_utils.ScalarType(dtype)
+        scalar_type = _type_utils.ScalarType(dtype)
 
-    start = g.op("Cast", start, to_i=type_.onnx_type()) if start else None
-    end = g.op("Cast", end, to_i=type_.onnx_type()) if end else None
-    step = g.op("Cast", step, to_i=type_.onnx_type()) if step else None
-    return type_, end, start, step
+    start = g.op("Cast", start, to_i=scalar_type.onnx_type()) if start else None
+    end = g.op("Cast", end, to_i=scalar_type.onnx_type()) if end else None
+    step = g.op("Cast", step, to_i=scalar_type.onnx_type()) if step else None
+    return scalar_type, end, start, step
 
 
 def _arange_helper(g, *args):
