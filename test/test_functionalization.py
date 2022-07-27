@@ -580,7 +580,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     zero_default = torch.ops.aten.zero.default(empty);  empty = None
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
@@ -597,7 +597,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     zero_default = torch.ops.aten.zero.default(empty);  empty = None
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
@@ -614,7 +614,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     zero_default = torch.ops.aten.zero.default(empty);  empty = None
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
@@ -631,7 +631,7 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    empty = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.SymInt([2, 2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     zero_default = torch.ops.aten.zero.default(empty);  empty = None
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zero_default)
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_default);  zero_default = None
