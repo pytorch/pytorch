@@ -1,0 +1,20 @@
+name: 📚 Documentation/Tutorials
+description: Report an issue related to https://pytorch.org/maskedtensor/main/index.html
+
+body:
+  - type: textarea
+    attributes:
+      label: 📚 The doc issue
+      description: >
+        A clear and concise description of what content in https://pytorch.org/maskedtensor/main/index.html is an issue or what additional documentation you'd like to see.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Suggest a potential alternative/fix
+      description: >
+        Tell us how we could improve the documentation in this regard.
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for contributing 🎉!

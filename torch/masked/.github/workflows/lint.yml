@@ -1,0 +1,67 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+  pull_request:
+
+jobs:
+  style:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.7"
+      - name: Check out source repository
+        uses: actions/checkout@v2
+      - name: Install lint utilities
+        run: |
+          pip install pre-commit
+          pre-commit install-hooks
+      - name: Lint Python code and config files
+        run: pre-commit run --all-files
+      - name: Required modifications
+        if: ${{ failure() }}
+        run: git --no-pager diff
+
+  mypy:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python environment
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Check out source repository
+        uses: actions/checkout@v2
+      - name: Install PyTorch
+        run: |
+          set -eux
+          python -m pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --user
+      - name: Install dependencies
+        run: |
+          set -eux
+          python -m pip install requests --user
+          python -m pip install mypy==0.812 --user
+      - name: Build MaskedTensor
+        run: |
+          set -eux
+          python setup.py develop --user
+      - name: Run mypy
+        env:
+          MYPY_FORCE_COLOR: 1
+          TERM: xterm-color
+        run: |
+          set -eux
+          STATUS=
+          if ! mypy --config=mypy.ini; then
+            STATUS=fail
+          fi
+          if [ -n "$STATUS" ]; then
+            echo 'Please fix the above mypy warnings.'
+            false
+          fi

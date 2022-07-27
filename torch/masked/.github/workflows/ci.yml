@@ -1,0 +1,60 @@
+name: Run MaskedTensor Tests
+on:
+  push:
+    branches:
+      - main
+      - release/*
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches:
+      - main
+      # For PR created by ghstack
+      - gh/*/*/base
+      - release/*
+
+jobs:
+  test:
+    if:
+      ${{ github.repository_owner == 'pytorch' && (github.event.action != 'labeled' ||
+      startsWith(github.event.label.name, 'ciflow')) }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - 3.7
+          - 3.8
+          - 3.9
+    steps:
+      - name: Setup additional system libraries
+        if: startsWith( matrix.os, 'ubuntu' )
+        run: |
+          sudo add-apt-repository multiverse
+          sudo apt update
+          sudo apt install rar unrar
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check out source repository
+        uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+          pip3 install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+      - name: Install test requirements
+        run: pip3 install expecttest numpy pytest
+      - name: Build MaskedTensor
+        run: python setup.py develop
+      - name: Run MaskedTensor tests with pytest
+        if: ${{ ! contains(github.event.pull_request.labels.*.name, 'ciflow/slow') }}
+        run: pytest --no-header -v test
+      - name: Run MaskedTensor tests with pytest (including slow tests)
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/slow') }}
+        run: pytest --no-header -v test
+        env:
+          PYTORCH_TEST_WITH_SLOW: 1

@@ -1,0 +1,23 @@
+name: Push Nightly Release
+
+on:
+  # [ Note: Manually Trigger the Workflow ]
+  # 1. Go to Actions under pytorch/data repo
+  # 2. In the left sidebar, click the workflow you want to run
+  # 3. Above the list of workflow runs, select Run workflow
+  # 4. Use the Branch dropdown to select the release/* branch
+  # 5. Click Run workflow
+  schedule:
+    - cron: "15 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  build_test_upload:
+    uses: ./.github/workflows/_build_test_upload.yml
+    with:
+      package_name: maskedtensor_nightly
+      wheel_version: nightly
+      pip_path: https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+      pre_dev_release: true
+    secrets:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}

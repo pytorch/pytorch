@@ -1,0 +1,105 @@
+name: Build, Test and Upload Wheel
+
+on:
+  workflow_call:
+    inputs:
+      package_name:
+        required: true
+        type: string
+      wheel_version:
+        required: true
+        type: string
+      pip_path:
+        required: true
+        type: string
+      pre_dev_release:
+        required: true
+        type: boolean
+    secrets:
+      PYPI_TOKEN:
+        required: false
+
+jobs:
+  build_test_upload:
+    if: github.repository == 'pytorch/maskedtensor'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # TODO: Turn the matrix on after cpp landed
+      matrix:
+        os:
+          # - macos-latest
+          - ubuntu-latest
+          # - windows-latest
+        python-version:
+          # - 3.7
+          # - 3.8
+          - 3.9
+    steps:
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Update pip
+        run: |
+          python3 -m pip install --upgrade pip
+      - name: Install Pre-release/Development-release PyTorch
+        if: inputs.pre_dev_release
+        run: |
+          pip3 install numpy
+          pip3 install --pre torch -f ${{ inputs.pip_path }}
+      - name: Install official PyTorch
+        if: ${{ ! inputs.pre_dev_release }}
+        run: |
+          pip3 install numpy
+          pip3 install torch ${{ inputs.package_name }} -f ${{ inputs.pip_path }}
+      - name: Check out source repository
+        uses: actions/checkout@v2
+      - name: Get hash of the last commit from release
+        if: inputs.pre_dev_release
+        run: |
+          pip3 install -r requirements.txt
+          # Using --no-deps here to make sure correct version of PyTorch Core
+          pip3 install --pre ${{ inputs.package_name }} -f ${{ inputs.pip_path }} --no-deps
+          pushd ~
+          RELEASE_COMMIT=$(python -c 'import maskedtensor; print(maskedtensor.version.git_version)')
+          echo "::set-output name=hash::$RELEASE_COMMIT"
+          popd
+          pip3 uninstall -y ${{ inputs.package_name }}
+        id: release_commit
+      - name: Get hash of the last commit from source
+        if: ${{ inputs.pre_dev_release }}
+        run: |
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          echo "::set-output name=hash::$SOURCE_COMMIT"
+        id: source_commit
+      # The following steps for pre-release will be skipped if the last commit
+      # from branch is the same as the last commit in release wheel
+      - name: Build and install maskedtensor wheel
+        if: |
+          ! inputs.pre_dev_release ||
+            steps.release_commit.outputs.hash != steps.source_commit.outputs.hash
+        run: |
+          pip3 install wheel
+          python setup.py bdist_wheel --${{ inputs.wheel_version }}
+          pip3 install dist/${{ inputs.package_name }}*.whl
+      - name: Upload wheel as GHA artifact
+        if: |
+          inputs.pre_dev_release &&
+            (steps.release_commit.outputs.hash != steps.source_commit.outputs.hash)
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ inputs.package_name }}_${{ matrix.python-version }}_${{ matrix.cuda-tag }}.whl
+          path: dist/${{ inputs.package_name }}*.whl
+      - name: Push wheel to PYPI
+        if: |
+          ! inputs.pre_dev_release ||
+            steps.release_commit.outputs.hash != steps.source_commit.outputs.hash
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          pip3 install twine
+          python -m twine upload --skip-existing \
+            --username __token__ \
+            --password "$PYPI_TOKEN" \
+            dist/${{ inputs.package_name }}*.whl

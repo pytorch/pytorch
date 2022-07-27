@@ -1,0 +1,37 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.0.1
+    hooks:
+      - id: check-docstring-first
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: end-of-file-fixer
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v2.5.1
+    hooks:
+      - id: prettier
+        types_or:
+          - markdown
+          - toml
+          - yaml
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v2.31.0
+    hooks:
+      - id: pyupgrade
+        args: [--py37-plus]
+
+  - repo: https://github.com/omnilib/ufmt
+    rev: v1.3.2
+    hooks:
+      - id: ufmt
+        additional_dependencies:
+          - black == 21.12b0
+          - usort == 1.0.0
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 4.0.1
+    hooks:
+      - id: flake8
+        args: [--max-line-length=120]

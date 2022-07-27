@@ -1,0 +1,42 @@
+name: Generate documentation
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_docs_job:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Dependencies
+        run: |
+          echo `python3 --version`
+          sudo apt-get install -y python-setuptools
+          python3 -m pip install --upgrade pip
+          python3 -m pip install setuptools
+          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+          python3 -m pip install --user "git+https://github.com/pytorch/maskedtensor.git"
+          sudo apt-get install -y yarn
+      - name: Check env
+        run: echo `which sphinx-build`
+      - name: Build the docset
+        run: |
+          cd ./docs
+          pip install -r requirements.txt
+          make html
+          cd ..
+      - name: Get output time
+        run: echo "The time was ${{ steps.build.outputs.time }}"
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4.2.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages # The branch the action should deploy to.
+          folder: docs/_build/html # The folder the action should deploy.
+          target-folder: main # The destination folder the action should deploy to.

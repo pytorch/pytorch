@@ -1,0 +1,10 @@
+# Documentation
+docutils>=0.17.1
+sphinx>=4.0.2
+sphinx_rtd_theme<=2.0.0
+jupytext
+myst-nb
+
+# Packages used for notebook execution
+numpy
+torch>=1.12,<=1.13
