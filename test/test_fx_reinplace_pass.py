@@ -7,7 +7,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 try:
     from functorch.experimental import functionalize
     HAS_FUNCTIONALIZATION = True
-except e:
+except Exception as e:
     HAS_FUNCTIONALIZATION = False
 
 class TestReinplacePass(TestCase):
@@ -109,6 +109,143 @@ def forward(self, a__1):
     add_tensor_1 = torch.ops.aten.add_.Tensor(view_default_5, view_default_6);  view_default_6 = None
     return view_default_5
     """)
+
+    def test_reinplace_scatter_twice(self):
+        def f(a_):
+            # for now, don't test mutations to inputs
+            a = a_.clone()
+            b = a[:, 1]
+            c = b[1]
+            c.add_(1)
+            return a
+
+        if not HAS_FUNCTIONALIZATION:
+            return
+
+        inpt = torch.ones(4, 4)
+        f2 = reinplace(make_fx(functionalize(f))(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
+    select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
+    select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
+    add_tensor = torch.ops.aten.add_.Tensor(select_int_1, 1);  select_int_1 = None
+    slice_tensor_1 = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
+    select_int_2 = torch.ops.aten.select.int(slice_tensor_1, 1, 1);  slice_tensor_1 = None
+    return clone_default
+    """)
+
+    def test_reinplace_scatter_twice_with_different_view_op_valid(self):
+        def f(a_):
+            a = a_.clone()
+            b = a[:, 1]
+            c = b[1]
+            c_updated = c.add(1)
+            good_mirror_of_b = a.as_strided((4,), (4,), 1)
+            # good_mirror_of_b points to the same region of memory as b.
+            # and this scatter op below tries to scatter c_updated into the same region
+            # that c currently takes up.
+            # reinplacing logic checks this by confirming that:
+            #   c_updated
+            #   good_mirror_of_b.select(0, 1)
+            # have the same size/stride/storage_offset.
+            b_updated = torch.select_scatter(good_mirror_of_b, c_updated, 0, 1)
+            return b_updated
+
+        inpt = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
+    select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
+    select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
+    add_tensor = torch.ops.aten.add_.Tensor(select_int_1, 1);  select_int_1 = None
+    as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 1);  clone_default = None
+    return as_strided_default
+    """)
+
+    # Test example where we have a scatter op, where the base tensor
+    # has the same size/stride/storage offset (even though it is a different view),
+    # making it valid to re-inplace
+    def test_reinplace_scatter_twice_with_different_view_op_invalid(self):
+        def f(a_):
+            a = a_.clone()
+            b = a[:, 1]
+            c = b[1]
+            c_updated = c.add(1)
+            good_mirror_of_b = a.as_strided((4,), (4,), 1)
+            # The first arg to select_scatter is an equivalent view to b.
+            # However, the select_scatter call below tries to put c_updated
+            # into a different slice of "b" than what "c" currently occupies.
+            #
+            b_updated = torch.select_scatter(good_mirror_of_b, c_updated, 0, 0)
+            return b_updated
+
+        inpt = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
+    select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
+    select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
+    add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
+    as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 1);  clone_default = None
+    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 0);  as_strided_default = add_tensor = None
+    return select_scatter_default
+    """)  # noqa: B950
+
+    def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
+        def f(a_):
+            a = a_.clone()
+            b = a[:, 1]
+            c = b[1]
+            c_updated = c.add(1)
+            bad_mirror_of_b = a.as_strided((4,), (4,), 0)
+            # The first arg to select_scatter points to a different than c's base.
+            # This makes it invalid to re-inplace.
+            b_updated = torch.select_scatter(bad_mirror_of_b, c_updated, 0, 1)
+            return b_updated
+
+        inpt = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        # self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
+    select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
+    select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
+    add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
+    as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 0);  clone_default = None
+    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 1);  as_strided_default = add_tensor = None
+    return select_scatter_default
+    """)  # noqa: B950
 
 if __name__ == '__main__':
     run_tests()
