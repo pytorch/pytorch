@@ -74,7 +74,7 @@ def ban_recomputation(node):
         # If the output of the reduction is 4x smaller (arbitrary choice),
         # then we don't allow recomputation.
         if get_aten_target(node) in reduction_ops:
-            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
+            input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, torch.fx.Node))
             output_size = _size_of(node.meta['tensor_meta'])
             return (output_size * 4 < input_tensors_size)
         return False
