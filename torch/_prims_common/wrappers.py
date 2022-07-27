@@ -1,12 +1,12 @@
 import torch
-from torch._prims.utils import (
+from torch._prims_common import (
     Number,
     NumberType,
     TensorLike,
     TensorLikeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims.utils as utils
+import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
@@ -20,6 +20,7 @@ from itertools import chain
 def _maybe_convert_to_dtype(
     a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
 ) -> Union[TensorLikeType, NumberType, Sequence]:
+    import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
             # NOTE: this is incorrect on the CPU
@@ -124,7 +125,7 @@ class elementwise_type_promotion_wrapper(object):
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
-        return prims.resize(out, shape)
+        return out.resize_(shape)
 
     if out.numel() != reduce(operator.mul, shape, 1):
         msg = (
@@ -137,7 +138,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
             )
         )
         warnings.warn(msg)
-        return prims.resize(out, shape)
+        return out.resize_(shape)
 
     return out
 
@@ -166,7 +167,7 @@ def _safe_copy_out(
             "but this can't be cast because it is not safe!",
         )
 
-    return prims.copy_to(copy_to, copy_from)
+    return copy_to.copy_(copy_from)
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
@@ -200,7 +201,22 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 and len(result) == len(out_names)
             )
             if out is not None:
-                assert type(out) == type(result)
+                # Naively you might expect this assert to be true, but
+                # it's not:
+                #
+                #   assert type(out) == type(result)
+                #
+                # The reason is that functions under this wrapper can
+                # get registered to the Meta dispatch key, and that
+                # means they can be executed in a context where tensor
+                # subclasses are disabled (with no_dispatch), which is a
+                # handy way for an is-a tensor subclass (e.g.,
+                # FakeTensor) to have the normal meta backend create a
+                # meta tensor, to be wrapped once it gets returned.
+                # In this situation, you will get a FakeTensor as
+                # the output tensor, but not the result--which will
+                # be a normal meta tensor, but this is perfectly
+                # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
@@ -266,7 +282,3 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
-
-
-# avoid mypy import cycle
-import torch._prims as prims

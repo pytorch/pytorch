@@ -2112,6 +2112,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_;
   }
 
+  bool has_symbolic_sizes_strides() const {
+    return has_symbolic_sizes_strides_;
+  }
+
  private:
   void HandleResize();
 

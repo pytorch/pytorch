@@ -1,7 +1,7 @@
 import torch._C._lazy
 
 
-def mark_step(device: str = "lazy:0", wait=False):
+def mark_step(device: str = "", wait=False):
     """Triggers a mark step, which amounts to
     - collecting a group of 'live' lazy tensors to index into the compilation cache
       (lowering/compiling their IR graphs if not cached)
