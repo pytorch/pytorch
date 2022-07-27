@@ -103,6 +103,8 @@ class ScalarType(enum.IntEnum):
 
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a ScalarType to an ONNX data type."""
+        if not self.onnx_compatible():
+            raise ValueError(f"Scalar type {self} is not compatible with ONNX")
         return _SCALAR_TYPE_TO_ONNX[self]
 
     def onnx_compatible(self) -> bool:
