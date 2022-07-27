@@ -845,7 +845,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
   auto size = asIntArrayRefSlow(packed_size);
-  return expand(self, size, implicit);
+  return self.expand(size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
