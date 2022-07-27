@@ -61,15 +61,8 @@ def get_github_prs(org: str, project: str, pr_query: Any) -> List[GitHubPR]:
     return prs
 
 
-def is_land_check(labels: List[str]) -> bool:
-    return LAND_CHECK_LABEL in labels
-
-
-def is_all_green(labels: List[str]) -> bool:
-    return ALL_GREEN_LABEL in labels
-
 def has_label(labels: List[str], label: str) -> bool:
-    return ALL_GREEN_LABEL in labels
+    return label in labels
 
 def validate_all_green(pr: GitHubPR) -> None:
     pending = pr_get_pending_checks(pr)
@@ -114,11 +107,11 @@ def main() -> None:
             if is_queued:
                 update_label_state(org, project, pr_num, LAND_QUEUED_LABEL, LAND_PENDING_LABEL)
 
-            if is_all_green(labels):
+            if has_label(labels, ALL_GREEN_LABEL):
                 validate_all_green(pr)
                 print(f"All on green checks passed for {pr_link}.")
 
-            if is_land_check(labels):
+            if has_label(labels, LAND_CHECK_LABEL):
                 if is_queued:
                     print(f"Creating land check branch for {pr_link}")
                     pr.create_land_time_check_branch(repo, 'viable/strict')
