@@ -45,12 +45,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const override;
   virtual c10::SymIntArrayRef sym_sizes() const override;
-
-  c10::Device device_custom() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: device_custom() not supported for UndefinedTensorImpl.");
-  }
+  virtual c10::SymIntArrayRef sym_strides_custom() const override;
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   const at::Storage& storage() const override {

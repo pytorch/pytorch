@@ -376,14 +376,19 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->is_contiguous(this);
   }
-  return is_contiguous_default(memory_format);
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have is_contiguous");
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->sizes(this);
   }
-  return sizes_default();
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
@@ -404,25 +409,32 @@ c10::Device TensorImpl::device_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->device(this);
   }
-  return device_default();
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have device");
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->strides(this);
   }
-  return strides_default();
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have strides");
 }
 
 int64_t TensorImpl::dim_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->dim(this);
   }
-  return dim_default();
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
 }
 
 int64_t TensorImpl::numel_custom() const {
-  return numel_default();
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
 
 c10::Layout TensorImpl::layout_custom() const {
