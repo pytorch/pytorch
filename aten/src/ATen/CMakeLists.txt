@@ -6,7 +6,12 @@ if(NOT MSVC)
   string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
   string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
+  string(APPEND CMAKE_CXX_FLAGS_DEBUG " -mcmodel=large")
+  string(APPEND CMAKE_SHARED_LINKER_FLAGS_DEBUG " -mcmodel=large")
 endif(NOT MSVC)
+
+#string(APPEND CMAKE_HIP_FLAGS_DEBUG " -mcmodel=large")
+set(CMAKE_HIP_FLAGS_DEBUG "${CMAKE_HIP_FLAGS_RELEASE}")
 
 # Can be compiled standalone
 if(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)

@@ -1302,9 +1302,12 @@ if(USE_ROCM)
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_CXX_FLAGS -g2)
-       list(APPEND HIP_CXX_FLAGS -O0)
+       # XXX Disabling device code debugging for now, to workaround https://github.com/RadeonOpenCompute/ROCm/issues/1765
+       #list(APPEND HIP_CXX_FLAGS -g2)
+       #list(APPEND HIP_CXX_FLAGS -O0)
+       list(APPEND HIP_CXX_FLAGS -mcmodel=large)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
+       list(APPEND HIP_HIPCC_FLAGS -mcmodel=large)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
