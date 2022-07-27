@@ -8,7 +8,6 @@
 #undef _POSIX_C_SOURCE
 
 #include <Python.h>
-#include <frameobject.h>
 #include <structseq.h>
 
 #pragma pop_macro("_XOPEN_SOURCE")

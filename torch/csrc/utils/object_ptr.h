@@ -65,5 +65,3 @@ class THPPointer {
  * not use THPPointer in this situation.
  */
 using THPObjectPtr = THPPointer<PyObject>;
-using THPCodeObjectPtr = THPPointer<PyCodeObject>;
-using THPFrameObjectPtr = THPPointer<PyFrameObject>;
