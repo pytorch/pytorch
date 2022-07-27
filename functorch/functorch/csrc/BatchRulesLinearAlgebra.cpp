@@ -240,7 +240,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
               op_name, ": The input tensor A must have at least 2 dimensions.");
     TORCH_CHECK(!second_bdim.has_value() || second.dim() > 2,
               op_name, ": The input tensor A must have at least 2 dimensions.");
-    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim);
+    const auto tensor_other = _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
     const auto tensor_ = std::get<0>(tensor_other);
     const auto other_ = std::get<1>(tensor_other);
     return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
