@@ -3201,8 +3201,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.lstsq'),
-        xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_rank'),
         xfail('linalg.matrix_rank', 'hermitian'),
         xfail('linalg.pinv'),

@@ -281,6 +281,7 @@ allowlist = {
     'linalg_householder_product',
     'linalg_inv_ex',
     'linalg_ldl_factor_ex',
+    'linalg_lstsq',
     'linalg_lu_factor_ex',
     'linalg_matrix_exp',
     'linalg_pinv',

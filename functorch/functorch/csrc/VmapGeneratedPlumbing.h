@@ -1564,21 +1564,6 @@ at::Tensor _log_softmax_backward_data_generated_plumbing(const at::Tensor & grad
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor matrix_exp_generated_plumbing(const at::Tensor & self) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(self, cur_level)) {
-    return at::_ops::matrix_exp::call(self);
-  }
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  auto results = batch_rule(self_value, self_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::tuple<at::Tensor,at::Tensor> aminmax_generated_plumbing(const at::Tensor & self, c10::optional<int64_t> dim, bool keepdim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -5558,6 +5543,24 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, hermitian, check_errors);
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor> linalg_lstsq_generated_plumbing(const at::Tensor & self, const at::Tensor & b, c10::optional<double> rcond, c10::optional<c10::string_view> driver) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(b, cur_level)) {
+    return at::_ops::linalg_lstsq::call(self, b, rcond, driver);
+  }
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor b_value;
+  optional<int64_t> b_bdim;
+  std::tie(b_value, b_bdim) = unwrapTensorAtLevel(b, cur_level);
+  auto results = batch_rule(self_value, self_bdim, b_value, b_bdim, rcond, driver);
+  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatched(std::get<6>(results), std::get<7>(results), cur_level));
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor linalg_matrix_exp_generated_plumbing(const at::Tensor & self) {
