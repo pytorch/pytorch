@@ -1647,7 +1647,7 @@ def all(
     return result
 
 
-# Saves Python all
+# Saves Python any
 py_any = any
 
 
