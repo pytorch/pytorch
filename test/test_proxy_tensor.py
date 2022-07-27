@@ -646,6 +646,9 @@ symbolic_tensor_failures = {
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type promot...
+    xfail('new_full', ''),
+    xfail('new_ones', ''),
+    xfail('new_zeros', ''),
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
@@ -694,6 +697,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.layer_norm', ''),  # Unexpected type <class 'torch.SymbolicIntNode'> when computing elementwise type...
     xfail('nn.functional.linear', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('nn.functional.logsigmoid', ''),
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
@@ -826,6 +830,7 @@ symbolic_tensor_failures = {
     xfail('view', ''),  # Tensors of type TensorImpl do not have numel
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
+    xfail('xlogy', ''),
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
 }
