@@ -9,7 +9,7 @@ CuDNNWrapper::PerGPUCuDNNStates& CuDNNWrapper::cudnn_states() {
   // New it (never delete) to avoid calling the destructors on process
   // exit and racing against the CUDA shutdown sequence.
   static auto* p = new CuDNNWrapper::PerGPUCuDNNStates();
-  CHECK_NOTNULL(p);
+  TORCH_CHECK_NOTNULL(p);
   return *p;
 }
 

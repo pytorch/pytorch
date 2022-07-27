@@ -71,7 +71,7 @@ C10_DEFINE_bool(
 namespace caffe2 {
 namespace glow {
 
-// The list in in the form of "0-3,5,6-7" which means, we will black list ops
+// The list in the form of "0-3,5,6-7" which means, we will black list ops
 // with net positions in [0,1,2,3,5,6,7]
 std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   std::unordered_set<int> net_position_list;

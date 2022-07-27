@@ -171,13 +171,13 @@ def get_method_definitions(file_path: Union[str, List[str]],
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
     """
     if root == "":
-        os.chdir(str(pathlib.Path(__file__).parent.resolve()))
-    else:
-        os.chdir(root)
+        root = str(pathlib.Path(__file__).parent.resolve())
     file_path = [file_path] if isinstance(file_path, str) else file_path
+    file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(file_path,
                                  files_to_exclude=files_to_exclude.union(deprecated_files))
-    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = parse_datapipe_files(file_paths)
+    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = \
+        parse_datapipe_files(file_paths)
 
     method_definitions = []
     for method_name, arguments in methods_and_signatures.items():
@@ -189,6 +189,7 @@ def get_method_definitions(file_path: Union[str, List[str]],
         method_definitions.append(f"# Functional form of '{class_name}'\n"
                                   f"def {method_name}({arguments}) -> {output_type}: ...")
     method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
+
     return method_definitions
 
 

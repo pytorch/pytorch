@@ -1,10 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
+#endif
+
 
 namespace at {
 namespace native {
@@ -413,7 +426,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   return std::tuple<Tensor, Tensor>{w, norms};
 }
 
-std::tuple<Tensor, Tensor> weight_norm_cuda_backward
+std::tuple<Tensor, Tensor> weight_norm_backward_cuda
   (const Tensor & grad_w,
    const Tensor & saved_v,
    const Tensor & saved_g,

@@ -4,50 +4,46 @@ functions. These are for use in the documentation, and potentially in
 online tutorials.
 """
 
-import os.path
-import torch.nn.modules.activation
-import torch.autograd
+from pathlib import Path
+
+import torch
 import matplotlib
+from matplotlib import pyplot as plt
 
-matplotlib.use('Agg')
-
-import pylab
+matplotlib.use("Agg")
 
 
 # Create a directory for the images, if it doesn't exist
-ACTIVATION_IMAGE_PATH = os.path.join(
-    os.path.realpath(os.path.join(__file__, "..")),
-    "activation_images"
-)
+ACTIVATION_IMAGE_PATH = Path(__file__).parent / "activation_images"
 
-if not os.path.exists(ACTIVATION_IMAGE_PATH):
-    os.mkdir(ACTIVATION_IMAGE_PATH)
+if not ACTIVATION_IMAGE_PATH.exists():
+    ACTIVATION_IMAGE_PATH.mkdir()
 
 # In a refactor, these ought to go into their own module or entry
 # points so we can generate this list programmaticly
 functions = [
-    'ELU',
-    'Hardshrink',
-    'Hardtanh',
-    'Hardsigmoid',
-    'Hardswish',
-    'LeakyReLU',  # Perhaps we should add text explaining slight slope?
-    'LogSigmoid',
-    'PReLU',
-    'ReLU',
-    'ReLU6',
-    'RReLU',
-    'SELU',
-    'SiLU',
-    'Mish',
-    'CELU',
-    'GELU',
-    'Sigmoid',
-    'Softplus',
-    'Softshrink',
-    'Softsign',
-    'Tanh',
-    'Tanhshrink'
+    torch.nn.ELU(),
+    torch.nn.Hardshrink(),
+    torch.nn.Hardtanh(),
+    torch.nn.Hardsigmoid(),
+    torch.nn.Hardswish(),
+    torch.nn.LeakyReLU(negative_slope=0.1),
+    torch.nn.LogSigmoid(),
+    torch.nn.PReLU(),
+    torch.nn.ReLU(),
+    torch.nn.ReLU6(),
+    torch.nn.RReLU(),
+    torch.nn.SELU(),
+    torch.nn.SiLU(),
+    torch.nn.Mish(),
+    torch.nn.CELU(),
+    torch.nn.GELU(),
+    torch.nn.Sigmoid(),
+    torch.nn.Softplus(),
+    torch.nn.Softshrink(),
+    torch.nn.Softsign(),
+    torch.nn.Tanh(),
+    torch.nn.Tanhshrink(),
 ]
 
 
@@ -57,33 +53,27 @@ def plot_function(function, **args):
     be used to specify color, alpha, etc.
     """
     xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
-    pylab.plot(
-        xrange.numpy(),
-        function(xrange).detach().numpy(),
-        **args
-    )
+    plt.plot(xrange.numpy(), function(xrange).detach().numpy(), **args)
 
 
 # Step through all the functions
-for function_name in functions:
-    plot_path = os.path.join(ACTIVATION_IMAGE_PATH, function_name + ".png")
-    if not os.path.exists(plot_path):
-        function = torch.nn.modules.activation.__dict__[function_name]()
-
+for function in functions:
+    function_name = function._get_name()
+    plot_path = ACTIVATION_IMAGE_PATH / f"{function_name}.png"
+    if not plot_path.exists():
         # Start a new plot
-        pylab.clf()
-        pylab.grid(color='k', alpha=0.2, linestyle='--')
+        plt.clf()
+        plt.grid(color="k", alpha=0.2, linestyle="--")
 
         # Plot the current function
         plot_function(function)
 
-        # The titles are a little redundant, given context?
-        pylab.title(function_name + " activation function")
-        pylab.xlabel("Input")
-        pylab.ylabel("Output")
-        pylab.xlim([-7, 7])
-        pylab.ylim([-7, 7])
+        plt.title(function)
+        plt.xlabel("Input")
+        plt.ylabel("Output")
+        plt.xlim([-7, 7])
+        plt.ylim([-7, 7])
 
         # And save it
-        pylab.savefig(plot_path)
-        print('Saved activation image for {} at {}'.format(function, plot_path))
+        plt.savefig(plot_path)
+        print(f"Saved activation image for {function_name} at {plot_path}")

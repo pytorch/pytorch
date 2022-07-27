@@ -55,7 +55,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
    */
   virtual QScheme qscheme() const = 0;
 
-  ScalarType scalar_type() {
+  ScalarType scalar_type() const {
     return scalar_type_;
   }
 
@@ -77,7 +77,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * Compare against `other` for equality.
    */
-  virtual bool equalTo(QuantizerPtr other) = 0;
+  virtual bool equalTo(QuantizerPtr other) const = 0;
 };
 
 } // namespace at

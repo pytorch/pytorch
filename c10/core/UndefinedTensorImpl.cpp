@@ -7,14 +7,13 @@ namespace c10 {
 UndefinedTensorImpl::UndefinedTensorImpl()
     : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
   set_storage_access_should_throw();
+  // TODO: accessing the sizes on an undefined tensor is not meaningful
+  // and should error too, but empirically it does not!
+  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
 }
 
-int64_t UndefinedTensorImpl::size(int64_t d) const {
-  TORCH_CHECK(false, "size(dim) called on an undefined Tensor");
-}
-
-int64_t UndefinedTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "stride(dim) called on an undefined Tensor");
+bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
+  return is_contiguous_default(format);
 }
 
 #ifdef DEBUG
@@ -27,10 +26,6 @@ bool UndefinedTensorImpl::has_storage() const {
 
 void UndefinedTensorImpl::set_storage_offset(int64_t) {
   TORCH_CHECK(false, "set_storage_offset() called on an undefined Tensor");
-}
-
-IntArrayRef UndefinedTensorImpl::strides() const {
-  TORCH_CHECK(false, "strides() called on undefined Tensor");
 }
 
 const char* UndefinedTensorImpl::tensorimpl_type_name() const {

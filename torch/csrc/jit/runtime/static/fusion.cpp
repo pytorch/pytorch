@@ -347,6 +347,7 @@ void performTensorExprFusion(
       /*min_group_size*/ 2,
       /*add_composed_op*/ true,
       /*fuse_to_dynamic_shapes*/ true);
+  RemoveTensorTypeSpecializations(graph);
   inlineFallbackGraphs(traced_graph);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);
