@@ -82,12 +82,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
-
-  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
-  if [[ -z "${GITHUB_ACTIONS}" ]]; then
-    export NUM_TEST_SHARDS=2
-  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -599,12 +593,6 @@ test_vec256() {
 test_dynamo() {
   pushd ../torchdynamo
   pytest tests
-  popd
-}
-
-test_functorch() {
-  pushd functorch
-  pytest test
   popd
 }
 
