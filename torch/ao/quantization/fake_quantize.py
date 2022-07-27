@@ -336,12 +336,16 @@ Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
 """
 
-default_symmetric_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=torch.quint8)
+default_symmetric_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver,
+                                                      qscheme=torch.per_tensor_symmetric,
+                                                      dtype=torch.quint8)
 """
 Default symmetric fake_quant for activations.
 """
 
-default_weight_symmetric_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=dtype=torch.qint8)
+default_weight_symmetric_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver,
+                                                             qscheme=torch.per_tensor_symmetric,
+                                                             dtype=torch.qint8)
 """
 Default symmetric fake_quant for weights.
 """

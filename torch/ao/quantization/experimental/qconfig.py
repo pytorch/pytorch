@@ -1,9 +1,6 @@
 from torch.ao.quantization.qconfig import QConfig
-from torch.ao.quantization.observer import (
-    MinMaxObserver
-)
 from torch.ao.quantization.fake_quantize import (
-    default_symmetric_fake_quant
+    default_symmetric_fake_quant,
     default_weight_symmetric_fake_quant
 )
 import torch
