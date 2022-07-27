@@ -1919,6 +1919,13 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@symbolic_helper.parse_args("v", "i", "i")
+def _log_softmax(g, input, dim, half_to_float):
+    if half_to_float and input.type().scalarType() == "Half":
+        input = g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+    return log_softmax(g, input, dim)
+
+
 @symbolic_helper.parse_args(
     "v", "v", "v", "is", "is", "is", "i", "is", "i", "i", "i", "i", "i"
 )
