@@ -4,9 +4,9 @@ import io
 
 import numpy as np
 import onnx
-from onnx import numpy_helper
 
 import torch
+from onnx import numpy_helper
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
 from torch.testing._internal import common_utils
@@ -280,12 +280,12 @@ class TestONNXShapeInference(common_utils.TestCase):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "prim::PythonOp", 1)
 
         # necessay parameters for transformer embeddings
-        hidden_size = 48 
-        max_position_embeddings = 32 
+        hidden_size = 48
+        max_position_embeddings = 32
         batch_size = 2
 
-        # issue found that autograd.function making downstream 
-        # node unreliable but with static shape. The issue was first 
+        # issue found that autograd.function making downstream
+        # node unreliable but with static shape. The issue was first
         # discovered with using Apex FusedLayerNorm in Transformers
         class CustomLayerNorm(torch.autograd.Function):
             @staticmethod
@@ -311,11 +311,17 @@ class TestONNXShapeInference(common_utils.TestCase):
         f = io.BytesIO()
         torch.onnx.export(
             EmbeddingModule().eval(),
-            (embeddings, ),
+            (embeddings,),
             f,
             opset_version=self.opset_version,
             input_names=["embeddings"],
-            dynamic_axes={"embeddings": {0:"batch_size", 1:"max_position_embeddings", 2:"hidden_size"}},
+            dynamic_axes={
+                "embeddings": {
+                    0: "batch_size",
+                    1: "max_position_embeddings",
+                    2: "hidden_size",
+                }
+            },
             custom_opsets={"com.microsoft": 1},
         )
         model = onnx.load(io.BytesIO(f.getvalue()))
@@ -326,10 +332,13 @@ class TestONNXShapeInference(common_utils.TestCase):
             for a in node.attribute:
                 if a.name == "value":
                     shape = numpy_helper.to_array(a.t)
-                    # If there is a constant node with dim=3 and these values, 
-                    # it means the shape becomes static. Normally, should be with 
-                    # dynamic batch size 
-                    self.assertNotEqual(shape.tolist(), [max_position_embeddings, batch_size, hidden_size])
+                    # If there is a constant node with dim=3 and these values,
+                    # it means the shape becomes static. Normally, should be with
+                    # dynamic batch size
+                    self.assertNotEqual(
+                        shape.tolist(),
+                        [max_position_embeddings, batch_size, hidden_size],
+                    )
 
 
 if __name__ == "__main__":
