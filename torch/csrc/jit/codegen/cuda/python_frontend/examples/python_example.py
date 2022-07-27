@@ -6,22 +6,17 @@ fusion = Fusion()
 
 with FusionDefinition(fusion) as fd :
     t0 = fd.define_tensor(3)
-    t1 = fd.define_tensor(1)
+    t1 = fd.define_tensor(3)
     s0 = fd.define_scalar()
-
-    fd.add_input(t0)
-    fd.add_input(t1)
-    fd.add_input(s0)
 
     c0 = fd.define_constant(3.0)
 
-    t1_b = fd.Ops.broadcast(t1, [True, True, False])
-    t2 = fd.Ops.add(t0, t1)
-    t3 = fd.Ops.mul(t2, c0)
-    t4 = fd.Ops.atan2(t3, s0)
-    t5 = fd.Ops.relu(t4)
-    t6 = fd.Ops.sum(t5, [-1], False, DataType.Float)
-    t7 = fd.Ops.isfinite(t6)
+    t2 = fd.ops.add(t0, t1)
+    t3 = fd.ops.mul(t2, c0)
+    t4 = fd.ops.atan2(t3, s0)
+    t5 = fd.ops.relu(t4)
+    t6 = fd.ops.sum(t5, [-1], False, DataType.Float)
+    t7 = fd.ops.isfinite(t6)
 
     fd.add_output(t6)
     fd.add_output(t7)
@@ -30,7 +25,7 @@ fusion.print_ir()
 
 # Execute Fusion
 input1 = torch.ones(2, 4, 8, device='cuda')
-input2 = torch.ones(8, device='cuda')
+input2 = torch.ones(2, 4, 8, device='cuda')
 
 # Kernel compilation should be cached for the 2nd iteration
 # with input tensors of the same shape
