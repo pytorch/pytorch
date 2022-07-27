@@ -1267,11 +1267,11 @@
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result, dim, keepdim) * self_t.conj()).sum(dim, keepdim).conj()
 
-- name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
+- name: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
   source: grad.take(index).reshape_as(source)
-  result: auto_linear  # It is affine, but sure
+  result: self_t.put(index, source_t, accumulate)
 
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
@@ -1522,6 +1522,10 @@
   self: grad.expand(self.sizes())
   result: auto_linear
 
+- name: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+  result: auto_linear
+
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
@@ -1575,7 +1579,7 @@
   result: auto_linear
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: zeros_like(self).put_(index, grad, true)
+  self: take_backward(grad, self, index)
   index: non_differentiable
   result: auto_linear
 
@@ -1706,6 +1710,12 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: auto_linear
+
+- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  # TODO: add proper double backward for view.SymInt
+  # by SymIntizing `reshape`
+  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
@@ -2774,10 +2784,6 @@
   output_differentiability: [False]
 
 - name: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  self: non_differentiable
-  output_differentiability: [False]
-
-- name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   self: non_differentiable
   output_differentiability: [False]
 
