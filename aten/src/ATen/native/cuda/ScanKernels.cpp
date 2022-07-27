@@ -1,9 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
 #include <ATen/native/cuda/ScanKernels.h>
 #include <ATen/native/ReduceOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cummax_helper_native.h>
+#include <ATen/ops/_cummin_helper_native.h>
+#include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at { namespace native {
 
@@ -49,6 +60,7 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
 }
 
 Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
+  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -64,7 +76,7 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
   auto result_ = contiguous_out_arg(result);
-  launch_logcumsumexp_cuda_kernel(*result_, self, dim);
+  launch_logcumsumexp_cuda_kernel(*result_, self, wrap_dim);
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }

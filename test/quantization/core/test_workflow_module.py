@@ -575,10 +575,9 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0],
                                  model(self.calib_data[0][0]))
 
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_scriptable(self, qdtype, qscheme):
-        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)))
+    def test_observer_scriptable(self, qdtype):
+        obs = RecordingObserver(dtype=qdtype)
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -1155,9 +1154,8 @@ class TestFusedObsFakeQuantModule(TestCase):
 
     def test_fused_mod_reduce_range(self):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
-
-        self.assertEqual(obs.quant_min, 0)
-        self.assertEqual(obs.quant_max, 127)
+        self.assertEqual(obs.activation_post_process.quant_min, 0)
+        self.assertEqual(obs.activation_post_process.quant_max, 127)
 
     def test_embedding_bag_qat_config(self):
         class Model(nn.Module):
@@ -1272,16 +1270,19 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(count_fake_quant, 3)
 
             if qengine == "fbgemm":
-                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
-                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 127)
-                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
-                                 MovingAveragePerChannelMinMaxObserver)
-            else:
-                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
-                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 255)
-                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
-                                 MovingAverageMinMaxObserver)
+                lower_bnd = 0
+                upper_bnd = 127
+                obs2match = MovingAveragePerChannelMinMaxObserver
 
+            else:
+                lower_bnd = 0
+                upper_bnd = 255
+                obs2match = MovingAverageMinMaxObserver
+
+            self.assertEqual(ref_model.quant.activation_post_process.activation_post_process.quant_min, lower_bnd)
+            self.assertEqual(ref_model.quant.activation_post_process.activation_post_process.quant_max, upper_bnd)
+            self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                             obs2match)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

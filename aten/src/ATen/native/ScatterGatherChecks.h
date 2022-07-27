@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
 

@@ -6,7 +6,8 @@ on:
 
 jobs:
   do_merge:
-    runs-on: ubuntu-20.04
+    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -29,9 +30,28 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
+          ON_GREEN: ${{ github.event.client_payload.on_green}}
+          LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
         run: |
+          set -ex
           if [ -n "${FORCE}" ]; then
-            python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+            if [ -n "${COMMENT_ID}" ]; then
+              python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+            fi
+          elif [ -n "${ON_GREEN}" ]; then
+            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
+          elif [ -n "${LAND_CHECKS}" ]; then
+            python3 .github/scripts/trymerge.py --land-checks "${PR_NUM}"
+          elif [ -n "${COMMENT_ID}" ]; then
+            python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
+
+# We want newer merge commands to supercede old ones
+concurrency:
+  group: try-merge-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true

@@ -1,6 +1,8 @@
+import copy
 import re
 import torch
 import torch.nn as nn
+from torch.ao.quantization import QuantType
 from torch.ao.quantization.utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -10,11 +12,46 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
+from .custom_config import PrepareCustomConfig
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
 import operator
 import warnings
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "all_node_args_except_first",
+    "all_node_args_have_no_tensors",
+    "assert_and_get_unique_device",
+    "BIAS_INDEX_DICT",
+    "collect_producer_nodes",
+    "create_getattr_from_value",
+    "create_node_from_old_node_preserve_meta",
+    "create_qparam_nodes",
+    "EMPTY_ARG_DICT",
+    "get_custom_module_class_keys",
+    "get_linear_prepack_op_for_dtype",
+    "get_new_attr_name_with_prefix",
+    "get_non_observable_arg_indexes_and_types",
+    "get_per_tensor_qparams",
+    "get_qconv_op",
+    "get_qconv_prepack_op",
+    "get_quantize_node_info",
+    "graph_module_from_producer_nodes",
+    "graph_pretty_str",
+    "is_get_tensor_info_node",
+    "maybe_get_next_module",
+    "NodeInfo",
+    "node_return_type_is_int",
+    "NON_OBSERVABLE_ARG_DICT",
+    "NON_QUANTIZABLE_WEIGHT_OPS",
+    "quantize_node",
+    "return_arg_list",
+    "WEIGHT_INDEX_DICT",
+    "get_skipped_module_name_and_classes",
+]
+
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -214,32 +251,29 @@ def quantize_node(
             inputs.append(value)
     return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
-def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
+def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
     Input:
-    custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-           "static": {
-               CustomModule1: ObservedCustomModule
-           },
-           "dynamic": {
-               CustomModule2: DynamicObservedCustomModule
-           },
-           "weight_only": {
-               CustomModule3: WeightOnlyObservedCustomModule
-           },
+    {
+        QuantType.STATIC: {
+            CustomModule1: ObservedCustomModule
+        },
+        QuantType.DYNAMIC: {
+            CustomModule2: DynamicObservedCustomModule
+        },
+        QuantType.WEIGHT_ONLY: {
+            CustomModule3: WeightOnlyObservedCustomModule
         },
     }
 
     Output:
-    # extract all the keys in "static", "dynamic" and "weight_only" dict
+    # extract the keys across all inner STATIC, DYNAMIC, and WEIGHT_ONLY dicts
     [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
     float_custom_module_classes : Set[Any] = set()
-    custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
-    for quant_mode in ["static", "dynamic", "weight_only"]:
+    for quant_mode in [QuantType.STATIC, QuantType.DYNAMIC, QuantType.WEIGHT_ONLY]:
         quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})
         quant_mode_custom_module_classes = set(quant_mode_custom_module_config.keys())
         float_custom_module_classes |= quant_mode_custom_module_classes
@@ -373,7 +407,9 @@ def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str
     get_new_attr_name = get_new_attr_name_with_prefix(prefix)
     attr_name = get_new_attr_name(module)
     device = assert_and_get_unique_device(module)
-    module.register_buffer(attr_name, torch.tensor(value, device=device))
+    new_value = value.clone().detach() if isinstance(value, torch.Tensor) \
+        else torch.tensor(value, device=device)
+    module.register_buffer(attr_name, new_value)
     # Create get_attr with value
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node
@@ -593,3 +629,16 @@ def create_node_from_old_node_preserve_meta(
     new_node = quantized_graph.create_node(*create_node_args)
     new_node.stack_trace = old_node.stack_trace
     return new_node
+
+def get_skipped_module_name_and_classes(
+        prepare_custom_config: PrepareCustomConfig,
+        is_standalone_module: bool) -> Tuple[List[str], List[Type[Any]]]:
+    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
+    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
+    if not is_standalone_module:
+        # standalone module and custom module config are applied in top level module
+        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
+        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
+        skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
+
+    return skipped_module_names, skipped_module_classes

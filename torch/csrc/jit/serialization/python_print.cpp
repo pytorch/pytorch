@@ -753,15 +753,22 @@ struct PythonPrintImpl {
       if (version_entry != get_operator_version_map().end()) {
         const auto& entry = version_entry->second;
         // TODO (tugsuu) move this calculation into a seperate step.
-        min_version_ = std::max(
-            min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
+        uint64_t current_version = entry[entry.size() - 1].bumped_at_version;
+        uint64_t legacy_version_map_version =
+            get_min_version_for_kind(node->kind());
+
+        // True means we solely calculate based on upgrader version
+        if (get_version_calculator_flag()) {
+          min_version_ = std::max(min_version_, current_version);
+        } else {
+          if (legacy_version_map_version != 0) {
+            min_version_ = std::max(min_version_, legacy_version_map_version);
+          } else {
+            min_version_ = std::max(min_version_, current_version);
+          }
+        }
       }
     }
-    // We want to manually bump the minimum versions for
-    // other variants of aten::div and aten::full which
-    // are not covered by the new upgraders
-    min_version_ =
-        std::max(min_version_, get_min_version_for_kind(node->kind()));
 #else
     min_version_ =
         std::max(min_version_, get_min_version_for_kind(node->kind()));

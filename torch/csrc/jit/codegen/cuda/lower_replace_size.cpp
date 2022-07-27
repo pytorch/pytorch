@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -180,17 +181,11 @@ void replaceSymbolicSizes(Fusion* fusion) {
     size_t dim = 0;
     for (auto id : root_td) {
       Val* orig_size = id->extent();
-
       // Output sizes could have reduction axes, which isn't what gets output.
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (id->isReduction() ||
-          (id->getIterType() == IterType::BroadcastWithoutStride)) {
+      if (id->isReduction()) {
         continue;
-      } else if (
-          id->isRFactorProduct() ||
-          // NOLINTNEXTLINE(bugprone-branch-clone)
-          (id->getIterType() == IterType::BroadcastWithStride) ||
-          orig_size->isConstScalar()) {
+      } else if (orig_size->isConstScalar()) {
         dim++;
         continue;
       }

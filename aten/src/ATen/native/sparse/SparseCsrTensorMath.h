@@ -11,7 +11,9 @@ namespace impl {
 // Returns true if all entries of self are zero
 // TODO: This has potential to be a generic helper
 inline bool _is_sparse_and_zero(const Tensor& self) {
-  if (self.is_sparse_csr() || self.is_sparse()) {
+  if (self.layout() == kSparse || self.layout() == kSparseCsr ||
+      self.layout() == kSparseCsc || self.layout() == kSparseBsr ||
+      self.layout() == kSparseBsc) {
     if (self._nnz() == 0) {
       return true;
     }

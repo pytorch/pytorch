@@ -184,8 +184,8 @@ Tensor& add_out_dense_sparse_csr_cuda(
   auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
   auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBool, kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
       [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
@@ -599,6 +599,15 @@ struct ReductionAddOp {
   __forceinline__ scalar_t identity_cpu() const { return 0; }
 };
 
+template <typename scalar_t>
+struct ReductionMulOp {
+  __device__ __forceinline__ scalar_t operator()(const scalar_t a, const scalar_t b) const {
+    return a * b;
+  }
+  __device__ __forceinline__ scalar_t identity() const { return 1; }
+  __forceinline__ scalar_t identity_cpu() const { return 1; }
+};
+
 } // namespace
 
 Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
@@ -609,6 +618,18 @@ Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool k
     kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cuda",
     [&] {
       result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
+    });
+  return result;
+}
+
+Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+  ScalarType dtype_ = dtype.value_or(input.scalar_type());
+  Tensor input_ = input.to(dtype_);
+  Tensor result;
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+    kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cuda",
+    [&] {
+      result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
     });
   return result;
 }

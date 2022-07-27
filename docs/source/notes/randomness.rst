@@ -32,6 +32,18 @@ CPU and CUDA)::
     import torch
     torch.manual_seed(0)
 
+Some PyTorch operations may use random numbers internally.
+:meth:`torch.svd_lowrank()` does this, for instance. Consequently, calling it
+multiple times back-to-back with the same input arguments may give different
+results. However, as long as :meth:`torch.manual_seed()` is set to a constant
+at the beginning of an application and all other sources of nondeterminism have
+been eliminated, the same series of random numbers will be generated each time
+the application is run in the same environment.
+
+It is also possible to obtain identical results from an operation that uses
+random numbers by setting :meth:`torch.manual_seed()` to the same value between
+subsequent calls.
+
 Python
 ------
 
@@ -88,7 +100,7 @@ Please check the documentation for :meth:`torch.use_deterministic_algorithms()`
 for a full list of affected operations. If an operation does not act correctly
 according to the documentation, or if you need a deterministic implementation
 of an operation that does not have one, please submit an issue:
-`<https://github.com/pytorch/pytorch/issues?q=label:%22topic:%20determinism%22>`_
+`<https://github.com/pytorch/pytorch/issues?q=label:%22module:%20determinism%22>`_
 
 For example, running the nondeterministic CUDA implementation of :meth:`torch.Tensor.index_add_`
 will throw an error::
