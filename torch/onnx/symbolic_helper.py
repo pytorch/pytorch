@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import collections
-import enum
 import functools
 import inspect
 import sys

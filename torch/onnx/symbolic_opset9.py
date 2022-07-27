@@ -740,7 +740,7 @@ prod = _reduce_with_dtype("ReduceProd", "prod", allow_multi_dim_support=False)
 def cumsum(g, input, dim, dtype):
     if symbolic_helper.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
-            return symbolic_helper._unimplemented(name, "dtype")
+            return symbolic_helper._unimplemented("cumsum", "dtype")
         return g.at("cumsum", input, dim_i=dim)
     else:
         symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11)
@@ -1275,7 +1275,9 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     sizes = symbolic_helper._get_tensor_sizes(input)
     dim = sizes[-len(padding) :] if sizes is not None else None
     if dim is None or any([i is None for i in dim]):
-        return symbolic_helper._unimplemented(name, "input size not accessible")
+        return symbolic_helper._unimplemented(
+            "get_pool_ceil_padding", "input size not accessible"
+        )
     ceiled_output_dim = [
         int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
         + 1
