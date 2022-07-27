@@ -16,8 +16,8 @@ jobs:
       CUDA_VISIBLE_DEVICES: "0"
       CORE_LIST: "24-47"
       GOMP_CPU_AFFINITY: "24-47"
-      CUDA_VERSION: "11.6"
-      MAGMA_VERSION: "magma-cuda116"
+      CUDA_VERSION: "11.3"
+      MAGMA_VERSION: "magma-cuda113"
     steps:
       - name: Check out pytorch/pytorch
         uses: actions/checkout@v2
@@ -49,11 +49,11 @@ jobs:
           conda install -y cudatoolkit=${CUDA_VERSION}
           conda install -y -c pytorch ${MAGMA_VERSION}
           # link: https://anaconda.org/pytorch/pytorch
-          conda install -y -c pytorch pytorch=1.12.0 torchvision
-          echo "RESULT_DIR=${HOME}/release-testing/1.12.0-${CUDA_VERSION}" >> $GITHUB_ENV
+          # conda install -y -c pytorch pytorch=1.12.0 torchvision
+          # echo "RESULT_DIR=${HOME}/release-testing/1.12.0-${CUDA_VERSION}" >> $GITHUB_ENV
           # link: https://anaconda.org/pytorch-test/pytorch
-          # conda install -y -c pytorch-test pytorch=1.12.1 torchvision torchtext
-          # echo "RESULT_DIR=${HOME}/release-testing/1.12.1-${CUDA_VERSION}" >> $GITHUB_ENV
+          conda install -y -c pytorch-test pytorch=1.12.1 torchvision
+          echo "RESULT_DIR=${HOME}/release-testing/1.12.1-${CUDA_VERSION}" >> $GITHUB_ENV
           popd; python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
           # install build deps
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
