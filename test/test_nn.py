@@ -19485,8 +19485,10 @@ torch.cuda.synchronize()
                 # transposed-conv: slow_conv_transpose2d
                 helper(nn.ConvTranspose2d, 2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1, weight_memory_format=mf)
                 helper(nn.ConvTranspose2d, 2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8, weight_memory_format=mf)
-                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1, weight_memory_format=mf)
-                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16, weight_memory_format=mf)
+                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
+                       weight_memory_format=mf)
+                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16,
+                       weight_memory_format=mf)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
