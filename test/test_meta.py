@@ -405,6 +405,7 @@ RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 meta_function_expected_failures = {
     torch.Tensor.item: {b8, bf16, c128, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
+    torch.arange: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
     torch.bincount: {i16, i32, i64, i8, u8},  # aten::bincount

@@ -2192,9 +2192,12 @@
   device_check: NoCheck
   device_guard: False
 
+# decomposes to eye.m
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3901,9 +3904,6 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: reshape
-    NestedTensorCPU, NestedTensorCUDA: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4385,6 +4385,9 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4409,8 +4412,6 @@
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   structured_delegate: _softmax_backward_data.out
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: nested_softmax_backward
 
 - func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -4580,6 +4581,12 @@
   dispatch:
     CompositeExplicitAutograd: sum
     SparseCsrCPU, SparseCsrCUDA: sum_csr
+
+- func: sum.SymInt(Tensor self, SymInt[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: sum_symint
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: sum.IntList_out
@@ -4859,7 +4866,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: transpose
-    NestedTensorCPU, NestedTensorCUDA: transpose_nested
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
@@ -5189,6 +5195,8 @@
     CUDA: _efficientzerotensor_cuda
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: zeros.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -6440,6 +6448,14 @@
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
+
+- func: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: view_symint
+    MkldnnCPU: mkldnn_view_symint
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
@@ -12326,6 +12342,13 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _neg_view_copy_out
+
+
+- func: view_copy.SymInt(Tensor self, SymInt[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_copy_SymInt
+  tags: view_copy
 
 
 - func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
