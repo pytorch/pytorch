@@ -1073,6 +1073,10 @@ std::vector<Shape> compute_shape_hardswish_backward(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_selu(const at::Tensor& self) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 // Non-Native Ops
 std::vector<Shape> compute_shape_scalar(
     const at::Scalar& value,
