@@ -1,10 +1,8 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
-
-#pragma once
 
 namespace at {
 namespace native {

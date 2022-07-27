@@ -292,12 +292,17 @@ endif()
 # Generic BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "generic")))
+  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+    set(GENERIC_BLAS "blas")
+  else()
+    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
+  endif()
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
   sgemm
   ""
-  "blas")
+  "${GENERIC_BLAS}")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
   endif(BLAS_LIBRARIES)

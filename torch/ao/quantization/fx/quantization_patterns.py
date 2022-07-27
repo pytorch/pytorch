@@ -3,17 +3,15 @@ from torch.fx.graph import (
     Node,
 )
 
-from .pattern_utils import (
-    register_quant_pattern,
-    Pattern,
-)
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from .quantization_types import NodePattern
+from torch.ao.quantization.quantization_types import (
+    Pattern,
+    NodePattern,
+)
 
 from abc import ABC
-import operator
 from typing import Any, Callable, Dict, Optional
 
 def _default_root_node_getter(node_pattern):
@@ -127,19 +125,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 class BatchNormQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.nn.qat.Embedding)
-@register_quant_pattern(torch.nn.qat.EmbeddingBag)
-@register_quant_pattern(torch.nn.Embedding)
-@register_quant_pattern(torch.nn.EmbeddingBag)
+# TODO: remove this class
 class EmbeddingQuantizeHandler(QuantizeHandler):
-    def input_output_observed(self) -> bool:
-        return False
+    pass
 
-# TODO (maybe): merge with embedding quantize handler
-@register_quant_pattern(torch.nn.GRUCell)
-@register_quant_pattern(torch.nn.LSTMCell)
-@register_quant_pattern(torch.nn.RNNCell)
-@register_quant_pattern(torch.nn.LSTM)
+# TODO: remove this class
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     pass
 
@@ -153,84 +143,13 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
-@register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
-@register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
-@register_quant_pattern(torch.nn.AvgPool1d)
-@register_quant_pattern(torch.nn.AvgPool2d)
-@register_quant_pattern(torch.nn.AvgPool3d)
-@register_quant_pattern(torch.nn.Hardtanh)
-@register_quant_pattern(torch.nn.MaxPool1d)
-@register_quant_pattern(torch.nn.MaxPool2d)
-@register_quant_pattern(torch.nn.MaxPool3d)
-@register_quant_pattern(torch.nn.ReLU)
-@register_quant_pattern(torch.nn.ReLU6)
-@register_quant_pattern(torch.adaptive_avg_pool1d)
-@register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
-@register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
-@register_quant_pattern(torch.nn.functional.hardtanh)
-@register_quant_pattern(torch.nn.functional.hardtanh_)
-@register_quant_pattern(torch.nn.functional.interpolate)
-@register_quant_pattern(torch.nn.functional.max_pool1d)
-@register_quant_pattern(torch.nn.functional.max_pool2d)
-@register_quant_pattern(torch.nn.functional.max_pool3d)
-@register_quant_pattern(torch.nn.functional.relu)
-@register_quant_pattern(torch.nn.functional.relu6)
-@register_quant_pattern(torch.avg_pool1d)
-@register_quant_pattern(torch._C._nn.avg_pool2d)
-@register_quant_pattern(torch._C._nn.avg_pool3d)
-@register_quant_pattern(torch.clamp)
-@register_quant_pattern(torch.flatten)
-@register_quant_pattern(torch.mean)
-@register_quant_pattern(operator.floordiv)
-@register_quant_pattern('clamp')
-@register_quant_pattern('mean')
-@register_quant_pattern('relu')
-@register_quant_pattern('relu_')
+# TODO: remove
 class CopyNodeQuantizeHandler(QuantizeHandler):
-    """ Operators that works on both float and quantized input
-    if input is quantized, the output Tensor shares
-    the same quantization parameter with input.
-    These ops will do computation on the input Tensor, e.g. average pool, so we will
-    insert extra observer/fake_quant for the output of these operators.
-    TODO: maybe rename this to TensorValueOpQuantizeHandler
-    """
-    def is_general_tensor_value_op(self) -> bool:
-        return True
+    pass
 
-@register_quant_pattern(torch.nn.Identity)
-@register_quant_pattern(torch.transpose)
-@register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.squeeze)
-@register_quant_pattern(torch.stack)
-@register_quant_pattern(torch.unsqueeze)
-@register_quant_pattern('contiguous')
-@register_quant_pattern('detach')
-@register_quant_pattern('detach_')
-@register_quant_pattern('permute')
-@register_quant_pattern('repeat')
-@register_quant_pattern('repeat_interleave')
-@register_quant_pattern('reshape')
-@register_quant_pattern('resize_')
-@register_quant_pattern('shape')
-@register_quant_pattern('size')
-@register_quant_pattern('squeeze')
-@register_quant_pattern('squeeze_')
-@register_quant_pattern('transpose')
-@register_quant_pattern('unsqueeze')
-@register_quant_pattern('unsqueeze_')
-@register_quant_pattern('view')
+# TODO: remove
 class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
-    """ Operators that works on both float and quantized input
-    if input is quantized, the output Tensor shares
-    the same quantization parameter with input.
-    These ops only do rearrangement of Tensor values, for
-    example reshape, or just query the information about Tensor
-    e.g. size, and we do not insert extra observer/fake_quant
-    for the output of the operator.
-    """
-    def is_general_tensor_value_op(self) -> bool:
-        return True
+    pass
 
 # TODO: not used, can be removed after torch.quantization namespace is deprecated
 class CustomModuleQuantizeHandler(QuantizeHandler):

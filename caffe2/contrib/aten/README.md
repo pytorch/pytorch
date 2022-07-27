@@ -72,7 +72,7 @@ class Add(torch.autograd.Function):
 
     @staticmethod
     def symbolic(g, a, b):
-        return g.op("ATen", a, b, operator_s = "add")
+        return g.at("add", a, b)
 
     @staticmethod
     def forward(ctx, a, b):

@@ -4,7 +4,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def basic_ddp_model(self, rank, model, process_group, hook_state, hook):
     r"""
     A function that creates a ddp_model and hook_state objects.
-    The ddp model is is initialized with a single device id and
+    The ddp model is initialized with a single device id and
     the process group. The ddp_model also registers the communication
     hook.
     Args:
