@@ -11,9 +11,9 @@ sysctl -a | grep machdep.cpu
 retry conda install -y \
   mkl=2021.2.0 \
   mkl-include=2021.2.0 \
-  numpy=1.18.5 \
+  numpy=1.23.1 \
   pyyaml=5.3 \
-  setuptools=46.0.0 \
+  setuptools=63.2.0 \
   cmake=3.19 \
   cffi \
   ninja \
