@@ -4,10 +4,6 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
 
-#ifdef USE_CUDA
-#include <c10/cuda/CUDACachingAllocator.h>
-#endif
-
 #include <cstddef>
 
 namespace torch {
@@ -65,7 +61,6 @@ void synchronize(int64_t device_index) {
   at::detail::getCUDAHooks().deviceSynchronize(device_index);
 }
 
-#ifdef USE_CUDA
 void set_per_process_memory_fraction(float fraction, int64_t device_index) {
   TORCH_CHECK(is_available(), "No CUDA GPUs are available");
   int64_t num_gpus = cuda::device_count();
@@ -77,10 +72,8 @@ void set_per_process_memory_fraction(float fraction, int64_t device_index) {
       fraction >= 0.0 || fraction <= 1.0,
       "Memory fraction should be between 0 and 1, got: ",
       fraction);
-  c10::cuda::CUDACachingAllocator::setMemoryFraction(
-      fraction, int(device_index));
+  at::detail::getCUDAHooks().setMemoryFraction(fraction, device_index);
 }
-#endif
 
 } // namespace cuda
 } // namespace torch

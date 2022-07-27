@@ -408,6 +408,10 @@ void CUDAHooks::deviceSynchronize(int64_t device_index) const {
   c10::cuda::device_synchronize();
 }
 
+void CUDAHooks::setMemoryFraction(double fraction, int64_t device_index) const {
+  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, int(device_index));
+}
+
 // Sigh, the registry doesn't support namespaces :(
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;

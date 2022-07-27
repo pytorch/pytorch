@@ -50,6 +50,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void cuFFTClearPlanCache(int64_t device_index) const override;
   int getNumGPUs() const override;
   void deviceSynchronize(int64_t device_index) const override;
+  void setMemoryFraction(double fraction, int64_t device_index) const override;
 };
 
 }}} // at::cuda::detail

@@ -187,6 +187,10 @@ struct TORCH_API CUDAHooksInterface {
   virtual void deviceSynchronize(int64_t /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
+
+  virtual void setMemoryFraction(double /*fraction*/, int64_t /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot set CUDA device memory fraction limit without ATen_cuda library. ", CUDA_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
