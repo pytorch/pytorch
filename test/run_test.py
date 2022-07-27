@@ -869,7 +869,7 @@ def get_selected_tests(options):
             print(
                 "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
             )
-            selected_tests = selected_tests[which_shard - 1:: num_shards]
+            selected_tests = selected_tests[which_shard - 1 :: num_shards]
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[os.environ["TEST_CONFIG"]]
