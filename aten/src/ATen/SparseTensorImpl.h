@@ -384,9 +384,13 @@ inline bool has_any_layout(const Tensor& self, Layout layout) {
 
 // Return true if the given Tensor self has a layout that matches
 // any of the given layouts.
-template<typename... Args>
-inline bool has_any_layout(const Tensor& self, Layout layout0, Args... other_layouts) {
-  return has_any_layout(self, layout0) || has_any_layout(self, other_layouts...);
+template <typename... Args>
+inline bool has_any_layout(
+    const Tensor& self,
+    Layout layout0,
+    Args... other_layouts) {
+  return has_any_layout(self, layout0) ||
+      has_any_layout(self, other_layouts...);
 }
 
 } // namespace at
