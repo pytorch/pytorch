@@ -398,6 +398,13 @@ c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   return sym_sizes_default();
 }
 
+c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_strides(this);
+  }
+  return sym_strides_default();
+}
+
 c10::Device TensorImpl::device_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->device(this);

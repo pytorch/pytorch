@@ -160,6 +160,14 @@ class TORCH_API TensorBase {
     return impl_->sym_size(dim);
   }
 
+  c10::SymInt sym_stride(int64_t dim) const {
+    const auto sizes = this->sym_strides();
+    const auto ndim = static_cast<int64_t>(sizes.size());
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
+
+  }
+
   int64_t size(int64_t dim) const {
     return impl_->size(dim);
   }
@@ -223,6 +231,9 @@ class TORCH_API TensorBase {
   }
   c10::SymIntArrayRef sym_sizes() const {
     return impl_->sym_sizes();
+  }
+  c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
   }
   IntArrayRef strides() const {
     return impl_->strides();
