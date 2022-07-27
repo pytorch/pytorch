@@ -1706,6 +1706,16 @@ class TestFakeTensorNonErroring(TestCase):
 
                 res = op(sample.input, *sample.args, **sample.kwargs)
 
+                def outputs_alias_inputs(outputs, inputs):
+                    input_storages = set()
+                    for out in tree_flatten(outputs)[0]:
+                        if isinstance(out, torch.Tensor):
+                            input_storages.add(out.storage()._cdata)
+                    for inp in tree_flatten(inputs)[0]:
+                        if isinstance(inp, torch.Tensor) and inp.storage()._cdata in input_storages:
+                            return True
+                    return False
+
                 for fake_out, real_out in zip(
                     tree_flatten(res_fake)[0], tree_flatten(res)[0]
                 ):
@@ -1717,6 +1727,10 @@ class TestFakeTensorNonErroring(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
                     prims.utils.compare_tensor_meta(fake_out, real_out)
+                    fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
+                    real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
+                    self.assertEqual(fake_aliasing, real_aliasing)
+
                 self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
