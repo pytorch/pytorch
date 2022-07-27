@@ -11,8 +11,8 @@ import torch
 import torch._prims_common as utils
 import torch.library
 from torch import _TypedStorage, Tensor
-from torch._prims.nvfuser_prims import register_nvprims
 from torch._C import _get_default_device
+from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
     check,
     DimsSequenceType,

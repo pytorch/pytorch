@@ -17,7 +17,6 @@ from torch._prims_common import (
 )
 
 from torch._prims_common.wrappers import backwards_not_supported
-from torch.utils._pytree import tree_flatten, tree_unflatten
 
 nvprim_namespace = "nvprims"
 nvprim = torch.library.Library(nvprim_namespace, "DEF")
