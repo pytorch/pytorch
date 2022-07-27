@@ -471,6 +471,7 @@ def _make_prim(
     _prim = _prim_packet.default
 
     from torch._subclasses.fake_tensor import contains_tensor_types
+
     if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments):
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
