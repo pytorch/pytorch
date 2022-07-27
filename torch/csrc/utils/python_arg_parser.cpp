@@ -1308,8 +1308,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        (is_int_list(args, param.size) ||
-         ((is_int_or_symint_list(args, param.size) && !int_list_overload)))) {
+        ((int_list_overload ? is_int_list(args, param.size)
+                            : is_int_or_symint_list(args, param.size)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
