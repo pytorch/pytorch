@@ -2,9 +2,9 @@
 
 #ifdef USE_C10D_MPI
 
+#include <iostream>
 #include <limits>
 #include <map>
-#include <iostream>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
@@ -22,7 +22,7 @@ namespace c10d {
       std::string err = "MPI error in: " + std::string(__FILE__) + ":" + \
           std::to_string(__LINE__) +                                     \
           ", with error code: " + std::to_string(mpiStatus);             \
-      TORCH_CHECK(false, err);                                     \
+      TORCH_CHECK(false, err);                                           \
     }                                                                    \
   } while (0)
 
@@ -70,7 +70,8 @@ void checkSingleTensorHelper(const at::Tensor& tensor) {
     TORCH_CHECK(false, "input tensor has to be dense");
   }
   if (tensor.is_cuda() && !cudaAwareMpiCheck()) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "CUDA tensor detected and the MPI used doesn't "
         "have CUDA-aware MPI support");
   }
@@ -78,8 +79,8 @@ void checkSingleTensorHelper(const at::Tensor& tensor) {
 
 void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    TORCH_CHECK(false,
-        "MPI process group does not support multi-GPU collectives");
+    TORCH_CHECK(
+        false, "MPI process group does not support multi-GPU collectives");
   }
   checkSingleTensorHelper(tensors[0]);
 }
@@ -159,7 +160,8 @@ bool ProcessGroupMPI::AsyncWork::isCompleted() {
 
 bool ProcessGroupMPI::AsyncWork::isSuccess() const {
   if (request_ != MPI_REQUEST_NULL) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Invalid call to AsyncWork::isSuccess before work has completed");
   }
 
@@ -200,9 +202,8 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
   return true;
 }
 
-void ProcessGroupMPI::AsyncWork::abort() {
-  TORCH_CHECK(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
-}
+void ProcessGroupMPI::AsyncWork::abort(){
+    TORCH_CHECK(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")}
 
 std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
   return outputTensors_;
@@ -220,7 +221,7 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
 // We only want to initialize once
-std::once_flag ProcessGroupMPI::onceFlagInitMPI;
+c10::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
 void ProcessGroupMPI::mpiExit() {
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -229,11 +230,12 @@ void ProcessGroupMPI::mpiExit() {
 
 void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
-  std::call_once(onceFlagInitMPI, []() {
+  c10::call_once(onceFlagInitMPI, []() {
     MPI_CHECK(MPI_Init_thread(
         nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Used MPI implementation doesn't have the "
           "minimum level of threading support: "
           "MPI_THREAD_SERIALIZED. This is required by "
@@ -372,7 +374,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors) {
-  auto work = c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
+  auto work =
+      c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   lock.unlock();
@@ -396,7 +399,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
             opts.rootRank,
             pgComm_));
       };
-  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
+  auto entry =
+      std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:broadcast",
@@ -421,7 +425,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
             mpiOp.at(opts.reduceOp),
             pgComm_));
       };
-  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
+  auto entry =
+      std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:all_reduce",
@@ -431,8 +436,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
-  TORCH_CHECK(false,
-      "allreduce_coalesced is currently not supported with MPI");
+  TORCH_CHECK(false, "allreduce_coalesced is currently not supported with MPI");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
@@ -458,7 +462,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
             opts.rootRank,
             pgComm_));
       };
-  auto entry = std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
+  auto entry =
+      std::make_unique<WorkEntry>(&tensors, &tensors, std::move(runFunc));
   return enqueue(
       std::move(entry),
       "mpi:reduce",
@@ -471,12 +476,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     const AllgatherOptions& opts) {
   checkSingleTensor(inputTensors);
   if (outputTensors.size() != 1) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "MPI process group only supports a single "
         "tensor op");
   }
   if (static_cast<size_t>(size_) != outputTensors[0].size()) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "All gather: number of output tensors should equal "
         "to the world size");
   }
@@ -516,8 +523,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
-  TORCH_CHECK(false,
-      "ProcessGroupMPI does not support allgather_coalesced");
+  TORCH_CHECK(false, "ProcessGroupMPI does not support allgather_coalesced");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
@@ -528,7 +534,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
 
   if (rank_ != opts.rootRank) {
     if (outputTensors.size() > 0) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Gather: number of output tensors should be 0 "
           "for non-root");
     }
@@ -537,7 +544,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
       TORCH_CHECK(false, "Gather: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != outputTensors[0].size()) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Gather: number of output tensors should equal "
           "to the world size");
     }
@@ -585,8 +593,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         "mpi:gather",
         c10::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
-    auto entry = std::make_unique<WorkEntry>(
-        &inputTensors, nullptr, std::move(runFunc));
+    auto entry =
+        std::make_unique<WorkEntry>(&inputTensors, nullptr, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:gather",
@@ -602,17 +610,18 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
   if (rank_ != opts.rootRank) {
     if (inputTensors.size() > 0) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Scatter: number of input tensors should be 0 "
           "for non-root");
     }
   } else {
     if (inputTensors.size() != 1) {
-      TORCH_CHECK(false,
-          "Scatter: multi-GPU collective is not supported");
+      TORCH_CHECK(false, "Scatter: multi-GPU collective is not supported");
     }
     if (static_cast<size_t>(size_) != inputTensors[0].size()) {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Scatter: number of input tensors should equal "
           "to the world size");
     }
@@ -660,7 +669,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
             : c10::nullopt);
   } else {
     auto entry = std::make_unique<WorkEntry>(
-      nullptr, &outputTensors, std::move(runFunc));
+        nullptr, &outputTensors, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:scatter",
@@ -790,7 +799,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
-        for(const auto i : c10::irange(size_)) {
+        for (const auto i : c10::irange(size_)) {
           srcFlatDataSplits[i].copy_(srcdata[i].view({-1}));
         }
         c10::DeviceGuard guard1(srcdata[0].device());
@@ -808,7 +817,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
 
         auto dstFlatDataSplits =
             dstFlatData.split_with_sizes(c10::IntArrayRef(recv_lengthsL), 0);
-        for(const auto i : c10::irange(size_)) {
+        for (const auto i : c10::irange(size_)) {
           dstdata[i].view({-1}).copy_(dstFlatDataSplits[i]);
         }
       };
@@ -913,7 +922,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Barrier(pgComm_));
       };
-  auto entry = std::make_unique<WorkEntry>(nullptr, nullptr, std::move(runFunc));
+  auto entry =
+      std::make_unique<WorkEntry>(nullptr, nullptr, std::move(runFunc));
   return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
 }
 
@@ -921,8 +931,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false,
-      "no support for _allgather_base in MPI process group");
+  TORCH_CHECK(false, "no support for _allgather_base in MPI process group");
 }
 
 } // namespace c10d

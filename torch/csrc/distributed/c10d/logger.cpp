@@ -5,6 +5,8 @@
 #include <fmt/format.h>
 #include <string>
 
+#include <c10/util/CallOnce.h>
+
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
 #endif
@@ -52,10 +54,10 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-std::once_flag log_graph_static_flag;
+c10::once_flag log_graph_static_flag;
 
 void Logger::log_if_graph_static(bool is_static) {
-  std::call_once(log_graph_static_flag, [this, is_static]() {
+  c10::call_once(log_graph_static_flag, [this, is_static]() {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     // It is useful to report the iteration that training finished at.
     ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
@@ -89,12 +91,12 @@ void Logger::set_env_variables() {
     ddp_logging_data_->strs_map["gloo_device_transport"] =
         parse_env("GLOO_DEVICE_TRANSPORT");
 
-    #ifdef USE_C10D_GLOO
+#ifdef USE_C10D_GLOO
     auto gloo_pg =
         static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
     auto n_threads = gloo_pg->getNumThreads();
     ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
-    #endif
+#endif
   }
 }
 
@@ -232,7 +234,8 @@ void Logger::calculate_avg_time(
     Timer::Event start_event,
     Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  c10::optional<int64_t> maybe_time_duration = timer.measureDifference(start_event, end_event);
+  c10::optional<int64_t> maybe_time_duration =
+      timer.measureDifference(start_event, end_event);
   if (!maybe_time_duration.has_value()) {
     return;
   }
@@ -296,7 +299,7 @@ void Logger::set_runtime_stats_and_log() {
       per_bucket_variable_indices.push_back(c10::Join(" ", bucket_indices));
     }
     ddp_logging_data_->strs_map["rebuilt_per_bucket_param_indices"] =
-      c10::Join(", ", per_bucket_variable_indices);
+        c10::Join(", ", per_bucket_variable_indices);
   }
   // Log gradient ready order
   if (!reducer_->grad_ready_order_indices_.empty()) {
@@ -312,16 +315,14 @@ void Logger::set_runtime_stats_and_log() {
   // Cuda time stats are only collected for single device modules.
   if (reducer_->params_[0].is_cuda() && reducer_->is_multi_device_module_) {
     TORCH_WARN_ONCE(
-      "Cuda time stats are not collected for multi-device modules."
-    );
+        "Cuda time stats are not collected for multi-device modules.");
     return;
   }
   if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
     TORCH_WARN_ONCE(
-      "Time stats are currently only collected for CPU and CUDA devices. "
-      "Please refer to CpuTimer or CudaTimer for how to register timer "
-      "for other device type."
-    );
+        "Time stats are currently only collected for CPU and CUDA devices. "
+        "Please refer to CpuTimer or CudaTimer for how to register timer "
+        "for other device type.");
     return;
   }
   TORCH_INTERNAL_ASSERT(reducer_->timer_);
@@ -351,30 +352,25 @@ void Logger::set_runtime_stats_and_log() {
       Timer::Event::kBackwardComputeEnd);
 
   set_event_time(
-    ddp_logging_data_->ints_map["forward_compute_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kForwardStart
-  );
+      ddp_logging_data_->ints_map["forward_compute_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kForwardStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_compute_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardComputeStart
-  );
+      ddp_logging_data_->ints_map["backward_compute_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardComputeStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_comm_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardCommStart
-  );
+      ddp_logging_data_->ints_map["backward_comm_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_compute_time_end"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardComputeEnd
-  );
+      ddp_logging_data_->ints_map["backward_compute_time_end"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardComputeEnd);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_comm_time_end"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardCommEnd
-  );
+      ddp_logging_data_->ints_map["backward_comm_time_end"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommEnd);
 
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
   if (debug_level() == DebugLevel::Detail) {

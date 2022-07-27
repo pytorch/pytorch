@@ -121,6 +121,17 @@ class TestCppExtensionAOT(common.TestCase):
         has_value = cpp_extension.function_taking_optional(None)
         self.assertFalse(has_value)
 
+    @common.skipIfRocm
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(os.getenv('USE_NINJA', '0') == '0', "cuda extension with dlink requires ninja to build")
+    def test_cuda_dlink_libs(self):
+        from torch_test_cpp_extension import cuda_dlink
+        a = torch.randn(8, dtype=torch.float, device='cuda')
+        b = torch.randn(8, dtype=torch.float, device='cuda')
+        ref = a + b
+        test = cuda_dlink.add(a, b)
+        self.assertEqual(test, ref)
 
 class TestORTTensor(common.TestCase):
     def test_unregistered(self):

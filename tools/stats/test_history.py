@@ -4,10 +4,10 @@ import argparse
 import subprocess
 import sys
 from datetime import datetime, timezone
-from signal import SIG_DFL, SIGPIPE, signal
+from signal import SIG_DFL, signal, SIGPIPE
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from tools.stats.s3_stat_parser import Report, get_cases, get_test_stats_summaries
+from tools.stats.s3_stat_parser import get_cases, get_test_stats_summaries, Report
 
 
 def get_git_commit_history(*, path: str, ref: str) -> List[Tuple[str, datetime]]:
