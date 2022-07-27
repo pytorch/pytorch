@@ -2013,12 +2013,24 @@
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_full
 
 - func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_zeros
 
 - func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: new_ones
 
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
@@ -2352,6 +2364,10 @@
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: full_like
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3602,6 +3618,10 @@
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: ones_like
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
 
@@ -3773,6 +3793,10 @@
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: rand_like
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -3794,9 +3818,17 @@
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -3817,6 +3849,10 @@
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randn_like
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -5215,6 +5251,10 @@
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
