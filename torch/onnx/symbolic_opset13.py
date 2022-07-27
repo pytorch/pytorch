@@ -4,12 +4,10 @@
 # This file exports ONNX ops for opset 13
 import torch
 import torch._C._onnx as _C_onnx
-from torch.onnx import (
-    symbolic_helper,
-    symbolic_opset11 as opset11,
-    symbolic_opset9 as opset9,
-    utils,
-)
+from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import symbolic_opset11 as opset11
+from torch.onnx import utils
 
 
 @symbolic_helper.parse_args("v", "i", "none")

@@ -15,7 +15,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -37,8 +37,7 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root)
 
-# There's only one test that runs gracheck, run slow mode manually
-@skipIfSlowGradcheckEnv
+
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -865,8 +864,7 @@ class TestCppExtensionJIT(common.TestCase):
         a = torch.randn(5, 5, requires_grad=True)
         b = torch.randn(5, 5, requires_grad=True)
 
-        for fast_mode in (True, False):
-            gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
+        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
 
 if __name__ == "__main__":

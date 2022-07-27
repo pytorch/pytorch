@@ -1,6 +1,17 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <ATen/ATen.h>
+#include <ATen/Tensor.h>
+#include <ATen/Utils.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <torch/library.h>
+
+#ifdef __OBJC__
+#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#endif
+
+using namespace at::mps;
 
 namespace at {
 namespace native {
@@ -23,8 +34,13 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   MPSGraphCache *cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + to_string(value.toDouble());
 
+    MPSShape* input_shape = getMPSShape(self);
+    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
+
+    string key = "fill_scalar_mps_impl:" + getMPSTypeString(self.scalar_type())
+                                         + ":" + string([ns_shape_key UTF8String])
+                                         + ":" + to_string(value.toDouble());
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
 
@@ -36,7 +52,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
-                                                               shape:getMPSShape(self)
+                                                               shape:input_shape
                                                             dataType:getMPSScalarType(self.scalar_type())];
           MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
                                                                  name:nil];
@@ -62,37 +78,17 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   return self;
 }
 
-// returns false if tensor cannot be filled with fillBuffer()
-bool fill_mps_tensor_(Tensor& self, uint8_t value) {
-  if (self.is_contiguous()) {
-    MPSStream* stream = getCurrentMPSStream();
-    auto storage_byte_offset = self.storage_offset() * self.itemsize();
-    stream->fill(mps::getMTLBufferStorage(self), 0, self.nbytes(), storage_byte_offset);
-    return true;
-  }
-  return false;
-}
-
 Tensor& zero_mps_(Tensor& self) {
-  // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (fill_mps_tensor_(self, 0) == true)
-    return self;
-  return fill_scalar_mps_impl(self, 0.0f);
+  return at::native::fill_scalar_mps_impl(self, 0.0f);
 }
 
 Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
-  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
-    return self;
-  return fill_scalar_mps_impl(self, value);
+  return at::native::fill_scalar_mps_impl(self, value);
 }
 
 Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  Scalar scalar_value = value.item();
-  if (scalar_value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
-    return self;
-  return fill_scalar_mps_impl(self, scalar_value);
+  return at::native::fill_scalar_mps_impl(self, value.item());
 }
-
 } // namespace native
 } // namespace at

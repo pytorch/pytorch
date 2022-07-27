@@ -346,9 +346,8 @@ def quantized_args(
 
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
-    if isinstance(x, torch.Tensor) and x.shape == ():
-        return x.item()
-    return None
+    assert x.numel() == 1
+    return x.item()
 
 
 def _if_scalar_type_as(g: _C.Graph, self, tensor):
