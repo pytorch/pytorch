@@ -1076,6 +1076,7 @@ def _optim_state_dict(
         [r0_flat_param_id_to_optim_state_key] if rank == 0 else [None]
     )
     dist.broadcast_object_list(key_obj_list, src=0, group=group)
+    assert key_obj_list[0] is not None
     r0_flat_param_id_to_optim_state_key = key_obj_list[0]
 
     # Ensure that all ranks have at least the optimizer states needed by
@@ -1102,6 +1103,7 @@ def _optim_state_dict(
             "are missing some of those states"
         )
         for rank, keys in enumerate(obj_list):
+            keys = cast(List[_OptimStateKey], keys)
             if len(keys) > 0:
                 error_msg += (
                     f"\nRank {rank} is missing states for the parameters: "
