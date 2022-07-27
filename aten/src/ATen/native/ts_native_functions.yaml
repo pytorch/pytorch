@@ -202,6 +202,16 @@ supported:
   - linalg_inv_ex
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
+  - new_full
+  - new_zeros
+  - new_ones
+  - full_like
+  - ones_like
+  - rand_like
+  - randint_like
+  - randint_like.low_dtype
+  - randn_like
+  - zeros_like
 autograd:
   - max_pool3d
   - native_group_norm

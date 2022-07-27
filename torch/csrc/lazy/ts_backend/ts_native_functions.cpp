@@ -575,6 +575,119 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }
 
+using at::Layout;
+using at::ScalarType;
+using at::Device;
+using at::Scalar;
+using at::IntArrayRef;
+
+Tensor LazyNativeFunctions::new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory
+    ) {
+  return at::native::new_full(self, size, fill_value, dtype, layout, device, pin_memory);
+}
+
+Tensor LazyNativeFunctions::new_zeros(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory
+    ) {
+  return at::native::new_zeros(self, size, dtype, layout, device, pin_memory);
+}
+
+Tensor LazyNativeFunctions::new_ones(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::native::new_ones(self, size, dtype, layout, device, pin_memory);
+}
+
+Tensor LazyNativeFunctions::full_like(
+    const Tensor& self,
+    const Scalar& fill_value,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::full_like(self, fill_value, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::ones_like(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::ones_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::rand_like(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::rand_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::randint_like(
+    const Tensor& self,
+    int64_t high,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::randint_like(self, high, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::randint_like(
+    const Tensor& self,
+    int64_t low,
+    int64_t high,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::randint_like(self, low, high, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::randn_like(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::randn_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor LazyNativeFunctions::zeros_like(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::native::zeros_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 void InitializeAtenBindings() {}
 
 } // namespace lazy
