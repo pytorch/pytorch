@@ -4,7 +4,8 @@ import os
 import sys
 
 import torch
-from torch.fx import symbolic_trace, subgraph_rewriter
+from torch.fx import symbolic_trace #, subgraph_rewriter
+import torch.fx.passes.utils.replacer_utils as subgraph_rewriter
 from torch.fx.annotate import annotate
 # Make the helper files in test/ importable
 from torch.fx.experimental.rewriter import RewritingTracer
@@ -461,7 +462,7 @@ class TestSubgraphRewriter(JitTestCase):
                 assert n.type == int
                 assert m.type == int
 
-    def test_subgraph_writer_replace_consecutive_submodules(self):
+    def test_subgraph_rewriter_replace_consecutive_submodules(self):
 
         def f(x):
             x = torch.sigmoid(x)
@@ -490,4 +491,75 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+
+    def test_subgraph_rewriter_replace_with_multiple_outputs(self):
+
+        def f(x):
+            y = torch.sigmoid(x)
+            z = torch.relu(x)
+            return y + z
+
+        def pattern(a):
+            b = torch.sigmoid(a)
+            c = torch.relu(a)
+            return b, c
+
+        def replacement(x):
+            return torch.exp(x), torch.abs(x)
+
+        def comparison(x):
+            y = torch.exp(x)
+            z = torch.abs(x)
+            return y + z
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_replace_with_duplicated_outputs(self):
+
+        def f(x1, x2):
+            x = x1 - x2
+            y = torch.sigmoid(x)
+            z = torch.relu(x)
+            return y + z
+
+        def pattern(a1, a2):
+            a = a1 - a2
+            b = torch.sigmoid(a)
+            c = torch.relu(a)
+            return b, c, a
+
+        def replacement(x1, x2):
+            y1 = torch.exp(x1)
+            y2 = torch.abs(x2)
+            return y2, y2, y1
+
+        def comparison(x1, x2):
+            y2 = torch.abs(x2)
+            return y2 + y2
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x1 = torch.randn(3, 4)
+        x2 = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x1, x2)
+        test_outs = traced.forward(x1, x2)
         self.assertEqual(ref_outs, test_outs)
