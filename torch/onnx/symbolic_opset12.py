@@ -2,7 +2,14 @@ import sys
 from typing import Optional, Tuple
 
 import torch
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, utils
+from torch._C import _onnx as _C_onnx
+from torch.onnx import (
+    _type_utils,
+    symbolic_helper,
+    symbolic_opset9 as opset9,
+    utils
+)
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
