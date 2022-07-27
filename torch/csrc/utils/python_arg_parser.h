@@ -522,8 +522,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       if (is_symint_node(py::handle(obj))) {
-        res.push_back(
-            py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
+        res.push_back(py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
       } else {
         // Elements of torch.Size are tensors during tracing, and we need to
         // record extra information before they are turned into an IntArrayRef

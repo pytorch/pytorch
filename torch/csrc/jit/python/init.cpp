@@ -1200,8 +1200,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_pyobj",
           [](std::shared_ptr<c10::SymIntNodeImpl> a) -> py::object {
-            if (auto psn =
-                    std::dynamic_pointer_cast<PythonSymIntNodeImpl>(a)) {
+            if (auto psn = std::dynamic_pointer_cast<PythonSymIntNodeImpl>(a)) {
               return py::reinterpret_borrow<py::object>(psn->getPyObj());
             }
             return py::none();
