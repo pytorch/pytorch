@@ -339,9 +339,6 @@
                 "state": "APPROVED"
               },
               {
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
                 "author": {
                   "login": "janeyx99"
                 },
@@ -392,7 +389,6 @@
                 "databaseId": 1068482921
               },
               {
->>>>>>> 7b24931c255 (update periodic merge)
                 "bodyText": "Hey @seemethere.\nYou've committed this PR, but it does not have both a 'release notes: ...' and 'topics: ...' label. Please add one of each to the PR. The 'release notes: ...' label should represent the part of PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should represent the kind of PR it is (not user facing, new feature, bug fix, perf improvement, etc). The list of valid labels can be found here for the 'release notes: ...' and here for the 'topics: ...'.\nFor changes that are 'topic: not user facing' there is no need for a release notes label.",
                 "author": {
                   "login": "github-actions"
@@ -431,61 +427,6 @@
                   "oid": "9d26f4e6d8c8df275ea546180fef42548257d2d7",
                   "checkSuites": {
                     "edges": [
-<<<<<<< HEAD
-=======
-                "node": {
-                  "app": {
-                    "name": "GitHub Actions",
-                    "databaseId": 15368
-                  },
-                  "workflowRun": {
-                    "workflow": {
-                      "name": "trunk"
-                    }
-                  },
-                  "checkRuns": {
-                    "nodes": [
->>>>>>> 560ce4c59b9 (fix up lints)
-                      {
-                        "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257522494?check_suite_focus=true"
-                      },
-                      {
-                        "name": "android-emulator-build-test / build-and-test",
-                        "conclusion": "FAILURE",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257522741?check_suite_focus=true"
-                      },
-                      {
-                        "name": "linux-xenial-cuda11.3-py3.7-gcc7-no-ops / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257522887?check_suite_focus=true"
-                      },
-                      {
-                        "name": "macos-10-15-py3-arm64 / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257523057?check_suite_focus=true"
-                      },
-                      {
-                        "name": "linux-bionic-cuda10.2-py3.9-gcc7 / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257523301?check_suite_focus=true"
-                      },
-                      {
-                        "name": "ios-12-5-1-x86-64 / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257523681?check_suite_focus=true"
-                      },
-                      {
-                        "name": "libtorch-linux-bionic-cuda11.6-py3.7-gcc7 / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257523926?check_suite_focus=true"
-                      },
-                      {
-                        "name": "win-vs2019-cuda11.6-py3 / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257524141?check_suite_focus=true"
-=======
                       {
                         "node": {
                           "app": {
@@ -508,7 +449,6 @@
                           "url": "https://github.com/pytorch/pytorch/commit/9d26f4e6d8c8df275ea546180fef42548257d2d7/checks?check_suite_id=5658276102"
                         },
                         "cursor": "Y3Vyc29yOnYyOpHPAAAAAVFCcQY="
->>>>>>> 7b24931c255 (update periodic merge)
                       },
                       {
                         "node": {
@@ -1353,95 +1293,6 @@
                         "cursor": "Y3Vyc29yOnYyOpHPAAAAAVFCcSg="
                       },
                       {
-<<<<<<< HEAD
-<<<<<<< HEAD
-                        "node": {
-                          "app": {
-                            "name": "PyTorch Bot",
-                            "databaseId": 40112
-                          },
-                          "workflowRun": null,
-                          "checkRuns": {
-                            "nodes": [],
-                            "pageInfo": {
-                              "endCursor": null,
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": null,
-                          "url": "https://github.com/pytorch/pytorch/commit/9d26f4e6d8c8df275ea546180fef42548257d2d7/checks?check_suite_id=5658277355"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAVFCdes="
-                      }
-                    ],
-                    "pageInfo": {
-                      "hasNextPage": false
-                    }
-                  }
-                }
-              }
-            ]
-          }
-        }
-      }
-    }
-  },
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=31093 owner=pytorch": {
-    "data": {
-      "repository": {
-        "pullRequest": {
-          "closed": true,
-          "isCrossRepository": true,
-          "author": {
-            "login": "mingxiaoh"
-          },
-          "title": "improve mkldnn convolution test coverage",
-          "body": "This pr will improve the test coverage of mkldnn convolution.\r\n1.test input: specific sensitive numbers\r\n2.pass criteria: output of mkldnn convolution matches output of thnn convolution\r\n3.coverage: by using coverage tool, we found out the following sensitive parameters. Overall the case will test 4352 patterns, takes 8.8s on my machine.\r\n\r\nto run the test case:\r\n\r\npython test_mkldnn_conv2d_ext.py\r\nor\r\npython run_test.py -i mkldnn_conv2d_ext\r\n\r\nIn case of failure, the pattern will be printed in the log for further debugging.\r\n\r\nactually, this PR is created to replace and improve that PR we created before(https://github.com/pytorch/pytorch/pull/25085) ",
-          "headRefName": "master",
-          "headRepository": {
-            "nameWithOwner": "mingxiaoh/pytorch"
-          },
-          "baseRefName": "master",
-          "baseRepository": {
-            "nameWithOwner": "pytorch/pytorch",
-            "isPrivate": false,
-            "defaultBranchRef": {
-              "name": "master"
-            }
-          },
-          "mergeCommit": null,
-          "commits_with_authors": {
-            "nodes": [
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "11pikachu"
-                    },
-                    "email": "junx.du@intel.com",
-                    "name": "dujun"
-                  },
-                  "oid": "29f6aa6ecc2ece3fa58170ff4561f9d8d5c129f9"
-                }
-              }
-            ],
-            "pageInfo": {
-              "endCursor": "MQ",
-              "hasNextPage": false
-            },
-            "totalCount": 1
-          },
-          "commits": {
-            "nodes": [
-              {
-                "commit": {
-                  "checkSuites": {
-                    "edges": [
-=======
-                        "name": "linux-xenial-py3-clang5-mobile-build / build",
-                        "conclusion": "SUCCESS",
-                        "detailsUrl": "https://github.com/pytorch/pytorch/runs/7257526187?check_suite_focus=true"
-=======
                         "node": {
                           "app": {
                             "name": "GitHub Actions",
@@ -1479,9 +1330,7 @@
                           "url": "https://github.com/pytorch/pytorch/commit/9d26f4e6d8c8df275ea546180fef42548257d2d7/checks?check_suite_id=5658276137"
                         },
                         "cursor": "Y3Vyc29yOnYyOpHPAAAAAVFCcSk="
->>>>>>> 7b24931c255 (update periodic merge)
                       },
->>>>>>> 560ce4c59b9 (fix up lints)
                       {
                         "node": {
                           "app": {
@@ -1946,162 +1795,8 @@
   },
   "query_sha=4fa42dda073cf7ac75b2bbf595a8ef67b6dfff4bd248668750ff33ea913bf75f cursor=Y3Vyc29yOnYyOpHPAAAAAVFCdAA= name=pytorch number=73811 owner=pytorch": {
     "data": {
-<<<<<<< HEAD
-      "organization": {
-        "team": {
-          "members": {
-            "nodes": [
-              {
-                "login": "kit1980"
-              },
-              {
-                "login": "huydhn"
-              },
-              {
-                "login": "b0noI"
-              },
-              {
-                "login": "seemethere"
-              },
-              {
-                "login": "malfet"
-              },
-              {
-                "login": "DanilBaibak"
-              },
-              {
-                "login": "ZainRizvi"
-              },
-              {
-                "login": "jeanschmidt"
-              },
-              {
-                "login": "atalman"
-              },
-              {
-                "login": "mehtanirav"
-              },
-              {
-                "login": "osalpekar"
-              },
-              {
-                "login": "swang392"
-              },
-              {
-                "login": "janeyx99"
-              },
-              {
-                "login": "clee2000"
-              },
-              {
-                "login": "izaitsevfb"
-              },
-              {
-                "login": "weiwangmeta"
-              }
-            ],
-            "pageInfo": {
-              "hasNextPage": false,
-              "endCursor": "Y3Vyc29yOnYyOpHOBoQSVA=="
-            }
-          },
-          "labels": {
-            "edges": [
-              {
-                "node": {
-                  "name": "triaged"
-                }
-              },
-              {
-                "node": {
-                  "name": "open source"
-                }
-              },
-              {
-                "node": {
-                  "name": "cla signed"
-                }
-              },
-              {
-                "node": {
-                  "name": "Stale"
-                }
-              }
-            ]
-          }
-        }
-      }
-    }
-  },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=qwertyuiop org=pytorch": {
-    "data": {
-      "organization": {
-        "team": null
-      }
-    }
-  },
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=73811 owner=pytorch with_labels=False": {
-    "data": {
       "repository": {
         "pullRequest": {
-          "number": 73811,
-          "closed": true,
-          "isCrossRepository": false,
-          "author": {
-            "login": "seemethere"
-          },
-          "title": "ci: Migrate metrics credentials to managed IAM",
-          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack):\n* __->__ #73811\n\r\nMigrates our credentials to upload metrics statistics to managed IAM\r\ncredentials in order to make it easier to know where the credentials are\r\ncoming from and to make it easier to add more permissions / less\r\npermissions later on.\r\n\r\nRelates to work done in [D34535827](https://www.internalfb.com/diff/D34535827)\r\n\r\nSigned-off-by: Eli Uriegas <eliuriegas@fb.com>",
-          "headRefName": "gh/seemethere/215/head",
-          "headRepository": {
-            "nameWithOwner": "pytorch/pytorch"
-          },
-          "baseRefName": "gh/seemethere/215/base",
-          "baseRepository": {
-            "nameWithOwner": "pytorch/pytorch",
-            "isPrivate": false,
-            "defaultBranchRef": {
-              "name": "master"
-            }
-          },
-          "mergeCommit": null,
-          "commits_with_authors": {
-            "nodes": [
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "seemethere"
-                    },
-                    "email": "eliuriegas@fb.com",
-                    "name": "Eli Uriegas"
-                  },
-                  "oid": "13c44d16a876a56bca479b4cf30715d21fa16e99"
-                }
-              },
-              {
-                "commit": {
-                  "author": {
-                    "user": {
-                      "login": "seemethere"
-                    },
-                    "email": "eliuriegas@fb.com",
-                    "name": "Eli Uriegas"
-                  },
-                  "oid": "9d26f4e6d8c8df275ea546180fef42548257d2d7"
-                }
-              }
-            ],
-            "pageInfo": {
-              "endCursor": "Mg",
-              "hasNextPage": false
-            },
-            "totalCount": 2
-          },
-=======
-      "repository": {
-        "pullRequest": {
->>>>>>> 7b24931c255 (update periodic merge)
           "commits": {
             "nodes": [
               {
@@ -4067,66 +3762,12 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=23d6a47e5fd875c42231779040ec1d35d0042b502c9142cb0d33d6f65d58fead commit=6882717f73deffb692219ccd1fd6db258d8ed684 cr_cursor=Y3Vyc29yOnYyOpHPAAAAAbCcmdI= cs_cursor=Y3Vyc29yOnYyOpHPAAAAAbH1h5Q= name=pytorch owner=pytorch": {
-    "data": {
-      "repository": {
-        "object": {
-          "oid": "6882717f73deffb692219ccd1fd6db258d8ed684",
-          "checkSuites": {
-            "nodes": [
-              {
-                "checkRuns": {
-                  "nodes": [
-                    {
-                      "name": "linux-focal-py3.7-clang7-asan / test (default, 4, 5, linux.2xlarge)",
-                      "conclusion": "SUCCESS",
-                      "detailsUrl": "https://github.com/pytorch/pytorch/runs/7258020388?check_suite_focus=true"
-                    },
-                    {
-                      "name": "linux-focal-py3.7-clang7-asan / test (default, 5, 5, linux.2xlarge)",
-                      "conclusion": "SUCCESS",
-                      "detailsUrl": "https://github.com/pytorch/pytorch/runs/7258020493?check_suite_focus=true"
-                    },
-                    {
-                      "name": "linux-xenial-cuda11_3-py3_7-gcc7-deploy / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
-                      "conclusion": "SUCCESS",
-                      "detailsUrl": "https://github.com/pytorch/pytorch/runs/7258219463?check_suite_focus=true"
-                    }
-                  ],
-                  "pageInfo": {
-                    "endCursor": "Y3Vyc29yOnYyOpHPAAAAAbCfo8c=",
-                    "hasNextPage": false
-                  }
-                }
-              }
-            ]
-          }
-        }
-      }
-    }
-  },
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=76118 owner=pytorch": {
-    "data": {
-      "repository": {
-        "pullRequest": {
-          "closed": true,
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=76118 owner=pytorch with_labels=False": {
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=76118 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
           "number": 76118,
-<<<<<<< HEAD
-          "closed": false,
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
           "closed": true,
->>>>>>> 7b24931c255 (update periodic merge)
           "isCrossRepository": false,
           "author": {
             "login": "malfet"
@@ -6601,15 +6242,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=76123 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=76123 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=76123 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -8236,15 +7869,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=71759 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=71759 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=71759 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -9100,15 +8725,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=75095 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=75095 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=75095 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -10542,15 +10159,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=77700 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=77700 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=77700 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -11367,15 +10976,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=68111 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=68111 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=68111 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -13290,15 +12891,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=73969 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=73969 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=73969 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -14351,15 +13944,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=73099 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=73099 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=73099 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -15383,15 +14968,7 @@
       }
     }
   },
-<<<<<<< HEAD
-<<<<<<< HEAD
-  "query_sha=0e2a29eda6405cea4c9de20fb80ae7924910e17272a7b251040182e7d8c390e0 name=pytorch number=74649 owner=pytorch": {
-=======
-  "query_sha=53839173d975f44ccda3582093202382264ea26d594ad0fab1b4e5782defd6b2 name=pytorch number=74649 owner=pytorch with_labels=False": {
->>>>>>> 560ce4c59b9 (fix up lints)
-=======
   "query_sha=edff5805963559338827c583a69278be9e7dd5ff36d08c83bdaaea99b4a5c407 name=pytorch number=74649 owner=pytorch": {
->>>>>>> 7b24931c255 (update periodic merge)
     "data": {
       "repository": {
         "pullRequest": {
@@ -16224,6 +15801,9 @@
                 "login": "dbish"
               },
               {
+                "login": "khabinov"
+              },
+              {
                 "login": "NicolasHug"
               },
               {
@@ -16333,26 +15913,26 @@
               },
               {
                 "login": "suphoff"
-              },
-              {
-                "login": "smessmer"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOACQ5JQ=="
+              "endCursor": "Y3Vyc29yOnYyOpHOACObIQ=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACQ5JQ== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOACObIQ== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "smessmer"
+              },
               {
                 "login": "ananthsub"
               },
@@ -16649,26 +16229,26 @@
               },
               {
                 "login": "briancoutinho"
-              },
-              {
-                "login": "fduwjj"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAGncmA=="
+              "endCursor": "Y3Vyc29yOnYyOpHOAGmf5A=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAGncmA== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAGmf5A== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "fduwjj"
+              },
               {
                 "login": "frank-wei"
               },
@@ -16965,26 +16545,26 @@
               },
               {
                 "login": "VirgileHlav"
-              },
-              {
-                "login": "mrshenli"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAQNk0w=="
+              "endCursor": "Y3Vyc29yOnYyOpHOAQFRIA=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAQNk0w== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAQFRIA== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "mrshenli"
+              },
               {
                 "login": "lena-kashtelyan"
               },
@@ -17101,6 +16681,9 @@
               },
               {
                 "login": "LinjianMa"
+              },
+              {
+                "login": "yoavnavon"
               },
               {
                 "login": "printfoo"
@@ -17278,29 +16861,29 @@
               },
               {
                 "login": "dhthompson"
-              },
-              {
-                "login": "superwizard2019"
-              },
-              {
-                "login": "fbhuba"
               }
             ],
             "pageInfo": {
               "hasNextPage": true,
-              "endCursor": "Y3Vyc29yOnYyOpHOAw9vlg=="
+              "endCursor": "Y3Vyc29yOnYyOpHOAwgp6g=="
             }
           }
         }
       }
     }
   },
-  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAw9vlg== name=metamates org=pytorch": {
+  "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=Y3Vyc29yOnYyOpHOAwgp6g== name=metamates org=pytorch": {
     "data": {
       "organization": {
         "team": {
           "members": {
             "nodes": [
+              {
+                "login": "superwizard2019"
+              },
+              {
+                "login": "fbhuba"
+              },
               {
                 "login": "shunting314"
               },
@@ -18315,10 +17898,6 @@
         }
       }
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7b24931c255 (update periodic merge)
   },
   "query_sha=a91ab398f97fb43cbe6e0899980dad8ff7447457ea5a71bbc59f7702a9280eb5 cursor=None name=pytorch-dev-infra org=pytorch": {
     "data": {
