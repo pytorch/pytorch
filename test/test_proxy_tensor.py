@@ -451,6 +451,10 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
