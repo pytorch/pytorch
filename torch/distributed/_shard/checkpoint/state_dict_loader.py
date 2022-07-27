@@ -1,5 +1,5 @@
 import io
-from typing import Any, Dict, List, Tuple, Optional, cast
+from typing import Any, Dict, List, Tuple, Optional
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor.shard import Shard
 
@@ -32,7 +32,7 @@ from .storage import (
     StorageReader,
 )
 
-from .api import CheckpointException
+from .utils import _DistWrapper
 
 def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
     return ShardMetadata(
@@ -163,7 +163,9 @@ def load_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    try:
+    distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
+
+    def load_model():
         metadata = storage_reader.read_metadata()
         bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
             state_dict=state_dict, metadata_from_storage=metadata
@@ -182,27 +184,8 @@ def load_state_dict(
             state_dict[req.fqn] = torch.load(req.bytes)
 
         tensor_futures.wait()
-        result = None
-    except BaseException as e:
-        result = e
 
-    global_result: Optional[CheckpointException] = None
-    if not no_dist:
-        all_errors = [None] * dist.get_world_size(process_group)
-
-        dist.all_gather_object(
-            object_list=all_errors,
-            obj=result,
-            group=process_group)
-
-        node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
-        if len(node_failures) > 0:
-            global_result = CheckpointException("failed to read checkpoint", node_failures)
-    elif result is not None:
-        global_result = CheckpointException("failed to read storage", {coordinator_rank : result})
-
-    if global_result is not None:
-        raise global_result
+    distW.all_gather("checkpoint read", load_model)
 
 
 def _validate_sharded_tensor(
