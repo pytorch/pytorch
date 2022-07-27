@@ -1,6 +1,6 @@
 import textwrap
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from torchgen.api.translate import translate
 from torchgen.api.types import DispatcherSignature
@@ -9,6 +9,7 @@ from torchgen.model import (
     Argument,
     BaseTy,
     BaseType,
+    FunctionSchema,
     ListType,
     NativeFunction,
     OptionalType,
@@ -50,8 +51,8 @@ def unwrap_optional_tensor(name: str, cur_level_var: str) -> List[str]:
 
 
 def gen_unwraps(
-    flat_arguments: List[Argument], cur_level_var: str
-) -> Tuple[List[str], List[str]]:
+    flat_arguments: Sequence[Argument], cur_level_var: str
+) -> Tuple[str, List[str]]:
     arg_names = [a.name for a in flat_arguments]
     arg_types = [a.type for a in flat_arguments]
 
@@ -66,7 +67,7 @@ def gen_unwraps(
 
     for opt_tensor in optional_tensors:
         unwraps += unwrap_optional_tensor(opt_tensor, cur_level_var)
-    unwraps = "\n".join(unwraps)
+    unwrap_code = "\n".join(unwraps)
 
     unwrapped_arg_list = []
     for arg in arg_names:
@@ -74,16 +75,12 @@ def gen_unwraps(
             unwrapped_arg_list += [f"{arg}_value", f"{arg}_bdim"]
         else:
             unwrapped_arg_list.append(arg)
-    return unwraps, unwrapped_arg_list
+    return unwrap_code, unwrapped_arg_list
 
 
-def get_aten_op_call(schema) -> str:
-    if schema.name.overload_name:
-        return f"ATEN_FN2({schema.name.name}, {schema.name.overload_name})"
-    return f"ATEN_FN({schema.name.name})"
-
-
-def gen_case_where_all_bdims_are_none(schema, cur_level_var) -> str:
+def gen_case_where_all_bdims_are_none(
+    schema: FunctionSchema, cur_level_var: str
+) -> str:
     conditions = []
     flat_args = schema.arguments.flat_all
     for arg in flat_args:
@@ -101,7 +98,9 @@ if ({' && '.join(conditions)}) {{
 }}"""
 
 
-def gen_returns(returns: List[Return], cur_level_var: str, results_var: str) -> str:
+def gen_returns(
+    returns: Tuple[Return, ...], cur_level_var: str, results_var: str
+) -> str:
     idx = 0
     wrapped_returns = []
     for ret in returns:
@@ -119,21 +118,21 @@ def gen_returns(returns: List[Return], cur_level_var: str, results_var: str) -> 
             wrapped_returns.append(f"std::get<{idx}>({results_var})")
             idx += 1
     if len(wrapped_returns) == 1:
-        wrapped_returns = f"return {wrapped_returns[0]};"
+        result = f"return {wrapped_returns[0]};"
     else:
-        wrapped_returns = f'return std::make_tuple({", ".join(wrapped_returns)});'
-    return wrapped_returns
+        result = f'return std::make_tuple({", ".join(wrapped_returns)});'
+    return result
 
 
-def accepts_at_least_one_tensor_input(schema):
+def accepts_at_least_one_tensor_input(schema: FunctionSchema) -> bool:
     return any(a.type.is_tensor_like() for a in schema.arguments.flat_all)
 
 
-def is_mutated_arg(argument):
+def is_mutated_arg(argument: Argument) -> bool:
     return argument.annotation is not None and argument.annotation.is_write
 
 
-def gen_vmap_inplace_plumbing(native_function):
+def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # Assumptions:
     # - only one argument is being modified in-place
     # - the argument that is being modified in-place is the first argument
@@ -198,7 +197,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 }}"""
 
 
-def gen_vmap_plumbing(native_function: NativeFunction) -> str:
+def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     schema = native_function.func
     sig = DispatcherSignature.from_schema(schema)
     returns = schema.returns
@@ -595,7 +594,7 @@ class ComputeBatchRulePlumbing:
         return result
 
 
-def gen_all_vmap_plumbing(native_functions):
+def gen_all_vmap_plumbing(native_functions: Sequence[NativeFunction]) -> str:
     body = "\n".join(list(mapMaybe(ComputeBatchRulePlumbing(), native_functions)))
     return f"""
 #pragma once
