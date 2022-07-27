@@ -220,7 +220,7 @@ def create_aot_autograd_function(
                             def fake_fn(primals, tangents):
                                 return fx_g(primals, tangents)
                             fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
-                
+
                 global graph_being_compiled
                 graph_being_compiled = "joint"
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
@@ -236,6 +236,7 @@ def create_aot_autograd_function(
 
                 global nth_graph
                 nth_graph += 1
+                graph_being_compiled = None
             else:
                 fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
             torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
